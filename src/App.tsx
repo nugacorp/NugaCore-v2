@@ -9,6 +9,8 @@ import SupportModule from './components/SupportModule';
 import InventoryModule from './components/InventoryModule';
 import GisModule from './components/GisModule';
 import FinanceOwnerModule from './components/FinanceOwnerModule';
+import LoginForm from './components/LoginForm';
+import { UserSessionProfile } from './lib/supabase';
 
 import { 
   Client, 
@@ -27,10 +29,52 @@ import {
 import { Cpu, AlertTriangle, CheckCircle, RefreshCw, Menu } from 'lucide-react';
 
 export default function App() {
-  const [activeTab, setActiveTab] = useState<string>('dashboard');
+  const [userSession, setUserSession] = useState<UserSessionProfile | null>(() => {
+    try {
+      const persisted = localStorage.getItem('nugacore_user_profile');
+      return persisted ? JSON.parse(persisted) : null;
+    } catch {
+      return null;
+    }
+  });
+
+  const [activeTab, setActiveTab] = useState<string>(() => {
+    // Pick an appropriate default tab based on the session's role if configured
+    try {
+      const persisted = localStorage.getItem('nugacore_user_profile');
+      if (persisted) {
+        const u = JSON.parse(persisted);
+        if (u.role === 'Técnico') return 'support';
+        if (u.role === 'Cobranza') return 'billing';
+      }
+    } catch {}
+    return 'dashboard';
+  });
+
   const [mobileMenuOpen, setMobileMenuOpen] = useState<boolean>(false);
   const [loading, setLoading] = useState<boolean>(true);
   const [errorStr, setErrorStr] = useState<string>('');
+
+  const handleLoginSuccess = (profile: UserSessionProfile) => {
+    setUserSession(profile);
+    localStorage.setItem('nugacore_user_profile', JSON.stringify(profile));
+    
+    // Choose starting screen that the profile carries permission to view
+    if (profile.role === 'Técnico') {
+      setActiveTab('support');
+    } else if (profile.role === 'Cobranza') {
+      setActiveTab('billing');
+    } else if (profile.role === 'Soporte') {
+      setActiveTab('support');
+    } else {
+      setActiveTab('dashboard');
+    }
+  };
+
+  const handleLogout = () => {
+    setUserSession(null);
+    localStorage.removeItem('nugacore_user_profile');
+  };
 
   // DB States
   const [stats, setStats] = useState<any>({
@@ -366,6 +410,10 @@ export default function App() {
   // Find system critical unacknowledged alerts to show in high-prominence top ticker
   const activeUnackCriticalAlert = alerts.find(a => !a.acknowledged && a.severity === 'critical');
 
+  if (!userSession) {
+    return <LoginForm onLoginSuccess={handleLoginSuccess} />;
+  }
+
   return (
     <div id="nugacore-master" className="min-h-screen bg-slate-950 text-slate-100 flex font-sans overflow-x-hidden selection:bg-indigo-500/30 selection:text-white">
       {/* Sidebar Controller */}
@@ -375,6 +423,8 @@ export default function App() {
         activeAlertsCount={alerts.filter(a => !a.acknowledged).length} 
         isOpen={mobileMenuOpen}
         onClose={() => setMobileMenuOpen(false)}
+        userProfile={userSession}
+        onLogout={handleLogout}
       />
 
       {/* Main Content Area */}
