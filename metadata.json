@@ -1,0 +1,10 @@
+{
+  "name": "NugaCore",
+  "description": "Enterprise-grade CRM & ERP for WISP / FTTH Internet Service Providers with real-time NOC, advanced FTTH provisioner, MikroTik RouterOS controller, and Gemini AI network diagnostic Copilot.",
+  "requestFramePermissions": [
+    "geolocation"
+  ],
+  "majorCapabilities": [
+    "MAJOR_CAPABILITY_SERVER_SIDE_GEMINI_API"
+  ]
+}
