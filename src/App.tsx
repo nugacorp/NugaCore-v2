@@ -10,6 +10,7 @@ import InventoryModule from './components/InventoryModule';
 import GisModule from './components/GisModule';
 import FinanceOwnerModule from './components/FinanceOwnerModule';
 import LoginForm from './components/LoginForm';
+import LandingPage from './components/LandingPage';
 import { UserSessionProfile } from './lib/supabase';
 
 import { 
@@ -29,6 +30,7 @@ import {
 import { Cpu, AlertTriangle, CheckCircle, RefreshCw, Menu } from 'lucide-react';
 
 export default function App() {
+  const [showLogin, setShowLogin] = useState<boolean>(false);
   const [userSession, setUserSession] = useState<UserSessionProfile | null>(() => {
     try {
       const persisted = localStorage.getItem('nugacore_user_profile');
@@ -74,6 +76,7 @@ export default function App() {
   const handleLogout = () => {
     setUserSession(null);
     localStorage.removeItem('nugacore_user_profile');
+    setShowLogin(false);
   };
 
   // DB States
@@ -411,7 +414,23 @@ export default function App() {
   const activeUnackCriticalAlert = alerts.find(a => !a.acknowledged && a.severity === 'critical');
 
   if (!userSession) {
-    return <LoginForm onLoginSuccess={handleLoginSuccess} />;
+    if (showLogin) {
+      return (
+        <LoginForm 
+          onLoginSuccess={handleLoginSuccess} 
+          onBack={() => setShowLogin(false)} 
+        />
+      );
+    } else {
+      return (
+        <LandingPage 
+          onEnterLogin={() => setShowLogin(true)} 
+          onInstantDemo={(profile) => {
+            handleLoginSuccess(profile);
+          }} 
+        />
+      );
+    }
   }
 
   return (

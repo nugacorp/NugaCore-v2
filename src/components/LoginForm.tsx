@@ -10,15 +10,17 @@ import {
   Sparkles, 
   HelpCircle,
   Database,
-  ArrowRight
+  ArrowRight,
+  ChevronLeft
 } from 'lucide-react';
 import { isSupabaseConfigured, supabase, MOCK_USER_PROFILES, UserSessionProfile } from '../lib/supabase';
 
 interface LoginFormProps {
   onLoginSuccess: (userProfile: UserSessionProfile) => void;
+  onBack?: () => void;
 }
 
-export default function LoginForm({ onLoginSuccess }: LoginFormProps) {
+export default function LoginForm({ onLoginSuccess, onBack }: LoginFormProps) {
   const [email, setEmail] = useState('');
   const [password, setPassword] = useState('');
   const [showPassword, setShowPassword] = useState(false);
@@ -217,7 +219,17 @@ export default function LoginForm({ onLoginSuccess }: LoginFormProps) {
         <div className="p-8 sm:p-10 space-y-6">
           
           {/* Logo & Brand */}
-          <div className="text-center space-y-2">
+          <div className="text-center space-y-2 relative">
+            {onBack && (
+              <button
+                type="button"
+                onClick={onBack}
+                className="absolute left-0 top-0 text-xs text-slate-500 hover:text-slate-300 flex items-center space-x-1.5 transition-colors font-mono py-1 px-2.5 rounded-lg border border-slate-800 hover:border-slate-700 bg-slate-950/60"
+              >
+                <ChevronLeft className="w-3.5 h-3.5" />
+                <span>Volver</span>
+              </button>
+            )}
             <div className="inline-flex items-center justify-center p-3 bg-indigo-950 text-indigo-400 rounded-2xl border border-indigo-900/50 mb-2">
               <Cpu className="w-8 h-8" />
             </div>
