@@ -16,6 +16,7 @@ import {
   LogOut
 } from 'lucide-react';
 import { UserSessionProfile } from '../lib/supabase';
+import { canAccessTab } from '../lib/rbac';
 
 interface SidebarProps {
   activeTab: string;
@@ -52,26 +53,7 @@ export default function Sidebar({
   // Filtering views according to basic Role Perms (FASE 1 Requirement)
   const isAuthorizedTab = (tabId: string): boolean => {
     if (!userProfile) return false;
-    const role = userProfile.role;
-    
-    // Technical operator constraints
-    if (role === 'Técnico') {
-      return ['dashboard', 'network', 'support', 'gis'].includes(tabId);
-    }
-    // Technical Support operator constraints
-    if (role === 'Soporte') {
-      return ['dashboard', 'crm', 'network', 'support', 'gis'].includes(tabId);
-    }
-    // Billing operator constraints
-    if (role === 'Cobranza') {
-      return ['dashboard', 'crm', 'billing', 'finance'].includes(tabId);
-    }
-    // Viewers or standard operators
-    if (role === 'Solo lectura') {
-      return ['dashboard', 'crm', 'network', 'gis'].includes(tabId);
-    }
-    // Super Admin & Admin see everything
-    return true;
+    return canAccessTab(userProfile.role, tabId);
   };
 
   const filteredMenuItems = menuItems.filter(item => isAuthorizedTab(item.id));

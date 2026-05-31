@@ -85,11 +85,29 @@ export interface Ticket {
   description: string;
   category: 'Internet' | 'Facturacion' | 'Instalacion' | 'Falla Red' | 'Otro';
   severity: 'low' | 'medium' | 'high' | 'critical';
+  priority?: 'P1' | 'P2' | 'P3' | 'P4';
   status: 'open' | 'assigned' | 'resolved' | 'closed';
   slaHours: number;
   technicianId?: string;
+  technicianName?: string;
+  updatedAt?: string;
   created: string;
   messages: { sender: string; message: string; date: string }[];
+  attachments?: {
+    id: string;
+    name: string;
+    url: string;
+    type?: string;
+    uploadedAt: string;
+    uploadedBy?: string;
+  }[];
+  history?: {
+    id: string;
+    action: string;
+    detail: string;
+    createdAt: string;
+    createdBy?: string;
+  }[];
 }
 
 export interface TaskOrder {
@@ -102,11 +120,29 @@ export interface TaskOrder {
   phone: string;
   notes: string;
   date: string;
+  scheduledStart?: string;
+  scheduledEnd?: string;
+  assignedTechnicianId?: string;
   technicianName: string;
   status: 'pending' | 'in_progress' | 'completed' | 'canceled';
   checklist: { item: string; done: boolean }[];
   signature?: string; // Base64
   photos?: string[];
+  evidences?: {
+    id: string;
+    kind: 'photo' | 'document';
+    url: string;
+    uploadedAt: string;
+    uploadedBy?: string;
+    notes?: string;
+  }[];
+  history?: {
+    id: string;
+    action: string;
+    detail: string;
+    createdAt: string;
+    createdBy?: string;
+  }[];
 }
 
 export interface WarehouseItem {

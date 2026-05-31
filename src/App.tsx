@@ -11,7 +11,9 @@ import GisModule from './components/GisModule';
 import FinanceOwnerModule from './components/FinanceOwnerModule';
 import LoginForm from './components/LoginForm';
 import LandingPage from './components/LandingPage';
-import { UserSessionProfile } from './lib/supabase';
+import { authSession, restoreSessionProfileFromSupabase } from './lib/authSession';
+import { UserSessionProfile, isSupabaseConfigured, supabase } from './lib/supabase';
+import { canAccessTab, getDefaultTabByRole } from './lib/rbac';
 
 import { 
   Client, 
@@ -31,25 +33,14 @@ import { Cpu, AlertTriangle, CheckCircle, RefreshCw, Menu } from 'lucide-react';
 
 export default function App() {
   const [showLogin, setShowLogin] = useState<boolean>(false);
-  const [userSession, setUserSession] = useState<UserSessionProfile | null>(() => {
-    try {
-      const persisted = localStorage.getItem('nugacore_user_profile');
-      return persisted ? JSON.parse(persisted) : null;
-    } catch {
-      return null;
-    }
-  });
+  const [userSession, setUserSession] = useState<UserSessionProfile | null>(() => authSession.readProfile());
+  const [sessionBootstrapped, setSessionBootstrapped] = useState<boolean>(!isSupabaseConfigured);
 
   const [activeTab, setActiveTab] = useState<string>(() => {
-    // Pick an appropriate default tab based on the session's role if configured
-    try {
-      const persisted = localStorage.getItem('nugacore_user_profile');
-      if (persisted) {
-        const u = JSON.parse(persisted);
-        if (u.role === 'Técnico') return 'support';
-        if (u.role === 'Cobranza') return 'billing';
-      }
-    } catch {}
+    const persisted = authSession.readProfile();
+    if (persisted?.role === 'Técnico') return 'support';
+    if (persisted?.role === 'Cobranza') return 'billing';
+    if (persisted?.role === 'Soporte') return 'support';
     return 'dashboard';
   });
 
@@ -57,27 +48,50 @@ export default function App() {
   const [loading, setLoading] = useState<boolean>(true);
   const [errorStr, setErrorStr] = useState<string>('');
 
-  const handleLoginSuccess = (profile: UserSessionProfile) => {
+  const handleLoginSuccess = (profile: UserSessionProfile, accessToken?: string) => {
     setUserSession(profile);
-    localStorage.setItem('nugacore_user_profile', JSON.stringify(profile));
-    
-    // Choose starting screen that the profile carries permission to view
-    if (profile.role === 'Técnico') {
-      setActiveTab('support');
-    } else if (profile.role === 'Cobranza') {
-      setActiveTab('billing');
-    } else if (profile.role === 'Soporte') {
-      setActiveTab('support');
-    } else {
-      setActiveTab('dashboard');
-    }
+    authSession.save(profile, accessToken);
+    setActiveTab(getDefaultTabByRole(profile.role));
   };
 
-  const handleLogout = () => {
+  const handleLogout = async () => {
+    if (isSupabaseConfigured && supabase) {
+      await supabase.auth.signOut();
+    }
     setUserSession(null);
-    localStorage.removeItem('nugacore_user_profile');
+    authSession.clear();
     setShowLogin(false);
   };
+
+  useEffect(() => {
+    let mounted = true;
+    const bootstrap = async () => {
+      if (!isSupabaseConfigured) {
+        setSessionBootstrapped(true);
+        return;
+      }
+
+      const restored = await restoreSessionProfileFromSupabase();
+      if (!mounted) return;
+      if (restored) {
+        setUserSession(restored);
+        setActiveTab(getDefaultTabByRole(restored.role));
+      }
+      setSessionBootstrapped(true);
+    };
+
+    bootstrap();
+    return () => {
+      mounted = false;
+    };
+  }, []);
+
+  useEffect(() => {
+    if (!userSession) return;
+    if (!canAccessTab(userSession.role, activeTab)) {
+      setActiveTab(getDefaultTabByRole(userSession.role));
+    }
+  }, [activeTab, userSession]);
 
   // DB States
   const [stats, setStats] = useState<any>({
@@ -104,6 +118,39 @@ export default function App() {
   const [mikrotikLogs, setMikrotikLogs] = useState<any[]>([]);
   const [naps, setNaps] = useState<NapBox[]>([]);
 
+  const getAuthHeaders = (): HeadersInit => {
+    const headers: Record<string, string> = {};
+    const accessToken = authSession.readAccessToken();
+
+    if (accessToken) {
+      headers.Authorization = `Bearer ${accessToken}`;
+    }
+
+    if (userSession) {
+      headers['x-user-role'] = userSession.role;
+      headers['x-user-id'] = userSession.id;
+    }
+
+    return headers;
+  };
+
+  const fetchJson = async (url: string, init?: RequestInit) => {
+    const response = await fetch(url, {
+      ...init,
+      headers: {
+        ...getAuthHeaders(),
+        ...(init?.headers || {}),
+      },
+    });
+
+    if (!response.ok) {
+      const errPayload = await response.json().catch(() => ({ error: 'Request failed' }));
+      throw new Error(errPayload.error || `HTTP ${response.status}`);
+    }
+
+    return response.json();
+  };
+
   // Fetch initial system database
   const fetchData = async () => {
     try {
@@ -123,19 +170,19 @@ export default function App() {
         resMktLogs,
         resNaps
       ] = await Promise.all([
-        fetch('/api/dashboard-stats').then(r => r.json()),
-        fetch('/api/clients').then(r => r.json()),
-        fetch('/api/plans').then(r => r.json()),
-        fetch('/api/billing/invoices').then(r => r.json()),
-        fetch('/api/network-towers').then(r => r.json()),
-        fetch('/api/olt').then(r => r.json()),
-        fetch('/api/onu').then(r => r.json()),
-        fetch('/api/tickets').then(r => r.json()),
-        fetch('/api/workorders').then(r => r.json()),
-        fetch('/api/inventory').then(r => r.json()),
-        fetch('/api/alerts').then(r => r.json()),
-        fetch('/api/mikrotik/logs').then(r => r.json()),
-        fetch('/api/naps').then(r => r.json())
+        fetchJson('/api/dashboard-stats'),
+        fetchJson('/api/clients'),
+        fetchJson('/api/plans'),
+        fetchJson('/api/billing/invoices'),
+        fetchJson('/api/network-towers'),
+        fetchJson('/api/olt'),
+        fetchJson('/api/onu'),
+        fetchJson('/api/tickets'),
+        fetchJson('/api/workorders'),
+        fetchJson('/api/inventory'),
+        fetchJson('/api/alerts'),
+        fetchJson('/api/mikrotik/logs'),
+        fetchJson('/api/naps')
       ]);
 
       setStats(resStats);
@@ -175,7 +222,7 @@ export default function App() {
 
   const handleAcknowledgeAlerts = async () => {
     try {
-      await fetch('/api/alerts/acknowledge-all', { method: 'POST' });
+      await fetchJson('/api/alerts/acknowledge-all', { method: 'POST' });
       await fetchData();
     } catch (err) {
       console.error(err);
@@ -196,14 +243,12 @@ export default function App() {
   // CLIENT CRUD CONTROLS
   const handleAddClient = async (newClientData: any) => {
     try {
-      const res = await fetch('/api/clients', {
+      await fetchJson('/api/clients', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify(newClientData)
       });
-      if (res.ok) {
-        await fetchData();
-      }
+      await fetchData();
     } catch (err) {
       console.error(err);
     }
@@ -211,14 +256,12 @@ export default function App() {
 
   const handleUpdateClientStatus = async (id: string, status: 'active' | 'suspended' | 'baja') => {
     try {
-      const res = await fetch(`/api/clients/${id}`, {
+      await fetchJson(`/api/clients/${id}`, {
         method: 'PUT',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ status })
       });
-      if (res.ok) {
-        await fetchData();
-      }
+      await fetchData();
     } catch (err) {
       console.error(err);
     }
@@ -227,14 +270,12 @@ export default function App() {
   // BILLING TRANSAC CONTROLS
   const handlePayInvoice = async (invoiceId: string, method: string) => {
     try {
-      const res = await fetch(`/api/billing/invoices/${invoiceId}/pay`, {
+      await fetchJson(`/api/billing/invoices/${invoiceId}/pay`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ method })
       });
-      if (res.ok) {
-        await fetchData();
-      }
+      await fetchData();
     } catch (err) {
       console.error(err);
     }
@@ -243,12 +284,10 @@ export default function App() {
   // TECHNICAL INFRASTRUCTURE CONTROLS
   const handleToggleTower = async (id: string) => {
     try {
-      const res = await fetch(`/api/network-towers/${id}/toggle-state`, {
+      await fetchJson(`/api/network-towers/${id}/toggle-state`, {
         method: 'POST'
       });
-      if (res.ok) {
-        await fetchData();
-      }
+      await fetchData();
     } catch (err) {
       console.error(err);
     }
@@ -256,14 +295,12 @@ export default function App() {
 
   const handleProvisionOnu = async (onuData: any) => {
     try {
-      const res = await fetch('/api/onu/provision', {
+      await fetchJson('/api/onu/provision', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify(onuData)
       });
-      if (res.ok) {
-        await fetchData();
-      }
+      await fetchData();
     } catch (err) {
       console.error(err);
     }
@@ -271,14 +308,12 @@ export default function App() {
 
   const handleCreateInvoice = async (invoiceData: any) => {
     try {
-      const res = await fetch('/api/billing/invoices', {
+      await fetchJson('/api/billing/invoices', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify(invoiceData)
       });
-      if (res.ok) {
-        await fetchData();
-      }
+      await fetchData();
     } catch (err) {
       console.error(err);
     }
@@ -286,14 +321,12 @@ export default function App() {
 
   const handleEditInvoice = async (id: string, invoiceData: any) => {
     try {
-      const res = await fetch(`/api/billing/invoices/${id}`, {
+      await fetchJson(`/api/billing/invoices/${id}`, {
         method: 'PUT',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify(invoiceData)
       });
-      if (res.ok) {
-        await fetchData();
-      }
+      await fetchData();
     } catch (err) {
       console.error(err);
     }
@@ -301,14 +334,12 @@ export default function App() {
 
   const handleCreateTower = async (towerData: any) => {
     try {
-      const res = await fetch('/api/network-towers', {
+      await fetchJson('/api/network-towers', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify(towerData)
       });
-      if (res.ok) {
-        await fetchData();
-      }
+      await fetchData();
     } catch (err) {
       console.error(err);
     }
@@ -316,34 +347,30 @@ export default function App() {
 
   // MIKROTIK COMMAND & AI COPILOT
   const handleSendCommand = async (cmd: string, routerId?: string) => {
-    const res = await fetch('/api/mikrotik/command', {
+    return fetchJson('/api/mikrotik/command', {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({ command: cmd, routerId })
     });
-    return res.json();
   };
 
   const handleAskCopilot = async (prompt: string, routerContext?: any) => {
-    const res = await fetch('/api/mikrotik/copilot', {
+    return fetchJson('/api/mikrotik/copilot', {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({ prompt, routerContext })
     });
-    return res.json();
   };
 
   // HELPDESK TICKETS & TECH CHECKS
   const handleAddTicket = async (ticketData: any) => {
     try {
-      const res = await fetch('/api/tickets', {
+      await fetchJson('/api/tickets', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify(ticketData)
       });
-      if (res.ok) {
-        await fetchData();
-      }
+      await fetchData();
     } catch (err) {
       console.error(err);
     }
@@ -351,14 +378,12 @@ export default function App() {
 
   const handlePostTicketMessage = async (id: string, text: string) => {
     try {
-      const res = await fetch(`/api/tickets/${id}/message`, {
+      await fetchJson(`/api/tickets/${id}/message`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ message: text })
       });
-      if (res.ok) {
-        await fetchData();
-      }
+      await fetchData();
     } catch (err) {
       console.error(err);
     }
@@ -366,14 +391,12 @@ export default function App() {
 
   const handleUpdateWorkOrderStatus = async (id: string, status: string, signature?: string, checklist?: any[]) => {
     try {
-      const res = await fetch(`/api/workorders/${id}/update-status`, {
+      await fetchJson(`/api/workorders/${id}/update-status`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ status, signature, checklist })
       });
-      if (res.ok) {
-        await fetchData();
-      }
+      await fetchData();
     } catch (err) {
       console.error(err);
     }
@@ -382,14 +405,12 @@ export default function App() {
   // ERP ACTIVE MOVEMENTS
   const handleInventoryMovement = async (itemId: string, type: 'in' | 'out' | 'transfer', qty: number, toWarehouse?: string) => {
     try {
-      const res = await fetch('/api/inventory/movement', {
+      await fetchJson('/api/inventory/movement', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ itemId, type, qty, toWarehouse })
       });
-      if (res.ok) {
-        await fetchData();
-      }
+      await fetchData();
     } catch (err) {
       console.error(err);
     }
@@ -397,14 +418,12 @@ export default function App() {
 
   const handleAddInventoryItem = async (itemData: any) => {
     try {
-      const res = await fetch('/api/inventory/add', {
+      await fetchJson('/api/inventory/add', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify(itemData)
       });
-      if (res.ok) {
-        await fetchData();
-      }
+      await fetchData();
     } catch (err) {
       console.error(err);
     }
@@ -412,6 +431,14 @@ export default function App() {
 
   // Find system critical unacknowledged alerts to show in high-prominence top ticker
   const activeUnackCriticalAlert = alerts.find(a => !a.acknowledged && a.severity === 'critical');
+
+  if (!sessionBootstrapped) {
+    return (
+      <div className="min-h-screen bg-slate-950 flex items-center justify-center text-slate-400 font-mono text-xs">
+        Validando sesión...
+      </div>
+    );
+  }
 
   if (!userSession) {
     if (showLogin) {

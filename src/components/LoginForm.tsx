@@ -13,10 +13,10 @@ import {
   ArrowRight,
   ChevronLeft
 } from 'lucide-react';
-import { isSupabaseConfigured, supabase, MOCK_USER_PROFILES, UserSessionProfile } from '../lib/supabase';
+import { isSupabaseConfigured, supabase, MOCK_USER_PROFILES, normalizeUserRole, UserSessionProfile } from '../lib/supabase';
 
 interface LoginFormProps {
-  onLoginSuccess: (userProfile: UserSessionProfile) => void;
+  onLoginSuccess: (userProfile: UserSessionProfile, accessToken?: string) => void;
   onBack?: () => void;
 }
 
@@ -90,14 +90,14 @@ export default function LoginForm({ onLoginSuccess, onBack }: LoginFormProps) {
               id: data.user.id,
               email: data.user.email || email,
               full_name: 'Usuario Autenticado',
-              role: 'Administrador', // Fallback safety
+              role: 'Solo lectura',
             };
-            onLoginSuccess(fallbackProfile);
+            onLoginSuccess(fallbackProfile, data.session?.access_token);
             return;
           }
 
           // Extract role name from nested query structure
-          let assignedRole: any = 'Solo lectura';
+          let assignedRole = 'Solo lectura';
           const userRoles = profile.user_roles as any;
           if (Array.isArray(userRoles) && userRoles.length > 0 && userRoles[0]?.roles?.name) {
             assignedRole = userRoles[0].roles.name;
@@ -110,13 +110,13 @@ export default function LoginForm({ onLoginSuccess, onBack }: LoginFormProps) {
             email: profile.email,
             full_name: profile.full_name,
             phone: profile.phone || '',
-            role: assignedRole,
+            role: normalizeUserRole(assignedRole),
             avatar_url: profile.avatar_url || '',
           };
 
           setSuccessMessage(`¡Bienvenido de vuelta, ${profile.full_name}!`);
           setTimeout(() => {
-            onLoginSuccess(userSession);
+            onLoginSuccess(userSession, data.session?.access_token);
           }, 1000);
         }
       } else {
@@ -132,18 +132,7 @@ export default function LoginForm({ onLoginSuccess, onBack }: LoginFormProps) {
             onLoginSuccess(foundMock);
           }, 900);
         } else {
-          // If not matching a exact mock profile, create a safe default "Invitado" profile for robust preview navigation
-          const genericUserProfile: UserSessionProfile = {
-            id: 'generic-demo-session-id',
-            email: email,
-            full_name: email.split('@')[0].toUpperCase(),
-            role: 'Super Admin', // Automatically grant Admin status so they can view and test all tabs
-            avatar_url: 'https://images.unsplash.com/photo-1472099645785-5658abf4ff4e?auto=format&fit=crop&w=150&q=80'
-          };
-          setSuccessMessage(`Creando sesión de prueba como Super Administrador para: ${genericUserProfile.full_name}`);
-          setTimeout(() => {
-            onLoginSuccess(genericUserProfile);
-          }, 1100);
+          setErrorMessage('Usuario demo no permitido. Usa uno de los accesos rápidos disponibles.');
         }
       }
     } catch (err: any) {
