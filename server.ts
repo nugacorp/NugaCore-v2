@@ -706,6 +706,88 @@ app.post("/api/inventory/add", (req, res) => {
 });
 
 // 7. ALERTS (NOC FEED)
+let NOTIFICATION_SETTINGS = {
+  pushEnabled: true,
+  latencyThresholdMs: 120,
+  fiberCutAlertEnabled: true,
+  browserSubscribed: false,
+  webhooksCount: 2
+};
+
+app.get("/api/notifications/settings", (req, res) => {
+  res.json(NOTIFICATION_SETTINGS);
+});
+
+app.post("/api/notifications/settings", (req, res) => {
+  const { pushEnabled, latencyThresholdMs, fiberCutAlertEnabled, browserSubscribed } = req.body;
+  if (pushEnabled !== undefined) NOTIFICATION_SETTINGS.pushEnabled = !!pushEnabled;
+  if (latencyThresholdMs !== undefined) NOTIFICATION_SETTINGS.latencyThresholdMs = Number(latencyThresholdMs);
+  if (fiberCutAlertEnabled !== undefined) NOTIFICATION_SETTINGS.fiberCutAlertEnabled = !!fiberCutAlertEnabled;
+  if (browserSubscribed !== undefined) NOTIFICATION_SETTINGS.browserSubscribed = !!browserSubscribed;
+  res.json(NOTIFICATION_SETTINGS);
+});
+
+app.post("/api/notifications/trigger-simulation", (req, res) => {
+  const { eventType, metricValue, source } = req.body;
+  
+  if (eventType === 'latency') {
+    const threshold = NOTIFICATION_SETTINGS.latencyThresholdMs;
+    const latency = Number(metricValue) || 150;
+    const targetSource = source || 'Backhaul Troncal Ajusco-Chilpancingo';
+    
+    if (latency >= threshold) {
+      createAlert(
+        'tower', 
+        latency >= 180 ? 'critical' : 'warning',
+        targetSource,
+        `[LATENCY ALERT] Enlace de microondas ${targetSource} reporta latencia de ${latency}ms, superando el umbral crítico configurado de ${threshold}ms.`
+      );
+      res.json({ 
+        triggered: true, 
+        message: `Alerta emitida: Latencia ${latency}ms supera el límite de ${threshold}ms en ${targetSource}.`,
+        notificationPayload: {
+          title: "🚨 Latencia Crítica en Backhaul",
+          body: `Enlace ${targetSource} registra ${latency}ms (Límite: ${threshold}ms).`,
+          icon: "/favicon.ico",
+          tag: "noc-latency"
+        }
+      });
+    } else {
+      res.json({ 
+        triggered: false, 
+        message: `Latencia de ${latency}ms está dentro del límite de ${threshold}ms. No se requirió acción.` 
+      });
+    }
+  } else if (eventType === 'fibercut') {
+    const targetSource = source || 'Anillo de Fibra GPON Centro - Sector N1';
+    if (NOTIFICATION_SETTINGS.fiberCutAlertEnabled) {
+      createAlert(
+        'olt', 
+        'critical',
+        targetSource,
+        `[FIBER CUT ALERT] ¡CRÍTICO! Atentación extrema de -42dB detectada en ${targetSource}. Posible rotura física o vandalismo de fibra troncal.`
+      );
+      res.json({
+        triggered: true,
+        message: `Alerta de rotura emitida para ${targetSource}.`,
+        notificationPayload: {
+          title: "💥 Rotura o Corte de Fibra",
+          body: `Caída de señal inmediata en ${targetSource}. Atenuación crítica en curso.`,
+          icon: "/favicon.ico",
+          tag: "noc-fibercut"
+        }
+      });
+    } else {
+      res.json({
+        triggered: false,
+        message: "Las alertas de corte de fibra están desactivadas temporalmente."
+      });
+    }
+  } else {
+    res.status(400).json({ error: "Tipo de simulación desconocido" });
+  }
+});
+
 app.get("/api/alerts", (req, res) => res.json(NOC_ALERTS));
 
 app.post("/api/alerts/acknowledge-all", (req, res) => {

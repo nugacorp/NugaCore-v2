@@ -8,6 +8,7 @@ import MikrotikModule from './components/MikrotikModule';
 import SupportModule from './components/SupportModule';
 import InventoryModule from './components/InventoryModule';
 import GisModule from './components/GisModule';
+import FinanceOwnerModule from './components/FinanceOwnerModule';
 
 import { 
   Client, 
@@ -23,10 +24,11 @@ import {
   NapBox
 } from './types';
 
-import { Cpu, AlertTriangle, CheckCircle, RefreshCw } from 'lucide-react';
+import { Cpu, AlertTriangle, CheckCircle, RefreshCw, Menu } from 'lucide-react';
 
 export default function App() {
   const [activeTab, setActiveTab] = useState<string>('dashboard');
+  const [mobileMenuOpen, setMobileMenuOpen] = useState<boolean>(false);
   const [loading, setLoading] = useState<boolean>(true);
   const [errorStr, setErrorStr] = useState<string>('');
 
@@ -371,10 +373,31 @@ export default function App() {
         activeTab={activeTab} 
         setActiveTab={setActiveTab} 
         activeAlertsCount={alerts.filter(a => !a.acknowledged).length} 
+        isOpen={mobileMenuOpen}
+        onClose={() => setMobileMenuOpen(false)}
       />
 
       {/* Main Content Area */}
       <div className="flex-1 flex flex-col min-w-0">
+        {/* Mobile Navigation Header */}
+        <div id="mobile-navigation-bar" className="md:hidden flex items-center justify-between py-3 px-4 bg-slate-950 border-b border-slate-900 shrink-0 sticky top-0 z-20">
+          <button 
+            onClick={() => setMobileMenuOpen(true)}
+            className="p-1.5 rounded-lg text-slate-400 hover:text-white hover:bg-slate-900 focus:outline-none transition"
+            title="Abrir menú"
+          >
+            <Menu className="w-5 h-5" />
+          </button>
+          
+          <div className="flex items-center space-x-1.5">
+            <span className="w-2 h-2 rounded-full bg-indigo-500 animate-pulse"></span>
+            <span className="font-bold text-xs text-white tracking-wide font-sans">NugaCore ERP</span>
+          </div>
+
+          <div className="w-7 h-7 rounded-full bg-indigo-950 border border-indigo-900 text-indigo-400 font-mono text-[10px] font-bold flex items-center justify-center">
+            NOC
+          </div>
+        </div>
         {/* Urgent Live Top Notification Slider */}
         {activeUnackCriticalAlert && (
           <div id="urgent-noc-banner" className="bg-rose-950/90 border-b border-rose-850 py-3 px-6 text-xs flex items-center justify-between text-rose-200 z-30 animate-pulse font-mono">
@@ -485,6 +508,30 @@ export default function App() {
               <GisModule 
                 towers={towers} 
                 clients={clients}
+              />
+            )}
+
+            {activeTab === 'finance' && (
+              <FinanceOwnerModule 
+                key="finance"
+                clients={clients}
+                invoices={invoices}
+                tickets={tickets}
+                onAddTicket={handleAddTicket}
+                onPayInvoice={handlePayInvoice}
+                mode="finance"
+              />
+            )}
+
+            {activeTab === 'owner' && (
+              <FinanceOwnerModule 
+                key="owner"
+                clients={clients}
+                invoices={invoices}
+                tickets={tickets}
+                onAddTicket={handleAddTicket}
+                onPayInvoice={handlePayInvoice}
+                mode="owner"
               />
             )}
           </main>

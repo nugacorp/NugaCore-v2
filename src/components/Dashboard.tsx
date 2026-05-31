@@ -12,7 +12,14 @@ import {
   Send,
   RefreshCw,
   Layers,
-  PhoneCall
+  PhoneCall,
+  Bell,
+  BellOff,
+  Sliders,
+  Play,
+  Settings,
+  Mail,
+  MessageSquare
 } from 'lucide-react';
 import { NocAlert } from '../types';
 
@@ -28,6 +35,153 @@ export default function Dashboard({ stats, alerts, onAcknowledgeAlerts, onRefres
   const [billingBotRunning, setBillingBotRunning] = useState(false);
   const [pingScanning, setPingScanning] = useState(false);
   const [scanResults, setScanResults] = useState<any[]>([]);
+
+  // Push Notifications States
+  const [pushSettings, setPushSettings] = useState({
+    pushEnabled: true,
+    latencyThresholdMs: 120,
+    fiberCutAlertEnabled: true,
+    browserSubscribed: false,
+    webhooksCount: 2
+  });
+  const [fetchingSettings, setFetchingSettings] = useState(true);
+  const [savingSettings, setSavingSettings] = useState(false);
+  const [notificationPermission, setNotificationPermission] = useState<string>('default');
+
+  // Simulation parameters states
+  const [simEventType, setSimEventType] = useState<'latency' | 'fibercut'>('latency');
+  const [simLatencyValue, setSimLatencyValue] = useState<number>(185);
+  const [simSource, setSimSource] = useState<string>('Enlace Troncal Guerrero-Acapulco Carrier SFP+');
+  const [triggeringSimulation, setTriggeringSimulation] = useState(false);
+  const [simLog, setSimLog] = useState<string[]>([]);
+
+  // In-App floating toasts
+  const [inAppToasts, setInAppToasts] = useState<any[]>([]);
+
+  useEffect(() => {
+    // Initial fetch of notification settings
+    fetch('/api/notifications/settings')
+      .then(r => {
+        if (!r.ok) throw new Error("status code " + r.status);
+        return r.json();
+      })
+      .then(data => {
+        setPushSettings(data);
+        setFetchingSettings(false);
+      })
+      .catch(err => {
+        console.error("Error loading notification settings", err);
+        setFetchingSettings(false);
+      });
+
+    // Check browser permission status if supported
+    if (typeof window !== 'undefined' && 'Notification' in window) {
+      setNotificationPermission(Notification.permission);
+    }
+  }, []);
+
+  const saveSettings = async (updated: typeof pushSettings) => {
+    setSavingSettings(true);
+    try {
+      const res = await fetch('/api/notifications/settings', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify(updated)
+      });
+      if (res.ok) {
+        const data = await res.json();
+        setPushSettings(data);
+        triggerInAppToast("✔️ Configuración Guardada", "Los umbrales y canales push se guardaron correctamente en la base de datos de control.", "info");
+      }
+    } catch (err) {
+      console.error("Error saving settings", err);
+    } finally {
+      setSavingSettings(false);
+    }
+  };
+
+  const handleRequestPermission = async () => {
+    if (typeof window !== 'undefined' && 'Notification' in window) {
+      try {
+        const res = await Notification.requestPermission();
+        setNotificationPermission(res);
+        if (res === 'granted') {
+          const updated = { ...pushSettings, browserSubscribed: true };
+          await saveSettings(updated);
+          triggerInAppToast("🔔 Notificaciones Habilitadas", "Este navegador ya está suscrito para alertas nativas en segundo plano.", "info");
+        } else {
+          triggerInAppToast("⚠️ Permiso Denegado", "El navegador bloqueó las notificaciones. Habilítalas en el candado de la barra de direcciones.", "warning");
+        }
+      } catch (err) {
+        console.error(err);
+      }
+    } else {
+      triggerInAppToast("🚫 Sin Soporte HTML5", "Este navegador no soporta Web Push Notifications de forma nativa.", "warning");
+    }
+  };
+
+  const triggerInAppToast = (title: string, body: string, severity: 'critical' | 'warning' | 'info') => {
+    const id = 'toast-' + Date.now();
+    setInAppToasts(prev => [...prev, { id, title, body, severity }]);
+    // Auto remove toast after 6 seconds
+    setTimeout(() => {
+      setInAppToasts(prev => prev.filter(t => t.id !== id));
+    }, 6000);
+  };
+
+  const executeSimulation = async (e: React.FormEvent) => {
+    e.preventDefault();
+    setTriggeringSimulation(true);
+    try {
+      const res = await fetch('/api/notifications/trigger-simulation', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          eventType: simEventType,
+          metricValue: simLatencyValue,
+          source: simSource
+        })
+      });
+
+      if (res.ok) {
+        const data = await res.json();
+        const stamp = new Date().toLocaleTimeString();
+        
+        if (data.triggered) {
+          setSimLog(prev => [`[${stamp}] 🔔 EVENTO ENVIADO: ${data.message}`, ...prev]);
+          
+          // Trigger in-app UI Toast notification
+          triggerInAppToast(
+            data.notificationPayload.title,
+            data.notificationPayload.body,
+            simEventType === 'fibercut' ? 'critical' : 'warning'
+          );
+
+          // Trigger native browser notification if allowed
+          if (notificationPermission === 'granted' && typeof window !== 'undefined' && 'Notification' in window) {
+            try {
+              new Notification(data.notificationPayload.title, {
+                body: data.notificationPayload.body,
+                icon: '/favicon.ico',
+                tag: data.notificationPayload.tag
+              });
+            } catch (e) {
+              console.warn("Unable to trigger native Notification instance (often due to iframe sandboxing):", e);
+            }
+          }
+
+          // Force refresh NOC alerts list immediately
+          await onRefresh();
+        } else {
+          setSimLog(prev => [`[${stamp}] ⚙️ EVENTO REGISTRADO (NO ENTRÓ): ${data.message}`, ...prev]);
+        }
+      }
+    } catch (err) {
+      console.error(err);
+    } finally {
+      setTriggeringSimulation(false);
+    }
+  };
 
   const formatMXN = (num: number) => {
     return new Intl.NumberFormat('es-MX', { style: 'currency', currency: 'MXN' }).format(num);
@@ -372,6 +526,316 @@ export default function Dashboard({ stats, alerts, onAcknowledgeAlerts, onRefres
           </div>
         </div>
       </div>
+
+      {/* SECTION: CONFIGURATION OF CUSTOMIZABLE PUSH NOTIFICATIONS */}
+      <div className="grid grid-cols-1 lg:grid-cols-12 gap-6 mt-6">
+        
+        {/* Left: Alerts Thresholds & Service Subscription */}
+        <div className="lg:col-span-6 bg-slate-950 border border-slate-800 rounded-2xl p-6 flex flex-col justify-between">
+          <div className="space-y-4">
+            <div className="flex items-center justify-between border-b border-slate-900 pb-3">
+              <h3 className="text-sm font-bold text-white font-mono uppercase flex items-center space-x-2">
+                <Sliders className="w-4 h-4 text-indigo-400" />
+                <span>Configuración de Umbrales & Alertas Push</span>
+              </h3>
+              <span className="text-[10px] bg-slate-900 border border-slate-800 text-indigo-400 px-2 py-0.5 rounded-full font-mono uppercase">Noc v2.2</span>
+            </div>
+
+            <p className="text-xs text-slate-400 leading-relaxed">
+              Configura límites personalizados para que NugaCore dispare notificaciones Push inmediatas al NOC, personal de campo y directores ejecutivos ante degradaciones de red.
+            </p>
+
+            {fetchingSettings ? (
+              <div className="py-6 text-center text-slate-500 font-mono text-xs">
+                Cargando configuración del servidor...
+              </div>
+            ) : (
+              <div className="space-y-4 font-mono text-xs">
+                
+                {/* Latency Threshold Slider */}
+                <div className="bg-slate-900/50 border border-slate-850 p-4 rounded-xl space-y-3">
+                  <div className="flex justify-between items-center">
+                    <span className="text-slate-300 font-medium">Umbral Máximo de Latencia</span>
+                    <span className="text-indigo-400 font-bold bg-indigo-950/60 border border-indigo-900/50 px-2 py-0.5 rounded text-[11px]">
+                      {pushSettings.latencyThresholdMs} ms
+                    </span>
+                  </div>
+                  <input
+                    type="range"
+                    min="50"
+                    max="300"
+                    step="10"
+                    value={pushSettings.latencyThresholdMs}
+                    onChange={e => setPushSettings({ ...pushSettings, latencyThresholdMs: Number(e.target.value) })}
+                    className="w-full accent-indigo-500 h-1.5 bg-slate-800 rounded-lg cursor-pointer"
+                  />
+                  <div className="flex justify-between text-[9px] text-slate-500">
+                    <span>50ms (Ultra estricto)</span>
+                    <span>300ms (Crit. Backhaul)</span>
+                  </div>
+                </div>
+
+                {/* Fiber Cut Detection Switch */}
+                <div className="flex items-center justify-between bg-slate-900/50 border border-slate-850 p-3 rounded-xl">
+                  <div>
+                    <span className="text-slate-300 block font-medium">Monitorear Cortes de Fibra</span>
+                    <span className="text-[10px] text-slate-500 block">Detectar atenuación abrupta en OLT &gt; -40dB</span>
+                  </div>
+                  <label className="relative inline-flex items-center cursor-pointer">
+                    <input
+                      type="checkbox"
+                      checked={pushSettings.fiberCutAlertEnabled}
+                      onChange={e => setPushSettings({ ...pushSettings, fiberCutAlertEnabled: e.target.checked })}
+                      className="sr-only peer"
+                    />
+                    <div className="w-9 h-5 bg-slate-850 peer-focus:outline-none rounded-full peer peer-checked:after:translate-x-full peer-checked:after:border-white after:content-[''] after:absolute after:top-[2px] after:left-[2px] after:bg-slate-400 after:border-gray-500 after:border after:rounded-full after:h-4 after:w-4 after:transition-all peer-checked:bg-indigo-600 peer-checked:after:bg-white border border-slate-800"></div>
+                  </label>
+                </div>
+
+                {/* Global Notification Service Switch */}
+                <div className="flex items-center justify-between bg-slate-900/50 border border-slate-850 p-3 rounded-xl">
+                  <div>
+                    <span className="text-slate-300 block font-medium">Habilitar Servicio Push Global</span>
+                    <span className="text-[10px] text-slate-500 block">Despachar notificaciones multipropósito</span>
+                  </div>
+                  <label className="relative inline-flex items-center cursor-pointer">
+                    <input
+                      type="checkbox"
+                      checked={pushSettings.pushEnabled}
+                      onChange={e => setPushSettings({ ...pushSettings, pushEnabled: e.target.checked })}
+                      className="sr-only peer"
+                    />
+                    <div className="w-9 h-5 bg-slate-850 peer-focus:outline-none rounded-full peer peer-checked:after:translate-x-full peer-checked:after:border-white after:content-[''] after:absolute after:top-[2px] after:left-[2px] after:bg-slate-400 after:border-gray-500 after:border after:rounded-full after:h-4 after:w-4 after:transition-all peer-checked:bg-indigo-600 peer-checked:after:bg-white border border-slate-800"></div>
+                  </label>
+                </div>
+
+                {/* Browser Subscription Channel */}
+                <div className="bg-slate-900/50 border border-slate-850 p-3.5 rounded-xl space-y-3">
+                  <div className="flex justify-between items-center text-[11px]">
+                    <span className="text-slate-300 font-medium font-sans">Estatus Push en este Navegador:</span>
+                    {notificationPermission === 'granted' ? (
+                      <span className="text-emerald-400 font-bold bg-emerald-500/10 border border-emerald-500/20 px-2 py-0.5 rounded text-[10px] uppercase">
+                        🟢 Suscrito
+                      </span>
+                    ) : notificationPermission === 'denied' ? (
+                      <span className="text-rose-400 font-bold bg-rose-500/10 border border-rose-500/20 px-2 py-0.5 rounded text-[10px] uppercase">
+                        ❌ Denegado
+                      </span>
+                    ) : (
+                      <span className="text-amber-400 font-bold bg-amber-500/10 border border-amber-500/20 px-2 py-0.5 rounded text-[10px] uppercase">
+                        ⚠️ Inactivo
+                      </span>
+                    )}
+                  </div>
+
+                  <button
+                    type="button"
+                    onClick={handleRequestPermission}
+                    className="w-full bg-slate-800 hover:bg-slate-700 border border-slate-750 text-slate-350 py-2 rounded-lg text-[10px] font-bold uppercase transition flex items-center justify-center space-x-1"
+                  >
+                    <Bell className="w-3.5 h-3.5 text-indigo-400" />
+                    <span>Suscribir Notificaciones de Escritorio</span>
+                  </button>
+                </div>
+
+                {/* Additional Active Channels Info block */}
+                <div className="pt-2">
+                  <span className="text-[10px] font-bold uppercase text-slate-400 block mb-2 font-sans">Canales de Despacho Activos</span>
+                  <div className="grid grid-cols-2 gap-2 text-[10px]">
+                    <div className="bg-slate-900/30 border border-slate-850 rounded-lg p-2 flex items-center space-x-2 text-slate-400">
+                      <MessageSquare className="w-3.5 h-3.5 text-sky-400" />
+                      <span>Telegram Bot (NOC)</span>
+                    </div>
+                    <div className="bg-slate-900/30 border border-slate-850 rounded-lg p-2 flex items-center space-x-2 text-slate-400">
+                      <PhoneCall className="w-3.5 h-3.5 text-emerald-400" />
+                      <span>WhatsApp API Gateway</span>
+                    </div>
+                  </div>
+                </div>
+
+              </div>
+            )}
+          </div>
+
+          <button
+            onClick={() => saveSettings(pushSettings)}
+            disabled={savingSettings || fetchingSettings}
+            className="w-full mt-4 bg-indigo-600 hover:bg-indigo-500 text-white font-semibold font-mono text-xs py-2.5 rounded-lg transition-all shadow-md shadow-indigo-500/10 border border-indigo-500/30 font-bold tracking-wider uppercase cursor-pointer"
+          >
+            {savingSettings ? "Guardando cambios en servidor..." : "Guardar Parámetros de Alerta"}
+          </button>
+        </div>
+
+        {/* Right: Interactive Event/Alert Push Simulation */}
+        <div className="lg:col-span-6 bg-slate-950 border border-slate-800 rounded-2xl p-6 flex flex-col justify-between">
+          <div className="space-y-4">
+            <div className="flex items-center justify-between border-b border-slate-900 pb-3">
+              <h3 className="text-sm font-bold text-white font-mono uppercase flex items-center space-x-2">
+                <Play className="w-4 h-4 text-emerald-400" />
+                <span>Consola Simuladora de Eventos Críticos</span>
+              </h3>
+              <span className="text-[10px] text-amber-400 bg-amber-500/10 border border-amber-500/20 px-2 py-0.5 rounded-full font-mono uppercase">SandBox API</span>
+            </div>
+
+            <p className="text-xs text-slate-400 leading-relaxed font-sans">
+              Prueba de extremo a extremo tus reglas de filtrado de alertas. Forzar un evento enviará la trama ICMP / SNMP correspondiente y disparará notificaciones visuales e integradas.
+            </p>
+
+            <form onSubmit={executeSimulation} className="space-y-3 font-mono text-xs">
+              
+              {/* Event Type Tabs */}
+              <div>
+                <span className="text-[10px] text-slate-500 uppercase font-bold block mb-1.5">1. Seleccionar Evento</span>
+                <div className="grid grid-cols-2 gap-2">
+                  <button
+                    type="button"
+                    onClick={() => setSimEventType('latency')}
+                    className={`py-2 px-3 border rounded-lg transition-all font-mono text-[10px] font-bold ${
+                      simEventType === 'latency'
+                        ? 'border-indigo-500 bg-indigo-500/10 text-white'
+                        : 'border-slate-800 bg-slate-900/60 text-slate-400 hover:border-slate-700'
+                    }`}
+                  >
+                    Latencia Elevada en Backhaul
+                  </button>
+                  <button
+                    type="button"
+                    onClick={() => {
+                      setSimEventType('fibercut');
+                      setSimSource('Anillo de Fibra GPON Centro - Sector N1');
+                    }}
+                    className={`py-2 px-3 border rounded-lg transition-all font-mono text-[10px] font-bold ${
+                      simEventType === 'fibercut'
+                        ? 'border-indigo-500 bg-indigo-500/10 text-white'
+                        : 'border-slate-800 bg-slate-900/60 text-slate-400 hover:border-slate-700'
+                    }`}
+                  >
+                    Simular Corte de Fibra
+                  </button>
+                </div>
+              </div>
+
+              {/* Metric/Value Configuration (Only if Event Type is Latency) */}
+              {simEventType === 'latency' && (
+                <div className="bg-slate-900/30 border border-slate-900 p-3.5 rounded-xl space-y-2">
+                  <div className="flex justify-between text-slate-400 text-[11px]">
+                    <span>Latencia backhaul del test:</span>
+                    <strong className="text-amber-400">{simLatencyValue} ms</strong>
+                  </div>
+                  <input
+                    type="range"
+                    min="30"
+                    max="280"
+                    step="5"
+                    value={simLatencyValue}
+                    onChange={e => setSimLatencyValue(Number(e.target.value))}
+                    className="w-full accent-amber-500 h-1.5 bg-slate-800 rounded-lg cursor-pointer"
+                  />
+                  <div className="flex justify-between text-[9px] text-slate-650">
+                    <span>90ms (Normal)</span>
+                    <span>{pushSettings.latencyThresholdMs}ms (Límite NOC)</span>
+                    <span>250ms (Extremo)</span>
+                  </div>
+                </div>
+              )}
+
+              {/* Source Node Header and Input */}
+              <div className="space-y-1">
+                <span className="text-[10px] text-slate-500 uppercase font-bold block">2. Nodo / Origen del Evento</span>
+                <input
+                  type="text"
+                  required
+                  value={simSource}
+                  onChange={e => setSimSource(e.target.value)}
+                  className="w-full bg-slate-900 border border-slate-800 rounded-lg p-2 text-white placeholder-slate-650 text-[11px] focus:outline-none"
+                />
+              </div>
+
+              {/* Trigger button */}
+              <button
+                type="submit"
+                disabled={triggeringSimulation}
+                className="w-full bg-emerald-600 hover:bg-emerald-500 text-white font-bold font-mono py-2 rounded-lg transition text-[10px] uppercase flex items-center justify-center space-x-2 shadow-lg shadow-emerald-500/5"
+              >
+                {triggeringSimulation ? (
+                  <>
+                    <span className="w-3.5 h-3.5 border-2 border-slate-200 border-t-white rounded-full animate-spin"></span>
+                    <span>Simulando Envío...</span>
+                  </>
+                ) : (
+                  <>
+                    <Zap className="w-3.5 h-3.5 text-amber-300" />
+                    <span>Disparar Alerta Simulada</span>
+                  </>
+                )}
+              </button>
+
+            </form>
+          </div>
+
+          {/* Console / Log panel for the simulation outputs */}
+          <div className="mt-4">
+            <span className="text-[10px] font-bold uppercase text-slate-400 block mb-1 font-mono">Consola de Eventos Recibidos</span>
+            <div className="bg-slate-900 border border-slate-850 rounded-lg p-3 h-20 overflow-y-auto text-[9.5px] font-mono text-sky-300 space-y-1">
+              {simLog.length === 0 ? (
+                <span className="text-slate-500 block italic">Doble clic o inicia un trigger arriba para capturar tramas SNMP...</span>
+              ) : (
+                simLog.map((log, index) => (
+                  <div key={index} className="border-b border-slate-950 pb-0.5 last:border-b-0 leading-normal text-slate-350">
+                    {log}
+                  </div>
+                ))
+              )}
+            </div>
+          </div>
+        </div>
+
+      </div>
+
+      {/* Floating Push Notification Toasts Absolute Display */}
+      <div className="fixed bottom-6 right-6 z-50 space-y-3 pointer-events-none max-w-sm w-full">
+        {inAppToasts.map(toast => (
+          <div
+            key={toast.id}
+            className={`pointer-events-auto p-4 rounded-xl shadow-2xl border backdrop-blur-md flex items-start gap-3 transition-all duration-300 transform translate-x-0 cursor-pointer ${
+              toast.severity === 'critical'
+                ? 'bg-rose-950/95 border-rose-500 text-rose-100 ring-1 ring-rose-500/30'
+                : toast.severity === 'warning'
+                ? 'bg-amber-950/95 border-amber-500 text-amber-100 ring-1 ring-amber-500/30'
+                : 'bg-indigo-950/95 border-indigo-500 text-indigo-150 ring-1 ring-indigo-500/30'
+            }`}
+            onClick={() => setInAppToasts(prev => prev.filter(t => t.id !== toast.id))}
+          >
+            <div className="shrink-0 mt-0.5">
+              {toast.severity === 'critical' ? (
+                <AlertTriangle className="w-5 h-5 text-rose-400 animate-pulse" />
+              ) : toast.severity === 'warning' ? (
+                <AlertTriangle className="w-5 h-5 text-amber-400" />
+              ) : (
+                <Bell className="w-5 h-5 text-indigo-400 animate-bounce" />
+              )}
+            </div>
+            <div className="flex-1 space-y-1">
+              <div className="flex items-center justify-between">
+                <span className="font-bold text-[9px] uppercase font-mono tracking-wider text-slate-400">Mensaje Push del NOC</span>
+                <span className="text-[8px] text-slate-400 font-mono">Ahora</span>
+              </div>
+              <h4 className="font-bold text-xs text-white leading-tight">{toast.title}</h4>
+              <p className="text-[11px] text-slate-300 leading-normal font-sans pt-0.5">{toast.body}</p>
+            </div>
+            <button
+              onClick={(e) => {
+                e.stopPropagation();
+                setInAppToasts(prev => prev.filter(t => t.id !== toast.id));
+              }}
+              className="text-slate-400 hover:text-white font-bold text-xs pl-2 shrink-0 self-start hover:scale-110 transition"
+            >
+              ✕
+            </button>
+          </div>
+        ))}
+      </div>
+
     </div>
   );
 }
