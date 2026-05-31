@@ -9,28 +9,84 @@ import {
   BookOpen,
   Cpu,
   Lock,
-  MessageSquare
+  MessageSquare,
+  Network
 } from 'lucide-react';
+
+export interface MikrotikRouter {
+  id: string;
+  name: string;
+  model: string;
+  ip: string;
+  location: string;
+  cpuCores: number;
+  ramTotal: string;
+  rosVersion: string;
+  promptUser: string;
+  status: 'online' | 'warning' | 'offline';
+}
+
+export const MIKROTIK_ROUTERS: MikrotikRouter[] = [
+  {
+    id: 'mkt-1',
+    name: 'Router Principal (Norte)',
+    model: 'RB5009UG+S+OUT',
+    ip: '10.0.1.1',
+    location: 'Torre del Valle (Norte)',
+    cpuCores: 4,
+    ramTotal: '1024 MB',
+    rosVersion: '7.12',
+    promptUser: 'admin@NugaCore_Norte',
+    status: 'online'
+  },
+  {
+    id: 'mkt-2',
+    name: 'Router Core (Sur)',
+    model: 'CCR2116-12G-4S+',
+    ip: '10.0.1.3',
+    location: 'Torre Ajusco (Sur-Master)',
+    cpuCores: 16,
+    ramTotal: '16 GB',
+    rosVersion: '7.14.2 (stable)',
+    promptUser: 'admin@SurMaster_CCR2116',
+    status: 'warning'
+  },
+  {
+    id: 'mkt-3',
+    name: 'Concentrador San Pedro',
+    model: 'hEX lite',
+    ip: '10.0.1.5',
+    location: 'Repetidor San Pedro',
+    cpuCores: 1,
+    ramTotal: '64 MB',
+    rosVersion: '6.49',
+    promptUser: 'admin@SanPedro_hEX_Client',
+    status: 'online'
+  }
+];
 
 interface MikrotikModuleProps {
   logs: any[];
-  onSendCommand: (cmd: string) => Promise<{ output: string }>;
-  onAskCopilot: (prompt: string) => Promise<{ text: string }>;
+  onSendCommand: (cmd: string, routerId?: string) => Promise<{ output: string }>;
+  onAskCopilot: (prompt: string, routerContext?: any) => Promise<{ text: string }>;
 }
 
 export default function MikrotikModule({ logs, onSendCommand, onAskCopilot }: MikrotikModuleProps) {
+  // Connected Router State
+  const [activeRouter, setActiveRouter] = useState<MikrotikRouter>(MIKROTIK_ROUTERS[0]);
+
   // Command Shell States
   const [commandInput, setCommandInput] = useState('');
   const [shellLines, setShellLines] = useState<string[]>([
-    "[admin@NugaCore_RouterOS] > /system resource print",
+    "[admin@NugaCore_Norte] > /system resource print",
     "uptime: 45d 12h 30m",
-    "version: 7.14.2 (stable)",
-    "cpu: mipsbe",
-    "cpu-count: 16",
+    "version: 7.12 (stable)",
+    "cpu: arm64",
+    "cpu-count: 4",
     "cpu-load: 8%",
-    "free-memory: 1012MB",
-    "total-memory: 2048MB",
-    "[admin@NugaCore_RouterOS] > "
+    "free-memory: 680MB",
+    "total-memory: 1024MB",
+    "[admin@NugaCore_Norte] > "
   ]);
   const [executingCommand, setExecutingCommand] = useState(false);
 
@@ -53,19 +109,47 @@ export default function MikrotikModule({ logs, onSendCommand, onAskCopilot }: Mi
     }
   }, [logs]);
 
+  // Handle Switching Routers Beautifully
+  const handleRouterChange = (routerId: string) => {
+    const selected = MIKROTIK_ROUTERS.find(r => r.id === routerId);
+    if (!selected) return;
+    const oldIp = activeRouter.ip;
+    setActiveRouter(selected);
+    
+    setShellLines(prev => [
+      ...prev,
+      `\n`,
+      `[SSH Session Closed from ${oldIp}]`,
+      `Connecting to ${selected.name} (${selected.ip}) via standard port 22...`,
+      `Establishing SSH Terminal session... SUCCESS.`,
+      `Welcome to MikroTik RouterOS v${selected.rosVersion} on ${selected.model}`,
+      `Type /system resource print to read router specs on live node.`,
+      `[${selected.promptUser}] > `
+    ]);
+
+    // Provide helpful helper message to AI Chat
+    setCopilotMessages(prev => [
+      ...prev,
+      {
+        sender: 'assistant',
+        text: `🔌 Se ha cambiado la sesión SSH activa. Ahora estás interactuando con el router '${selected.name}' (${selected.model}) con IP ${selected.ip} ubicado en ${selected.location}. El Copiloto IA ya está sincronizado con esta especificación.`
+      }
+    ]);
+  };
+
   const handleCommandSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
     if (!commandInput.trim()) return;
 
     const cmd = commandInput.trim();
     setExecutingCommand(true);
-    setShellLines(prev => [...prev, `[admin@NugaCore_RouterOS] > ${cmd}`]);
+    setShellLines(prev => [...prev, `[${activeRouter.promptUser}] > ${cmd}`]);
 
     try {
-      const res = await onSendCommand(cmd);
-      setShellLines(prev => [...prev, res.output, "[admin@NugaCore_RouterOS] > "]);
+      const res = await onSendCommand(cmd, activeRouter.id);
+      setShellLines(prev => [...prev, res.output, `[${activeRouter.promptUser}] > `]);
     } catch (err) {
-      setShellLines(prev => [...prev, "Error communicating with Core Router engine.", "[admin@NugaCore_RouterOS] > "]);
+      setShellLines(prev => [...prev, "Error communicating with Core Router engine.", `[${activeRouter.promptUser}] > `]);
     } finally {
       setExecutingCommand(false);
       setCommandInput('');
@@ -82,7 +166,7 @@ export default function MikrotikModule({ logs, onSendCommand, onAskCopilot }: Mi
     setCopilotInput('');
 
     try {
-      const res = await onAskCopilot(prompt);
+      const res = await onAskCopilot(prompt, activeRouter);
       setCopilotMessages(prev => [...prev, { sender: 'assistant', text: res.text }]);
     } catch (err) {
       setCopilotMessages(prev => [...prev, { 
@@ -107,9 +191,31 @@ export default function MikrotikModule({ logs, onSendCommand, onAskCopilot }: Mi
             Consola interactiva SSH/API, monitoreo del demonio de logs syslog, y asistente de red Gemini v3.5 integrado.
           </p>
         </div>
-        <div className="flex items-center space-x-2 text-xs font-mono">
-          <span className="w-2.5 h-2.5 rounded-full bg-emerald-500 inline-block animate-ping"></span>
-          <span className="text-slate-400">RouterOS API CONECTADA (10.0.1.1)</span>
+        <div className="flex flex-col md:flex-row items-stretch md:items-center gap-3">
+          {/* Dropdown Selector */}
+          <div className="bg-slate-950 border border-slate-800 rounded-xl px-3 py-2 flex items-center space-x-2 font-mono text-xs">
+            <Network className="w-4 h-4 text-indigo-400 animate-pulse shrink-0" />
+            <span className="text-slate-500 font-bold uppercase select-none shrink-0">Router:</span>
+            <select
+              value={activeRouter.id}
+              onChange={(e) => handleRouterChange(e.target.value)}
+              className="bg-transparent text-emerald-400 font-medium font-mono focus:outline-none focus:ring-0 cursor-pointer text-xs pr-6"
+            >
+              {MIKROTIK_ROUTERS.map(router => (
+                <option key={router.id} value={router.id} className="bg-slate-950 text-slate-200">
+                  {router.name} — {router.ip} ({router.model})
+                </option>
+              ))}
+            </select>
+          </div>
+
+          <div className="flex items-center space-x-2 text-xs font-mono bg-slate-950 px-3 py-2 rounded-xl border border-slate-800 justify-center">
+            <span className={`w-2.5 h-2.5 rounded-full inline-block shrink-0 ${
+              activeRouter.status === 'online' ? 'bg-emerald-500 animate-ping' :
+              activeRouter.status === 'warning' ? 'bg-amber-400 animate-pulse' : 'bg-rose-500'
+            }`}></span>
+            <span className="text-slate-400">APIS: {activeRouter.status.toUpperCase()}</span>
+          </div>
         </div>
       </div>
 
@@ -190,7 +296,10 @@ export default function MikrotikModule({ logs, onSendCommand, onAskCopilot }: Mi
           {/* Shell CLI */}
           <div className="bg-black border border-slate-800 rounded-3xl p-5 h-[340px] flex flex-col justify-between font-mono text-xs">
             <div>
-              <p className="text-[10px] text-slate-500 uppercase tracking-widest font-bold mb-3">CONSOLA SSH ROUTER CORES (SIMULADA)</p>
+              <p className="text-[10px] text-slate-500 uppercase tracking-widest font-bold mb-3 truncate flex items-center space-x-1.5">
+                <span className="text-indigo-400">▶</span>
+                <span>SSH: <strong className="text-slate-300 font-mono font-bold">{activeRouter.promptUser}@{activeRouter.ip}</strong> ({activeRouter.model})</span>
+              </p>
               <div 
                 ref={shellConsoleRef}
                 className="space-y-1 h-[210px] overflow-y-auto font-mono text-[11px] text-emerald-400 leading-snug pr-1"

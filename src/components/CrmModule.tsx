@@ -41,6 +41,7 @@ export default function CrmModule({ clients, plans, onAddClient, onUpdateClientS
   const [formLat, setFormLat] = useState('19.4125');
   const [formLng, setFormLng] = useState('-99.1555');
   const [formNotes, setFormNotes] = useState('');
+  const [formConnectionType, setFormConnectionType] = useState<'WISP' | 'FTTH'>('WISP');
   const [isLeadForm, setIsLeadForm] = useState(false);
   const [selectedClient, setSelectedClient] = useState<Client | null>(null);
 
@@ -66,6 +67,7 @@ export default function CrmModule({ clients, plans, onAddClient, onUpdateClientS
       address: formAddress,
       city: formCity,
       planId: formPlanId || plans[0]?.id || 'plan-basic',
+      connectionType: formConnectionType,
       lat: Number(formLat),
       lng: Number(formLng),
       notes: formNotes,
@@ -80,6 +82,7 @@ export default function CrmModule({ clients, plans, onAddClient, onUpdateClientS
     setFormAddress('');
     setFormPlanId('');
     setFormNotes('');
+    setFormConnectionType('WISP');
     setShowAddForm(false);
   };
 
@@ -92,6 +95,7 @@ export default function CrmModule({ clients, plans, onAddClient, onUpdateClientS
       address: lead.address,
       city: lead.city,
       planId: lead.planId || plans[0]?.id || 'plan-basic',
+      connectionType: lead.connectionType || 'FTTH',
       lat: lead.lat,
       lng: lead.lng,
       notes: lead.notes,
@@ -181,11 +185,11 @@ export default function CrmModule({ clients, plans, onAddClient, onUpdateClientS
                   </tr>
                 </thead>
                 <tbody className="divide-y divide-slate-900">
-                  {filteredClients.map((client) => {
+                  {filteredClients.map((client, idx) => {
                     const plan = plans.find(p => p.id === client.planId);
                     return (
                       <tr 
-                        key={client.id}
+                        key={`${client.id}-${idx}`}
                         id={`crm-client-row-${client.id}`}
                         onClick={() => setSelectedClient(client)}
                         className={`hover:bg-slate-900/60 transition cursor-pointer ${
@@ -193,7 +197,14 @@ export default function CrmModule({ clients, plans, onAddClient, onUpdateClientS
                         }`}
                       >
                         <td className="py-3 px-2">
-                          <div className="font-semibold text-white text-sm">{client.name}</div>
+                          <div className="flex items-center space-x-1.5 flex-wrap">
+                            <span className="font-semibold text-white text-sm">{client.name}</span>
+                            {client.connectionType === 'FTTH' ? (
+                              <span className="bg-cyan-500/15 text-cyan-400 border border-cyan-500/20 text-[8px] px-1.5 py-0.2 rounded font-mono uppercase font-black uppercase">FTTH Fibra</span>
+                            ) : (
+                              <span className="bg-amber-500/15 text-amber-400 border border-amber-500/25 text-[8px] px-1.5 py-0.2 rounded font-mono uppercase font-black uppercase">WISP Radio</span>
+                            )}
+                          </div>
                           <div className="text-slate-500 flex items-center space-x-1 font-mono uppercase text-[9px] mt-0.5">
                             <span>{client.type}</span>
                             <span>•</span>
@@ -228,12 +239,25 @@ export default function CrmModule({ clients, plans, onAddClient, onUpdateClientS
                         </td>
                         <td className="py-3 px-2 text-slate-400">{client.city}</td>
                         <td className="py-3 px-2 text-right">
-                          <button
-                            id={`crm-view-btn-${client.id}`}
-                            className="text-[10px] bg-slate-800 hover:bg-slate-700 text-slate-300 px-2 py-1 rounded border border-slate-700 transition"
-                          >
-                            Inspeccionar
-                          </button>
+                          <div className="flex items-center justify-end space-x-1.5">
+                            {client.status === 'suspended' && (
+                              <button
+                                onClick={(e) => {
+                                  e.stopPropagation();
+                                  onUpdateClientStatus(client.id, 'active');
+                                }}
+                                className="bg-emerald-600 hover:bg-emerald-500 text-white font-mono text-[9px] font-bold px-2 py-1 rounded-md transition uppercase tracking-wider shadow-lg animate-pulse"
+                              >
+                                Reactivar
+                              </button>
+                            )}
+                            <button
+                              id={`crm-view-btn-${client.id}`}
+                              className="text-[10px] bg-slate-800 hover:bg-slate-700 text-slate-300 px-2.5 py-1 rounded border border-slate-700 transition"
+                            >
+                              Inspeccionar
+                            </button>
+                          </div>
                         </td>
                       </tr>
                     );
@@ -279,8 +303,8 @@ export default function CrmModule({ clients, plans, onAddClient, onUpdateClientS
                     <span className="font-semibold">{selectedClient.contractId || 'No Emitido'}</span>
                   </div>
                   <div>
-                    <span className="text-slate-500 block uppercase text-[9px] font-mono">Fecha Inst.</span>
-                    <span className="font-semibold">{selectedClient.installationDate || 'Pendiente'}</span>
+                    <span className="text-slate-500 block uppercase text-[9px] font-mono">Tecnología</span>
+                    <span className="font-semibold text-indigo-400">{selectedClient.connectionType === 'FTTH' ? 'FTTH Fibra' : 'WISP Radio'}</span>
                   </div>
                 </div>
 
@@ -467,6 +491,18 @@ export default function CrmModule({ clients, plans, onAddClient, onUpdateClientS
                     ))}
                   </select>
                 </div>
+              </div>
+
+              <div className="space-y-1">
+                <label className="text-indigo-400 font-mono font-semibold">Tecnología de Suscriptor</label>
+                <select
+                  value={formConnectionType}
+                  onChange={(e) => setFormConnectionType(e.target.value as 'WISP' | 'FTTH')}
+                  className="w-full bg-slate-900 border border-indigo-900/50 rounded-xl p-2.5 focus:outline-none focus:border-indigo-500 font-semibold"
+                >
+                  <option value="WISP">WISP - Antena Inalámbrica CPE (Ubiquiti/Cambium)</option>
+                  <option value="FTTH">FTTH - Fibra Óptica (Puerto Gpon / Caja NAP)</option>
+                </select>
               </div>
 
               <div className="grid grid-cols-2 gap-3">

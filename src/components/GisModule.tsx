@@ -17,6 +17,7 @@ export default function GisModule({ towers, clients }: GisModuleProps) {
   // Layout sizing
   const containerRef = useRef<HTMLDivElement>(null);
   const [dimensions, setDimensions] = useState({ width: 600, height: 400 });
+  const [activeTooltip, setActiveTooltip] = useState<{ tower: Tower; x: number; y: number } | null>(null);
 
   useEffect(() => {
     if (!containerRef.current) return;
@@ -88,7 +89,8 @@ export default function GisModule({ towers, clients }: GisModuleProps) {
             {/* SVG Interactive Area */}
             <div 
               ref={containerRef}
-              className="relative w-full h-[380px] bg-slate-900/40 rounded-2xl border border-slate-900 overflow-hidden"
+              onClick={() => setActiveTooltip(null)}
+              className="relative w-full h-[380px] bg-slate-900/40 rounded-2xl border border-slate-900 overflow-hidden text-slate-200"
             >
               {/* Radial background representing coordinate grid */}
               <div className="absolute inset-0 opacity-15" style={{ backgroundImage: "radial-gradient(circle, #4f46e5 1px, transparent 1px)", backgroundSize: "30px 30px" }}></div>
@@ -165,13 +167,13 @@ export default function GisModule({ towers, clients }: GisModuleProps) {
                 })()}
 
                 {/* 3. Draw Client dots */}
-                {clients.map((c) => {
+                {clients.map((c, i) => {
                   const { x, y } = convertCoordToXY(c.lat, c.lng);
                   let color = "fill-indigo-400";
                   if (c.status === 'suspended') color = "fill-rose-500";
                   if (c.status === 'lead') color = "fill-amber-400";
                   return (
-                    <g key={`client-dot-${c.id}`}>
+                    <g key={`client-dot-${c.id}-${i}`}>
                       <circle 
                         cx={x} 
                         cy={y} 
@@ -189,25 +191,110 @@ export default function GisModule({ towers, clients }: GisModuleProps) {
                   if (t.status === 'warning') color = "fill-amber-500";
                   if (t.status === 'offline') color = "fill-rose-600";
                   return (
-                    <g key={`tower-icon-${t.id}`}>
+                    <g 
+                      key={`tower-icon-${t.id}`}
+                      className="cursor-pointer group/tower-node"
+                      onClick={(e) => {
+                        e.stopPropagation();
+                        setActiveTooltip({ tower: t, x, y });
+                      }}
+                    >
                       <circle 
                         cx={x} 
                         cy={y} 
                         r="6" 
-                        className={`${color} stroke-slate-950`}
+                        className={`${color} stroke-slate-950 transition-all duration-200 group-hover/tower-node:r-[7.5px]`}
                         strokeWidth="2"
                       />
                       <circle 
                         cx={x} 
                         cy={y} 
-                        r="12" 
-                        className={`${t.status === 'offline' ? 'stroke-rose-500/0' : 'stroke-white/10'} fill-none`}
-                        strokeWidth="1"
+                        r="14" 
+                        fill="transparent"
+                        className={`${t.status === 'offline' ? 'stroke-rose-500/0' : 'stroke-white/10'} hover:stroke-white/40 transition-all duration-200`}
+                        strokeWidth="1.5"
                       />
                     </g>
                   );
                 })}
               </svg>
+
+              {/* Absolutely positioned tower custom pop-over tooltip */}
+              {activeTooltip && (
+                <div 
+                  id={`tower-tooltip-${activeTooltip.tower.id}`}
+                  onClick={(e) => e.stopPropagation()}
+                  className="absolute bg-slate-950/95 border border-slate-800 p-4 rounded-2xl shadow-2xl z-30 font-mono text-xs text-slate-300 w-56 space-y-2.5 backdrop-blur-sm"
+                  style={{
+                    left: Math.max(10, Math.min(dimensions.width - 240, activeTooltip.x - 112)),
+                    top: Math.max(10, Math.min(dimensions.height - 210, activeTooltip.y - 185))
+                  }}
+                >
+                  <div className="flex items-center justify-between border-b border-slate-800 pb-2">
+                    <span className="font-bold text-white text-sm truncate pr-2">{activeTooltip.tower.name}</span>
+                    <button 
+                      type="button"
+                      onClick={() => setActiveTooltip(null)}
+                      className="text-slate-500 hover:text-slate-300 transition text-[13px] px-1 font-sans"
+                    >
+                      ✕
+                    </button>
+                  </div>
+                  <div className="space-y-1.5 text-[11px]">
+                    <div className="flex justify-between">
+                      <span className="text-slate-500 uppercase text-[9px] font-bold">Estado:</span>
+                      <span className={`font-bold ${
+                        activeTooltip.tower.status === 'online' ? 'text-emerald-400' :
+                        activeTooltip.tower.status === 'warning' ? 'text-amber-400' : 'text-rose-500'
+                      }`}>{activeTooltip.tower.status.toUpperCase()}</span>
+                    </div>
+
+                    <div className="flex justify-between">
+                      <span className="text-slate-500 uppercase text-[9px] font-bold">IP AP:</span>
+                      <span className="text-slate-300">{activeTooltip.tower.ip}</span>
+                    </div>
+
+                    <div className="space-y-1 pt-0.5">
+                      <div className="flex justify-between">
+                        <span className="text-slate-500 uppercase text-[9px] font-bold">Carga CPU:</span>
+                        <span className="text-slate-300">{activeTooltip.tower.cpu}%</span>
+                      </div>
+                      <div className="w-full h-1.5 bg-slate-900 rounded-full overflow-hidden border border-slate-800">
+                        <div 
+                          className={`h-full transition-all duration-300 ${
+                            activeTooltip.tower.cpu > 75 ? 'bg-rose-500' :
+                            activeTooltip.tower.cpu > 45 ? 'bg-amber-500' : 'bg-indigo-500'
+                          }`} 
+                          style={{ width: `${activeTooltip.tower.cpu}%` }}
+                        ></div>
+                      </div>
+                    </div>
+
+                    <div className="space-y-1 pt-0.5">
+                      <div className="flex justify-between">
+                        <span className="text-slate-500 uppercase text-[9px] font-bold">Memoria RAM:</span>
+                        <span className="text-slate-300">{activeTooltip.tower.ram}%</span>
+                      </div>
+                      <div className="w-full h-1.5 bg-slate-900 rounded-full overflow-hidden border border-slate-800">
+                        <div 
+                          className="h-full bg-emerald-500 transition-all duration-300" 
+                          style={{ width: `${activeTooltip.tower.ram}%` }}
+                        ></div>
+                      </div>
+                    </div>
+
+                    <div className="flex justify-between">
+                      <span className="text-slate-500 uppercase text-[9px] font-bold">Temp:</span>
+                      <span className="text-slate-300">{activeTooltip.tower.tempCelsius}°C</span>
+                    </div>
+
+                    <div className="flex justify-between border-t border-slate-900 pt-2 mt-1">
+                      <span className="text-slate-500 uppercase text-[9px] font-bold">Tiempo Activo:</span>
+                      <span className="text-indigo-300 font-bold font-mono">{activeTooltip.tower.uptime}</span>
+                    </div>
+                  </div>
+                </div>
+              )}
 
               {/* Map floating control legends */}
               <div className="absolute bottom-3 left-3 bg-slate-950/90 border border-slate-800 p-3 rounded-xl z-20 text-[10px] space-y-1.5 font-mono text-slate-400">

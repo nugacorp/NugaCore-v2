@@ -2,7 +2,7 @@ import express from "express";
 import path from "path";
 import { createServer as createViteServer } from "vite";
 import { GoogleGenAI } from "@google/genai";
-import { Client, Plan, Tower, OltFTTH, OnuFTTH, Ticket, TaskOrder, WarehouseItem, Invoice, NocAlert } from "./src/types";
+import { Client, Plan, Tower, OltFTTH, OnuFTTH, Ticket, TaskOrder, WarehouseItem, Invoice, NocAlert, NapBox } from "./src/types";
 
 // Initialize Gemini Client safely
 let geminiClient: GoogleGenAI | null = null;
@@ -37,13 +37,13 @@ const PLANS: Plan[] = [
 ];
 
 let CLIENTS: Client[] = [
-  { id: 'c-1', name: 'Sofia Rodriguez Mendoza', type: 'residential', status: 'active', email: 'sofia.rodriguez@email.com', phone: '5512345678', address: 'Av. Insurgentes Sur 1204', city: 'CDMX', lat: 19.3891, lng: -99.1783, planId: 'plan-plus', ip: '10.100.10.12', mac: 'BC:E6:7C:12:34:56', pppoeUser: 'sofia_rodriguez_nuga', pppoePassword: 'pass_sofiarod_99', contractId: 'CONT-2026-103', documents: [{ name: 'INE', url: '#', date: '2026-01-10' }, { name: 'Comp_Domicilio', url: '#', date: '2026-01-10' }], installationPhotos: [], installationDate: '2026-01-12' },
-  { id: 'c-2', name: 'Corporativo Reforma S.A.', type: 'corporate', status: 'active', email: 'it@reforma.com', phone: '5576543210', address: 'Paseo de la Reforma 250', city: 'CDMX', lat: 19.4273, lng: -99.1676, planId: 'plan-corp-small', ip: '192.168.200.4', mac: '00:15:6D:EE:AA:11', contractId: 'CONT-2026-104', installationDate: '2026-01-15' },
-  { id: 'c-3', name: 'Hotel Vista Hermosa', type: 'hotel', status: 'active', email: 'gerencia@hotelvista.om', phone: '7449876543', address: 'Costera Miguel Alemán 405', city: 'Acapulco', lat: 16.8534, lng: -99.8821, planId: 'plan-corp-gig', ip: '10.100.40.2', mac: '44:D9:E7:AA:BB:CC', contractId: 'CONT-2026-105', installationDate: '2026-02-01' },
-  { id: 'c-4', name: 'Rodrigo Flores Ortiz', type: 'residential', status: 'suspended', email: 'rodrigo.flores@email.com', phone: '5587654321', address: 'Calle 10, Col. San Pedro de los Pinos', city: 'CDMX', lat: 19.3908, lng: -99.1895, planId: 'plan-basic', ip: '10.100.10.45', mac: 'BC:E6:7C:99:A1:C2', pppoeUser: 'rodrigo_flores_nuga', pppoePassword: 'pw_rodrigo_f123', contractId: 'CONT-2026-118' },
-  { id: 'c-5', name: 'Escuela Primaria Benito Juárez', type: 'school', status: 'active', email: 'directora@bjprimaria.edu.mx', phone: '5544332211', address: 'Calle Juarez s/n, Col. Centro', city: 'CDMX', lat: 19.4125, lng: -99.1555, planId: 'plan-plus', ip: '10.100.10.88', mac: 'E0:3F:49:FF:22:98' },
-  { id: 'c-lead-1', name: 'Mario Moreno Cantinflas', type: 'residential', status: 'lead', email: 'mario.moreno@cantinflas.org', phone: '5522119933', address: 'Plaza Garibaldi 12', city: 'CDMX', lat: 19.4412, lng: -99.1394, planId: 'plan-plus', ip: '0.0.0.0', notes: 'Interesado en internet residencial. Factibilidad aprobada del Sector Norte. Espera asignación de técnico.' },
-  { id: 'c-lead-2', name: 'Restaurante El Cardenal', type: 'corporate', status: 'lead', email: 'administracion@elcardenal.mx', phone: '5544998811', address: 'Calle de la Palma 23', city: 'CDMX', lat: 19.4348, lng: -99.1332, planId: 'plan-corp-small', ip: '0.0.0.0', notes: 'Requiere enlace simétrico para terminales punto de venta y Wi-Fi para clientes.' }
+  { id: 'c-1', name: 'Sofia Rodriguez Mendoza', type: 'residential', status: 'active', email: 'sofia.rodriguez@email.com', phone: '5512345678', address: 'Av. Insurgentes Sur 1204', city: 'CDMX', lat: 19.3891, lng: -99.1783, planId: 'plan-plus', ip: '10.100.10.12', connectionType: 'FTTH', mac: 'BC:E6:7C:12:34:56', pppoeUser: 'sofia_rodriguez_nuga', pppoePassword: 'pass_sofiarod_99', contractId: 'CONT-2026-103', documents: [{ name: 'INE', url: '#', date: '2026-01-10' }, { name: 'Comp_Domicilio', url: '#', date: '2026-01-10' }], installationPhotos: [], installationDate: '2026-01-12' },
+  { id: 'c-2', name: 'Corporativo Reforma S.A.', type: 'corporate', status: 'active', email: 'it@reforma.com', phone: '5576543210', address: 'Paseo de la Reforma 250', city: 'CDMX', lat: 19.4273, lng: -99.1676, planId: 'plan-corp-small', ip: '192.168.200.4', connectionType: 'FTTH', mac: '00:15:6D:EE:AA:11', contractId: 'CONT-2026-104', installationDate: '2026-01-15' },
+  { id: 'c-3', name: 'Hotel Vista Hermosa', type: 'hotel', status: 'active', email: 'gerencia@hotelvista.om', phone: '7449876543', address: 'Costera Miguel Alemán 405', city: 'Acapulco', lat: 16.8534, lng: -99.8821, planId: 'plan-corp-gig', ip: '10.100.40.2', connectionType: 'FTTH', mac: '44:D9:E7:AA:BB:CC', contractId: 'CONT-2026-105', installationDate: '2026-02-01' },
+  { id: 'c-4', name: 'Rodrigo Flores Ortiz', type: 'residential', status: 'suspended', email: 'rodrigo.flores@email.com', phone: '5587654321', address: 'Calle 10, Col. San Pedro de los Pinos', city: 'CDMX', lat: 19.3908, lng: -99.1895, planId: 'plan-basic', ip: '10.100.10.45', connectionType: 'WISP', mac: 'BC:E6:7C:99:A1:C2', pppoeUser: 'rodrigo_flores_nuga', pppoePassword: 'pw_rodrigo_f123', contractId: 'CONT-2026-118' },
+  { id: 'c-5', name: 'Escuela Primaria Benito Juárez', type: 'school', status: 'active', email: 'directora@bjprimaria.edu.mx', phone: '5544332211', address: 'Calle Juarez s/n, Col. Centro', city: 'CDMX', lat: 19.4125, lng: -99.1555, planId: 'plan-plus', ip: '10.100.10.88', connectionType: 'FTTH', mac: 'E0:3F:49:FF:22:98' },
+  { id: 'c-lead-1', name: 'Mario Moreno Cantinflas', type: 'residential', status: 'lead', email: 'mario.moreno@cantinflas.org', phone: '5522119933', address: 'Plaza Garibaldi 12', city: 'CDMX', lat: 19.4412, lng: -99.1394, planId: 'plan-plus', ip: '0.0.0.0', connectionType: 'WISP', notes: 'Interesado en internet residencial. Factibilidad aprobada del Sector Norte. Espera asignación de técnico.' },
+  { id: 'c-lead-2', name: 'Restaurante El Cardenal', type: 'corporate', status: 'lead', email: 'administracion@elcardenal.mx', phone: '5544998811', address: 'Calle de la Palma 23', city: 'CDMX', lat: 19.4348, lng: -99.1332, planId: 'plan-corp-small', ip: '0.0.0.0', connectionType: 'FTTH', notes: 'Requiere enlace simétrico para terminales punto de venta y Wi-Fi para clientes.' }
 ];
 
 let TOWERS: Tower[] = [
@@ -57,8 +57,82 @@ let OLTS: OltFTTH[] = [
 ];
 
 let ONUS: OnuFTTH[] = [
-  { id: 'onu-1', clientId: 'c-1', clientName: 'Sofia Rodriguez Mendoza', oltId: 'olt-1', port: 1, mac: 'HWTC:A1:B2:C3:44', signalDb: -19.5, status: 'online', brand: 'Huawei', model: 'EG8145V5' },
-  { id: 'onu-2', clientId: 'c-5', clientName: 'Escuela Primaria Benito Juárez', oltId: 'olt-1', port: 2, mac: 'HWTC:FE:11:22:90', signalDb: -22.3, status: 'online', brand: 'Huawei', model: 'EG8010H' }
+  { id: 'onu-1', clientId: 'c-1', clientName: 'Sofia Rodriguez Mendoza', oltId: 'olt-1', port: 1, mac: 'HWTC:A1:B2:C3:44', signalDb: -19.5, status: 'online', brand: 'Huawei', model: 'EG8145V5', napId: 'NAP-01', napPort: 1 },
+  { id: 'onu-2', clientId: 'c-5', clientName: 'Escuela Primaria Benito Juárez', oltId: 'olt-1', port: 2, mac: 'HWTC:FE:11:22:90', signalDb: -22.3, status: 'online', brand: 'Huawei', model: 'EG8010H', napId: 'NAP-01', napPort: 4 }
+];
+
+let NAP_BOXES: NapBox[] = [
+  { 
+    id: 'NAP-01', 
+    name: 'NAP Principal Centro Col. Juarez', 
+    ponPort: 'PON-01',
+    fibersFree: 3, 
+    fibersTotal: 8, 
+    lat: 19.4285, 
+    lng: -99.1655, 
+    splitRatio: '1:8', 
+    coverageMeters: 250, 
+    ports: [
+      { num: 1, status: 'occupied', client: 'Sofia Rodriguez Mendoza (onu-1)' },
+      { num: 2, status: 'occupied', client: 'Banco Comunitario' },
+      { num: 3, status: 'occupied', client: 'Hotel Las Flores' },
+      { num: 4, status: 'occupied', client: 'Escuela Primaria Benito Juárez (onu-2)' },
+      { num: 5, status: 'occupied', client: 'Felipe de Jesus' },
+      { num: 6, status: 'free', client: '' },
+      { num: 7, status: 'free', client: '' },
+      { num: 8, status: 'free', client: '' },
+    ]
+  },
+  { 
+    id: 'NAP-02', 
+    name: 'NAP Alterna Sur Condesa', 
+    ponPort: 'PON-02',
+    fibersFree: 6, 
+    fibersTotal: 8, 
+    lat: 19.4185, 
+    lng: -99.1555, 
+    splitRatio: '1:8', 
+    coverageMeters: 300, 
+    ports: [
+      { num: 1, status: 'occupied', client: 'Raul Jimenez' },
+      { num: 2, status: 'occupied', client: 'Clínica Santa Maria' },
+      { num: 3, status: 'free', client: '' },
+      { num: 4, status: 'free', client: '' },
+      { num: 5, status: 'free', client: '' },
+      { num: 6, status: 'free', client: '' },
+      { num: 7, status: 'free', client: '' },
+      { num: 8, status: 'free', client: '' },
+    ]
+  },
+  { 
+    id: 'NAP-03', 
+    name: 'NAP Ajusco Sector Alto', 
+    ponPort: 'PON-03',
+    fibersFree: 1, 
+    fibersTotal: 16, 
+    lat: 19.2185, 
+    lng: -99.1855, 
+    splitRatio: '1:16', 
+    coverageMeters: 200, 
+    ports: [
+      { num: 1, status: 'occupied', client: 'Marta Diaz' },
+      { num: 2, status: 'occupied', client: 'Gimnasio Olimpico' },
+      { num: 3, status: 'occupied', client: 'Oficina Gubernamental' },
+      { num: 4, status: 'occupied', client: 'Estancia Infantil' },
+      { num: 5, status: 'occupied', client: 'Estética Express' },
+      { num: 6, status: 'occupied', client: 'Fábrica de Hielo' },
+      { num: 7, status: 'occupied', client: 'Taller Mecánico' },
+      { num: 8, status: 'occupied', client: 'Tienda La Luz' },
+      { num: 9, status: 'occupied', client: 'Farmacia Centro' },
+      { num: 10, status: 'occupied', client: 'Papelería ABC' },
+      { num: 11, status: 'occupied', client: 'Hotel Ajusco' },
+      { num: 12, status: 'occupied', client: 'Caseta Forestal' },
+      { num: 13, status: 'occupied', client: 'Socio de Negocios' },
+      { num: 14, status: 'occupied', client: 'Colegio Ajusco' },
+      { num: 15, status: 'occupied', client: 'Puesto de Inspección' },
+      { num: 16, status: 'free', client: '' },
+    ]
+  }
 ];
 
 let TICKETS: Ticket[] = [
@@ -114,6 +188,42 @@ function createAlert(type: 'tower' | 'olt' | 'client' | 'system', severity: 'cri
   NOC_ALERTS.unshift(newAlert);
 }
 
+function getUniqueClientId(): string {
+  let nextNum = 1;
+  const ids = new Set(CLIENTS.map(c => c.id));
+  while (ids.has(`c-${nextNum}`)) {
+    nextNum++;
+  }
+  return `c-${nextNum}`;
+}
+
+function getUniqueInvoiceId(): string {
+  let nextNum = 100;
+  const ids = new Set(INVOICES.map(i => i.id));
+  while (ids.has(`fac-${nextNum}`)) {
+    nextNum++;
+  }
+  return `fac-${nextNum}`;
+}
+
+function getUniqueOnuId(): string {
+  let nextNum = 1;
+  const ids = new Set(ONUS.map(o => o.id));
+  while (ids.has(`onu-${nextNum}`)) {
+    nextNum++;
+  }
+  return `onu-${nextNum}`;
+}
+
+function getUniqueTicketId(): string {
+  let nextNum = 1;
+  const ids = new Set(TICKETS.map(t => t.id));
+  while (ids.has(`tk-${nextNum}`)) {
+    nextNum++;
+  }
+  return `tk-${nextNum}`;
+}
+
 // REST ENDPOINTS
 
 // 1. STATS
@@ -155,7 +265,7 @@ app.get("/api/clients", (req, res) => {
 });
 
 app.post("/api/clients", (req, res) => {
-  const { name, type, email, phone, address, city, planId, lat, lng, isConvertLead, leadId, notes } = req.body;
+  const { name, type, email, phone, address, city, planId, lat, lng, isConvertLead, leadId, notes, connectionType } = req.body;
   
   if (isConvertLead && leadId) {
     CLIENTS = CLIENTS.filter(c => c.id !== leadId);
@@ -164,7 +274,7 @@ app.post("/api/clients", (req, res) => {
 
   const randomSub = Math.floor(Math.random() * 253) + 2;
   const newClient: Client = {
-    id: 'c-' + (CLIENTS.length + 10),
+    id: getUniqueClientId(),
     name,
     type,
     status: isConvertLead ? 'active' : 'lead',
@@ -175,6 +285,7 @@ app.post("/api/clients", (req, res) => {
     lat: Number(lat) || 19.4125,
     lng: Number(lng) || -99.1555,
     planId: planId || 'plan-basic',
+    connectionType: connectionType || (type === 'corporate' || type === 'hotel' ? 'FTTH' : 'WISP'),
     ip: isConvertLead ? `10.100.10.${randomSub}` : '0.0.0.0',
     mac: isConvertLead ? `00:1A:79:A1:BA:${randomSub.toString(16).toUpperCase().padStart(2, '0')}` : undefined,
     pppoeUser: isConvertLead ? `${name.toLowerCase().replace(/[^a-z0-9]/g, '_')}_nuga` : undefined,
@@ -191,7 +302,7 @@ app.post("/api/clients", (req, res) => {
     const plan = PLANS.find(p => p.id === newClient.planId);
     const cost = plan ? plan.price : 449;
     const newInvoice: Invoice = {
-      id: 'fac-' + (120 + INVOICES.length),
+      id: getUniqueInvoiceId(),
       clientId: newClient.id,
       clientName: newClient.name,
       amount: cost,
@@ -207,7 +318,7 @@ app.post("/api/clients", (req, res) => {
     // Create a new ONU provisioned representation
     if (newClient.type === 'residential' || newClient.type === 'school') {
       const newOnu: OnuFTTH = {
-        id: 'onu-' + (ONUS.length + 10),
+        id: getUniqueOnuId(),
         clientId: newClient.id,
         clientName: newClient.name,
         oltId: 'olt-1',
@@ -264,6 +375,38 @@ app.get("/api/network-towers", (req, res) => {
   res.json(TOWERS);
 });
 
+app.post("/api/network-towers", (req, res) => {
+  const { name, lat, lng, height, coverageRadiusKm, ip, equipment } = req.body;
+  const newTower: Tower = {
+    id: 't-' + (TOWERS.length + 1) + '-' + Math.floor(Math.random() * 90 + 10),
+    name,
+    status: 'online' as const,
+    lat: Number(lat) || 19.3908,
+    lng: Number(lng) || -99.1895,
+    height: Number(height) || 30,
+    coverageRadiusKm: Number(coverageRadiusKm) || 5,
+    ip: ip || '10.0.1.' + (TOWERS.length + 10),
+    cpu: 10,
+    ram: 25,
+    tempCelsius: 34,
+    pingMs: 12,
+    uptime: '0d 0h 10m',
+    ports: [
+      { port: 'eth1 (WAN Uplink)', status: 'up' as const, speed: '1 Gbps' },
+      { port: 'eth2 (SFP AP Backbone)', status: 'up' as const, speed: '10 Gbps' },
+      { port: 'eth3 (Sector Norte)', status: 'down' as const, speed: '100 Mbps' },
+      { port: 'eth4 (Sector Sur)', status: 'down' as const, speed: '100 Mbps' }
+    ],
+    equipment: equipment && equipment.length > 0 ? equipment : [
+      { name: 'RB5009UG+S+OUT', type: 'Router principal', brand: 'MikroTik' },
+      { name: 'Rocket5 AC Gen2', type: 'AP Sectorial', brand: 'Ubiquiti' }
+    ]
+  };
+  TOWERS.push(newTower);
+  createAlert('tower', 'info', name, `Nueva subestación de telecomunicaciones ${name} conectada correctamente.`);
+  res.status(201).json(newTower);
+});
+
 // Simulate Tower Control Actions (Reboot / Faults toggling)
 app.post("/api/network-towers/:id/toggle-state", (req, res) => {
   const { id } = req.params;
@@ -297,16 +440,18 @@ app.post("/api/network-towers/:id/toggle-state", (req, res) => {
 // FTTH GPON PROVISIONING
 app.get("/api/olt", (req, res) => res.json(OLTS));
 app.get("/api/onu", (req, res) => res.json(ONUS));
+app.get("/api/naps", (req, res) => res.json(NAP_BOXES));
 
 app.post("/api/onu/provision", (req, res) => {
-  const { clientId, oltId, port, mac, brand, model } = req.body;
+  const { clientId, oltId, port, mac, brand, model, napId, napPort } = req.body;
   const client = CLIENTS.find(c => c.id === clientId);
   if (!client) {
     return res.status(400).json({ error: "Invalid client" });
   }
 
+  const newOnuId = getUniqueOnuId();
   const newOnu: OnuFTTH = {
-    id: 'onu-' + (ONUS.length + 11),
+    id: newOnuId,
     clientId,
     clientName: client.name,
     oltId: oltId || 'olt-1',
@@ -315,10 +460,28 @@ app.post("/api/onu/provision", (req, res) => {
     signalDb: -21.8,
     status: 'online',
     brand: brand || 'Huawei',
-    model: model || 'ONU Dual-Band'
+    model: model || 'ONU Dual-Band',
+    napId,
+    napPort: napPort ? Number(napPort) : undefined
   };
 
   ONUS.push(newOnu);
+
+  // Update NAP Box if provisioned to a specific NAP box & port
+  if (napId && napPort) {
+    const nap = NAP_BOXES.find(n => n.id === napId);
+    if (nap) {
+      const pNum = Number(napPort);
+      const targetPort = nap.ports.find(p => p.num === pNum);
+      if (targetPort) {
+        targetPort.status = 'occupied';
+        targetPort.client = `${client.name} (${newOnuId})`;
+      }
+      // Recalculate fibersFree
+      nap.fibersFree = nap.ports.filter(p => p.status === 'free').length;
+    }
+  }
+
   res.json(newOnu);
 });
 
@@ -359,6 +522,44 @@ app.post("/api/billing/invoices/:id/pay", (req, res) => {
   }
 });
 
+app.post("/api/billing/invoices", (req, res) => {
+  const { clientId, amount, dueDateStr, items } = req.body;
+  const client = CLIENTS.find(c => c.id === clientId);
+  if (!client) {
+    return res.status(404).json({ error: "Client not found" });
+  }
+  
+  const resolvedAmount = Number(amount) || 0;
+  const newInvoice: Invoice = {
+    id: 'fac-' + (INVOICES.length + 101) + '-' + Math.floor(Math.random() * 900 + 100),
+    clientId,
+    clientName: client.name,
+    amount: resolvedAmount,
+    dateStr: new Date().toISOString().substring(0, 10),
+    dueDateStr: dueDateStr || new Date(Date.now() + 10 * 24 * 60 * 60 * 1000).toISOString().substring(0, 10),
+    status: 'unpaid' as const,
+    cfdiStatus: 'pending' as const,
+    items: items && items.length > 0 ? items : [{ description: 'Servicio de Internet banda ancha para Suscriptor', price: resolvedAmount, qty: 1 }],
+    payments: []
+  };
+  INVOICES.unshift(newInvoice);
+  res.status(201).json(newInvoice);
+});
+
+app.put("/api/billing/invoices/:id", (req, res) => {
+  const { id } = req.params;
+  const { amount, dueDateStr, items, status } = req.body;
+  const invoice = INVOICES.find(inv => inv.id === id);
+  if (!invoice) {
+    return res.status(404).json({ error: "Invoice not found" });
+  }
+  if (amount !== undefined) invoice.amount = Number(amount);
+  if (dueDateStr !== undefined) invoice.dueDateStr = dueDateStr;
+  if (items !== undefined) invoice.items = items;
+  if (status !== undefined) invoice.status = status;
+  res.json(invoice);
+});
+
 // 5. HELPDESK TICKETS & TECH WORK ORDERS
 app.get("/api/tickets", (req, res) => res.json(TICKETS));
 
@@ -367,7 +568,7 @@ app.post("/api/tickets", (req, res) => {
   const client = CLIENTS.find(c => c.id === clientId);
   
   const newTicket: Ticket = {
-    id: 'tk-' + (TICKETS.length + 10),
+    id: getUniqueTicketId(),
     clientName: client ? client.name : 'Cliente Genérico',
     clientId,
     title,
@@ -478,6 +679,32 @@ app.post("/api/inventory/movement", (req, res) => {
   }
 });
 
+app.post("/api/inventory/add", (req, res) => {
+  const { name, category, model, brand, qty, warehouse, serials } = req.body;
+  if (!name || !model || !brand) {
+    return res.status(400).json({ error: "Missing required fields: name, model, and brand are required" });
+  }
+  
+  const initialQty = Number(qty) || 0;
+  const serialsArr = Array.isArray(serials) 
+    ? serials 
+    : (serials ? String(serials).split(',').map(s => s.trim()).filter(Boolean) : []);
+
+  const newItem: WarehouseItem = {
+    id: `item-${Date.now()}`,
+    name,
+    category: category || 'Other',
+    model,
+    brand,
+    qty: initialQty,
+    warehouse: warehouse || 'Principal',
+    serials: serialsArr
+  };
+
+  INVENTORY.unshift(newItem);
+  res.status(201).json(newItem);
+});
+
 // 7. ALERTS (NOC FEED)
 app.get("/api/alerts", (req, res) => res.json(NOC_ALERTS));
 
@@ -493,11 +720,83 @@ app.get("/api/mikrotik/logs", (req, res) => {
 
 // Run raw RouterOS Commands Simulation
 app.post("/api/mikrotik/command", (req, res) => {
-  const { command } = req.body;
+  const { command, routerId } = req.body;
   if (!command) return res.status(400).json({ error: "No query command" });
 
   let output = "";
   const cmd = command.trim();
+
+  // Route-Specific Resource and IP configuration overrides
+  if (cmd.startsWith("/system resource print") || cmd.startsWith("system resource print")) {
+    const modelName = routerId === 'mkt-2' ? 'CCR2116-12G-4S+' : routerId === 'mkt-3' ? 'hEX lite' : 'RB5009';
+    const ver = routerId === 'mkt-2' ? '7.14.2 (stable)' : routerId === 'mkt-3' ? '6.49 (stable)' : '7.12 (stable)';
+    const cpuType = routerId === 'mkt-2' ? 'tile' : routerId === 'mkt-3' ? 'mipsbe' : 'arm64';
+    const cpuCount = routerId === 'mkt-2' ? '16' : routerId === 'mkt-3' ? '1' : '4';
+    const cpuLoad = routerId === 'mkt-2' ? '52%' : routerId === 'mkt-3' ? '18%' : '8%';
+    const freeMem = routerId === 'mkt-2' ? '12480MB' : routerId === 'mkt-3' ? '24MB' : '680MB';
+    const totMem = routerId === 'mkt-2' ? '16384MB' : routerId === 'mkt-3' ? '64MB' : '1024MB';
+
+    const routerName = routerId === 'mkt-2' ? 'Torre Ajusco (Sur-Master)' : routerId === 'mkt-3' ? 'Repetidor San Pedro' : 'Torre del Valle (Norte)';
+    MIKROTIK_LOGS.push({
+      timestamp: new Date().toISOString().replace('T', ' ').substring(0, 19),
+      message: `user,info [${routerName}] Admin console ran: "/system resource print"`
+    });
+
+    return res.json({
+      output: `uptime: 45d 12h 30m
+version: ${ver}
+cpu: ${cpuType}
+cpu-count: ${cpuCount}
+cpu-load: ${cpuLoad}
+free-memory: ${freeMem}
+total-memory: ${totMem}`
+    });
+  }
+
+  if (cmd.startsWith("/ip address print") || cmd.startsWith("ip address print")) {
+    if (routerId === 'mkt-2') {
+      const routerName = routerId === 'mkt-2' ? 'Torre Ajusco (Sur-Master)' : routerId === 'mkt-3' ? 'Repetidor San Pedro' : 'Torre del Valle (Norte)';
+      MIKROTIK_LOGS.push({
+        timestamp: new Date().toISOString().replace('T', ' ').substring(0, 19),
+        message: `user,info [${routerName}] Admin console ran: "${command}"`
+      });
+      return res.json({
+        output: `Flags: D - dynamic, X - disabled, I - invalid, A - active
+ #   ADDRESS            NETWORK         INTERFACE
+  0   10.0.1.3/24        10.0.1.0        ether1-WAN-FIBER
+  1   10.200.10.1/24     10.200.10.0     vlan50-Clientes-Sur`
+      });
+    } else if (routerId === 'mkt-3') {
+      const routerName = routerId === 'mkt-2' ? 'Torre Ajusco (Sur-Master)' : routerId === 'mkt-3' ? 'Repetidor San Pedro' : 'Torre del Valle (Norte)';
+      MIKROTIK_LOGS.push({
+        timestamp: new Date().toISOString().replace('T', ' ').substring(0, 19),
+        message: `user,info [${routerName}] Admin console ran: "${command}"`
+      });
+      return res.json({
+        output: `Flags: D - dynamic, X - disabled, I - invalid, A - active
+ #   ADDRESS            NETWORK         INTERFACE
+  0   10.0.1.5/24        10.0.1.0        ether1-UPLINK
+  1   192.168.88.1/24    192.168.88.0    ether2-local`
+      });
+    }
+  }
+
+  if (cmd && !cmd.startsWith("/ip address print") && !cmd.startsWith("/ppp active print") && !cmd.startsWith("/queue simple print") && !cmd.includes("reboot")) {
+    const modelStr = routerId === 'mkt-2' ? 'CCR2116-12G-4S+' : routerId === 'mkt-3' ? 'hEX lite' : 'RB5009UG+S+OUT';
+    const osVer = routerId === 'mkt-2' ? 'v7.14.2' : routerId === 'mkt-3' ? 'v6.49' : 'v7.12';
+    const routerName = routerId === 'mkt-2' ? 'Torre Ajusco (Sur-Master)' : routerId === 'mkt-3' ? 'Repetidor San Pedro' : 'Torre del Valle (Norte)';
+    
+    MIKROTIK_LOGS.push({
+      timestamp: new Date().toISOString().replace('T', ' ').substring(0, 19),
+      message: `user,info [${routerName}] Admin console ran: "${command}"`
+    });
+
+    return res.json({
+      output: `Command executed successfully on ${modelStr} (${routerName}).
+Output: [RouterOS ${osVer} Core]
+Script trigger OK. IP Address & routing rules status synchronized.`
+    });
+  }
 
   if (cmd.startsWith("/ip address print")) {
     output = `Flags: D - dynamic, X - disabled, I - invalid, A - active

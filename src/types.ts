@@ -20,6 +20,7 @@ export interface Client {
   lng: number;
   planId: string;
   ip: string;
+  connectionType?: 'WISP' | 'FTTH';
   mac?: string;
   pppoeUser?: string;
   pppoePassword?: string;
@@ -72,6 +73,8 @@ export interface OnuFTTH {
   status: 'online' | 'offline' | 'dying_gasp';
   brand: string;
   model: string;
+  napId?: string;
+  napPort?: number;
 }
 
 export interface Ticket {
@@ -139,4 +142,23 @@ export interface NocAlert {
   message: string;
   timestamp: string;
   acknowledged: boolean;
+}
+
+export interface NapPort {
+  num: number;
+  status: 'occupied' | 'free';
+  client: string;
+}
+
+export interface NapBox {
+  id: string;
+  name: string;
+  ponPort: string;
+  fibersFree: number;
+  fibersTotal: number;
+  lat: number;
+  lng: number;
+  splitRatio: string;
+  coverageMeters: number;
+  ports: NapPort[];
 }

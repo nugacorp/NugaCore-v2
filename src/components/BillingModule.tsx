@@ -11,21 +11,50 @@ import {
   ExternalLink,
   ChevronRight,
   Zap,
-  Check
+  Check,
+  Plus,
+  Edit,
+  Coins
 } from 'lucide-react';
-import { Invoice } from '../types';
+import { Invoice, Client } from '../types';
 
 interface BillingModuleProps {
   invoices: Invoice[];
+  clients: Client[];
   onPayInvoice: (id: string, method: string) => Promise<void>;
+  onCreateInvoice: (invoiceData: any) => Promise<void>;
+  onEditInvoice: (id: string, invoiceData: any) => Promise<void>;
 }
 
-export default function BillingModule({ invoices, onPayInvoice }: BillingModuleProps) {
+export default function BillingModule({ 
+  invoices, 
+  clients, 
+  onPayInvoice, 
+  onCreateInvoice, 
+  onEditInvoice 
+}: BillingModuleProps) {
   const [searchTerm, setSearchTerm] = useState('');
   const [filterStatus, setFilterStatus] = useState<string>('all');
   const [selectedInvoice, setSelectedInvoice] = useState<Invoice | null>(null);
   const [payGateway, setPayGateway] = useState('Stripe');
   const [paymentInProgress, setPaymentInProgress] = useState(false);
+
+  // Invoice creation state
+  const [showCreateModal, setShowCreateModal] = useState(false);
+  const [formClientId, setFormClientId] = useState('');
+  const [formConcept, setFormConcept] = useState('Suscripción Mensual Internet Banda Ancha');
+  const [formAmount, setFormAmount] = useState('449');
+  const [formDueDate, setFormDueDate] = useState(() => {
+    const d = new Date();
+    d.setDate(d.getDate() + 10);
+    return d.toISOString().split('T')[0];
+  });
+
+  // Invoice edit state
+  const [showEditModal, setShowEditModal] = useState(false);
+  const [editConcept, setEditConcept] = useState('');
+  const [editAmount, setEditAmount] = useState('449');
+  const [editDueDate, setEditDueDate] = useState('');
 
   const formatMXN = (num: number) => {
     return new Intl.NumberFormat('es-MX', { style: 'currency', currency: 'MXN' }).format(num);
@@ -50,6 +79,40 @@ export default function BillingModule({ invoices, onPayInvoice }: BillingModuleP
     }
   };
 
+  const handleCreateInvoiceSubmit = async (e: React.FormEvent) => {
+    e.preventDefault();
+    if (!formClientId || !formAmount) return;
+    await onCreateInvoice({
+      clientId: formClientId,
+      amount: Number(formAmount),
+      dueDateStr: formDueDate,
+      items: [{ description: formConcept, price: Number(formAmount), qty: 1 }]
+    });
+    setFormClientId('');
+    setFormConcept('Suscripción Mensual Internet Banda Ancha');
+    setFormAmount('449');
+    setShowCreateModal(false);
+  };
+
+  const handleEditInvoiceSubmit = async (e: React.FormEvent) => {
+    e.preventDefault();
+    if (!selectedInvoice) return;
+    await onEditInvoice(selectedInvoice.id, {
+      amount: Number(editAmount),
+      dueDateStr: editDueDate,
+      items: [{ description: editConcept, price: Number(editAmount), qty: 1 }]
+    });
+    setSelectedInvoice(null);
+    setShowEditModal(false);
+  };
+
+  const openEditModal = (inv: Invoice) => {
+    setEditConcept(inv.items[0]?.description || 'Suscripción Mensual Internet Banda Ancha');
+    setEditAmount(String(inv.amount));
+    setEditDueDate(inv.dueDateStr);
+    setShowEditModal(true);
+  };
+
   const overdueCount = invoices.filter(i => i.status === 'overdue').length;
   const totalInvoiced = invoices.reduce((acc, i) => acc + i.amount, 0);
   const totalPaid = invoices.filter(i => i.status === 'paid').reduce((acc, i) => acc + i.amount, 0);
@@ -65,8 +128,16 @@ export default function BillingModule({ invoices, onPayInvoice }: BillingModuleP
             Módulo ERP completo de timbrado SAT CFDI 4.0 México, pasarelas de pago y recordatorios automáticos de cobranza.
           </p>
         </div>
-        <div className="flex items-center space-x-2">
-          <span className="text-xs bg-emerald-500/10 text-emerald-400 border border-emerald-500/20 px-3 py-1.5 rounded-lg font-mono">
+        <div className="flex items-center space-x-2 flex-wrap gap-2">
+          <button
+            onClick={() => setShowCreateModal(true)}
+            id="emitir-factura-btn"
+            className="flex items-center space-x-2 bg-indigo-600 hover:bg-indigo-500 border border-indigo-500 text-white px-4 py-2 rounded-xl text-xs font-semibold transition shadow-lg shrink-0"
+          >
+            <Plus className="w-3.5 h-3.5" />
+            <span>Emitir Factura / Cargo</span>
+          </button>
+          <span className="text-xs bg-emerald-500/10 text-emerald-400 border border-emerald-500/20 px-3 py-1.5 rounded-lg font-mono text-center">
             SAT API: ONLINE (CFDI 4.0 CONEXION DIRECTA)
           </span>
         </div>
@@ -256,6 +327,26 @@ export default function BillingModule({ invoices, onPayInvoice }: BillingModuleP
                   )}
                 </div>
 
+                {/* Quick Manual Actions */}
+                {selectedInvoice.status !== 'paid' && (
+                  <div className="grid grid-cols-2 gap-2">
+                    <button
+                      onClick={() => openEditModal(selectedInvoice)}
+                      className="py-2.5 bg-slate-800 hover:bg-slate-700 text-slate-200 rounded-xl font-bold transition text-[11px] flex items-center justify-center space-x-1 border border-slate-700"
+                    >
+                      <Edit className="w-3.5 h-3.5 text-indigo-400" />
+                      <span>Editar Factura</span>
+                    </button>
+                    <button
+                      onClick={() => handlePaySubmit(selectedInvoice.id)}
+                      className="py-2.5 bg-emerald-600/15 hover:bg-emerald-600 hover:text-slate-950 text-emerald-400 rounded-xl font-bold transition text-[11px] flex items-center justify-center space-x-1 border border-emerald-500/20"
+                    >
+                      <Coins className="w-3.5 h-3.5" />
+                      <span>Pago Manual / Caja</span>
+                    </button>
+                  </div>
+                )}
+
                 {/* Gateway trigger */}
                 {selectedInvoice.status !== 'paid' && (
                   <div className="bg-slate-900 p-4 rounded-2xl border border-slate-800/80 space-y-3">
@@ -307,6 +398,156 @@ export default function BillingModule({ invoices, onPayInvoice }: BillingModuleP
           )}
         </div>
       </div>
+
+      {/* Create Invoice Modal */}
+      {showCreateModal && (
+        <div className="fixed inset-0 bg-black/60 backdrop-blur-sm z-50 flex items-center justify-center p-4">
+          <div className="bg-slate-950 border border-slate-800 rounded-3xl max-w-md w-full p-6 space-y-4">
+            <div className="flex items-center justify-between border-b border-slate-900 pb-3">
+              <h3 className="text-base font-bold text-white flex items-center space-x-2">
+                <FileText className="w-4 h-4 text-indigo-400" />
+                <span>Emitir Nueva Factura / Cargo</span>
+              </h3>
+              <button onClick={() => setShowCreateModal(false)} className="text-slate-400 hover:text-white font-bold">✕</button>
+            </div>
+
+            <form onSubmit={handleCreateInvoiceSubmit} className="space-y-4 text-xs">
+              <div className="space-y-1">
+                <label className="text-slate-400 font-mono">Seleccionar Cliente Receptor</label>
+                <select
+                  required
+                  value={formClientId}
+                  onChange={(e) => setFormClientId(e.target.value)}
+                  className="w-full bg-slate-900 text-white border border-slate-800 rounded-xl p-2.5 focus:outline-none"
+                >
+                  <option value="">-- Elige un suscriptor --</option>
+                  {clients.map(c => (
+                    <option key={c.id} value={c.id}>{c.name} ({c.connectionType || 'WISP'}) - Estatus: {c.status}</option>
+                  ))}
+                </select>
+              </div>
+
+              <div className="space-y-1">
+                <label className="text-slate-400 font-mono">Concepto de Cobro</label>
+                <input
+                  type="text"
+                  required
+                  placeholder="Ej. Suscripción Mensual Plan 50 Megas Fibra"
+                  value={formConcept}
+                  onChange={(e) => setFormConcept(e.target.value)}
+                  className="w-full bg-slate-900 text-white border border-slate-800 rounded-xl p-2.5"
+                />
+              </div>
+
+              <div className="grid grid-cols-2 gap-3">
+                <div className="space-y-1">
+                  <label className="text-slate-400 font-mono">Costo Neto (MXN)</label>
+                  <input
+                    type="number"
+                    required
+                    value={formAmount}
+                    onChange={(e) => setFormAmount(e.target.value)}
+                    className="w-full bg-slate-900 text-white border border-slate-800 rounded-xl p-2.5 font-mono"
+                  />
+                </div>
+                <div className="space-y-1">
+                  <label className="text-slate-400 font-mono">Fecha de Vencimiento</label>
+                  <input
+                    type="date"
+                    required
+                    value={formDueDate}
+                    onChange={(e) => setFormDueDate(e.target.value)}
+                    className="w-full bg-slate-900 text-white border border-slate-800 rounded-xl p-2.5 font-mono"
+                  />
+                </div>
+              </div>
+
+              <div className="border-t border-slate-900 pt-3 flex justify-end space-x-2">
+                <button
+                  type="button"
+                  onClick={() => setShowCreateModal(false)}
+                  className="border border-slate-800 hover:bg-slate-900 text-slate-400 px-4 py-2 rounded-xl transition"
+                >
+                  Cancelar
+                </button>
+                <button
+                  type="submit"
+                  className="bg-indigo-600 hover:bg-indigo-400 text-white px-5 py-2 rounded-xl transition font-semibold"
+                >
+                  Emitir Factura SAT
+                </button>
+              </div>
+            </form>
+          </div>
+        </div>
+      )}
+
+      {/* Edit Invoice Modal */}
+      {showEditModal && (
+        <div className="fixed inset-0 bg-black/60 backdrop-blur-sm z-50 flex items-center justify-center p-4">
+          <div className="bg-slate-950 border border-slate-800 rounded-3xl max-w-md w-full p-6 space-y-4">
+            <div className="flex items-center justify-between border-b border-slate-900 pb-3">
+              <h3 className="text-base font-bold text-white flex items-center space-x-2">
+                <Edit className="w-4 h-4 text-indigo-400" />
+                <span>Editar Factura / Cargo</span>
+              </h3>
+              <button onClick={() => setShowEditModal(false)} className="text-slate-400 hover:text-white font-bold">✕</button>
+            </div>
+
+            <form onSubmit={handleEditInvoiceSubmit} className="space-y-4 text-xs">
+              <div className="space-y-1">
+                <label className="text-slate-400 font-mono">Concepto de Cobro</label>
+                <input
+                  type="text"
+                  required
+                  value={editConcept}
+                  onChange={(e) => setEditConcept(e.target.value)}
+                  className="w-full bg-slate-900 text-white border border-slate-800 rounded-xl p-2.5"
+                />
+              </div>
+
+              <div className="grid grid-cols-2 gap-3">
+                <div className="space-y-1">
+                  <label className="text-slate-400 font-mono">Costo Neto (MXN)</label>
+                  <input
+                    type="number"
+                    required
+                    value={editAmount}
+                    onChange={(e) => setEditAmount(e.target.value)}
+                    className="w-full bg-slate-900 text-white border border-slate-800 rounded-xl p-2.5 font-mono"
+                  />
+                </div>
+                <div className="space-y-1">
+                  <label className="text-slate-400 font-mono">Fecha de Vencimiento</label>
+                  <input
+                    type="date"
+                    required
+                    value={editDueDate}
+                    onChange={(e) => setEditDueDate(e.target.value)}
+                    className="w-full bg-slate-900 text-white border border-slate-800 rounded-xl p-2.5 font-mono"
+                  />
+                </div>
+              </div>
+
+              <div className="border-t border-slate-900 pt-3 flex justify-end space-x-2">
+                <button
+                  type="button"
+                  onClick={() => setShowEditModal(false)}
+                  className="border border-slate-800 hover:bg-slate-900 text-slate-400 px-4 py-2 rounded-xl transition"
+                >
+                  Cancelar
+                </button>
+                <button
+                  type="submit"
+                  className="bg-indigo-600 hover:bg-indigo-400 text-white px-5 py-2 rounded-xl transition font-semibold"
+                >
+                  Guardar Cambios
+                </button>
+              </div>
+            </form>
+          </div>
+        </div>
+      )}
     </div>
   );
 }

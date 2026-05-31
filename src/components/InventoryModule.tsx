@@ -5,9 +5,10 @@ import { WarehouseItem } from '../types';
 interface InventoryModuleProps {
   inventory: WarehouseItem[];
   onMovement: (itemId: string, type: 'in' | 'out' | 'transfer', qty: number, toWarehouse?: string) => Promise<void>;
+  onAddItem: (itemData: any) => Promise<void>;
 }
 
-export default function InventoryModule({ inventory, onMovement }: InventoryModuleProps) {
+export default function InventoryModule({ inventory, onMovement, onAddItem }: InventoryModuleProps) {
   const [searchTerm, setSearchTerm] = useState('');
   const [filterWarehouse, setFilterWarehouse] = useState('all');
 
@@ -17,6 +18,16 @@ export default function InventoryModule({ inventory, onMovement }: InventoryModu
   const [moveType, setMoveType] = useState<'in' | 'out' | 'transfer'>('transfer');
   const [moveQty, setMoveQty] = useState('1');
   const [destWarehouse, setDestWarehouse] = useState<'Principal' | 'Torre Alfa' | 'Coche Tecnico 1' | 'Coche Tecnico 2'>('Coche Tecnico 1');
+
+  // Add Item Modal State
+  const [showAddModal, setShowAddModal] = useState(false);
+  const [formName, setFormName] = useState('');
+  const [formCategory, setFormCategory] = useState<'CPE' | 'Router' | 'Switch' | 'Antenna' | 'Fiber' | 'OLT' | 'Other'>('CPE');
+  const [formModel, setFormModel] = useState('');
+  const [formBrand, setFormBrand] = useState('');
+  const [formQty, setFormQty] = useState('1');
+  const [formWarehouse, setFormWarehouse] = useState<'Principal' | 'Torre Alfa' | 'Coche Tecnico 1' | 'Coche Tecnico 2'>('Principal');
+  const [formSerials, setFormSerials] = useState('');
 
   const filteredInventory = inventory.filter(item => {
     const matchesSearch = item.name.toLowerCase().includes(searchTerm.toLowerCase()) || 
@@ -33,6 +44,26 @@ export default function InventoryModule({ inventory, onMovement }: InventoryModu
     setShowMoveModal(false);
   };
 
+  const handleAddItemSubmit = async (e: React.FormEvent) => {
+    e.preventDefault();
+    if (!formName || !formModel || !formBrand) return;
+    await onAddItem({
+      name: formName,
+      category: formCategory,
+      model: formModel,
+      brand: formBrand,
+      qty: Number(formQty),
+      warehouse: formWarehouse,
+      serials: formSerials
+    });
+    setFormName('');
+    setFormModel('');
+    setFormBrand('');
+    setFormQty('1');
+    setFormSerials('');
+    setShowAddModal(false);
+  };
+
   return (
     <div className="space-y-6 text-slate-200 p-6 bg-slate-900 min-h-screen font-sans">
       {/* Header Bento block */}
@@ -46,6 +77,14 @@ export default function InventoryModule({ inventory, onMovement }: InventoryModu
             ERP real de activos: bobinas de fibra drop, antenas Ubiquiti Litebeam, GPON ONUs, switches y routers core.
           </p>
         </div>
+        <button
+          onClick={() => setShowAddModal(true)}
+          id="btn-add-inventory-item"
+          className="inline-flex items-center space-x-2 bg-indigo-600 hover:bg-indigo-500 text-white font-bold px-4 py-2.5 rounded-xl text-xs transition shadow-lg shadow-indigo-600/15 cursor-pointer self-start md:self-auto"
+        >
+          <Plus className="w-4 h-4" />
+          <span>Añadir Artículo a Almacén</span>
+        </button>
       </div>
 
       {/* Main Board */}
@@ -215,6 +254,136 @@ export default function InventoryModule({ inventory, onMovement }: InventoryModu
                   className="bg-indigo-600 hover:bg-indigo-500 text-white px-5 py-2 rounded-xl font-bold"
                 >
                   Confirmar Registro
+                </button>
+              </div>
+            </form>
+          </div>
+        </div>
+      )}
+
+      {/* Add Item Modal */}
+      {showAddModal && (
+        <div className="fixed inset-0 bg-black/60 backdrop-blur-sm z-50 flex items-center justify-center p-4">
+          <div className="bg-slate-950 border border-slate-800 rounded-3xl max-w-md w-full p-6 space-y-4 shadow-2xl">
+            <div className="flex items-center justify-between border-b border-slate-900 pb-3">
+              <h3 className="text-sm font-bold text-white font-mono flex items-center space-x-1.5">
+                <Box className="w-4 h-4 text-indigo-400" />
+                <span>Registrar Nuevo Artículo</span>
+              </h3>
+              <button onClick={() => setShowAddModal(false)} className="text-slate-400 hover:text-white font-bold text-sm">✕</button>
+            </div>
+
+            <form onSubmit={handleAddItemSubmit} className="space-y-4 text-xs font-mono">
+              <div className="space-y-1">
+                <label className="text-slate-400">Nombre del Artículo</label>
+                <input
+                  type="text"
+                  required
+                  placeholder="Ej: Antena LiteBeam 5AC Gen2 o ONU ZTE F670L"
+                  value={formName}
+                  onChange={(e) => setFormName(e.target.value)}
+                  className="w-full bg-slate-900 border border-slate-800 rounded-xl p-2.5 text-white placeholder-slate-600 focus:outline-none focus:border-indigo-500"
+                />
+              </div>
+
+              <div className="grid grid-cols-2 gap-3">
+                <div className="space-y-1">
+                  <label className="text-slate-400">Marca</label>
+                  <input
+                    type="text"
+                    required
+                    placeholder="Ej: Ubiquiti, Huawei, Mikrotik"
+                    value={formBrand}
+                    onChange={(e) => setFormBrand(e.target.value)}
+                    className="w-full bg-slate-900 border border-slate-800 rounded-xl p-2.5 text-white placeholder-slate-600 focus:outline-none focus:border-indigo-500"
+                  />
+                </div>
+
+                <div className="space-y-1">
+                  <label className="text-slate-400">Modelo</label>
+                  <input
+                    type="text"
+                    required
+                    placeholder="Ej: LBE-5AC, EG8145V5"
+                    value={formModel}
+                    onChange={(e) => setFormModel(e.target.value)}
+                    className="w-full bg-slate-900 border border-slate-800 rounded-xl p-2.5 text-white placeholder-slate-600 focus:outline-none focus:border-indigo-500"
+                  />
+                </div>
+              </div>
+
+              <div className="grid grid-cols-2 gap-3">
+                <div className="space-y-1">
+                  <label className="text-slate-400">Categoría</label>
+                  <select
+                    value={formCategory}
+                    onChange={(e) => setFormCategory(e.target.value as any)}
+                    className="w-full bg-slate-900 border border-slate-800 rounded-xl p-2.5 text-white focus:outline-none focus:border-indigo-500"
+                  >
+                    <option value="CPE">CPE (Antena Cliente)</option>
+                    <option value="Router">Router (MikroTik/Ubiquiti)</option>
+                    <option value="Switch">Switch (Red Distribución)</option>
+                    <option value="Antenna">Antenna Sectorial</option>
+                    <option value="Fiber">Bobina de Fibra / Planta Externa</option>
+                    <option value="OLT">OLT GPON Chassis</option>
+                    <option value="Other">Otro Equipo/Accesorio</option>
+                  </select>
+                </div>
+
+                <div className="space-y-1">
+                  <label className="text-slate-400">Almacén Ubicación Inicial</label>
+                  <select
+                    value={formWarehouse}
+                    onChange={(e) => setFormWarehouse(e.target.value as any)}
+                    className="w-full bg-slate-900 border border-slate-800 rounded-xl p-2.5 text-white focus:outline-none"
+                  >
+                    <option value="Principal">Almacén Principal</option>
+                    <option value="Torre Alfa">Torre Alfa</option>
+                    <option value="Coche Tecnico 1">Coche Técnico Móvil 1</option>
+                    <option value="Coche Tecnico 2">Coche Técnico Móvil 2</option>
+                  </select>
+                </div>
+              </div>
+
+              <div className="grid grid-cols-3 gap-3">
+                <div className="col-span-1 space-y-1">
+                  <label className="text-slate-400">Cantidad Inicial</label>
+                  <input
+                    type="number"
+                    min="0"
+                    required
+                    value={formQty}
+                    onChange={(e) => setFormQty(e.target.value)}
+                    className="w-full bg-slate-900 border border-slate-800 rounded-xl p-2.5 text-white focus:outline-none focus:border-indigo-500"
+                  />
+                </div>
+
+                <div className="col-span-2 space-y-1">
+                  <label className="text-slate-400">Números de Serie (seriales)</label>
+                  <input
+                    type="text"
+                    placeholder="Separados por coma, ej: SN1, SN2"
+                    value={formSerials}
+                    onChange={(e) => setFormSerials(e.target.value)}
+                    className="w-full bg-slate-900 border border-slate-800 rounded-xl p-2.5 text-white placeholder-slate-600 focus:outline-none focus:border-indigo-500 text-[10px]"
+                  />
+                </div>
+              </div>
+
+              <div className="border-t border-slate-900 pt-3 flex justify-end space-x-2">
+                <button
+                  type="button"
+                  onClick={() => setShowAddModal(false)}
+                  className="border border-slate-800 hover:bg-slate-900 text-slate-400 px-4 py-2 rounded-xl transition duration-150"
+                >
+                  Cancelar
+                </button>
+                <button
+                  type="submit"
+                  id="btn-confirm-add-item"
+                  className="bg-indigo-600 hover:bg-indigo-500 text-white px-5 py-2 rounded-xl font-bold font-mono transition duration-150"
+                >
+                  Registrar Artículo
                 </button>
               </div>
             </form>

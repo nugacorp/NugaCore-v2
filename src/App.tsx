@@ -19,7 +19,8 @@ import {
   TaskOrder, 
   WarehouseItem, 
   Invoice, 
-  NocAlert 
+  NocAlert,
+  NapBox
 } from './types';
 
 import { Cpu, AlertTriangle, CheckCircle, RefreshCw } from 'lucide-react';
@@ -52,6 +53,7 @@ export default function App() {
   const [inventory, setInventory] = useState<WarehouseItem[]>([]);
   const [alerts, setAlerts] = useState<NocAlert[]>([]);
   const [mikrotikLogs, setMikrotikLogs] = useState<any[]>([]);
+  const [naps, setNaps] = useState<NapBox[]>([]);
 
   // Fetch initial system database
   const fetchData = async () => {
@@ -69,7 +71,8 @@ export default function App() {
         resWorkOrders,
         resInventory,
         resAlerts,
-        resMktLogs
+        resMktLogs,
+        resNaps
       ] = await Promise.all([
         fetch('/api/dashboard-stats').then(r => r.json()),
         fetch('/api/clients').then(r => r.json()),
@@ -82,7 +85,8 @@ export default function App() {
         fetch('/api/workorders').then(r => r.json()),
         fetch('/api/inventory').then(r => r.json()),
         fetch('/api/alerts').then(r => r.json()),
-        fetch('/api/mikrotik/logs').then(r => r.json())
+        fetch('/api/mikrotik/logs').then(r => r.json()),
+        fetch('/api/naps').then(r => r.json())
       ]);
 
       setStats(resStats);
@@ -97,6 +101,7 @@ export default function App() {
       setInventory(resInventory);
       setAlerts(resAlerts);
       setMikrotikLogs(resMktLogs);
+      setNaps(resNaps);
       setErrorStr('');
     } catch (err: any) {
       console.error(err);
@@ -215,21 +220,66 @@ export default function App() {
     }
   };
 
+  const handleCreateInvoice = async (invoiceData: any) => {
+    try {
+      const res = await fetch('/api/billing/invoices', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify(invoiceData)
+      });
+      if (res.ok) {
+        await fetchData();
+      }
+    } catch (err) {
+      console.error(err);
+    }
+  };
+
+  const handleEditInvoice = async (id: string, invoiceData: any) => {
+    try {
+      const res = await fetch(`/api/billing/invoices/${id}`, {
+        method: 'PUT',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify(invoiceData)
+      });
+      if (res.ok) {
+        await fetchData();
+      }
+    } catch (err) {
+      console.error(err);
+    }
+  };
+
+  const handleCreateTower = async (towerData: any) => {
+    try {
+      const res = await fetch('/api/network-towers', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify(towerData)
+      });
+      if (res.ok) {
+        await fetchData();
+      }
+    } catch (err) {
+      console.error(err);
+    }
+  };
+
   // MIKROTIK COMMAND & AI COPILOT
-  const handleSendCommand = async (cmd: string) => {
+  const handleSendCommand = async (cmd: string, routerId?: string) => {
     const res = await fetch('/api/mikrotik/command', {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ command: cmd })
+      body: JSON.stringify({ command: cmd, routerId })
     });
     return res.json();
   };
 
-  const handleAskCopilot = async (prompt: string) => {
+  const handleAskCopilot = async (prompt: string, routerContext?: any) => {
     const res = await fetch('/api/mikrotik/copilot', {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ prompt })
+      body: JSON.stringify({ prompt, routerContext })
     });
     return res.json();
   };
@@ -287,6 +337,21 @@ export default function App() {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ itemId, type, qty, toWarehouse })
+      });
+      if (res.ok) {
+        await fetchData();
+      }
+    } catch (err) {
+      console.error(err);
+    }
+  };
+
+  const handleAddInventoryItem = async (itemData: any) => {
+    try {
+      const res = await fetch('/api/inventory/add', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify(itemData)
       });
       if (res.ok) {
         await fetchData();
@@ -369,7 +434,10 @@ export default function App() {
             {activeTab === 'billing' && (
               <BillingModule 
                 invoices={invoices} 
+                clients={clients}
                 onPayInvoice={handlePayInvoice}
+                onCreateInvoice={handleCreateInvoice}
+                onEditInvoice={handleEditInvoice}
               />
             )}
 
@@ -379,8 +447,10 @@ export default function App() {
                 olts={olts} 
                 onus={onus} 
                 clients={clients}
+                naps={naps}
                 onToggleTower={handleToggleTower}
                 onProvisionOnu={handleProvisionOnu}
+                onCreateTower={handleCreateTower}
               />
             )}
 
@@ -388,7 +458,7 @@ export default function App() {
               <MikrotikModule 
                 logs={mikrotikLogs} 
                 onSendCommand={handleSendCommand}
-                onAskCopilot={handleAskCopilotSubmit => handleAskCopilot(handleAskCopilotSubmit)}
+                onAskCopilot={handleAskCopilot}
               />
             )}
 
@@ -407,6 +477,7 @@ export default function App() {
               <InventoryModule 
                 inventory={inventory} 
                 onMovement={handleInventoryMovement}
+                onAddItem={handleAddInventoryItem}
               />
             )}
 
