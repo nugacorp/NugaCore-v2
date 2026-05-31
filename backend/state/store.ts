@@ -143,6 +143,39 @@ export interface SuspensionActionLog {
   createdAt: string;
 }
 
+export interface AutomationRule {
+  id: string;
+  name: string;
+  trigger: 'vencimiento' | 'pago' | 'suspension' | 'alerta';
+  enabled: boolean;
+  threshold?: number;
+  channels?: string[];
+  lastRunAt?: string;
+}
+
+export interface SecurityAuditLog {
+  id: string;
+  actorId?: string;
+  actorRole?: string;
+  action: string;
+  resource: string;
+  method: string;
+  statusCode: number;
+  success: boolean;
+  source: string;
+  metadata?: string;
+  createdAt: string;
+}
+
+export interface BackupPolicy {
+  enabled: boolean;
+  frequency: 'daily' | 'weekly' | 'monthly';
+  retentionDays: number;
+  encrypted: boolean;
+  location: string;
+  lastBackupAt?: string;
+}
+
 export const store: {
   PLANS: Plan[];
   CLIENTS: Client[];
@@ -167,6 +200,9 @@ export const store: {
   NETWORK_SECTORS: NetworkSector[];
   SUSPENSION_POLICY: SuspensionPolicy;
   SUSPENSION_ACTION_LOGS: SuspensionActionLog[];
+  AUTOMATION_RULES: AutomationRule[];
+  SECURITY_AUDIT_LOGS: SecurityAuditLog[];
+  BACKUP_POLICY: BackupPolicy;
   NOTIFICATION_SETTINGS: NotificationSettings;
   MONITORING_SNAPSHOTS: MonitoringSnapshot[];
   createAlert: (type: AlertSourceType, severity: AlertSeverity, source: string, message: string) => void;
@@ -178,6 +214,7 @@ export const store: {
   logMikrotikCommandAudit: (event: Omit<MikrotikCommandAudit, 'id' | 'createdAt'>) => void;
   logSuspensionAction: (event: Omit<SuspensionActionLog, 'id' | 'createdAt'>) => void;
   logMonitoringSnapshot: (event: Omit<MonitoringSnapshot, 'id' | 'createdAt'>) => void;
+  logSecurityAudit: (event: Omit<SecurityAuditLog, 'id' | 'createdAt'>) => void;
   getUniqueClientId: () => string;
   getUniqueInvoiceId: () => string;
   getUniqueOnuId: () => string;
@@ -187,6 +224,7 @@ export const store: {
   getUniquePaymentAllocationId: () => string;
   getUniqueSectorId: () => string;
   getUniqueMikrotikRouterId: () => string;
+  getUniqueAutomationRuleId: () => string;
 } = {
   PLANS: [
     { id: 'plan-basic', name: 'Nuga Residencial 20M', speedMbpsDown: 20, speedMbpsUp: 5, price: 299, type: 'PPPoE' },
@@ -486,6 +524,57 @@ export const store: {
       createdAt: '2026-05-31 03:31',
     },
   ],
+  AUTOMATION_RULES: [
+    {
+      id: 'rule-1',
+      name: 'Suspension automatica por vencimiento',
+      trigger: 'vencimiento',
+      enabled: true,
+      threshold: 3,
+      channels: ['dashboard', 'email'],
+      lastRunAt: '2026-05-31 03:40',
+    },
+    {
+      id: 'rule-2',
+      name: 'Reactivacion automatica por pago',
+      trigger: 'pago',
+      enabled: true,
+      channels: ['dashboard'],
+      lastRunAt: '2026-05-31 03:41',
+    },
+    {
+      id: 'rule-3',
+      name: 'Alerta de latencia NOC',
+      trigger: 'alerta',
+      enabled: true,
+      threshold: 120,
+      channels: ['dashboard', 'telegram'],
+      lastRunAt: '2026-05-31 03:42',
+    },
+  ],
+  SECURITY_AUDIT_LOGS: [
+    {
+      id: 'audit-1',
+      actorId: 'system',
+      actorRole: 'super admin',
+      action: 'startup',
+      resource: '/api/system',
+      method: 'INIT',
+      statusCode: 200,
+      success: true,
+      source: 'backend',
+      metadata: 'Inicializacion de servicios de API.',
+      createdAt: '2026-05-31 03:30',
+    },
+  ],
+  BACKUP_POLICY: {
+    enabled: true,
+    frequency: 'daily',
+    retentionDays: 30,
+    encrypted: true,
+    location: 's3://nugacore-backups/dev',
+    lastBackupAt: '2026-05-31 02:00',
+  },
   NOTIFICATION_SETTINGS: {
     pushEnabled: true,
     latencyThresholdMs: 120,
@@ -609,6 +698,16 @@ export const store: {
       this.MONITORING_SNAPSHOTS = this.MONITORING_SNAPSHOTS.slice(0, 200);
     }
   },
+  logSecurityAudit(event) {
+    this.SECURITY_AUDIT_LOGS.unshift({
+      id: 'audit-' + Date.now() + '-' + Math.floor(Math.random() * 90 + 10),
+      createdAt: new Date().toISOString().replace('T', ' ').substring(0, 16),
+      ...event,
+    });
+    if (this.SECURITY_AUDIT_LOGS.length > 5000) {
+      this.SECURITY_AUDIT_LOGS = this.SECURITY_AUDIT_LOGS.slice(0, 5000);
+    }
+  },
   getUniqueClientId() {
     let nextNum = 1;
     const ids = new Set(this.CLIENTS.map((c) => c.id));
@@ -680,5 +779,13 @@ export const store: {
       nextNum++;
     }
     return `mkt-${nextNum}`;
+  },
+  getUniqueAutomationRuleId() {
+    let nextNum = this.AUTOMATION_RULES.length + 1;
+    const ids = new Set(this.AUTOMATION_RULES.map((rule) => rule.id));
+    while (ids.has(`rule-${nextNum}`)) {
+      nextNum++;
+    }
+    return `rule-${nextNum}`;
   },
 };

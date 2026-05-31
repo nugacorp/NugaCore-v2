@@ -6,6 +6,134 @@ const router = Router();
 
 const nowStamp = () => new Date().toISOString().replace('T', ' ').substring(0, 16);
 
+const monthKey = (date: Date) => `${date.getFullYear()}-${String(date.getMonth() + 1).padStart(2, '0')}`;
+
+const buildExecutiveKpis = () => {
+  const now = new Date();
+  const currentMonth = monthKey(now);
+  const prev = new Date(now.getFullYear(), now.getMonth() - 1, 1);
+  const previousMonth = monthKey(prev);
+
+  const activeCount = store.CLIENTS.filter((c) => c.status === 'active').length;
+  const suspendedCount = store.CLIENTS.filter((c) => c.status === 'suspended').length;
+  const leadsCount = store.CLIENTS.filter((c) => c.status === 'lead').length;
+  const offlineClients = suspendedCount + store.CLIENTS.filter((c) => c.status === 'baja').length;
+
+  const totalMrr = store.CLIENTS.reduce((acc, c) => {
+    if (c.status === 'active' || c.status === 'suspended') {
+      const plan = store.PLANS.find((p) => p.id === c.planId);
+      return acc + (plan ? plan.price : 0);
+    }
+    return acc;
+  }, 0);
+
+  const invoicesByMonth = store.INVOICES.reduce<Record<string, { facturado: number; cobrado: number }>>((acc, invoice) => {
+    const key = String(invoice.dateStr || '').substring(0, 7);
+    if (!key) return acc;
+    if (!acc[key]) {
+      acc[key] = { facturado: 0, cobrado: 0 };
+    }
+    acc[key].facturado += invoice.amount;
+    if (invoice.status === 'paid') {
+      acc[key].cobrado += invoice.amount;
+    }
+    return acc;
+  }, {});
+
+  const currentRevenue = invoicesByMonth[currentMonth]?.facturado || 0;
+  const previousRevenue = invoicesByMonth[previousMonth]?.facturado || 0;
+  const currentCollection = invoicesByMonth[currentMonth]?.cobrado || 0;
+
+  const monthlyGrowthPct = previousRevenue > 0
+    ? Number((((currentRevenue - previousRevenue) / previousRevenue) * 100).toFixed(2))
+    : currentRevenue > 0 ? 100 : 0;
+
+  const leadConversionsCurrentMonth = store.CLIENT_TIMELINE.filter((event) => (
+    event.eventType === 'lead_conversion' && String(event.createdAt).startsWith(currentMonth)
+  )).length;
+  const leadConversionsPreviousMonth = store.CLIENT_TIMELINE.filter((event) => (
+    event.eventType === 'lead_conversion' && String(event.createdAt).startsWith(previousMonth)
+  )).length;
+
+  const clientGrowthPct = leadConversionsPreviousMonth > 0
+    ? Number((((leadConversionsCurrentMonth - leadConversionsPreviousMonth) / leadConversionsPreviousMonth) * 100).toFixed(2))
+    : leadConversionsCurrentMonth > 0 ? 100 : 0;
+
+  const activeTickets = store.TICKETS.filter((t) => t.status !== 'resolved' && t.status !== 'closed').length;
+  const resolvedTickets = store.TICKETS.filter((t) => t.status === 'resolved' || t.status === 'closed').length;
+  const totalTickets = activeTickets + resolvedTickets;
+  const ticketResolutionPct = totalTickets > 0 ? Number(((resolvedTickets / totalTickets) * 100).toFixed(2)) : 100;
+
+  const towersOnline = store.TOWERS.filter((t) => t.status === 'online').length;
+  const towersWarning = store.TOWERS.filter((t) => t.status === 'warning').length;
+  const towersOffline = store.TOWERS.filter((t) => t.status === 'offline').length;
+  const towerAvailabilityPct = store.TOWERS.length > 0
+    ? Number((((towersOnline + towersWarning * 0.5) / store.TOWERS.length) * 100).toFixed(2))
+    : 100;
+
+  const monitoring = calculateMonitoringOverview();
+  const totalNetworkOffline = monitoring.onlineOffline.offlineTargets + towersOffline + store.ONUS.filter((o) => o.status !== 'online').length;
+
+  return {
+    generatedAt: nowStamp(),
+    customers: {
+      active: activeCount,
+      suspended: suspendedCount,
+      leads: leadsCount,
+      offline: offlineClients,
+      growthPct: clientGrowthPct,
+      leadConversionsCurrentMonth,
+    },
+    revenue: {
+      mrr: totalMrr,
+      currentMonth: currentRevenue,
+      previousMonth: previousRevenue,
+      collectionCurrentMonth: currentCollection,
+      monthlyGrowthPct,
+      collectionRatePct: currentRevenue > 0 ? Number(((currentCollection / currentRevenue) * 100).toFixed(2)) : 0,
+    },
+    tickets: {
+      active: activeTickets,
+      resolved: resolvedTickets,
+      total: totalTickets,
+      resolutionPct: ticketResolutionPct,
+    },
+    towers: {
+      online: towersOnline,
+      warning: towersWarning,
+      offline: towersOffline,
+      availabilityPct: towerAvailabilityPct,
+    },
+    network: {
+      totalOffline: totalNetworkOffline,
+      avgLatencyMs: monitoring.ping.avgLatencyMs,
+      degradedTargets: monitoring.onlineOffline.degradedTargets,
+    },
+  };
+};
+
+const buildRevenueTrend = (months = 6) => {
+  const keys: string[] = [];
+  const now = new Date();
+  for (let i = months - 1; i >= 0; i--) {
+    keys.push(monthKey(new Date(now.getFullYear(), now.getMonth() - i, 1)));
+  }
+
+  const trend = keys.map((key) => {
+    const invoices = store.INVOICES.filter((inv) => String(inv.dateStr || '').startsWith(key));
+    const facturado = invoices.reduce((acc, inv) => acc + inv.amount, 0);
+    const cobrado = invoices.filter((inv) => inv.status === 'paid').reduce((acc, inv) => acc + inv.amount, 0);
+    return {
+      month: key,
+      facturado,
+      cobrado,
+      collectionRatePct: facturado > 0 ? Number(((cobrado / facturado) * 100).toFixed(2)) : 0,
+    };
+  });
+
+  return trend;
+};
+
 const evaluateMonitoringStatus = (latencyMs: number, packetLossPct: number): 'online' | 'offline' | 'degraded' => {
   if (packetLossPct >= 90 || latencyMs < 0) return 'offline';
   if (packetLossPct > 5 || latencyMs > 90) return 'degraded';
@@ -53,34 +181,55 @@ const calculateMonitoringOverview = () => {
 };
 
 router.get('/api/dashboard-stats', (_req, res) => {
-  const activeCount = store.CLIENTS.filter((c) => c.status === 'active').length;
-  const suspendedCount = store.CLIENTS.filter((c) => c.status === 'suspended').length;
-  const leadsCount = store.CLIENTS.filter((c) => c.status === 'lead').length;
-  const totalMrr = store.CLIENTS.reduce((acc, c) => {
-    if (c.status === 'active' || c.status === 'suspended') {
-      const plan = store.PLANS.find((p) => p.id === c.planId);
-      return acc + (plan ? plan.price : 0);
-    }
-    return acc;
-  }, 0);
-
+  const kpis = buildExecutiveKpis();
   const monthCobranza = store.INVOICES.filter((f) => f.status === 'paid').reduce((acc, f) => acc + f.amount, 0);
   const monthFacturacion = store.INVOICES.reduce((acc, f) => acc + f.amount, 0);
 
-  const onlineTowers = store.TOWERS.filter((t) => t.status === 'online').length;
-  const warningsTowers = store.TOWERS.filter((t) => t.status === 'warning').length;
-  const offlineTowers = store.TOWERS.filter((t) => t.status === 'offline').length;
-
   res.json({
-    activeClients: activeCount,
-    suspendedClients: suspendedCount,
-    leadsCount,
-    mrr: totalMrr,
+    activeClients: kpis.customers.active,
+    suspendedClients: kpis.customers.suspended,
+    leadsCount: kpis.customers.leads,
+    mrr: kpis.revenue.mrr,
     cobranzaMes: monthCobranza,
     facturacionMes: monthFacturacion,
-    activeTickets: store.TICKETS.filter((t) => t.status !== 'resolved' && t.status !== 'closed').length,
-    towers: { online: onlineTowers, warning: warningsTowers, offline: offlineTowers },
+    activeTickets: kpis.tickets.active,
+    towers: { online: kpis.towers.online, warning: kpis.towers.warning, offline: kpis.towers.offline },
     oltStats: { connected: store.ONUS.filter((o) => o.status === 'online').length, offlineOnus: store.ONUS.filter((o) => o.status !== 'online').length },
+    growth: {
+      revenueMonthlyPct: kpis.revenue.monthlyGrowthPct,
+      clientsMonthlyPct: kpis.customers.growthPct,
+    },
+    executive: {
+      offlineTotal: kpis.network.totalOffline,
+      ticketResolutionPct: kpis.tickets.resolutionPct,
+      towerAvailabilityPct: kpis.towers.availabilityPct,
+      collectionRatePct: kpis.revenue.collectionRatePct,
+    },
+  });
+});
+
+router.get('/api/dashboard/executive-summary', (_req, res) => {
+  const kpis = buildExecutiveKpis();
+  const trend = buildRevenueTrend(6);
+
+  res.json({
+    kpis,
+    trend,
+    highlights: [
+      `Crecimiento mensual de ingresos: ${kpis.revenue.monthlyGrowthPct}%`,
+      `Resolucion de tickets: ${kpis.tickets.resolutionPct}%`,
+      `Disponibilidad de torres: ${kpis.towers.availabilityPct}%`,
+      `Nodos/servicios fuera de linea: ${kpis.network.totalOffline}`,
+    ],
+  });
+});
+
+router.get('/api/dashboard/kpi-trends', (req, res) => {
+  const months = Math.max(3, Math.min(12, Number(req.query.months) || 6));
+  res.json({
+    generatedAt: nowStamp(),
+    months,
+    revenue: buildRevenueTrend(months),
   });
 });
 

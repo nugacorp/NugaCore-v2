@@ -235,7 +235,7 @@ export default function Dashboard({ stats, alerts, onAcknowledgeAlerts, onRefres
             <span>Refrescar NOC</span>
           </button>
           <span className="text-xs bg-indigo-500/10 border border-indigo-500/20 text-indigo-400 font-mono px-3 py-1.5 rounded-lg">
-            SLA de Red: 99.98%
+            SLA de Red: {stats.executive?.towerAvailabilityPct ?? 99.98}%
           </span>
         </div>
       </div>
@@ -273,9 +273,9 @@ export default function Dashboard({ stats, alerts, onAcknowledgeAlerts, onRefres
           </div>
           <div className="mt-2 flex items-center space-x-1 text-xs text-slate-400">
             <span className="bg-emerald-500/10 text-emerald-400 border border-emerald-500/20 px-1 py-0.5 rounded text-[10px]">
-              EBITDA ~85%
+              Crec. Mes {stats.growth?.revenueMonthlyPct ?? 0}%
             </span>
-            <span>WISP de fibra de alta rentabilidad</span>
+            <span>Cobranza efectiva {stats.executive?.collectionRatePct ?? 0}%</span>
           </div>
           <div className="absolute right-[-10px] bottom-[-10px] w-14 h-14 bg-emerald-500/5 rounded-full blur-xl group-hover:bg-emerald-500/10 transition"></div>
         </div>
@@ -323,7 +323,7 @@ export default function Dashboard({ stats, alerts, onAcknowledgeAlerts, onRefres
             ) : (
               <span className="text-emerald-400 flex items-center space-x-1">
                 <CheckCircle className="w-3.5 h-3.5" />
-                <span>Soporte al día</span>
+                <span>Resolución {stats.executive?.ticketResolutionPct ?? 100}%</span>
               </span>
             )}
           </div>

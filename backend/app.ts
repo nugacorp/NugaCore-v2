@@ -2,6 +2,7 @@ import express from 'express';
 import { attachAuthContext } from './common/auth-context';
 import { errorHandler } from './common/errors';
 import { logger } from './common/logger';
+import { attachSecurityAudit } from './common/security-audit';
 import { registerRoutes } from './register-routes';
 
 export function createApp() {
@@ -13,6 +14,7 @@ export function createApp() {
     next();
   });
   app.use(attachAuthContext);
+  app.use(attachSecurityAudit);
 
   registerRoutes(app);
 

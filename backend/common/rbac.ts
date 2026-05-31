@@ -1,4 +1,5 @@
 import { NextFunction, Request, Response } from 'express';
+import { ActionPermissionKey, hasActionPermission } from './action-permissions';
 
 export type AppRole = 'super admin' | 'administrador' | 'cobranza' | 'tecnico' | 'soporte' | 'solo lectura';
 
@@ -26,6 +27,24 @@ export const requireRoles = (allowed: AppRole[]) => {
 
     if (!allowed.includes(role)) {
       res.status(403).json({ error: 'Forbidden: role does not have permission for this action' });
+      return;
+    }
+
+    next();
+  };
+};
+
+export const requireAction = (action: ActionPermissionKey) => {
+  return (req: Request, res: Response, next: NextFunction): void => {
+    const role = req.authContext?.role || null;
+
+    if (!role) {
+      res.status(401).json({ error: 'Unauthorized: missing verified auth context' });
+      return;
+    }
+
+    if (!hasActionPermission(role, action)) {
+      res.status(403).json({ error: `Forbidden: role does not have permission for action ${action}` });
       return;
     }
 
