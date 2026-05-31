@@ -508,6 +508,9 @@ export default function App() {
               <GisModule 
                 towers={towers} 
                 clients={clients}
+                naps={naps}
+                onus={onus}
+                olts={olts}
               />
             )}
 
