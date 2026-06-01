@@ -16,7 +16,7 @@ const asBool = (value: string | undefined): boolean =>
   (value || 'false').trim().toLowerCase() === 'true';
 
 export type DomainKey =
-  | 'clients'
+  | 'customers'
   | 'plans'
   | 'billing'
   | 'suspension'
@@ -33,7 +33,7 @@ export type DomainKey =
 
 // Mapa dominio -> variable de entorno (USE_DB_<DOMINIO>).
 const FLAG_ENV: Record<DomainKey, string> = {
-  clients: 'USE_DB_CLIENTS',
+  customers: 'USE_DB_CUSTOMERS',
   plans: 'USE_DB_PLANS',
   billing: 'USE_DB_BILLING',
   suspension: 'USE_DB_SUSPENSION',
