@@ -1,0 +1,40 @@
+# ====================================================================
+# NugaCore — docker-compose para DESARROLLO
+# Levanta la app con hot-reload (tsx + Vite middleware) montando el código.
+# No usa el Dockerfile de producción: corre el dev server directamente.
+#
+# Uso:
+#   docker compose -f docker-compose.dev.yml up
+# ====================================================================
+
+services:
+  nugacore-dev:
+    image: node:22-alpine
+    container_name: nugacore-dev
+    working_dir: /app
+    command: sh -c "npm install && npm run dev:tsx"
+    ports:
+      - "3000:3000"
+    environment:
+      NODE_ENV: development
+      PORT: "3000"
+      APP_URL: http://localhost:3000
+      # En dev, sin Supabase, los trusted-headers se habilitan solos.
+      AUTH_TRUST_HEADERS: "true"
+      # Deja Vite vigilando archivos (HMR). Pon "true" para ahorrar CPU.
+      DISABLE_HMR: "false"
+      # Integraciones opcionales (vacías en Fase 0).
+      GEMINI_API_KEY: ""
+      SUPABASE_URL: ""
+      SUPABASE_ANON_KEY: ""
+      SUPABASE_SERVICE_ROLE_KEY: ""
+      DATABASE_URL: ""
+      MIKROTIK_CREDENTIALS_KEY: ""
+    volumes:
+      - .:/app
+      # node_modules vive en un volumen para no pisar el del host
+      - nugacore_node_modules:/app/node_modules
+    restart: unless-stopped
+
+volumes:
+  nugacore_node_modules:

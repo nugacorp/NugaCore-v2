@@ -1,0 +1,42 @@
+# ====================================================================
+# NugaCore — docker-compose para PRODUCCIÓN
+# Construye la imagen multistage y la ejecuta con secretos por entorno.
+# Pensado para un VPS o como referencia para Coolify.
+#
+# Uso:
+#   1. Copia .env.production.example a .env y rellena los valores.
+#   2. docker compose -f docker-compose.prod.yml up -d --build
+#
+# Nota: las VITE_* se incrustan en build-time (build args), el resto
+#       se inyecta en runtime vía env_file.
+# ====================================================================
+
+services:
+  nugacore:
+    build:
+      context: .
+      dockerfile: Dockerfile
+      args:
+        VITE_SUPABASE_URL: "${VITE_SUPABASE_URL:-}"
+        VITE_SUPABASE_ANON_KEY: "${VITE_SUPABASE_ANON_KEY:-}"
+    image: nugacore:latest
+    container_name: nugacore
+    env_file:
+      - .env
+    environment:
+      NODE_ENV: production
+      PORT: "3000"
+    ports:
+      - "3000:3000"
+    restart: unless-stopped
+    healthcheck:
+      test: ["CMD", "node", "-e", "fetch('http://127.0.0.1:'+(process.env.PORT||3000)+'/api/health/live').then(r=>process.exit(r.ok?0:1)).catch(()=>process.exit(1))"]
+      interval: 30s
+      timeout: 5s
+      start_period: 20s
+      retries: 3
+    logging:
+      driver: json-file
+      options:
+        max-size: "10m"
+        max-file: "3"

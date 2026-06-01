@@ -1,5 +1,6 @@
 import { Express } from 'express';
 import authRoutes from './domains/auth/routes';
+import healthRoutes from './domains/health/routes';
 import automationsRoutes from './domains/automations/routes';
 import billingRoutes from './domains/billing/routes';
 import customersRoutes from './domains/customers/routes';
@@ -15,6 +16,7 @@ import suspensionRoutes from './domains/suspension/routes';
 import ticketsRoutes from './domains/tickets/routes';
 
 export function registerRoutes(app: Express): void {
+  app.use(healthRoutes);
   app.use(authRoutes);
   app.use(customersRoutes);
   app.use(plansRoutes);

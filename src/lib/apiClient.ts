@@ -21,11 +21,29 @@ const defaultHeaders: Record<string, string> = {
   'Content-Type': 'application/json',
 };
 
+// --------------------------------------------------------------------
+// Inyección de cabeceras de autenticación (opt-in, aditivo).
+//
+// Por defecto NO inyecta nada (comportamiento idéntico al anterior).
+// En Fase 1, el frontend podrá llamar `configureApiClient({ getAuthHeaders })`
+// para adjuntar Authorization / x-user-* sin tocar cada call site.
+// --------------------------------------------------------------------
+type AuthHeaderProvider = () => Record<string, string>;
+
+let authHeaderProvider: AuthHeaderProvider = () => ({});
+
+export function configureApiClient(options: { getAuthHeaders?: AuthHeaderProvider }): void {
+  if (options.getAuthHeaders) {
+    authHeaderProvider = options.getAuthHeaders;
+  }
+}
+
 async function request<T>(url: string, options: RequestOptions = {}): Promise<T> {
   const response = await fetch(url, {
     method: options.method || 'GET',
     headers: {
       ...defaultHeaders,
+      ...authHeaderProvider(),
       ...(options.headers || {}),
     },
     body: options.body !== undefined ? JSON.stringify(options.body) : undefined,

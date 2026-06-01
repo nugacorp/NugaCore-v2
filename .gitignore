@@ -3,6 +3,14 @@ build/
 dist/
 coverage/
 .DS_Store
+
+# Logs y temporales (incluye el log de depuración y su symlink)
 *.log
+.tmp_claude_debug.log
+/latest
+
+# Variables de entorno (se ignoran salvo los archivos de ejemplo)
 .env*
 !.env.example
+!.env.production.example
+!.env.development.example

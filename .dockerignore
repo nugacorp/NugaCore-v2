@@ -1,0 +1,36 @@
+# Dependencias y artefactos (se reconstruyen en la imagen)
+node_modules
+dist
+build
+coverage
+
+# Control de versiones y editor
+.git
+.gitignore
+.vscode
+.idea
+
+# Entornos y secretos (NUNCA copiar a la imagen)
+.env
+.env.*
+!.env.example
+!.env.production.example
+!.env.development.example
+
+# Logs y temporales
+*.log
+.tmp_claude_debug.log
+latest
+
+# Documentación y CI (no necesarios en runtime)
+docs
+.github
+README.md
+
+# Tests
+tests
+vitest.config.ts
+
+# Otros
+.DS_Store
+assets/.aistudio
