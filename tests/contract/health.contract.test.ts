@@ -18,10 +18,16 @@ describe('Health checks', () => {
     expect(res.body.service).toBe('nugacore-api');
     expect(typeof res.body.version).toBe('string');
     expect(typeof res.body.uptimeSeconds).toBe('number');
-    // En Fase 0 no hay dominios en DB.
-    expect(res.body.persistence).toBe('in-memory');
+    // La persistencia depende de los feature flags activos:
+    // por defecto 'in-memory'; con algún USE_DB_* activo, 'mixed'.
     expect(Array.isArray(res.body.domainsOnDb)).toBe(true);
-    expect(res.body.domainsOnDb.length).toBe(0);
+    if (process.env.USE_DB_CUSTOMERS === 'true') {
+      expect(res.body.persistence).toBe('mixed');
+      expect(res.body.domainsOnDb).toContain('customers');
+    } else {
+      expect(res.body.persistence).toBe('in-memory');
+      expect(res.body.domainsOnDb.length).toBe(0);
+    }
   });
 
   it('GET /api/health/live -> 200', async () => {
