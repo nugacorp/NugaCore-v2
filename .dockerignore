@@ -22,6 +22,10 @@ coverage
 .tmp_claude_debug.log
 latest
 
+# Supabase: estado local del CLI (puede contener credenciales de link). NUNCA al contexto de build.
+supabase/.temp
+supabase/.branches
+
 # Documentación y CI (no necesarios en runtime)
 docs
 .github
