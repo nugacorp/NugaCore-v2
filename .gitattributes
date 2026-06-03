@@ -1,0 +1,6 @@
+# Garantiza LF en scripts de shell (Hermes los ejecuta en Linux/VPS).
+# Un CRLF en el shebang rompería la ejecución con "bash\r: No such file".
+*.sh text eol=lf
+
+# Scripts Node y configs ejecutados en el servidor: LF también.
+*.mjs text eol=lf
