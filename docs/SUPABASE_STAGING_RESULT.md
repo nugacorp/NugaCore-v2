@@ -19,12 +19,14 @@
 | Campo | Valor |
 |-------|-------|
 | Nombre | **nugacore-staging** |
-| Project ref | `dcuohhbojxylgmdiiviy` (no es secreto; aparece en la URL) |
+| Project ref | `elshnzkceutvjzxvzqad` (no es secreto; aparece en la URL) |
 | Organización | NugaCorp (`zkjlliihyfgeznuwjemo`) |
 | Región | `us-west-1` (West US / N. California — la más cercana a México) |
-| URL | `https://dcuohhbojxylgmdiiviy.supabase.co` |
+| URL | `https://elshnzkceutvjzxvzqad.supabase.co` |
 
 > ⚠️ Para liberar cupo (límite de 2 proyectos gratis) el dueño autorizó **borrar** los 2 proyectos previos (`NugaCorp Wireless` y `Selectos BCN's Project`). Acción **irreversible** ya ejecutada y confirmada por el dueño.
+>
+> 🔁 **Recreado por seguridad (2026-06-03):** el primer `nugacore-staging` (ref `dcuohhbojxylgmdiiviy`) se **borró** porque su `service_role` legacy quedó expuesta en un log de sesión y la rotación de dashboard no la invalidaba. Este proyecto (`elshnzkceutvjzxvzqad`) es el **vigente**; las keys del anterior están muertas.
 
 ---
 
@@ -58,7 +60,7 @@ Resultado: `clients` = **2** registros **ficticios** (`c-staging-1` active, `c-s
 | `NODE_ENV` | no | `development` (local) |
 | `USE_DB_CUSTOMERS` | no | `true` |
 | `AUTH_TRUST_HEADERS` | no | `true` **solo local** (para probar alta por API sin auth real) |
-| `SUPABASE_URL` | no | `https://dcuohhbojxylgmdiiviy.supabase.co` |
+| `SUPABASE_URL` | no | `https://elshnzkceutvjzxvzqad.supabase.co` |
 | `SUPABASE_SERVICE_ROLE_KEY` | **SÍ** | Dashboard → Project Settings → API, o `supabase projects api-keys` |
 | `SUPABASE_ANON_KEY` | medio | idem |
 | `VITE_SUPABASE_URL` | no | igual a SUPABASE_URL (build-time) |
@@ -113,14 +115,14 @@ En el servicio NugaCore de Coolify, define estas variables (los **valores secret
 NODE_ENV=production
 AUTH_TRUST_HEADERS=false
 USE_DB_CUSTOMERS=true
-SUPABASE_URL=https://dcuohhbojxylgmdiiviy.supabase.co
+SUPABASE_URL=https://elshnzkceutvjzxvzqad.supabase.co
 SUPABASE_SERVICE_ROLE_KEY=<SECRETO – service_role key del proyecto>
 MIKROTIK_CREDENTIALS_KEY=<SECRETO – si ya existe>
 ```
 
 **Build-time (marcar como Build Variable en Coolify, se incrustan en el bundle):**
 ```
-VITE_SUPABASE_URL=https://dcuohhbojxylgmdiiviy.supabase.co
+VITE_SUPABASE_URL=https://elshnzkceutvjzxvzqad.supabase.co
 VITE_SUPABASE_ANON_KEY=<anon key del proyecto>
 ```
 
