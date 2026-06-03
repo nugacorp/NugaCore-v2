@@ -118,9 +118,18 @@ export default function App() {
   const [mikrotikLogs, setMikrotikLogs] = useState<any[]>([]);
   const [naps, setNaps] = useState<NapBox[]>([]);
 
-  const getAuthHeaders = (): HeadersInit => {
+  const getAuthHeaders = async (): Promise<Record<string, string>> => {
     const headers: Record<string, string> = {};
-    const accessToken = authSession.readAccessToken();
+
+    // Prefer the freshest Supabase access token (auto-refreshed by supabase-js)
+    // so long-lived sessions don't 401 after the ~1h token expiry.
+    let accessToken = authSession.readAccessToken();
+    if (isSupabaseConfigured && supabase) {
+      const { data } = await supabase.auth.getSession();
+      if (data.session?.access_token) {
+        accessToken = data.session.access_token;
+      }
+    }
 
     if (accessToken) {
       headers.Authorization = `Bearer ${accessToken}`;
@@ -135,10 +144,11 @@ export default function App() {
   };
 
   const fetchJson = async (url: string, init?: RequestInit) => {
+    const authHeaders = await getAuthHeaders();
     const response = await fetch(url, {
       ...init,
       headers: {
-        ...getAuthHeaders(),
+        ...authHeaders,
         ...(init?.headers || {}),
       },
     });

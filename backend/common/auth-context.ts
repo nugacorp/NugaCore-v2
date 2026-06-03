@@ -12,16 +12,35 @@ export interface AuthContext {
 
 const DEFAULT_ROLE: AppRole = 'solo lectura';
 
-// Trusted headers let any client assert its own role, so they must never be the
-// only line of defense in production. Auto-enabling them just because Supabase is
-// missing would leave a production deploy fully open.
-const allowTrustedHeaders = env.AUTH_TRUST_HEADERS || (!isSupabaseAdminConfigured && !isProduction);
+// ====================================================================
+// Trusted headers (the client asserting its own x-user-role) are a
+// DEV-ONLY convenience. In PRODUCTION they are ALWAYS disabled: identity
+// must come from a verified Supabase JWT. This removes any dependency on
+// AUTH_TRUST_HEADERS for production hardening (Fase 2).
+// ====================================================================
+export const computeAllowTrustedHeaders = (
+  productionMode: boolean,
+  trustHeadersEnv: boolean,
+  supabaseConfigured: boolean,
+): boolean => {
+  if (productionMode) return false; // prod: JWT-only, no exceptions
+  return trustHeadersEnv || !supabaseConfigured; // dev: explicit flag, or no Supabase yet
+};
 
-if (isProduction && allowTrustedHeaders) {
+const allowTrustedHeaders = computeAllowTrustedHeaders(
+  isProduction,
+  env.AUTH_TRUST_HEADERS,
+  isSupabaseAdminConfigured,
+);
+
+if (isProduction && !isSupabaseAdminConfigured) {
   logger.warn(
-    'Trusted-header auth is enabled in production: clients can assert their own role. ' +
-      'Configure Supabase and unset AUTH_TRUST_HEADERS to disable.',
+    'Producción sin Supabase configurado: no hay forma de autenticar. ' +
+      'Todas las rutas protegidas responderán 401. Define SUPABASE_URL y SUPABASE_SERVICE_ROLE_KEY.',
   );
+}
+if (!isProduction && allowTrustedHeaders) {
+  logger.info('Auth: trusted-headers habilitados (solo dev). En producción se ignoran; identidad por JWT.');
 }
 
 const extractBearerToken = (value: string | undefined): string | null => {
@@ -72,6 +91,8 @@ export const attachAuthContext = async (req: Request, _res: Response, next: Next
     }
   }
 
+  // Trusted-header fallback: ONLY in non-production (see computeAllowTrustedHeaders).
+  // In production this branch never runs, so a spoofed x-user-role is ignored.
   if (!req.authContext && allowTrustedHeaders) {
     const role = normalizeRole(req.headers['x-user-role']) || DEFAULT_ROLE;
     const headerUserId = Array.isArray(req.headers['x-user-id'])
