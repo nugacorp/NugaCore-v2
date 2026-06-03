@@ -1,16 +1,17 @@
 import { describe, it, expect, beforeAll } from 'vitest';
 import request from 'supertest';
 import type { Express } from 'express';
+import type { SupabaseClient } from '@supabase/supabase-js';
 
 // ====================================================================
-// Prueba de AUTH REAL (Supabase JWT) — Fase 2.
+// Prueba de AUTH REAL (Supabase JWT) — Fase 2.1.
 //
 // Se EJECUTA SOLO si hay Supabase de staging + usuarios sembrados
 // (SUPABASE_URL, SUPABASE_ANON_KEY, SUPABASE_SERVICE_ROLE_KEY,
 //  STAGING_AUTH_PASSWORD). En CI sin esto se OMITE.
 //
-// Valida que: login con Supabase -> JWT -> el backend resuelve el rol
-// desde public.user_roles (sin trusted-headers) y el RBAC se respeta.
+// Valida: login real, JWT, refresh token, logout, resolución de rol desde
+// public.user_roles, RBAC backend y escritura protegida de Customers.
 // ====================================================================
 
 const URL = process.env.SUPABASE_URL;
@@ -18,67 +19,213 @@ const ANON = process.env.SUPABASE_ANON_KEY;
 const PW = process.env.STAGING_AUTH_PASSWORD;
 const hasEnv = Boolean(URL && ANON && process.env.SUPABASE_SERVICE_ROLE_KEY && PW);
 
-describe.skipIf(!hasEnv)('Auth real (Supabase JWT) — Fase 2', () => {
+type RoleKey = 'superadmin' | 'administrador' | 'cobranza' | 'tecnico' | 'soporte' | 'readonly';
+
+const USERS: Record<RoleKey, { email: string; expectedRole: string }> = {
+  superadmin: { email: 'superadmin@staging.nugacore.local', expectedRole: 'super admin' },
+  administrador: { email: 'admin@staging.nugacore.local', expectedRole: 'administrador' },
+  cobranza: { email: 'billing@staging.nugacore.local', expectedRole: 'cobranza' },
+  tecnico: { email: 'tech@staging.nugacore.local', expectedRole: 'tecnico' },
+  soporte: { email: 'support@staging.nugacore.local', expectedRole: 'soporte' },
+  readonly: { email: 'readonly@staging.nugacore.local', expectedRole: 'solo lectura' },
+};
+
+describe.skipIf(!hasEnv)('Auth real (Supabase JWT) — Fase 2.1 staging', () => {
   let app: Express;
-  let tokenAdmin = '';
-  let tokenLectura = '';
+  let anon: SupabaseClient;
+  const tokens: Partial<Record<RoleKey, string>> = {};
+  const refreshTokens: Partial<Record<RoleKey, string>> = {};
+
+  const signIn = async (email: string): Promise<{ accessToken: string; refreshToken: string }> => {
+    for (let i = 0; i < 4; i += 1) {
+      const { data, error } = await anon.auth.signInWithPassword({ email, password: PW! });
+      if (!error && data.session?.access_token && data.session.refresh_token) {
+        return { accessToken: data.session.access_token, refreshToken: data.session.refresh_token };
+      }
+      await new Promise((r) => setTimeout(r, 1500 * (i + 1)));
+    }
+    return { accessToken: '', refreshToken: '' };
+  };
 
   beforeAll(async () => {
     const { createClient } = await import('@supabase/supabase-js');
-    const anon = createClient(URL!, ANON!, { auth: { persistSession: false } });
+    anon = createClient(URL!, ANON!, { auth: { persistSession: false, autoRefreshToken: false } });
 
-    // Sign-in con reintentos: el endpoint de auth de Supabase puede devolver
-    // rate-limit transitorio si se ejecuta el suite varias veces seguidas.
-    const signIn = async (email: string): Promise<string> => {
-      for (let i = 0; i < 4; i += 1) {
-        const { data, error } = await anon.auth.signInWithPassword({ email, password: PW! });
-        if (!error && data.session?.access_token) return data.session.access_token;
-        await new Promise((r) => setTimeout(r, 1500 * (i + 1)));
-      }
-      return '';
-    };
-
-    tokenAdmin = await signIn('superadmin@nugacore.local');
-    tokenLectura = await signIn('lectura@nugacore.local');
+    for (const [roleKey, user] of Object.entries(USERS) as Array<[RoleKey, { email: string; expectedRole: string }]>) {
+      const session = await signIn(user.email);
+      tokens[roleKey] = session.accessToken;
+      refreshTokens[roleKey] = session.refreshToken;
+    }
 
     const { createApp } = await import('../../backend/app');
     app = createApp();
-  }, 30000);
+  }, 60000);
 
-  it('login super admin -> JWT válido', () => {
-    expect(tokenAdmin.length).toBeGreaterThan(20);
-    expect(tokenLectura.length).toBeGreaterThan(20);
+  it('login real emite JWT y refresh token para todos los roles staging', () => {
+    for (const key of Object.keys(USERS) as RoleKey[]) {
+      expect(tokens[key]?.length).toBeGreaterThan(20);
+      expect(refreshTokens[key]?.length).toBeGreaterThan(8);
+    }
   });
 
-  it('JWT super admin -> /api/auth/me resuelve rol desde DB (source=supabase-jwt)', async () => {
-    const res = await request(app).get('/api/auth/me').set('Authorization', `Bearer ${tokenAdmin}`);
+  it('JWT válido -> /api/auth/me resuelve rol desde DB (source=supabase-jwt)', async () => {
+    for (const [key, user] of Object.entries(USERS) as Array<[RoleKey, { email: string; expectedRole: string }]>) {
+      const res = await request(app).get('/api/auth/me').set('Authorization', `Bearer ${tokens[key]}`);
+      expect(res.status).toBe(200);
+      expect(res.body.email || user.email).toBeTruthy();
+      expect(res.body.role).toBe(user.expectedRole);
+      expect(res.body.source).toBe('supabase-jwt');
+    }
+  });
+
+  it('refresh token renueva sesión y el nuevo JWT sigue autenticando', async () => {
+    const { data, error } = await anon.auth.refreshSession({ refresh_token: refreshTokens.superadmin! });
+    expect(error).toBeNull();
+    expect(data.session?.access_token?.length || 0).toBeGreaterThan(20);
+
+    const res = await request(app)
+      .get('/api/auth/me')
+      .set('Authorization', `Bearer ${data.session!.access_token}`);
     expect(res.status).toBe(200);
     expect(res.body.role).toBe('super admin');
     expect(res.body.source).toBe('supabase-jwt');
   });
 
-  it('JWT solo lectura -> rol solo lectura; escritura protegida -> 403', async () => {
-    const me = await request(app).get('/api/auth/me').set('Authorization', `Bearer ${tokenLectura}`);
-    expect(me.status).toBe(200);
-    expect(me.body.role).toBe('solo lectura');
+  it('logout invalida la sesión del cliente Supabase', async () => {
+    const { createClient } = await import('@supabase/supabase-js');
+    const client = createClient(URL!, ANON!, { auth: { persistSession: false, autoRefreshToken: false } });
+    const login = await client.auth.signInWithPassword({ email: USERS.readonly.email, password: PW! });
+    expect(login.error).toBeNull();
+    expect(login.data.session?.access_token?.length || 0).toBeGreaterThan(20);
 
-    const post = await request(app)
-      .post('/api/clients')
-      .set('Authorization', `Bearer ${tokenLectura}`)
-      .send({ name: 'no-debe-crearse', type: 'residential', address: 'a', city: 'CDMX' });
-    expect(post.status).toBe(403);
+    const logout = await client.auth.signOut();
+    expect(logout.error).toBeNull();
+    const sessionAfterLogout = await client.auth.getSession();
+    expect(sessionAfterLogout.data.session).toBeNull();
   });
 
-  it('sin token -> /api/auth/me 401 (cuando no hay trusted-headers reales)', async () => {
-    // En test los trusted-headers están activos por defecto; este caso valida
-    // que un Bearer inválido NO autentica (se ignora) y cae a sin-contexto/headers.
-    const res = await request(app).get('/api/auth/me').set('Authorization', 'Bearer token-invalido');
-    // Con trusted-headers activos en test y sin x-user-*, se asigna rol por defecto.
-    // Lo esencial: un Bearer inválido nunca produce source=supabase-jwt.
-    if (res.status === 200) {
-      expect(res.body.source).not.toBe('supabase-jwt');
+  it('sin Bearer válido no autentica como Supabase JWT y trusted headers no bypassan producción JWT-only', async () => {
+    const invalid = await request(app).get('/api/auth/me').set('Authorization', 'Bearer token-invalido');
+    if (invalid.status === 200) {
+      expect(invalid.body.source).not.toBe('supabase-jwt');
     } else {
-      expect(res.status).toBe(401);
+      expect(invalid.status).toBe(401);
     }
+
+    const spoofed = await request(app)
+      .post('/api/clients')
+      .set({ 'x-user-role': 'super admin', 'x-user-id': 'spoofed' })
+      .send({ name: 'no-auth-spoofed', type: 'residential', address: 'a', city: 'CDMX' });
+    expect([401, 403]).toContain(spoofed.status);
+  });
+
+  it('RBAC: superadmin y administrador acceden a Customers; readonly solo lectura', async () => {
+    for (const key of ['superadmin', 'administrador'] as RoleKey[]) {
+      const res = await request(app)
+        .post('/api/clients')
+        .set('Authorization', `Bearer ${tokens[key]}`)
+        .send({ name: `RBAC ${key}`, type: 'residential', address: 'Calle Auth 1', city: 'CDMX' });
+      expect(res.status).toBe(201);
+      await request(app).delete(`/api/clients/${res.body.id}`).set('Authorization', `Bearer ${tokens.superadmin}`).expect(204);
+    }
+
+    const read = await request(app).get('/api/clients').set('Authorization', `Bearer ${tokens.readonly}`);
+    expect(read.status).toBe(200);
+
+    const freshReadonly = await signIn(USERS.readonly.email);
+    const write = await request(app)
+      .post('/api/clients')
+      .set('Authorization', `Bearer ${freshReadonly.accessToken}`)
+      .send({ name: 'Readonly Forbidden', type: 'residential', address: 'Calle Auth 2', city: 'CDMX' });
+    expect(write.status).toBe(403);
+  });
+
+  it('RBAC: cobranza accede a pagos/facturación y puede editar clientes pero no crear/eliminar clientes', async () => {
+    const invoices = await request(app).get('/api/billing/invoices').set('Authorization', `Bearer ${tokens.cobranza}`);
+    expect(invoices.status).toBe(200);
+
+    const created = await request(app)
+      .post('/api/clients')
+      .set('Authorization', `Bearer ${tokens.superadmin}`)
+      .send({ name: 'Auth Cobranza Edit', type: 'residential', address: 'Calle Cobranza 1', city: 'CDMX' });
+    expect(created.status).toBe(201);
+
+    const edited = await request(app)
+      .put(`/api/clients/${created.body.id}`)
+      .set('Authorization', `Bearer ${tokens.cobranza}`)
+      .send({ notes: 'editado por cobranza' });
+    expect(edited.status).toBe(200);
+
+    const forbiddenCreate = await request(app)
+      .post('/api/clients')
+      .set('Authorization', `Bearer ${tokens.cobranza}`)
+      .send({ name: 'Cobranza Forbidden', type: 'residential', address: 'Calle Cobranza 2', city: 'CDMX' });
+    expect(forbiddenCreate.status).toBe(403);
+
+    const forbiddenDelete = await request(app).delete(`/api/clients/${created.body.id}`).set('Authorization', `Bearer ${tokens.cobranza}`);
+    expect(forbiddenDelete.status).toBe(403);
+    await request(app).delete(`/api/clients/${created.body.id}`).set('Authorization', `Bearer ${tokens.superadmin}`).expect(204);
+  });
+
+  it('RBAC: técnico accede a red y soporte accede a tickets', async () => {
+    const network = await request(app)
+      .post('/api/network-towers')
+      .set('Authorization', `Bearer ${tokens.tecnico}`)
+      .send({ name: 'Torre Auth Técnico', location: 'CDMX', lat: 19.43, lng: -99.13, status: 'online' });
+    expect(network.status).toBe(201);
+
+    const ticket = await request(app)
+      .post('/api/tickets')
+      .set('Authorization', `Bearer ${tokens.soporte}`)
+      .send({ clientId: 'c-1', title: 'Ticket Auth', category: 'Internet', severity: 'low', description: 'Validación RBAC soporte' });
+    expect(ticket.status).toBe(201);
+  });
+
+  it('escritura protegida Customers: crear, leer, editar, suspender, reactivar y eliminar cliente ficticio con JWT válido', async () => {
+    const created = await request(app)
+      .post('/api/clients')
+      .set('Authorization', `Bearer ${tokens.superadmin}`)
+      .send({
+        name: 'Cliente Ficticio Auth E2E',
+        type: 'residential',
+        email: 'cliente-auth-e2e@staging.nugacore.local',
+        phone: '+520000000000',
+        address: 'Calle Auth E2E 123',
+        city: 'CDMX',
+        planId: 'plan-basic',
+      });
+    expect(created.status).toBe(201);
+    const id = created.body.id;
+
+    const read = await request(app).get(`/api/clients/${id}`).set('Authorization', `Bearer ${tokens.superadmin}`);
+    expect(read.status).toBe(200);
+    expect(read.body.name).toBe('Cliente Ficticio Auth E2E');
+
+    const edited = await request(app)
+      .put(`/api/clients/${id}`)
+      .set('Authorization', `Bearer ${tokens.administrador}`)
+      .send({ phone: '+521111111111', notes: 'editado en validación auth e2e' });
+    expect(edited.status).toBe(200);
+    expect(edited.body.phone).toBe('+521111111111');
+
+    const suspended = await request(app)
+      .put(`/api/clients/${id}`)
+      .set('Authorization', `Bearer ${tokens.cobranza}`)
+      .send({ status: 'suspended' });
+    expect(suspended.status).toBe(200);
+    expect(suspended.body.status).toBe('suspended');
+
+    const reactivated = await request(app)
+      .put(`/api/clients/${id}`)
+      .set('Authorization', `Bearer ${tokens.administrador}`)
+      .send({ status: 'active' });
+    expect(reactivated.status).toBe(200);
+    expect(reactivated.body.status).toBe('active');
+
+    const removed = await request(app).delete(`/api/clients/${id}`).set('Authorization', `Bearer ${tokens.superadmin}`);
+    expect(removed.status).toBe(204);
+
+    const missing = await request(app).get(`/api/clients/${id}`).set('Authorization', `Bearer ${tokens.superadmin}`);
+    expect(missing.status).toBe(404);
   });
 });

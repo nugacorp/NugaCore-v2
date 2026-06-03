@@ -34,12 +34,12 @@ const admin = createClient(url, serviceKey, {
 
 // Usuarios ficticios, uno por rol (nombres de rol deben existir en public.roles).
 const USERS = [
-  { email: 'superadmin@nugacore.local', full_name: 'Staging Super Admin', role: 'Super Admin' },
-  { email: 'admin@nugacore.local',      full_name: 'Staging Administrador', role: 'Administrador' },
-  { email: 'cobranza@nugacore.local',   full_name: 'Staging Cobranza',     role: 'Cobranza' },
-  { email: 'tecnico@nugacore.local',    full_name: 'Staging Técnico',      role: 'Técnico' },
-  { email: 'soporte@nugacore.local',    full_name: 'Staging Soporte',      role: 'Soporte' },
-  { email: 'lectura@nugacore.local',    full_name: 'Staging Solo Lectura', role: 'Solo lectura' },
+  { email: 'superadmin@staging.nugacore.local', full_name: 'Staging Super Admin', role: 'Super Admin' },
+  { email: 'admin@staging.nugacore.local',      full_name: 'Staging Administrador', role: 'Administrador' },
+  { email: 'billing@staging.nugacore.local',    full_name: 'Staging Cobranza',     role: 'Cobranza' },
+  { email: 'tech@staging.nugacore.local',       full_name: 'Staging Técnico',      role: 'Técnico' },
+  { email: 'support@staging.nugacore.local',    full_name: 'Staging Soporte',      role: 'Soporte' },
+  { email: 'readonly@staging.nugacore.local',   full_name: 'Staging Solo Lectura', role: 'Solo lectura' },
 ];
 
 const findUserIdByEmail = async (email) => {
