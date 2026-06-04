@@ -103,8 +103,10 @@ describe('Suspension engine — KPIs en dashboard', () => {
     const res = await request(app).get('/api/dashboard-stats').set(ADMIN);
     expect(res.status).toBe(200);
     expect(res.body).toHaveProperty('suspension');
-    for (const k of ['suspendedToday', 'reactivatedToday', 'morosos', 'pendingSuspension', 'pendingReactivation']) {
+    // Contrato 4.5.1: delinquent debe existir (morosos se mantiene por compat).
+    for (const k of ['suspendedToday', 'reactivatedToday', 'delinquent', 'pendingSuspension', 'pendingReactivation']) {
       expect(res.body.suspension).toHaveProperty(k);
     }
+    expect(typeof res.body.suspension.delinquent).toBe('number');
   });
 });

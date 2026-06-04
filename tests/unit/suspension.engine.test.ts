@@ -108,33 +108,35 @@ describe('evaluateCustomerById (efectos + idempotencia)', () => {
     engineStore.reset();
   });
 
-  it('moroso activo → PENDING_SUSPENSION + 1 orden; reevaluar no duplica', () => {
-    const r1 = evaluateCustomerById(CID, 'tester');
+  it('moroso activo → PENDING_SUSPENSION + 1 orden; reevaluar no duplica', async () => {
+    const r1 = await evaluateCustomerById(CID, 'tester');
     expect(r1?.serviceStatus).toBe('PENDING_SUSPENSION');
     expect(r1?.action).toBe('create_suspension');
     expect(engineStore.openOrders(CID, 'suspension').length).toBe(1);
 
-    const r2 = evaluateCustomerById(CID, 'tester');
+    const r2 = await evaluateCustomerById(CID, 'tester');
     expect(r2?.action).toBe('none');
     expect(r2?.changed).toBe(false);
     expect(engineStore.openOrders(CID, 'suspension').length).toBe(1); // idempotente
   });
 
-  it('billing agrega el peor estado del cliente', () => {
-    const { billingStatus } = evaluateBillingState(CID);
+  it('billing agrega el peor estado del cliente', async () => {
+    const { billingStatus } = await evaluateBillingState(CID);
     expect(billingStatus).toBe('DELINQUENT');
   });
 
-  it('al pagar y estar suspendido → reactivación; cancela orden de suspensión abierta', () => {
-    evaluateCustomerById(CID, 'tester'); // crea orden de suspensión
+  it('al pagar y estar suspendido → reactivación; cancela orden de suspensión abierta', async () => {
+    await evaluateCustomerById(CID, 'tester'); // crea orden de suspensión
     // Simula que el Worker ejecutó el corte y el cliente pagó.
     const client = store.CLIENTS.find((c) => c.id === CID)!;
     client.status = 'suspended';
     const inv = store.INVOICES.find((i) => i.id === 'inv-engine-1')!;
     inv.status = 'paid';
     inv.payments = [{ date: 'now', amount: 1000, method: 'SPEI' }];
+    inv.paidAmount = 1000;
+    inv.pendingAmount = 0;
 
-    const r = evaluateCustomerById(CID, 'tester');
+    const r = await evaluateCustomerById(CID, 'tester');
     expect(r?.serviceStatus).toBe('PENDING_REACTIVATION');
     expect(r?.action).toBe('create_reactivation');
     expect(engineStore.openOrders(CID, 'reactivation').length).toBe(1);

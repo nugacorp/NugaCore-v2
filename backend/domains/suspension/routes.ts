@@ -1,13 +1,17 @@
 import { Router } from 'express';
 import { store } from '../../state/store';
 import { requireRoles } from '../../common/rbac';
-import { engineStore } from './engine-store';
+import { getSuspensionService } from './service';
+import { asyncHandler } from '../../common/errors';
 import {
   customerServiceView,
   evaluateAllCustomers,
   evaluateCustomerById,
 } from './engine';
 import { SuspensionPolicyV2 } from './types';
+import { getCustomersService } from '../customers/service';
+import { getBillingService } from '../billing/service';
+import type { Client } from '../../../src/types';
 
 const router = Router();
 
@@ -210,12 +214,13 @@ router.post('/api/suspension/clients/:id/reactivate', requireRoles(['super admin
 // ════════════════════════════════════════════════════════════════════
 
 // ── Políticas ─────────────────────────────────────────────────────────
-router.get('/api/suspension/policies', requireRoles([...SUSP_VIEW_ROLES]), (_req, res) => {
-  res.json(engineStore.POLICY);
-});
+router.get('/api/suspension/policies', requireRoles([...SUSP_VIEW_ROLES]), asyncHandler(async (_req, res) => {
+  res.json(await getSuspensionService().repo.getPolicy());
+}));
 
-router.put('/api/suspension/policies', requireRoles([...SUSP_POLICY_ROLES]), (req, res) => {
-  const p = engineStore.POLICY;
+router.put('/api/suspension/policies', requireRoles([...SUSP_POLICY_ROLES]), asyncHandler(async (req, res) => {
+  const repo = getSuspensionService().repo;
+  const p = await repo.getPolicy();
   const body = req.body || {};
   const next: SuspensionPolicyV2 = { ...p };
 
@@ -229,56 +234,58 @@ router.put('/api/suspension/policies', requireRoles([...SUSP_POLICY_ROLES]), (re
   if (body.graceDays !== undefined) {
     const g = Number(body.graceDays);
     if (!Number.isFinite(g) || g < 0 || g > 60) {
-      return res.status(400).json({ error: 'Invalid graceDays. Allowed range: 0 to 60.' });
+      res.status(400).json({ error: 'Invalid graceDays. Allowed range: 0 to 60.' });
+      return;
     }
     next.graceDays = g;
   }
   if (body.dueSoonDays !== undefined) {
     const d = Number(body.dueSoonDays);
     if (!Number.isFinite(d) || d < 0 || d > 30) {
-      return res.status(400).json({ error: 'Invalid dueSoonDays. Allowed range: 0 to 30.' });
+      res.status(400).json({ error: 'Invalid dueSoonDays. Allowed range: 0 to 30.' });
+      return;
     }
     next.dueSoonDays = d;
   }
 
   next.updatedAt = new Date().toISOString();
-  engineStore.POLICY = next;
-  res.json(engineStore.POLICY);
-});
+  res.json(await repo.savePolicy(next));
+}));
 
 // ── Estado de clientes (read-only) ────────────────────────────────────
-router.get('/api/suspension/customers', requireRoles([...SUSP_VIEW_ROLES]), (_req, res) => {
-  res.json(customerServiceView());
-});
+router.get('/api/suspension/customers', requireRoles([...SUSP_VIEW_ROLES]), asyncHandler(async (_req, res) => {
+  res.json(await customerServiceView());
+}));
 
 // ── Órdenes ───────────────────────────────────────────────────────────
-router.get('/api/suspension/orders', requireRoles([...SUSP_VIEW_ROLES]), (req, res) => {
+router.get('/api/suspension/orders', requireRoles([...SUSP_VIEW_ROLES]), asyncHandler(async (req, res) => {
   const status = String(req.query.status || '').trim().toUpperCase();
   const customerId = String(req.query.customerId || '').trim();
-  let rows = engineStore.ORDERS;
-  if (customerId) rows = rows.filter((o) => o.customerId === customerId);
-  if (status) rows = rows.filter((o) => o.status === status);
+  const rows = await getSuspensionService().repo.listOrders({
+    customerId: customerId || undefined,
+    status: status || undefined,
+  });
   res.json(rows);
-});
+}));
 
 // ── Eventos / auditoría ───────────────────────────────────────────────
-router.get('/api/suspension/events', requireRoles([...SUSP_VIEW_ROLES]), (req, res) => {
+router.get('/api/suspension/events', requireRoles([...SUSP_VIEW_ROLES]), asyncHandler(async (req, res) => {
   const customerId = String(req.query.customerId || '').trim();
-  const rows = customerId
-    ? engineStore.EVENTS.filter((e) => e.customerId === customerId)
-    : engineStore.EVENTS;
-  res.json(rows);
-});
+  res.json(await getSuspensionService().repo.listEvents(customerId || undefined));
+}));
 
 // ── Evaluación (genera órdenes; NO ejecuta) ───────────────────────────
-router.post('/api/suspension/evaluate/:customerId', requireRoles([...SUSP_EVALUATE_ROLES]), (req, res) => {
-  const result = evaluateCustomerById(req.params.customerId, req.authContext?.userId);
-  if (!result) return res.status(404).json({ error: 'Customer not found' });
+router.post('/api/suspension/evaluate/:customerId', requireRoles([...SUSP_EVALUATE_ROLES]), asyncHandler(async (req, res) => {
+  const result = await evaluateCustomerById(req.params.customerId, req.authContext?.userId);
+  if (!result) {
+    res.status(404).json({ error: 'Customer not found' });
+    return;
+  }
   res.json(result);
-});
+}));
 
-router.post('/api/suspension/evaluate-all', requireRoles([...SUSP_EVALUATE_ROLES]), (req, res) => {
-  const results = evaluateAllCustomers(req.authContext?.userId);
+router.post('/api/suspension/evaluate-all', requireRoles([...SUSP_EVALUATE_ROLES]), asyncHandler(async (req, res) => {
+  const results = await evaluateAllCustomers(req.authContext?.userId);
   const summary = {
     evaluated: results.length,
     suspensionOrders: results.filter((r) => r.action === 'create_suspension').length,
@@ -286,6 +293,93 @@ router.post('/api/suspension/evaluate-all', requireRoles([...SUSP_EVALUATE_ROLES
     changed: results.filter((r) => r.changed).length,
   };
   res.json({ summary, results });
-});
+}));
+
+// ════════════════════════════════════════════════════════════════════
+// HERRAMIENTA DE STAGING/TEST (Fase 4.5.1) — crea escenarios A/B usando los
+// services REALES de Customers/Billing, para que Hermes valide end-to-end
+// también con USE_DB_CUSTOMERS/USE_DB_BILLING=true.
+//
+// Triple candado (NUNCA disponible en producción):
+//   - NODE_ENV !== 'production'
+//   - STAGING_TEST_TOOLS_ENABLED !== 'false'
+//   - rol super admin + body.confirm === true
+// ════════════════════════════════════════════════════════════════════
+const testToolsAvailable = (): boolean =>
+  (process.env.NODE_ENV || 'development') !== 'production' &&
+  (process.env.STAGING_TEST_TOOLS_ENABLED || 'true').trim().toLowerCase() !== 'false';
+
+const daysAgo = (n: number): string => new Date(Date.now() - n * 86400000).toISOString().substring(0, 10);
+
+router.post('/api/suspension/test-tools/scenario', requireRoles(['super admin']), asyncHandler(async (req, res) => {
+  if (!testToolsAvailable()) {
+    res.status(404).json({ error: 'Test tools not available in this environment.' });
+    return;
+  }
+  if (req.body?.confirm !== true) {
+    res.status(400).json({ error: 'Confirmation required: send { "confirm": true }.' });
+    return;
+  }
+  const scenario = String(req.body?.scenario || '').toUpperCase();
+  if (scenario !== 'A' && scenario !== 'B') {
+    res.status(400).json({ error: 'scenario must be "A" (suspend) or "B" (reactivate).' });
+    return;
+  }
+
+  const customers = getCustomersService();
+  const billing = getBillingService();
+  const planId = String(req.body?.planId || 'plan-basic');
+  const amount = Number(req.body?.amount) || 449;
+
+  // 1. Cliente de prueba (status según escenario).
+  const clientId = await customers.generateClientId();
+  const networkStatus: Client['status'] = scenario === 'B' ? 'suspended' : 'active';
+  const client: Client = {
+    id: clientId,
+    name: `__TEST__ Suspension ${scenario} ${clientId}`,
+    type: 'residential',
+    status: networkStatus,
+    email: `test_${clientId}@example.com`,
+    phone: '0000000000',
+    address: 'Test', city: 'Test', lat: 0, lng: 0,
+    planId, ip: '10.255.255.1',
+    pppoeUser: `test_${clientId}`,
+  };
+  await customers.create(client);
+
+  // 2. Factura vencida (fuera de la gracia).
+  const invoice = await billing.createInvoice({
+    clientId,
+    clientName: client.name,
+    amount,
+    dueDateStr: daysAgo(15),
+    items: [{ description: '__TEST__ Suscripción', price: amount, qty: 1 }],
+  });
+
+  // 3. Escenario B: pago COMPLETO → factura cerrada → procede reactivación.
+  if (scenario === 'B') {
+    await billing.recordPayment(invoice.id, { amount, method: 'SPEI', transactionId: `TEST_${clientId}` });
+  }
+
+  res.status(201).json({
+    scenario,
+    customerId: clientId,
+    invoiceId: invoice.id,
+    networkStatus,
+    expectation: scenario === 'A'
+      ? 'Cliente activo + factura vencida fuera de gracia → al evaluar se crea SuspensionOrder.'
+      : 'Cliente suspendido + factura pagada → al evaluar se crea ReactivationOrder.',
+    next: `POST /api/suspension/evaluate/${clientId}`,
+  });
+}));
+
+router.delete('/api/suspension/test-tools/customer/:id', requireRoles(['super admin']), asyncHandler(async (req, res) => {
+  if (!testToolsAvailable()) {
+    res.status(404).json({ error: 'Test tools not available in this environment.' });
+    return;
+  }
+  const ok = await getCustomersService().remove(req.params.id);
+  res.json({ removed: ok, customerId: req.params.id });
+}));
 
 export default router;

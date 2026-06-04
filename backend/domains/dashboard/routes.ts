@@ -181,10 +181,11 @@ const calculateMonitoringOverview = () => {
   };
 };
 
-router.get('/api/dashboard-stats', requireRoles(READ_ROLES), (_req, res) => {
+router.get('/api/dashboard-stats', requireRoles(READ_ROLES), async (_req, res) => {
   const kpis = buildExecutiveKpis();
   const monthCobranza = store.INVOICES.filter((f) => f.status === 'paid').reduce((acc, f) => acc + f.amount, 0);
   const monthFacturacion = store.INVOICES.reduce((acc, f) => acc + f.amount, 0);
+  const suspension = await suspensionKpis();
 
   res.json({
     activeClients: kpis.customers.active,
@@ -206,8 +207,8 @@ router.get('/api/dashboard-stats', requireRoles(READ_ROLES), (_req, res) => {
       towerAvailabilityPct: kpis.towers.availabilityPct,
       collectionRatePct: kpis.revenue.collectionRatePct,
     },
-    // Motor de Suspensiones (Fase 4.5) — read-only, sin efectos.
-    suspension: suspensionKpis(),
+    // Motor de Suspensiones (Fase 4.5/4.5.1) — read-only, sin efectos.
+    suspension,
   });
 });
 
