@@ -1,7 +1,10 @@
 import { describe, it, expect, beforeAll } from 'vitest';
 import request from 'supertest';
+import { createClient } from '@supabase/supabase-js';
+import { readFileSync } from 'node:fs';
 import type { Express } from 'express';
 import type { SupabaseClient } from '@supabase/supabase-js';
+import { createApp } from '../../backend/app';
 
 // ====================================================================
 // Prueba de AUTH REAL (Supabase JWT) — Fase 2.1.
@@ -90,6 +93,24 @@ describe.skipIf(!hasEnv)('Auth real (Supabase JWT) — Fase 2.1 staging', () => 
     expect(res.body.role).toBe('super admin');
     expect(res.body.source).toBe('supabase-jwt');
   });
+
+  it('frontend auth usa /api/auth/me como fuente de rol y no consulta users_profile desde el navegador', async () => {
+    const loginForm = readFileSync('src/components/LoginForm.tsx', 'utf8');
+    const authSession = readFileSync('src/lib/authSession.ts', 'utf8');
+    expect(loginForm).not.toContain("from('users_profile')");
+    expect(loginForm).not.toContain('rest/v1/users_profile');
+    expect(authSession).not.toContain("from('users_profile')");
+    expect(authSession).not.toContain('rest/v1/users_profile');
+
+    const freshAdmin = await signIn(USERS.administrador.email);
+    const authMe = await request(app)
+      .get('/api/auth/me')
+      .set('Authorization', `Bearer ${freshAdmin.accessToken}`);
+    expect(authMe.status).toBe(200);
+    expect(authMe.body.role).toBe(USERS.administrador.expectedRole);
+    expect(authMe.body.source).toBe('supabase-jwt');
+  });
+
 
   it('logout invalida la sesión del cliente Supabase', async () => {
     const { createClient } = await import('@supabase/supabase-js');

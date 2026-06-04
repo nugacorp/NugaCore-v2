@@ -46,35 +46,26 @@ export async function restoreSessionProfileFromSupabase(): Promise<UserSessionPr
   }
 
   const sessionUser = data.session.user;
-  const { data: profile } = await supabase
-    .from('users_profile')
-    .select(`
-      id,
-      email,
-      full_name,
-      phone,
-      avatar_url,
-      user_roles (
-        roles (
-          name
-        )
-      )
-    `)
-    .eq('id', sessionUser.id)
-    .maybeSingle();
-
-  const userRoles = (profile as { user_roles?: Array<{ roles?: { name?: string } }> } | null)?.user_roles;
-  const rawRole = Array.isArray(userRoles) && userRoles.length > 0
-    ? userRoles[0]?.roles?.name || null
-    : null;
+  let backendRole: string | null = null;
+  try {
+    const authMe = await fetch('/api/auth/me', {
+      headers: { Authorization: `Bearer ${data.session.access_token}` },
+    });
+    if (authMe.ok) {
+      const authContext = await authMe.json();
+      backendRole = typeof authContext.role === 'string' ? authContext.role : null;
+    }
+  } catch {
+    backendRole = null;
+  }
 
   const userProfile: UserSessionProfile = {
     id: sessionUser.id,
-    email: (profile?.email || sessionUser.email || '').trim(),
-    full_name: profile?.full_name || 'Usuario Autenticado',
-    phone: profile?.phone || '',
-    role: normalizeUserRole(rawRole),
-    avatar_url: profile?.avatar_url || '',
+    email: (sessionUser.email || '').trim(),
+    full_name: (sessionUser.user_metadata?.full_name as string | undefined) || 'Usuario Autenticado',
+    phone: (sessionUser.user_metadata?.phone as string | undefined) || '',
+    role: normalizeUserRole(backendRole),
+    avatar_url: (sessionUser.user_metadata?.avatar_url as string | undefined) || '',
   };
 
   authSession.save(userProfile, data.session.access_token);

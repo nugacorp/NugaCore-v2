@@ -66,57 +66,37 @@ export default function LoginForm({ onLoginSuccess, onBack }: LoginFormProps) {
         }
 
         if (data?.user) {
-          // Fetch additional profile data from 'users_profile'
-          const { data: profile, error: profileError } = await supabase
-            .from('users_profile')
-            .select(`
-              id, 
-              email, 
-              full_name, 
-              phone, 
-              avatar_url,
-              user_roles (
-                roles (
-                  name
-                )
-              )
-            `)
-            .eq('id', data.user.id)
-            .single();
+          const accessToken = data.session?.access_token;
+          let backendRole: string | null = null;
 
-          if (profileError || !profile) {
-            // Rollback details or assign a safe fallback role
-            const fallbackProfile: UserSessionProfile = {
-              id: data.user.id,
-              email: data.user.email || email,
-              full_name: 'Usuario Autenticado',
-              role: 'Solo lectura',
-            };
-            onLoginSuccess(fallbackProfile, data.session?.access_token);
-            return;
+          if (accessToken) {
+            try {
+              const authMe = await fetch('/api/auth/me', {
+                headers: { Authorization: `Bearer ${accessToken}` },
+              });
+              if (authMe.ok) {
+                const authContext = await authMe.json();
+                backendRole = typeof authContext.role === 'string' ? authContext.role : null;
+              }
+            } catch {
+              backendRole = null;
+            }
           }
 
-          // Extract role name from nested query structure
-          let assignedRole = 'Solo lectura';
-          const userRoles = profile.user_roles as any;
-          if (Array.isArray(userRoles) && userRoles.length > 0 && userRoles[0]?.roles?.name) {
-            assignedRole = userRoles[0].roles.name;
-          } else if (userRoles?.roles?.name) {
-            assignedRole = userRoles.roles.name;
-          }
+          let assignedRole = backendRole || 'Solo lectura';
 
           const userSession: UserSessionProfile = {
-            id: profile.id,
-            email: profile.email,
-            full_name: profile.full_name,
-            phone: profile.phone || '',
+            id: data.user.id,
+            email: data.user.email || email.trim(),
+            full_name: (data.user.user_metadata?.full_name as string | undefined) || 'Usuario Autenticado',
+            phone: (data.user.user_metadata?.phone as string | undefined) || '',
             role: normalizeUserRole(assignedRole),
-            avatar_url: profile.avatar_url || '',
+            avatar_url: (data.user.user_metadata?.avatar_url as string | undefined) || '',
           };
 
-          setSuccessMessage(`¡Bienvenido de vuelta, ${profile.full_name}!`);
+          setSuccessMessage(`¡Bienvenido de vuelta, ${userSession.full_name}!`);
           setTimeout(() => {
-            onLoginSuccess(userSession, data.session?.access_token);
+            onLoginSuccess(userSession, accessToken);
           }, 1000);
         }
       } else {
