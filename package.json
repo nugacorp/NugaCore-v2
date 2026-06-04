@@ -12,7 +12,9 @@
     "lint": "tsc --noEmit",
     "typecheck": "tsc --noEmit",
     "test": "vitest run",
-    "test:watch": "vitest"
+    "test:watch": "vitest",
+    "test:db": "node scripts/run-tests.mjs db",
+    "test:auth": "node scripts/run-tests.mjs auth"
   },
   "dependencies": {
     "@google/genai": "^2.4.0",

@@ -7,20 +7,46 @@ import type { SupabaseClient } from '@supabase/supabase-js';
 import { createApp } from '../../backend/app';
 
 // ====================================================================
-// Prueba de AUTH REAL (Supabase JWT) — Fase 2.1.
+// Prueba de AUTH REAL (Supabase JWT) — Fase 2.1. NO hermética.
 //
-// Se EJECUTA SOLO si hay Supabase de staging + usuarios sembrados
-// (SUPABASE_URL, SUPABASE_ANON_KEY, SUPABASE_SERVICE_ROLE_KEY,
-//  STAGING_AUTH_PASSWORD). En CI sin esto se OMITE.
+// Opt-in EXPLÍCITO: solo corre con RUN_AUTH_TESTS=true (lo activa el script
+// `npm run test:auth`, que además fuerza NODE_ENV=production para replicar
+// staging JWT-only). Sin ese flag se OMITE -> `npm test` queda hermético.
+//
+// Requiere además staging configurado + usuarios sembrados (SUPABASE_URL,
+// SUPABASE_ANON_KEY, SUPABASE_SERVICE_ROLE_KEY, STAGING_AUTH_PASSWORD). Si
+// se opta por correrla pero falta alguna, FALLA con un mensaje claro (sin
+// imprimir nunca passwords ni JWT).
 //
 // Valida: login real, JWT, refresh token, logout, resolución de rol desde
 // public.user_roles, RBAC backend y escritura protegida de Customers.
 // ====================================================================
 
+const optIn = process.env.RUN_AUTH_TESTS === 'true';
 const URL = process.env.SUPABASE_URL;
 const ANON = process.env.SUPABASE_ANON_KEY;
 const PW = process.env.STAGING_AUTH_PASSWORD;
 const hasEnv = Boolean(URL && ANON && process.env.SUPABASE_SERVICE_ROLE_KEY && PW);
+
+// Opt-in sin entorno completo -> error explícito (solo nombres, sin valores).
+if (optIn && !hasEnv) {
+  describe('Auth real — configuración requerida', () => {
+    it('RUN_AUTH_TESTS=true exige SUPABASE_URL, SUPABASE_ANON_KEY, SUPABASE_SERVICE_ROLE_KEY y STAGING_AUTH_PASSWORD', () => {
+      throw new Error(
+        'RUN_AUTH_TESTS=true pero falta al menos una variable de staging: ' +
+          'SUPABASE_URL, SUPABASE_ANON_KEY, SUPABASE_SERVICE_ROLE_KEY o ' +
+          'STAGING_AUTH_PASSWORD. Configúralas (staging real) o ejecuta ' +
+          '`npm test` (hermético). No se imprime ningún valor por seguridad.',
+      );
+    });
+  });
+}
+
+// Timeouts de red holgados: el login real de 6 usuarios + reintentos puede
+// tardar segundos por llamada según la latencia a Supabase Auth. Evita el
+// "timeout falso" de un cap demasiado bajo (la suite es staging-grade).
+const NET_HOOK_TIMEOUT_MS = 180000;
+const NET_TEST_TIMEOUT_MS = 120000;
 
 type RoleKey = 'superadmin' | 'administrador' | 'cobranza' | 'tecnico' | 'soporte' | 'readonly';
 
@@ -33,7 +59,7 @@ const USERS: Record<RoleKey, { email: string; expectedRole: string }> = {
   readonly: { email: 'readonly@staging.nugacore.local', expectedRole: 'solo lectura' },
 };
 
-describe.skipIf(!hasEnv)('Auth real (Supabase JWT) — Fase 2.1 staging', () => {
+describe.skipIf(!optIn || !hasEnv)('Auth real (Supabase JWT) — Fase 2.1 staging', () => {
   let app: Express;
   let anon: SupabaseClient;
   const tokens: Partial<Record<RoleKey, string>> = {};
@@ -62,7 +88,7 @@ describe.skipIf(!hasEnv)('Auth real (Supabase JWT) — Fase 2.1 staging', () => 
 
     const { createApp } = await import('../../backend/app');
     app = createApp();
-  }, 60000);
+  }, NET_HOOK_TIMEOUT_MS);
 
   it('login real emite JWT y refresh token para todos los roles staging', () => {
     for (const key of Object.keys(USERS) as RoleKey[]) {
@@ -170,7 +196,7 @@ describe.skipIf(!hasEnv)('Auth real (Supabase JWT) — Fase 2.1 staging', () => 
       const authorized = await request(app).get(path).set('Authorization', `Bearer ${authorizedSession.accessToken}`);
       expect(authorized.status, `${path} debe permitir JWT readonly válido`).toBe(200);
     }
-  });
+  }, NET_TEST_TIMEOUT_MS);
 
   it('RBAC: superadmin y administrador acceden a Customers; readonly solo lectura', async () => {
     for (const key of ['superadmin', 'administrador'] as RoleKey[]) {
