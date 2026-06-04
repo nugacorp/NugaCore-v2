@@ -168,6 +168,45 @@ export interface Invoice {
   cfdiUuid?: string;
   items: { description: string; price: number; qty: number }[];
   payments: { date: string; amount: number; method: string; transactionId?: string }[];
+  // Campos enriquecidos por el backend (EnrichedInvoice). Opcionales y aditivos:
+  // el contrato GET /api/billing/invoices siempre los incluye, pero se dejan
+  // opcionales para no romper datos mock/legacy ni otros consumidores del tipo.
+  paidAmount?: number;
+  pendingAmount?: number;
+}
+
+// Estado de cuenta por factura — respuesta de GET /api/billing/invoices/:id/account-state.
+export interface InvoiceAllocation {
+  id: string;
+  invoiceId: string;
+  amount: number;
+  method: string;
+  paymentDate: string;
+  transactionId?: string;
+  remainingAfterPayment: number;
+}
+
+export interface AccountStateResponse {
+  invoice: Invoice;
+  allocations: InvoiceAllocation[];
+}
+
+// Resumen de cobranza — respuesta de GET /api/billing/account-summary.
+export interface BillingAccountSummary {
+  totalInvoiced: number;
+  totalCollected: number;
+  totalPending: number;
+  overdueCount: number;
+  paidCount: number;
+  unpaidCount: number;
+  invoicesCount: number;
+}
+
+// Reporte de ingresos — respuesta de GET /api/billing/revenue-report.
+export interface BillingRevenueReport {
+  generatedAt: string;
+  byMethod: { method: string; amount: number }[];
+  topPendingInvoices: Invoice[];
 }
 
 export interface NocAlert {

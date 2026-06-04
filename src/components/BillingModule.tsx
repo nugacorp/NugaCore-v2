@@ -1,43 +1,92 @@
-import React, { useState } from 'react';
-import { 
-  CreditCard, 
-  Search, 
-  TrendingUp, 
-  Briefcase, 
-  FileText, 
-  CheckCircle, 
-  AlertTriangle, 
-  Clock, 
-  ExternalLink,
-  ChevronRight,
+import React, { useState, useEffect } from 'react';
+import {
+  FileText,
   Zap,
-  Check,
   Plus,
   Edit,
-  Coins
+  Coins,
+  Lock,
+  Ban,
+  Loader2,
+  CheckCircle,
+  AlertTriangle,
+  BarChart3,
 } from 'lucide-react';
-import { Invoice, Client } from '../types';
+import {
+  Invoice,
+  Client,
+  BillingAccountSummary,
+  BillingRevenueReport,
+  AccountStateResponse,
+} from '../types';
+import type { UserRole } from '../lib/supabase';
+import { canManageBilling } from '../lib/billingRbac';
+import {
+  formatMXN,
+  paidAmountOf,
+  pendingAmountOf,
+  statusBadge,
+  isPayable,
+  deriveSummary,
+  resolvePaymentAmount,
+  type BillingBadgeTone,
+} from '../lib/billingView';
 
 interface BillingModuleProps {
   invoices: Invoice[];
   clients: Client[];
-  onPayInvoice: (id: string, method: string) => Promise<void>;
+  summary: BillingAccountSummary | null;
+  revenueReport: BillingRevenueReport | null;
+  userRole: UserRole;
+  onPayInvoice: (id: string, method: string, amount?: number) => Promise<void>;
   onCreateInvoice: (invoiceData: any) => Promise<void>;
   onEditInvoice: (id: string, invoiceData: any) => Promise<void>;
+  onFetchAccountState: (id: string) => Promise<AccountStateResponse>;
 }
 
-export default function BillingModule({ 
-  invoices, 
-  clients, 
-  onPayInvoice, 
-  onCreateInvoice, 
-  onEditInvoice 
+const BADGE_CLASS: Record<BillingBadgeTone, string> = {
+  paid: 'bg-emerald-500/15 text-emerald-400 border-emerald-500/20',
+  unpaid: 'bg-amber-500/15 text-amber-400 border-amber-500/20',
+  overdue: 'bg-rose-500/15 text-rose-400 border-rose-500/20 animate-pulse',
+  canceled: 'bg-slate-700/40 text-slate-400 border-slate-600/40 line-through',
+  partial: 'bg-sky-500/15 text-sky-400 border-sky-500/20',
+};
+
+type Toast = { kind: 'success' | 'error'; msg: string } | null;
+type Confirm = { message: string; confirmLabel: string; onConfirm: () => void } | null;
+
+export default function BillingModule({
+  invoices,
+  clients,
+  summary,
+  revenueReport,
+  userRole,
+  onPayInvoice,
+  onCreateInvoice,
+  onEditInvoice,
+  onFetchAccountState,
 }: BillingModuleProps) {
+  const canManage = canManageBilling(userRole);
+
   const [searchTerm, setSearchTerm] = useState('');
   const [filterStatus, setFilterStatus] = useState<string>('all');
   const [selectedInvoice, setSelectedInvoice] = useState<Invoice | null>(null);
   const [payGateway, setPayGateway] = useState('Stripe');
+  const [payAmount, setPayAmount] = useState('');
+  const [payAmountError, setPayAmountError] = useState('');
   const [paymentInProgress, setPaymentInProgress] = useState(false);
+
+  // Async UX state
+  const [toast, setToast] = useState<Toast>(null);
+  const [confirm, setConfirm] = useState<Confirm>(null);
+  const [busyLabel, setBusyLabel] = useState<string>('');
+
+  // Account state (per-invoice ledger)
+  const [accountState, setAccountState] = useState<AccountStateResponse | null>(null);
+  const [accountStateLoading, setAccountStateLoading] = useState(false);
+
+  // Revenue report panel toggle
+  const [showRevenue, setShowRevenue] = useState(false);
 
   // Invoice creation state
   const [showCreateModal, setShowCreateModal] = useState(false);
@@ -56,54 +105,150 @@ export default function BillingModule({
   const [editAmount, setEditAmount] = useState('449');
   const [editDueDate, setEditDueDate] = useState('');
 
-  const formatMXN = (num: number) => {
-    return new Intl.NumberFormat('es-MX', { style: 'currency', currency: 'MXN' }).format(num);
-  };
+  // Auto-dismiss toasts
+  useEffect(() => {
+    if (!toast) return;
+    const t = setTimeout(() => setToast(null), 4000);
+    return () => clearTimeout(t);
+  }, [toast]);
 
-  const filteredInvoices = invoices.filter(inv => {
-    const matchesSearch = inv.clientName.toLowerCase().includes(searchTerm.toLowerCase()) || 
-                          inv.id.toLowerCase().includes(searchTerm.toLowerCase());
+  // Keep the selected invoice in sync with refreshed data; reload account state.
+  useEffect(() => {
+    if (!selectedInvoice) {
+      setAccountState(null);
+      return;
+    }
+    const fresh = invoices.find((i) => i.id === selectedInvoice.id) || null;
+    if (fresh && fresh !== selectedInvoice) setSelectedInvoice(fresh);
+
+    let cancelled = false;
+    setAccountStateLoading(true);
+    setAccountState(null);
+    onFetchAccountState(selectedInvoice.id)
+      .then((state) => {
+        if (!cancelled) setAccountState(state);
+      })
+      .catch(() => {
+        if (!cancelled) setAccountState(null);
+      })
+      .finally(() => {
+        if (!cancelled) setAccountStateLoading(false);
+      });
+    return () => {
+      cancelled = true;
+    };
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [selectedInvoice?.id, invoices]);
+
+  const filteredInvoices = invoices.filter((inv) => {
+    const matchesSearch =
+      inv.clientName.toLowerCase().includes(searchTerm.toLowerCase()) ||
+      inv.id.toLowerCase().includes(searchTerm.toLowerCase());
     const matchesStatus = filterStatus === 'all' || inv.status === filterStatus;
     return matchesSearch && matchesStatus;
   });
 
-  const handlePaySubmit = async (invId: string) => {
+  // Resumen canónico del backend; fallback al cálculo en cliente si aún no llega.
+  const view = summary ?? deriveSummary(invoices);
+
+  // ── Acciones async ────────────────────────────────────────────────────
+  const runPayment = async (inv: Invoice) => {
     setPaymentInProgress(true);
+    setBusyLabel('Registrando pago...');
+    const { amount } = resolvePaymentAmount(inv, payAmount);
     try {
-      await onPayInvoice(invId, payGateway);
-      setSelectedInvoice(null);
-    } catch (err) {
-      console.error(err);
+      await onPayInvoice(inv.id, payGateway, payAmount.trim() ? amount : undefined);
+      setToast({ kind: 'success', msg: `Pago de ${formatMXN(amount)} registrado en ${inv.id}.` });
+      setPayAmount('');
+    } catch (err: any) {
+      setToast({ kind: 'error', msg: err?.message || 'No se pudo registrar el pago.' });
     } finally {
       setPaymentInProgress(false);
+      setBusyLabel('');
     }
+  };
+
+  const requestPayment = (inv: Invoice) => {
+    setPayAmountError('');
+    const { amount, error } = resolvePaymentAmount(inv, payAmount);
+    if (error) {
+      setPayAmountError(error);
+      return;
+    }
+    setConfirm({
+      message: `¿Registrar pago de ${formatMXN(amount)} para la factura ${inv.id} (${inv.clientName}) vía ${payGateway}?`,
+      confirmLabel: 'Registrar pago',
+      onConfirm: () => runPayment(inv),
+    });
+  };
+
+  const requestCancel = (inv: Invoice) => {
+    setConfirm({
+      message: `¿Cancelar la factura ${inv.id} de ${inv.clientName}? Esta acción marca la factura como cancelada.`,
+      confirmLabel: 'Cancelar factura',
+      onConfirm: async () => {
+        setBusyLabel('Cancelando factura...');
+        try {
+          await onEditInvoice(inv.id, { status: 'canceled' });
+          setToast({ kind: 'success', msg: `Factura ${inv.id} cancelada.` });
+        } catch (err: any) {
+          setToast({ kind: 'error', msg: err?.message || 'No se pudo cancelar la factura.' });
+        } finally {
+          setBusyLabel('');
+        }
+      },
+    });
   };
 
   const handleCreateInvoiceSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
     if (!formClientId || !formAmount) return;
-    await onCreateInvoice({
-      clientId: formClientId,
-      amount: Number(formAmount),
-      dueDateStr: formDueDate,
-      items: [{ description: formConcept, price: Number(formAmount), qty: 1 }]
-    });
-    setFormClientId('');
-    setFormConcept('Suscripción Mensual Internet Banda Ancha');
-    setFormAmount('449');
-    setShowCreateModal(false);
+    setBusyLabel('Creando factura...');
+    try {
+      await onCreateInvoice({
+        clientId: formClientId,
+        amount: Number(formAmount),
+        dueDateStr: formDueDate,
+        items: [{ description: formConcept, price: Number(formAmount), qty: 1 }],
+      });
+      setToast({ kind: 'success', msg: 'Factura creada correctamente.' });
+      setFormClientId('');
+      setFormConcept('Suscripción Mensual Internet Banda Ancha');
+      setFormAmount('449');
+      setShowCreateModal(false);
+    } catch (err: any) {
+      setToast({ kind: 'error', msg: err?.message || 'No se pudo crear la factura.' });
+    } finally {
+      setBusyLabel('');
+    }
   };
 
-  const handleEditInvoiceSubmit = async (e: React.FormEvent) => {
+  const submitEdit = async () => {
+    if (!selectedInvoice) return;
+    setBusyLabel('Guardando cambios...');
+    try {
+      await onEditInvoice(selectedInvoice.id, {
+        amount: Number(editAmount),
+        dueDateStr: editDueDate,
+        items: [{ description: editConcept, price: Number(editAmount), qty: 1 }],
+      });
+      setToast({ kind: 'success', msg: `Factura ${selectedInvoice.id} actualizada.` });
+      setShowEditModal(false);
+    } catch (err: any) {
+      setToast({ kind: 'error', msg: err?.message || 'No se pudo editar la factura.' });
+    } finally {
+      setBusyLabel('');
+    }
+  };
+
+  const handleEditInvoiceSubmit = (e: React.FormEvent) => {
     e.preventDefault();
     if (!selectedInvoice) return;
-    await onEditInvoice(selectedInvoice.id, {
-      amount: Number(editAmount),
-      dueDateStr: editDueDate,
-      items: [{ description: editConcept, price: Number(editAmount), qty: 1 }]
+    setConfirm({
+      message: `¿Guardar cambios en la factura ${selectedInvoice.id}? Nuevo total: ${formatMXN(Number(editAmount))}.`,
+      confirmLabel: 'Guardar cambios',
+      onConfirm: submitEdit,
     });
-    setSelectedInvoice(null);
-    setShowEditModal(false);
   };
 
   const openEditModal = (inv: Invoice) => {
@@ -113,98 +258,185 @@ export default function BillingModule({
     setShowEditModal(true);
   };
 
-  const overdueCount = invoices.filter(i => i.status === 'overdue').length;
-  const totalInvoiced = invoices.reduce((acc, i) => acc + i.amount, 0);
-  const totalPaid = invoices.filter(i => i.status === 'paid').reduce((acc, i) => acc + i.amount, 0);
-  const totalPending = invoices.filter(i => i.status === 'unpaid' || i.status === 'overdue').reduce((acc, i) => acc + i.amount, 0);
-
   return (
     <div className="space-y-6 text-slate-200 p-6 bg-slate-900 min-h-screen font-sans">
-      {/* Header Bento and KPI blocks */}
+      {/* Toast / notice */}
+      {toast && (
+        <div
+          id="billing-toast"
+          className={`fixed top-5 right-5 z-[60] flex items-center space-x-2 px-4 py-3 rounded-xl border text-xs font-mono shadow-xl ${
+            toast.kind === 'success'
+              ? 'bg-emerald-500/15 text-emerald-300 border-emerald-500/30'
+              : 'bg-rose-500/15 text-rose-300 border-rose-500/30'
+          }`}
+        >
+          {toast.kind === 'success' ? (
+            <CheckCircle className="w-4 h-4" />
+          ) : (
+            <AlertTriangle className="w-4 h-4" />
+          )}
+          <span>{toast.msg}</span>
+        </div>
+      )}
+
+      {/* Global busy banner */}
+      {busyLabel && (
+        <div className="fixed top-5 left-1/2 -translate-x-1/2 z-[60] flex items-center space-x-2 bg-slate-950 border border-slate-700 text-slate-200 px-4 py-2 rounded-xl text-xs font-mono shadow-xl">
+          <Loader2 className="w-4 h-4 animate-spin text-indigo-400" />
+          <span>{busyLabel}</span>
+        </div>
+      )}
+
+      {/* Header */}
       <div className="flex flex-col md:flex-row md:items-center justify-between gap-4 border-b border-slate-800 pb-5">
         <div>
-          <h2 className="text-2xl font-bold tracking-tight text-white">Facturación Fiscal & Cobros</h2>
+          <h2 className="text-2xl font-bold tracking-tight text-white">Facturación Fiscal &amp; Cobros</h2>
           <p className="text-sm text-slate-400 font-mono mt-0.5">
-            Módulo ERP completo de timbrado SAT CFDI 4.0 México, pasarelas de pago y recordatorios automáticos de cobranza.
+            Cobranza conectada a Billing persistente. Crea facturas, registra pagos (totales o parciales) y consulta estado de cuenta real.
           </p>
         </div>
         <div className="flex items-center space-x-2 flex-wrap gap-2">
-          <button
-            onClick={() => setShowCreateModal(true)}
-            id="emitir-factura-btn"
-            className="flex items-center space-x-2 bg-indigo-600 hover:bg-indigo-500 border border-indigo-500 text-white px-4 py-2 rounded-xl text-xs font-semibold transition shadow-lg shrink-0"
-          >
-            <Plus className="w-3.5 h-3.5" />
-            <span>Emitir Factura / Cargo</span>
-          </button>
+          {canManage ? (
+            <button
+              onClick={() => setShowCreateModal(true)}
+              id="emitir-factura-btn"
+              className="flex items-center space-x-2 bg-indigo-600 hover:bg-indigo-500 border border-indigo-500 text-white px-4 py-2 rounded-xl text-xs font-semibold transition shadow-lg shrink-0"
+            >
+              <Plus className="w-3.5 h-3.5" />
+              <span>Emitir Factura / Cargo</span>
+            </button>
+          ) : (
+            <span className="flex items-center space-x-1.5 text-xs bg-slate-800/60 text-slate-400 border border-slate-700 px-3 py-1.5 rounded-lg font-mono">
+              <Lock className="w-3.5 h-3.5" />
+              <span>Modo solo lectura</span>
+            </span>
+          )}
           <span className="text-xs bg-emerald-500/10 text-emerald-400 border border-emerald-500/20 px-3 py-1.5 rounded-lg font-mono text-center">
-            SAT API: ONLINE (CFDI 4.0 CONEXION DIRECTA)
+            Billing DB: ONLINE
           </span>
         </div>
       </div>
 
-      {/* Stats row with a Bento design, mimicking the green highlight card */}
+      {/* Stats / resumen de cobranza (account-summary) */}
       <div className="grid grid-cols-1 md:grid-cols-12 gap-5">
-        {/* Dynamic bright emerald card (from design request) */}
         <div className="md:col-span-4 bg-emerald-500 rounded-3xl p-6 text-slate-950 flex flex-col justify-between">
           <div>
-            <h3 className="text-xs font-bold uppercase tracking-widest opacity-80">Por Cobrar en Mayo</h3>
-            <p className="text-4xl font-extrabold mt-3 tracking-tight">{formatMXN(totalPending)}</p>
+            <h3 className="text-xs font-bold uppercase tracking-widest opacity-80">Total Pendiente por Cobrar</h3>
+            <p id="billing-kpi-pending" className="text-4xl font-extrabold mt-3 tracking-tight">
+              {formatMXN(view.totalPending)}
+            </p>
             <div className="bg-slate-950/20 p-4 rounded-xl mt-3 text-xs border border-white/10">
               <div className="flex justify-between items-center font-bold">
-                <span>SAT CFDI 4.0</span>
-                <span className="bg-slate-950 text-white px-2 py-0.5 rounded text-[8px]">ACTIVE</span>
+                <span>Cobrado</span>
+                <span className="bg-slate-950 text-white px-2 py-0.5 rounded text-[10px]">
+                  {formatMXN(view.totalCollected)}
+                </span>
               </div>
-              <p className="mt-1 opacity-90">Timbrado automático del 100% de la facturación recurrente.</p>
+              <p className="mt-1 opacity-90">
+                {view.invoicesCount} facturas · {view.paidCount} pagadas · {view.overdueCount} vencidas
+              </p>
             </div>
           </div>
-          <button 
-            onClick={() => alert("Generando reporte PDF consolidado para NugaCorp...")}
-            className="mt-6 w-full bg-slate-950 hover:bg-slate-900 text-white py-3 rounded-2xl text-xs font-bold transition font-mono uppercase tracking-widest text-center block"
+          <button
+            onClick={() => setShowRevenue((s) => !s)}
+            className="mt-6 w-full bg-slate-950 hover:bg-slate-900 text-white py-3 rounded-2xl text-xs font-bold transition font-mono uppercase tracking-widest text-center flex items-center justify-center space-x-2"
           >
-            Generar Reporte Cobranza
+            <BarChart3 className="w-3.5 h-3.5" />
+            <span>{showRevenue ? 'Ocultar' : 'Ver'} Reporte de Ingresos</span>
           </button>
         </div>
 
-        {/* Breakdown Bento Box */}
         <div className="md:col-span-8 bg-slate-950 p-6 rounded-3xl border border-slate-800 flex flex-col justify-between">
           <div className="space-y-4">
-            <p className="text-xs text-slate-400 uppercase tracking-wider font-mono font-bold">Resumen de Cuenta de Facturas</p>
+            <p className="text-xs text-slate-400 uppercase tracking-wider font-mono font-bold">Resumen de Cuenta (Billing DB)</p>
             <div className="grid grid-cols-3 gap-4">
               <div className="bg-slate-900/60 p-4 rounded-2xl border border-slate-900">
                 <span className="text-[10px] text-slate-500 block uppercase font-mono">Total Facturado</span>
-                <span className="text-xl font-bold font-mono text-white">{formatMXN(totalInvoiced)}</span>
-                <span className="text-[9px] text-slate-500 block mt-1">Con IVA incluido (16%)</span>
+                <span className="text-xl font-bold font-mono text-white">{formatMXN(view.totalInvoiced)}</span>
+                <span className="text-[9px] text-slate-500 block mt-1">{view.invoicesCount} folios emitidos</span>
               </div>
               <div className="bg-slate-900/60 p-4 rounded-2xl border border-slate-900">
-                <span className="text-[10px] text-slate-400 block uppercase font-mono">Clientes Pagados</span>
-                <span className="text-xl font-bold font-mono text-emerald-400">{formatMXN(totalPaid)}</span>
-                <span className="text-[9px] text-emerald-500/80 block mt-1">Conciliación automática OK</span>
+                <span className="text-[10px] text-slate-400 block uppercase font-mono">Total Cobrado</span>
+                <span className="text-xl font-bold font-mono text-emerald-400">{formatMXN(view.totalCollected)}</span>
+                <span className="text-[9px] text-emerald-500/80 block mt-1">{view.paidCount} pagadas</span>
               </div>
               <div className="bg-slate-900/60 p-4 rounded-2xl border border-slate-900">
-                <span className="text-[10px] text-slate-400 block uppercase font-mono">Vencimientos</span>
-                <span className="text-xl font-bold font-mono text-rose-400">{overdueCount} Recargos</span>
-                <span className="text-[9px] text-rose-400/80 block mt-1">Sujetos a suspensión</span>
+                <span className="text-[10px] text-slate-400 block uppercase font-mono">Vencidas</span>
+                <span className="text-xl font-bold font-mono text-rose-400">{view.overdueCount}</span>
+                <span className="text-[9px] text-rose-400/80 block mt-1">{view.unpaidCount} pendientes</span>
               </div>
             </div>
           </div>
 
-          <div className="bg-slate-900/40 p-4 rounded-2xl border border-slate-900 text-xs text-slate-400 leading-relaxed mt-4 flex items-center justify-between">
-            <div className="flex items-center space-x-2">
-              <Zap className="w-4 h-4 text-amber-400 shrink-0" />
-              <span>NugaCore detectará de inmediato los pagos SPEI / Stripe y enviará llamadas de reactivación en el Router Core RouterOS.</span>
+          {showRevenue && (
+            <div id="billing-revenue-report" className="bg-slate-900/40 p-4 rounded-2xl border border-slate-900 mt-4 space-y-3">
+              <span className="text-[10px] text-slate-400 uppercase font-mono font-bold flex items-center space-x-2">
+                <BarChart3 className="w-3.5 h-3.5 text-indigo-400" />
+                <span>Reporte de Ingresos</span>
+              </span>
+              {!revenueReport ? (
+                <p className="text-[11px] text-slate-500 italic">Cargando reporte de ingresos...</p>
+              ) : (
+                <div className="grid grid-cols-1 md:grid-cols-2 gap-4 text-xs">
+                  <div>
+                    <span className="text-[10px] text-slate-500 uppercase font-mono block mb-1.5">Ingresos por Método</span>
+                    {revenueReport.byMethod.length === 0 ? (
+                      <p className="text-slate-600 text-[11px] italic">Sin pagos registrados.</p>
+                    ) : (
+                      <div className="space-y-1">
+                        {revenueReport.byMethod.map((m) => (
+                          <div key={m.method} className="flex justify-between font-mono text-slate-300">
+                            <span>{m.method}</span>
+                            <span className="text-emerald-400 font-bold">{formatMXN(m.amount)}</span>
+                          </div>
+                        ))}
+                      </div>
+                    )}
+                  </div>
+                  <div>
+                    <span className="text-[10px] text-slate-500 uppercase font-mono block mb-1.5">Top Facturas Pendientes (deudores)</span>
+                    {revenueReport.topPendingInvoices.length === 0 ? (
+                      <p className="text-slate-600 text-[11px] italic">Sin facturas pendientes.</p>
+                    ) : (
+                      <div className="space-y-1">
+                        {revenueReport.topPendingInvoices.slice(0, 5).map((inv) => (
+                          <div key={inv.id} className="flex justify-between font-mono text-slate-300">
+                            <span className="truncate max-w-[150px]">{inv.clientName}</span>
+                            <span className="text-rose-400 font-bold">{formatMXN(pendingAmountOf(inv))}</span>
+                          </div>
+                        ))}
+                      </div>
+                    )}
+                  </div>
+                </div>
+              )}
             </div>
-          </div>
+          )}
+
+          {!showRevenue && (
+            <div className="bg-slate-900/40 p-4 rounded-2xl border border-slate-900 text-xs text-slate-400 leading-relaxed mt-4 flex items-center justify-between">
+              <div className="flex items-center space-x-2">
+                <Zap className="w-4 h-4 text-amber-400 shrink-0" />
+                <span>Los pagos se persisten en Billing DB. Selecciona una factura para ver su estado de cuenta y registrar cobros parciales o totales.</span>
+              </div>
+            </div>
+          )}
         </div>
       </div>
 
-      {/* Main ledger list & Invoice details */}
+      {/* Ledger + detail */}
       <div className="grid grid-cols-1 lg:grid-cols-12 gap-6">
-        {/* Invoice list (7 columns) */}
+        {/* Invoice list */}
         <div className="lg:col-span-7 bg-slate-950 p-5 rounded-3xl border border-slate-800">
           <div className="flex flex-col md:flex-row md:items-center gap-3 justify-between border-b border-slate-900 pb-4 mb-4">
             <p className="text-sm font-bold text-white tracking-wide">Registro de Facturas Emitidas</p>
             <div className="flex gap-2">
+              <input
+                value={searchTerm}
+                onChange={(e) => setSearchTerm(e.target.value)}
+                placeholder="Buscar cliente / folio"
+                className="bg-slate-900 border border-slate-800 text-xs text-slate-300 rounded-xl px-2.5 py-1.5 focus:outline-none"
+              />
               <select
                 value={filterStatus}
                 onChange={(e) => setFilterStatus(e.target.value)}
@@ -214,178 +446,243 @@ export default function BillingModule({
                 <option value="paid">Pagadas</option>
                 <option value="unpaid">Sin Pagar</option>
                 <option value="overdue">Vencidas</option>
+                <option value="canceled">Canceladas</option>
               </select>
             </div>
           </div>
 
-          <div className="space-y-2.5 max-h-[400px] overflow-y-auto pr-1">
-            {filteredInvoices.map((inv) => (
-              <div
-                key={inv.id}
-                id={`billing-invoice-box-${inv.id}`}
-                onClick={() => setSelectedInvoice(inv)}
-                className={`p-3.5 rounded-2xl border text-xs cursor-pointer transition flex items-center justify-between ${
-                  selectedInvoice?.id === inv.id 
-                    ? 'bg-slate-900 border-indigo-500/50' 
-                    : 'bg-slate-900/40 border-slate-900 hover:border-slate-800'
-                }`}
-              >
-                <div className="space-y-1">
-                  <div className="flex items-center space-x-2">
-                    <span className="font-bold text-white text-sm">{inv.clientName}</span>
-                    <span className="bg-slate-850 text-slate-400 border border-slate-800 font-mono text-[9px] px-1.5 py-0.2 rounded font-semibold uppercase">
-                      ID: {inv.id}
-                    </span>
-                  </div>
-                  <div className="text-slate-400 font-mono text-[10px]">
-                    Fecha límite de pago: <span className="text-slate-300">{inv.dueDateStr}</span>
-                    {inv.cfdiUuid && (
-                      <span className="text-slate-500 block text-[9px] mt-0.5 truncate max-w-[200px]">SAT UUID: {inv.cfdiUuid}</span>
-                    )}
-                  </div>
-                </div>
-
-                <div className="text-right space-y-1.5">
-                  <span className="font-bold font-mono text-sm text-white block">{formatMXN(inv.amount)}</span>
-                  <div>
-                    {inv.status === 'paid' && (
-                      <span className="bg-emerald-500/15 text-emerald-400 border border-emerald-500/20 px-2 py-0.5 rounded text-[9px] font-mono font-bold uppercase inline-block">
-                        Pagada
-                      </span>
-                    )}
-                    {inv.status === 'unpaid' && (
-                      <span className="bg-amber-500/15 text-amber-400 border border-amber-500/20 px-2 py-0.5 rounded text-[9px] font-mono font-bold uppercase inline-block animate-pulse">
-                        Socio Pendiente
-                      </span>
-                    )}
-                    {inv.status === 'overdue' && (
-                      <span className="bg-rose-500/15 text-rose-400 border border-rose-500/20 px-2 py-0.5 rounded text-[9px] font-mono font-bold uppercase inline-block animate-pulse">
-                        Vencida / Corte
-                      </span>
-                    )}
-                  </div>
-                </div>
+          <div className="space-y-2.5 max-h-[440px] overflow-y-auto pr-1">
+            {filteredInvoices.length === 0 ? (
+              <div id="billing-empty-state" className="text-center py-12 text-slate-500 font-mono">
+                <FileText className="w-10 h-10 text-slate-800 mx-auto mb-3" />
+                <p className="text-sm">
+                  {invoices.length === 0
+                    ? 'Sin facturas registradas todavía.'
+                    : 'Ninguna factura coincide con el filtro.'}
+                </p>
               </div>
-            ))}
+            ) : (
+              filteredInvoices.map((inv) => {
+                const badge = statusBadge(inv);
+                const pending = pendingAmountOf(inv);
+                const paid = paidAmountOf(inv);
+                return (
+                  <div
+                    key={inv.id}
+                    id={`billing-invoice-box-${inv.id}`}
+                    onClick={() => setSelectedInvoice(inv)}
+                    className={`p-3.5 rounded-2xl border text-xs cursor-pointer transition flex items-center justify-between ${
+                      selectedInvoice?.id === inv.id
+                        ? 'bg-slate-900 border-indigo-500/50'
+                        : 'bg-slate-900/40 border-slate-900 hover:border-slate-800'
+                    }`}
+                  >
+                    <div className="space-y-1">
+                      <div className="flex items-center space-x-2">
+                        <span className="font-bold text-white text-sm">{inv.clientName}</span>
+                        <span className="bg-slate-850 text-slate-400 border border-slate-800 font-mono text-[9px] px-1.5 py-0.2 rounded font-semibold uppercase">
+                          ID: {inv.id}
+                        </span>
+                      </div>
+                      <div className="text-slate-400 font-mono text-[10px]">
+                        Vence: <span className="text-slate-300">{inv.dueDateStr}</span>
+                        {badge.tone === 'partial' && (
+                          <span className="text-sky-400 block text-[10px] mt-0.5">
+                            Pagado {formatMXN(paid)} · Resta {formatMXN(pending)}
+                          </span>
+                        )}
+                      </div>
+                    </div>
+
+                    <div className="text-right space-y-1.5">
+                      <span className="font-bold font-mono text-sm text-white block">{formatMXN(inv.amount)}</span>
+                      <span
+                        className={`px-2 py-0.5 rounded text-[9px] font-mono font-bold uppercase inline-block border ${BADGE_CLASS[badge.tone]}`}
+                      >
+                        {badge.label}
+                      </span>
+                    </div>
+                  </div>
+                );
+              })
+            )}
           </div>
         </div>
 
-        {/* Invoice Detail inspection & Pay wizard (5 columns) */}
+        {/* Detail / account state / pay */}
         <div className="lg:col-span-5">
           {selectedInvoice ? (
             <div id="billing-detail-wizard" className="bg-slate-950 p-6 rounded-3xl border border-slate-800 space-y-5">
               <div className="flex items-center justify-between border-b border-slate-900 pb-3">
                 <div>
                   <span className="bg-emerald-500/15 text-emerald-400 border border-emerald-500/20 text-[9px] font-mono tracking-widest uppercase px-2 py-0.5 rounded">
-                    Revisión de Folio
+                    Estado de Cuenta
                   </span>
-                  <h4 className="text-base font-bold text-white mt-1.5">Detalles de Facturación</h4>
+                  <h4 className="text-base font-bold text-white mt-1.5">Factura {selectedInvoice.id}</h4>
                 </div>
                 <button onClick={() => setSelectedInvoice(null)} className="text-slate-500 hover:text-white font-bold">✕</button>
               </div>
 
-              {/* Items Table */}
               <div className="space-y-4 text-xs font-mono">
-                <div className="bg-slate-900/60 p-4 rounded-xl border border-slate-900">
-                  <span className="text-[10px] text-slate-500 uppercase block font-semibold">Cliente Receptor</span>
-                  <span className="text-sm font-semibold text-white block mt-0.5">{selectedInvoice.clientName}</span>
-                  <span className="text-[9px] text-slate-500 block mt-1">Suscrito a Nuga Core WISP</span>
+                {/* Client + totals */}
+                <div className="bg-slate-900/60 p-4 rounded-xl border border-slate-900 space-y-2">
+                  <div>
+                    <span className="text-[10px] text-slate-500 uppercase block font-semibold">Cliente Receptor</span>
+                    <span className="text-sm font-semibold text-white block mt-0.5">{selectedInvoice.clientName}</span>
+                  </div>
+                  <div className="grid grid-cols-3 gap-2 pt-2 border-t border-slate-900">
+                    <div>
+                      <span className="text-[9px] text-slate-500 uppercase block">Total</span>
+                      <span className="text-white font-bold block">{formatMXN(selectedInvoice.amount)}</span>
+                    </div>
+                    <div>
+                      <span className="text-[9px] text-slate-500 uppercase block">Pagado</span>
+                      <span id="billing-detail-paid" className="text-emerald-400 font-bold block">{formatMXN(paidAmountOf(selectedInvoice))}</span>
+                    </div>
+                    <div>
+                      <span className="text-[9px] text-slate-500 uppercase block">Pendiente</span>
+                      <span id="billing-detail-pending" className="text-amber-400 font-bold block">{formatMXN(pendingAmountOf(selectedInvoice))}</span>
+                    </div>
+                  </div>
+                  <div className="pt-2 border-t border-slate-900 flex justify-between items-center">
+                    <span className="text-[10px] text-slate-500 uppercase">Vencimiento</span>
+                    <span className="text-slate-300">{selectedInvoice.dueDateStr}</span>
+                  </div>
                 </div>
 
+                {/* Concepts */}
                 <div className="space-y-1">
-                  <span className="text-[10px] text-slate-500 uppercase block font-semibold mb-2">Desglose de Conceptos</span>
+                  <span className="text-[10px] text-slate-500 uppercase block font-semibold mb-2">Conceptos</span>
                   {selectedInvoice.items.map((it, idx) => (
                     <div key={idx} className="flex justify-between text-slate-300 py-1 border-b border-slate-900">
                       <span className="truncate max-w-[200px]">{it.description}</span>
                       <span className="font-semibold text-slate-100">{formatMXN(it.price * it.qty)}</span>
                     </div>
                   ))}
-                  <div className="flex justify-between py-2 text-sm font-bold text-white mt-2">
-                    <span>Total Neto</span>
-                    <span className="font-semibold text-emerald-400">{formatMXN(selectedInvoice.amount)}</span>
-                  </div>
                 </div>
 
-                {/* Payments done log */}
+                {/* Pagos aplicados (account-state) */}
                 <div>
-                  <span className="text-[10px] text-slate-500 uppercase block font-semibold mb-2">Historial de Transacción</span>
-                  {selectedInvoice.payments.length > 0 ? (
-                    selectedInvoice.payments.map((p, idx) => (
-                      <div key={idx} className="bg-slate-900/40 p-3 rounded-xl border border-slate-900/50 space-y-1">
-                        <div className="flex justify-between items-center text-slate-200">
-                          <span className="font-bold">{p.method} Gateway</span>
-                          <span className="text-emerald-400 text-[11px] font-bold">Pagado</span>
+                  <span className="text-[10px] text-slate-500 uppercase block font-semibold mb-2">Pagos Aplicados</span>
+                  {accountStateLoading ? (
+                    <p className="text-slate-500 text-[11px] italic flex items-center space-x-1.5">
+                      <Loader2 className="w-3.5 h-3.5 animate-spin" />
+                      <span>Cargando estado de cuenta...</span>
+                    </p>
+                  ) : accountState && accountState.allocations.length > 0 ? (
+                    <div className="space-y-1.5">
+                      {accountState.allocations.map((a) => (
+                        <div key={a.id} className="bg-slate-900/40 p-3 rounded-xl border border-slate-900/50 space-y-1">
+                          <div className="flex justify-between items-center text-slate-200">
+                            <span className="font-bold">{a.method}</span>
+                            <span className="text-emerald-400 text-[11px] font-bold">{formatMXN(a.amount)}</span>
+                          </div>
+                          <div className="text-[10px] text-slate-500 flex justify-between">
+                            <span>{a.paymentDate?.substring(0, 16).replace('T', ' ')}</span>
+                            <span>Resta: {formatMXN(a.remainingAfterPayment)}</span>
+                          </div>
+                          {a.transactionId && (
+                            <div className="text-[9px] text-indigo-400 truncate">TXN: {a.transactionId}</div>
+                          )}
                         </div>
-                        <div className="text-[10px] text-slate-500 flex justify-between">
-                          <span>{p.date}</span>
-                          <span className="text-indigo-400 underline truncate max-w-[150px]">{p.transactionId}</span>
-                        </div>
-                      </div>
-                    ))
+                      ))}
+                    </div>
                   ) : (
-                    <p className="text-slate-500 text-[11px] italic">Esta factura todavía no ha recibido transacciones de pago.</p>
+                    <p className="text-slate-500 text-[11px] italic">Esta factura aún no tiene pagos aplicados.</p>
                   )}
                 </div>
 
-                {/* Quick Manual Actions */}
-                {selectedInvoice.status !== 'paid' && (
-                  <div className="grid grid-cols-2 gap-2">
-                    <button
-                      onClick={() => openEditModal(selectedInvoice)}
-                      className="py-2.5 bg-slate-800 hover:bg-slate-700 text-slate-200 rounded-xl font-bold transition text-[11px] flex items-center justify-center space-x-1 border border-slate-700"
-                    >
-                      <Edit className="w-3.5 h-3.5 text-indigo-400" />
-                      <span>Editar Factura</span>
-                    </button>
-                    <button
-                      onClick={() => handlePaySubmit(selectedInvoice.id)}
-                      className="py-2.5 bg-emerald-600/15 hover:bg-emerald-600 hover:text-slate-950 text-emerald-400 rounded-xl font-bold transition text-[11px] flex items-center justify-center space-x-1 border border-emerald-500/20"
-                    >
-                      <Coins className="w-3.5 h-3.5" />
-                      <span>Pago Manual / Caja</span>
-                    </button>
-                  </div>
-                )}
-
-                {/* Gateway trigger */}
-                {selectedInvoice.status !== 'paid' && (
-                  <div className="bg-slate-900 p-4 rounded-2xl border border-slate-800/80 space-y-3">
-                    <span className="text-slate-400 font-bold uppercase text-[9px] font-mono block">Simulación de Pasarela de Pago</span>
+                {/* Acciones (RBAC visual) */}
+                {canManage && isPayable(selectedInvoice) && (
+                  <>
                     <div className="grid grid-cols-2 gap-2">
-                      {['Stripe', 'Mercado Pago', 'PayPal', 'OXXO', 'SPEI'].map((gw) => (
-                        <button
-                          key={gw}
-                          type="button"
-                          onClick={() => setPayGateway(gw)}
-                          className={`py-1.5 rounded-lg font-mono text-[10px] transition font-bold border ${
-                            payGateway === gw 
-                              ? 'bg-indigo-600 border-indigo-500 text-white' 
-                              : 'bg-slate-950 border-slate-800 text-slate-400 hover:text-slate-200'
-                          }`}
-                        >
-                          {gw}
-                        </button>
-                      ))}
+                      <button
+                        onClick={() => openEditModal(selectedInvoice)}
+                        className="py-2.5 bg-slate-800 hover:bg-slate-700 text-slate-200 rounded-xl font-bold transition text-[11px] flex items-center justify-center space-x-1 border border-slate-700"
+                      >
+                        <Edit className="w-3.5 h-3.5 text-indigo-400" />
+                        <span>Editar</span>
+                      </button>
+                      <button
+                        onClick={() => requestCancel(selectedInvoice)}
+                        className="py-2.5 bg-slate-800 hover:bg-rose-600/30 text-slate-200 rounded-xl font-bold transition text-[11px] flex items-center justify-center space-x-1 border border-slate-700"
+                      >
+                        <Ban className="w-3.5 h-3.5 text-rose-400" />
+                        <span>Cancelar</span>
+                      </button>
                     </div>
 
-                    <button
-                      id="submit-payment-btn"
-                      onClick={() => handlePaySubmit(selectedInvoice.id)}
-                      disabled={paymentInProgress}
-                      className="w-full py-2.5 rounded-xl bg-emerald-500 hover:bg-emerald-400 disabled:bg-slate-800 text-slate-950 font-bold font-mono text-xs flex items-center justify-center space-x-1.5 transition uppercase tracking-widest shadow-lg shadow-emerald-500/15"
-                    >
-                      {paymentInProgress ? (
-                        <>
-                          <span className="w-3.5 h-3.5 border-2 border-slate-950 border-t-white rounded-full animate-spin"></span>
-                          <span>Procesando...</span>
-                        </>
-                      ) : (
-                        <span>Simular Conciliación {payGateway}</span>
-                      )}
-                    </button>
-                    <p className="text-[9px] text-slate-500 leading-normal text-center">
-                      Al simular la conciliación, se timbrará el CFDI 4.0 con sello digital y se disparará la reactivación automática en MikroTik.
-                    </p>
+                    <div className="bg-slate-900 p-4 rounded-2xl border border-slate-800/80 space-y-3">
+                      <span className="text-slate-400 font-bold uppercase text-[9px] font-mono block">Registrar Pago (Caja / Conciliación)</span>
+
+                      <div className="space-y-1.5">
+                        <label className="text-[9px] text-slate-500 uppercase block">Monto (vacío = saldo completo {formatMXN(pendingAmountOf(selectedInvoice))})</label>
+                        <input
+                          id="billing-pay-amount"
+                          type="number"
+                          min="0"
+                          step="0.01"
+                          placeholder={String(pendingAmountOf(selectedInvoice))}
+                          value={payAmount}
+                          onChange={(e) => {
+                            setPayAmount(e.target.value);
+                            setPayAmountError('');
+                          }}
+                          className="w-full bg-slate-950 text-white border border-slate-800 rounded-xl p-2.5 font-mono text-xs"
+                        />
+                        {payAmountError && <p className="text-[10px] text-rose-400">{payAmountError}</p>}
+                      </div>
+
+                      <div className="grid grid-cols-2 gap-2">
+                        {['Stripe', 'Mercado Pago', 'PayPal', 'OXXO', 'SPEI'].map((gw) => (
+                          <button
+                            key={gw}
+                            type="button"
+                            onClick={() => setPayGateway(gw)}
+                            className={`py-1.5 rounded-lg font-mono text-[10px] transition font-bold border ${
+                              payGateway === gw
+                                ? 'bg-indigo-600 border-indigo-500 text-white'
+                                : 'bg-slate-950 border-slate-800 text-slate-400 hover:text-slate-200'
+                            }`}
+                          >
+                            {gw}
+                          </button>
+                        ))}
+                      </div>
+
+                      <button
+                        id="submit-payment-btn"
+                        onClick={() => requestPayment(selectedInvoice)}
+                        disabled={paymentInProgress}
+                        className="w-full py-2.5 rounded-xl bg-emerald-500 hover:bg-emerald-400 disabled:bg-slate-800 text-slate-950 font-bold font-mono text-xs flex items-center justify-center space-x-1.5 transition uppercase tracking-widest shadow-lg shadow-emerald-500/15"
+                      >
+                        {paymentInProgress ? (
+                          <>
+                            <Loader2 className="w-3.5 h-3.5 animate-spin" />
+                            <span>Procesando...</span>
+                          </>
+                        ) : (
+                          <>
+                            <Coins className="w-3.5 h-3.5" />
+                            <span>Registrar Pago {payGateway}</span>
+                          </>
+                        )}
+                      </button>
+                      <p className="text-[9px] text-slate-500 leading-normal text-center">
+                        Pasarelas en simulación (sin pago en línea). El cobro se persiste en Billing DB.
+                      </p>
+                    </div>
+                  </>
+                )}
+
+                {canManage && !isPayable(selectedInvoice) && selectedInvoice.status === 'paid' && (
+                  <div className="bg-emerald-500/10 border border-emerald-500/20 text-emerald-400 rounded-xl p-3 text-[11px] text-center">
+                    Factura liquidada por completo.
+                  </div>
+                )}
+                {selectedInvoice.status === 'canceled' && (
+                  <div className="bg-slate-800/40 border border-slate-700/40 text-slate-400 rounded-xl p-3 text-[11px] text-center">
+                    Factura cancelada.
                   </div>
                 )}
               </div>
@@ -393,14 +690,46 @@ export default function BillingModule({
           ) : (
             <div className="bg-slate-950 p-6 rounded-3xl border border-slate-800 text-center py-12 text-slate-500 font-mono">
               <FileText className="w-12 h-12 text-slate-850 mx-auto mb-3" />
-              <p className="text-sm">Inspecciona los conceptos de cualquier emisión para timbrar o simular pagos en línea.</p>
+              <p className="text-sm">Selecciona una factura para ver su estado de cuenta y registrar pagos.</p>
             </div>
           )}
         </div>
       </div>
 
+      {/* Confirm dialog */}
+      {confirm && (
+        <div className="fixed inset-0 bg-black/60 backdrop-blur-sm z-[55] flex items-center justify-center p-4">
+          <div className="bg-slate-950 border border-slate-800 rounded-3xl max-w-sm w-full p-6 space-y-4">
+            <h3 className="text-sm font-bold text-white flex items-center space-x-2">
+              <AlertTriangle className="w-4 h-4 text-amber-400" />
+              <span>Confirmar acción</span>
+            </h3>
+            <p className="text-xs text-slate-300 leading-relaxed">{confirm.message}</p>
+            <div className="flex justify-end space-x-2">
+              <button
+                onClick={() => setConfirm(null)}
+                className="border border-slate-800 hover:bg-slate-900 text-slate-400 px-4 py-2 rounded-xl transition text-xs"
+              >
+                Cancelar
+              </button>
+              <button
+                id="billing-confirm-btn"
+                onClick={() => {
+                  const fn = confirm.onConfirm;
+                  setConfirm(null);
+                  fn();
+                }}
+                className="bg-indigo-600 hover:bg-indigo-500 text-white px-5 py-2 rounded-xl transition font-semibold text-xs"
+              >
+                {confirm.confirmLabel}
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+
       {/* Create Invoice Modal */}
-      {showCreateModal && (
+      {showCreateModal && canManage && (
         <div className="fixed inset-0 bg-black/60 backdrop-blur-sm z-50 flex items-center justify-center p-4">
           <div className="bg-slate-950 border border-slate-800 rounded-3xl max-w-md w-full p-6 space-y-4">
             <div className="flex items-center justify-between border-b border-slate-900 pb-3">
@@ -421,8 +750,10 @@ export default function BillingModule({
                   className="w-full bg-slate-900 text-white border border-slate-800 rounded-xl p-2.5 focus:outline-none"
                 >
                   <option value="">-- Elige un suscriptor --</option>
-                  {clients.map(c => (
-                    <option key={c.id} value={c.id}>{c.name} ({c.connectionType || 'WISP'}) - Estatus: {c.status}</option>
+                  {clients.map((c) => (
+                    <option key={c.id} value={c.id}>
+                      {c.name} ({c.connectionType || 'WISP'}) - Estatus: {c.status}
+                    </option>
                   ))}
                 </select>
               </div>
@@ -472,9 +803,10 @@ export default function BillingModule({
                 </button>
                 <button
                   type="submit"
-                  className="bg-indigo-600 hover:bg-indigo-400 text-white px-5 py-2 rounded-xl transition font-semibold"
+                  disabled={!!busyLabel}
+                  className="bg-indigo-600 hover:bg-indigo-400 disabled:bg-slate-800 text-white px-5 py-2 rounded-xl transition font-semibold"
                 >
-                  Emitir Factura SAT
+                  Emitir Factura
                 </button>
               </div>
             </form>
@@ -483,7 +815,7 @@ export default function BillingModule({
       )}
 
       {/* Edit Invoice Modal */}
-      {showEditModal && (
+      {showEditModal && canManage && (
         <div className="fixed inset-0 bg-black/60 backdrop-blur-sm z-50 flex items-center justify-center p-4">
           <div className="bg-slate-950 border border-slate-800 rounded-3xl max-w-md w-full p-6 space-y-4">
             <div className="flex items-center justify-between border-b border-slate-900 pb-3">
@@ -539,7 +871,8 @@ export default function BillingModule({
                 </button>
                 <button
                   type="submit"
-                  className="bg-indigo-600 hover:bg-indigo-400 text-white px-5 py-2 rounded-xl transition font-semibold"
+                  disabled={!!busyLabel}
+                  className="bg-indigo-600 hover:bg-indigo-400 disabled:bg-slate-800 text-white px-5 py-2 rounded-xl transition font-semibold"
                 >
                   Guardar Cambios
                 </button>

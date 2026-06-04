@@ -104,14 +104,20 @@ export default function FinanceOwnerModule({
     alert('¡Ticket enviado correctamente desde el Portal del Cliente!');
   };
 
+  const [portalPayError, setPortalPayError] = useState('');
   const triggerPayFromPortal = async () => {
     if (!portalPayingInvoice) return;
-    await onPayInvoice(portalPayingInvoice.id, payGateway.toUpperCase());
-    setPortalPaymentSuccess(true);
-    setTimeout(() => {
-      setPortalPaymentSuccess(false);
-      setPortalPayingInvoice(null);
-    }, 2000);
+    setPortalPayError('');
+    try {
+      await onPayInvoice(portalPayingInvoice.id, payGateway.toUpperCase());
+      setPortalPaymentSuccess(true);
+      setTimeout(() => {
+        setPortalPaymentSuccess(false);
+        setPortalPayingInvoice(null);
+      }, 2000);
+    } catch (err: any) {
+      setPortalPayError(err?.message || 'No se pudo procesar el pago.');
+    }
   };
 
   // --- Sub-Tab 3: Automations State ---
@@ -695,6 +701,12 @@ export default function FinanceOwnerModule({
                                 ))}
                               </div>
                             </div>
+
+                            {portalPayError && (
+                              <p className="text-[10px] text-rose-400 bg-rose-500/10 border border-rose-500/20 rounded-lg px-2 py-1.5">
+                                {portalPayError}
+                              </p>
+                            )}
 
                             <button
                               onClick={triggerPayFromPortal}

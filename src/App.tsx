@@ -25,9 +25,12 @@ import {
   Ticket, 
   TaskOrder, 
   WarehouseItem, 
-  Invoice, 
+  Invoice,
   NocAlert,
-  NapBox
+  NapBox,
+  BillingAccountSummary,
+  BillingRevenueReport,
+  AccountStateResponse
 } from './types';
 
 import { Cpu, AlertTriangle, CheckCircle, RefreshCw, Menu } from 'lucide-react';
@@ -118,6 +121,8 @@ export default function App() {
   const [clients, setClients] = useState<Client[]>([]);
   const [plans, setPlans] = useState<Plan[]>([]);
   const [invoices, setInvoices] = useState<Invoice[]>([]);
+  const [billingSummary, setBillingSummary] = useState<BillingAccountSummary | null>(null);
+  const [revenueReport, setRevenueReport] = useState<BillingRevenueReport | null>(null);
   const [towers, setTowers] = useState<Tower[]>([]);
   const [olts, setOlts] = useState<OltFTTH[]>([]);
   const [onus, setOnus] = useState<OnuFTTH[]>([]);
@@ -195,7 +200,9 @@ export default function App() {
         resInventory,
         resAlerts,
         resMktLogs,
-        resNaps
+        resNaps,
+        resBillingSummary,
+        resRevenueReport
       ] = await Promise.all([
         fetchJson('/api/dashboard-stats'),
         fetchJson('/api/clients'),
@@ -209,13 +216,17 @@ export default function App() {
         fetchJson('/api/inventory'),
         fetchJson('/api/alerts'),
         fetchJson('/api/mikrotik/logs'),
-        fetchJson('/api/naps')
+        fetchJson('/api/naps'),
+        fetchJson('/api/billing/account-summary'),
+        fetchJson('/api/billing/revenue-report')
       ]);
 
       setStats(resStats);
       setClients(resClients);
       setPlans(resPlans);
       setInvoices(resInvoices);
+      setBillingSummary(resBillingSummary);
+      setRevenueReport(resRevenueReport);
       setTowers(resTowers);
       setOlts(resOlts);
       setOnus(resOnus);
@@ -300,17 +311,24 @@ export default function App() {
   };
 
   // BILLING TRANSAC CONTROLS
-  const handlePayInvoice = async (invoiceId: string, method: string) => {
-    try {
-      await fetchJson(`/api/billing/invoices/${invoiceId}/pay`, {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ method })
-      });
-      await fetchData();
-    } catch (err) {
-      console.error(err);
-    }
+  // `amount` opcional: si se omite, el backend liquida el saldo completo;
+  // si se envía, registra un pago parcial. Los errores se RELANZAN para que
+  // la UI (BillingModule) pueda mostrar estado de error/éxito.
+  const handlePayInvoice = async (invoiceId: string, method: string, amount?: number) => {
+    const body: Record<string, unknown> = { method };
+    if (typeof amount === 'number' && amount > 0) body.amount = amount;
+    await fetchJson(`/api/billing/invoices/${invoiceId}/pay`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify(body)
+    });
+    await fetchData();
+  };
+
+  // Estado de cuenta por factura (allocations + saldos). Lo consume BillingModule
+  // bajo demanda al abrir el detalle de una factura.
+  const fetchAccountState = async (invoiceId: string): Promise<AccountStateResponse> => {
+    return fetchJson(`/api/billing/invoices/${invoiceId}/account-state`);
   };
 
   // TECHNICAL INFRASTRUCTURE CONTROLS
@@ -338,30 +356,23 @@ export default function App() {
     }
   };
 
+  // Errores RELANZADOS para que BillingModule muestre estado de error/éxito.
   const handleCreateInvoice = async (invoiceData: any) => {
-    try {
-      await fetchJson('/api/billing/invoices', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify(invoiceData)
-      });
-      await fetchData();
-    } catch (err) {
-      console.error(err);
-    }
+    await fetchJson('/api/billing/invoices', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify(invoiceData)
+    });
+    await fetchData();
   };
 
   const handleEditInvoice = async (id: string, invoiceData: any) => {
-    try {
-      await fetchJson(`/api/billing/invoices/${id}`, {
-        method: 'PUT',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify(invoiceData)
-      });
-      await fetchData();
-    } catch (err) {
-      console.error(err);
-    }
+    await fetchJson(`/api/billing/invoices/${id}`, {
+      method: 'PUT',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify(invoiceData)
+    });
+    await fetchData();
   };
 
   const handleCreateTower = async (towerData: any) => {
@@ -595,12 +606,16 @@ export default function App() {
             )}
 
             {activeTab === 'billing' && (
-              <BillingModule 
-                invoices={invoices} 
+              <BillingModule
+                invoices={invoices}
                 clients={clients}
+                summary={billingSummary}
+                revenueReport={revenueReport}
+                userRole={userSession.role}
                 onPayInvoice={handlePayInvoice}
                 onCreateInvoice={handleCreateInvoice}
                 onEditInvoice={handleEditInvoice}
+                onFetchAccountState={fetchAccountState}
               />
             )}
 
