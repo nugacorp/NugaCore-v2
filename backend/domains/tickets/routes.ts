@@ -1,7 +1,7 @@
 import { Router } from 'express';
 import { TaskOrder, Ticket } from '../../../src/types';
 import { store } from '../../../backend/state/store';
-import { requireRoles } from '../../common/rbac';
+import { READ_ROLES, requireRoles } from '../../common/rbac';
 
 const router = Router();
 
@@ -106,7 +106,7 @@ const updateRelatedClientOnCompletedOrder = (order: TaskOrder) => {
   }
 };
 
-router.get('/api/technicians', (_req, res) => {
+router.get('/api/technicians', requireRoles(READ_ROLES), (_req, res) => {
   const byOrder = store.WORK_ORDERS.map((wo) => ({ id: wo.assignedTechnicianId || wo.technicianName.toLowerCase().replace(/[^a-z0-9]/g, '-'), name: wo.technicianName }));
   const byTicket = store.TICKETS.filter((tk) => !!tk.technicianName).map((tk) => ({ id: tk.technicianId || tk.technicianName!.toLowerCase().replace(/[^a-z0-9]/g, '-'), name: tk.technicianName! }));
 
@@ -120,7 +120,7 @@ router.get('/api/technicians', (_req, res) => {
   res.json(Array.from(unique.values()));
 });
 
-router.get('/api/tickets', (req, res) => {
+router.get('/api/tickets', requireRoles(READ_ROLES), (req, res) => {
   const status = parseTicketStatus(req.query.status);
   const severity = parseTicketSeverity(req.query.severity);
   const priority = parseTicketPriority(req.query.priority);
@@ -145,7 +145,7 @@ router.get('/api/tickets', (req, res) => {
   res.json(rows);
 });
 
-router.get('/api/tickets/:id', (req, res) => {
+router.get('/api/tickets/:id', requireRoles(READ_ROLES), (req, res) => {
   const ticket = store.TICKETS.find((item) => item.id === req.params.id);
   if (!ticket) {
     return res.status(404).json({ error: 'Ticket not found' });
@@ -350,7 +350,7 @@ router.post('/api/tickets/:id/attachments', requireRoles(['super admin', 'admini
   return res.status(201).json(ticket);
 });
 
-router.get('/api/tickets/:id/history', (req, res) => {
+router.get('/api/tickets/:id/history', requireRoles(READ_ROLES), (req, res) => {
   const ticket = store.TICKETS.find((item) => item.id === req.params.id);
   if (!ticket) {
     return res.status(404).json({ error: 'Ticket not found' });
@@ -359,7 +359,7 @@ router.get('/api/tickets/:id/history', (req, res) => {
   return res.json(ticket.history || []);
 });
 
-router.get('/api/workorders/agenda', (req, res) => {
+router.get('/api/workorders/agenda', requireRoles(READ_ROLES), (req, res) => {
   const technicianId = String(req.query.technicianId || '').trim();
   const from = String(req.query.from || '').trim();
   const to = String(req.query.to || '').trim();
@@ -386,7 +386,7 @@ router.get('/api/workorders/agenda', (req, res) => {
   return res.json(calendar);
 });
 
-router.get('/api/workorders', (req, res) => {
+router.get('/api/workorders', requireRoles(READ_ROLES), (req, res) => {
   const status = parseWorkOrderStatus(req.query.status);
   const type = parseWorkOrderType(req.query.type);
   const technicianId = String(req.query.technicianId || '').trim();
@@ -412,7 +412,7 @@ router.get('/api/workorders', (req, res) => {
   return res.json(rows);
 });
 
-router.get('/api/workorders/:id', (req, res) => {
+router.get('/api/workorders/:id', requireRoles(READ_ROLES), (req, res) => {
   const order = store.WORK_ORDERS.find((item) => item.id === req.params.id);
   if (!order) {
     return res.status(404).json({ error: 'Work order not found' });

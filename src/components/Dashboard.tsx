@@ -29,9 +29,10 @@ interface DashboardProps {
   onAcknowledgeAlerts: () => void;
   onRefresh: () => void;
   onPostAlert: (type: 'tower' | 'olt' | 'client' | 'system', severity: 'critical' | 'warning' | 'info', source: string, msg: string) => void;
+  getAuthHeaders: () => Promise<Record<string, string>>;
 }
 
-export default function Dashboard({ stats, alerts, onAcknowledgeAlerts, onRefresh, onPostAlert }: DashboardProps) {
+export default function Dashboard({ stats, alerts, onAcknowledgeAlerts, onRefresh, onPostAlert, getAuthHeaders }: DashboardProps) {
   const [billingBotRunning, setBillingBotRunning] = useState(false);
   const [pingScanning, setPingScanning] = useState(false);
   const [scanResults, setScanResults] = useState<any[]>([]);
@@ -60,7 +61,8 @@ export default function Dashboard({ stats, alerts, onAcknowledgeAlerts, onRefres
 
   useEffect(() => {
     // Initial fetch of notification settings
-    fetch('/api/notifications/settings')
+    getAuthHeaders()
+      .then(headers => fetch('/api/notifications/settings', { headers }))
       .then(r => {
         if (!r.ok) throw new Error("status code " + r.status);
         return r.json();
@@ -78,14 +80,14 @@ export default function Dashboard({ stats, alerts, onAcknowledgeAlerts, onRefres
     if (typeof window !== 'undefined' && 'Notification' in window) {
       setNotificationPermission(Notification.permission);
     }
-  }, []);
+  }, [getAuthHeaders]);
 
   const saveSettings = async (updated: typeof pushSettings) => {
     setSavingSettings(true);
     try {
       const res = await fetch('/api/notifications/settings', {
         method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
+        headers: { 'Content-Type': 'application/json', ...(await getAuthHeaders()) },
         body: JSON.stringify(updated)
       });
       if (res.ok) {
@@ -135,7 +137,7 @@ export default function Dashboard({ stats, alerts, onAcknowledgeAlerts, onRefres
     try {
       const res = await fetch('/api/notifications/trigger-simulation', {
         method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
+        headers: { 'Content-Type': 'application/json', ...(await getAuthHeaders()) },
         body: JSON.stringify({
           eventType: simEventType,
           metricValue: simLatencyValue,

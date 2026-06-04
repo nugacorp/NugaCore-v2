@@ -1,7 +1,7 @@
 import { Router } from 'express';
 import { Plan } from '../../../src/types';
 import { store } from '../../../backend/state/store';
-import { requireRoles } from '../../common/rbac';
+import { READ_ROLES, requireRoles } from '../../common/rbac';
 
 const router = Router();
 
@@ -12,7 +12,7 @@ const asBusinessType = (value: unknown): 'Residencial' | 'Empresarial' | 'Dedica
   return 'Residencial';
 };
 
-router.get('/api/plans', (req, res) => {
+router.get('/api/plans', requireRoles(READ_ROLES), (req, res) => {
   const q = String(req.query.q || '').trim().toLowerCase();
   const status = String(req.query.status || '').trim().toLowerCase();
   const businessType = String(req.query.businessType || '').trim().toLowerCase();
@@ -36,7 +36,7 @@ router.get('/api/plans', (req, res) => {
   res.json(filtered);
 });
 
-router.get('/api/plans/:id', (_req, res) => {
+router.get('/api/plans/:id', requireRoles(READ_ROLES), (_req, res) => {
   const plan = store.PLANS.find((p) => p.id === _req.params.id);
   if (!plan) {
     return res.status(404).json({ error: 'Plan not found' });

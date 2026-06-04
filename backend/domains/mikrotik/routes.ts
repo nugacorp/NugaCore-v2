@@ -2,7 +2,7 @@ import { Router } from 'express';
 import { getGemini } from '../../../backend/services/gemini';
 import { encryptSecret } from '../../../backend/services/crypto';
 import { store } from '../../../backend/state/store';
-import { requireRoles } from '../../common/rbac';
+import { READ_ROLES, requireRoles } from '../../common/rbac';
 
 const router = Router();
 
@@ -294,7 +294,7 @@ router.get('/api/mikrotik/command-audit', requireRoles(['super admin', 'administ
   res.json(rows);
 });
 
-router.get('/api/mikrotik/logs', (_req, res) => {
+router.get('/api/mikrotik/logs', requireRoles(READ_ROLES), (_req, res) => {
   res.json(store.MIKROTIK_LOGS);
 });
 

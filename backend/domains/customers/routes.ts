@@ -1,7 +1,7 @@
 import { Router } from 'express';
 import { Client, Invoice, OnuFTTH } from '../../../src/types';
 import { store } from '../../../backend/state/store';
-import { requireRoles } from '../../common/rbac';
+import { READ_ROLES, requireRoles } from '../../common/rbac';
 import { asyncHandler } from '../../common/errors';
 import { getCustomersService, parseClientStatus, parseClientType } from './service';
 
@@ -12,7 +12,7 @@ const router = Router();
 // Los efectos cruzados con otros dominios (facturas, ONUs, logs MikroTik,
 // alertas) NO están migrados y siguen operando contra el store en ambos modos.
 
-router.get('/api/clients', asyncHandler(async (req, res) => {
+router.get('/api/clients', requireRoles(READ_ROLES), asyncHandler(async (req, res) => {
   const status = parseClientStatus(req.query.status);
   const type = parseClientType(req.query.type);
   const city = String(req.query.city || '').trim().toLowerCase();
@@ -23,12 +23,12 @@ router.get('/api/clients', asyncHandler(async (req, res) => {
   res.json(rows);
 }));
 
-router.get('/api/clients/:id/history', asyncHandler(async (req, res) => {
+router.get('/api/clients/:id/history', requireRoles(READ_ROLES), asyncHandler(async (req, res) => {
   const events = await getCustomersService().getHistory(req.params.id);
   res.json(events);
 }));
 
-router.get('/api/clients/:id', asyncHandler(async (req, res) => {
+router.get('/api/clients/:id', requireRoles(READ_ROLES), asyncHandler(async (req, res) => {
   const client = await getCustomersService().getById(req.params.id);
   if (!client) {
     return res.status(404).json({ error: 'Customer not found' });

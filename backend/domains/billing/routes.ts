@@ -1,7 +1,7 @@
 import { Router } from 'express';
 import { Invoice } from '../../../src/types';
 import { store } from '../../../backend/state/store';
-import { requireRoles } from '../../common/rbac';
+import { READ_ROLES, requireRoles } from '../../common/rbac';
 
 const router = Router();
 
@@ -47,12 +47,12 @@ const refreshAllInvoiceStatuses = () => {
   store.INVOICES.forEach(syncInvoiceStatus);
 };
 
-router.get('/api/billing/invoices', (_req, res) => {
+router.get('/api/billing/invoices', requireRoles(READ_ROLES), (_req, res) => {
   refreshAllInvoiceStatuses();
   res.json(store.INVOICES.map(withAccountState));
 });
 
-router.get('/api/billing/invoices/:id/account-state', (req, res) => {
+router.get('/api/billing/invoices/:id/account-state', requireRoles(READ_ROLES), (req, res) => {
   const invoice = store.INVOICES.find((row) => row.id === req.params.id);
   if (!invoice) {
     return res.status(404).json({ error: 'Invoice ledger not found' });
@@ -65,7 +65,7 @@ router.get('/api/billing/invoices/:id/account-state', (req, res) => {
   });
 });
 
-router.get('/api/billing/account-summary', (_req, res) => {
+router.get('/api/billing/account-summary', requireRoles(READ_ROLES), (_req, res) => {
   refreshAllInvoiceStatuses();
 
   const totals = store.INVOICES.reduce(
@@ -95,7 +95,7 @@ router.get('/api/billing/account-summary', (_req, res) => {
   });
 });
 
-router.get('/api/billing/revenue-report', (_req, res) => {
+router.get('/api/billing/revenue-report', requireRoles(READ_ROLES), (_req, res) => {
   refreshAllInvoiceStatuses();
 
   const byMethod = new Map<string, number>();

@@ -3,6 +3,8 @@ import { ActionPermissionKey, hasActionPermission } from './action-permissions';
 
 export type AppRole = 'super admin' | 'administrador' | 'cobranza' | 'tecnico' | 'soporte' | 'solo lectura';
 
+export const READ_ROLES: AppRole[] = ['super admin', 'administrador', 'cobranza', 'tecnico', 'soporte', 'solo lectura'];
+
 export const normalizeRole = (value: string | string[] | undefined): AppRole | null => {
   const raw = Array.isArray(value) ? value[0] : value;
   const role = (raw || '').trim().toLowerCase();

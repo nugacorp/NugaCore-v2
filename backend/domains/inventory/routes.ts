@@ -1,7 +1,7 @@
 import { Router } from 'express';
 import { WarehouseItem } from '../../../src/types';
 import { store } from '../../../backend/state/store';
-import { requireRoles } from '../../common/rbac';
+import { READ_ROLES, requireRoles } from '../../common/rbac';
 
 const router = Router();
 
@@ -30,7 +30,7 @@ const parseOperationalStatus = (value: unknown) => {
   return null;
 };
 
-router.get('/api/inventory', (req, res) => {
+router.get('/api/inventory', requireRoles(READ_ROLES), (req, res) => {
   const q = String(req.query.q || '').trim().toLowerCase();
   const warehouse = String(req.query.warehouse || '').trim();
   const status = parseOperationalStatus(req.query.operationalStatus);
@@ -52,7 +52,7 @@ router.get('/api/inventory', (req, res) => {
   res.json(rows);
 });
 
-router.get('/api/inventory/movements', (req, res) => {
+router.get('/api/inventory/movements', requireRoles(READ_ROLES), (req, res) => {
   const itemId = String(req.query.itemId || '').trim();
   const rows = itemId
     ? store.INVENTORY_MOVEMENTS.filter((row) => row.itemId === itemId)
@@ -60,7 +60,7 @@ router.get('/api/inventory/movements', (req, res) => {
   res.json(rows);
 });
 
-router.get('/api/inventory/assignments', (req, res) => {
+router.get('/api/inventory/assignments', requireRoles(READ_ROLES), (req, res) => {
   const itemId = String(req.query.itemId || '').trim();
   const rows = itemId
     ? store.INVENTORY_ASSIGNMENTS.filter((row) => row.itemId === itemId)
@@ -68,7 +68,7 @@ router.get('/api/inventory/assignments', (req, res) => {
   res.json(rows);
 });
 
-router.get('/api/inventory/:id/state', (req, res) => {
+router.get('/api/inventory/:id/state', requireRoles(READ_ROLES), (req, res) => {
   const item = store.INVENTORY.find((row) => row.id === req.params.id);
   if (!item) {
     return res.status(404).json({ error: 'Inventory item not found' });

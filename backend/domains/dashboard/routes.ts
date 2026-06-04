@@ -1,6 +1,6 @@
 import { Router } from 'express';
 import { store } from '../../../backend/state/store';
-import { requireRoles } from '../../common/rbac';
+import { READ_ROLES, requireRoles } from '../../common/rbac';
 
 const router = Router();
 
@@ -180,7 +180,7 @@ const calculateMonitoringOverview = () => {
   };
 };
 
-router.get('/api/dashboard-stats', (_req, res) => {
+router.get('/api/dashboard-stats', requireRoles(READ_ROLES), (_req, res) => {
   const kpis = buildExecutiveKpis();
   const monthCobranza = store.INVOICES.filter((f) => f.status === 'paid').reduce((acc, f) => acc + f.amount, 0);
   const monthFacturacion = store.INVOICES.reduce((acc, f) => acc + f.amount, 0);
@@ -208,7 +208,7 @@ router.get('/api/dashboard-stats', (_req, res) => {
   });
 });
 
-router.get('/api/dashboard/executive-summary', (_req, res) => {
+router.get('/api/dashboard/executive-summary', requireRoles(READ_ROLES), (_req, res) => {
   const kpis = buildExecutiveKpis();
   const trend = buildRevenueTrend(6);
 
@@ -224,7 +224,7 @@ router.get('/api/dashboard/executive-summary', (_req, res) => {
   });
 });
 
-router.get('/api/dashboard/kpi-trends', (req, res) => {
+router.get('/api/dashboard/kpi-trends', requireRoles(READ_ROLES), (req, res) => {
   const months = Math.max(3, Math.min(12, Number(req.query.months) || 6));
   res.json({
     generatedAt: nowStamp(),
@@ -233,7 +233,7 @@ router.get('/api/dashboard/kpi-trends', (req, res) => {
   });
 });
 
-router.get('/api/notifications/settings', (_req, res) => {
+router.get('/api/notifications/settings', requireRoles(READ_ROLES), (_req, res) => {
   res.json(store.NOTIFICATION_SETTINGS);
 });
 
@@ -307,13 +307,13 @@ router.post('/api/notifications/trigger-simulation', requireRoles(['super admin'
   }
 });
 
-router.get('/api/alerts', (_req, res) => res.json(store.NOC_ALERTS));
+router.get('/api/alerts', requireRoles(READ_ROLES), (_req, res) => res.json(store.NOC_ALERTS));
 
-router.get('/api/monitoring/overview', (_req, res) => {
+router.get('/api/monitoring/overview', requireRoles(READ_ROLES), (_req, res) => {
   res.json(calculateMonitoringOverview());
 });
 
-router.get('/api/monitoring/snapshots', (req, res) => {
+router.get('/api/monitoring/snapshots', requireRoles(READ_ROLES), (req, res) => {
   const targetType = String(req.query.targetType || '').trim().toLowerCase();
   const targetId = String(req.query.targetId || '').trim();
   const limit = Math.max(1, Math.min(200, Number(req.query.limit) || 50));
@@ -329,7 +329,7 @@ router.get('/api/monitoring/snapshots', (req, res) => {
   res.json(rows);
 });
 
-router.get('/api/monitoring/targets', (_req, res) => {
+router.get('/api/monitoring/targets', requireRoles(READ_ROLES), (_req, res) => {
   const targets = [
     ...store.TOWERS.map((tower) => ({ id: tower.id, label: tower.name, ip: tower.ip, targetType: 'tower' })),
     ...store.OLTS.map((olt) => ({ id: olt.id, label: olt.name, ip: olt.ip, targetType: 'olt' })),

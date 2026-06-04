@@ -119,6 +119,38 @@ describe.skipIf(!hasEnv)('Auth real (Supabase JWT) — Fase 2.1 staging', () => 
     expect([401, 403]).toContain(spoofed.status);
   });
 
+  it('lecturas sensibles exigen Bearer válido en staging/producción y no aceptan trusted-header spoofing', async () => {
+    const sensitiveReads = [
+      '/api/dashboard-stats',
+      '/api/clients',
+      '/api/plans',
+      '/api/billing/invoices',
+      '/api/network-towers',
+      '/api/olt',
+      '/api/onu',
+      '/api/tickets',
+      '/api/workorders',
+      '/api/inventory',
+      '/api/alerts',
+      '/api/mikrotik/logs',
+      '/api/naps',
+    ];
+
+    for (const path of sensitiveReads) {
+      const anonymous = await request(app).get(path);
+      expect(anonymous.status, `${path} debe bloquear lectura anónima`).toBe(401);
+
+      const spoofed = await request(app)
+        .get(path)
+        .set({ 'x-user-role': 'super admin', 'x-user-id': 'spoofed-reader' });
+      expect(spoofed.status, `${path} no debe aceptar trusted headers en producción`).toBe(401);
+
+      const authorizedSession = await signIn(USERS.readonly.email);
+      const authorized = await request(app).get(path).set('Authorization', `Bearer ${authorizedSession.accessToken}`);
+      expect(authorized.status, `${path} debe permitir JWT readonly válido`).toBe(200);
+    }
+  });
+
   it('RBAC: superadmin y administrador acceden a Customers; readonly solo lectura', async () => {
     for (const key of ['superadmin', 'administrador'] as RoleKey[]) {
       const res = await request(app)
@@ -129,13 +161,14 @@ describe.skipIf(!hasEnv)('Auth real (Supabase JWT) — Fase 2.1 staging', () => 
       await request(app).delete(`/api/clients/${res.body.id}`).set('Authorization', `Bearer ${tokens.superadmin}`).expect(204);
     }
 
-    const read = await request(app).get('/api/clients').set('Authorization', `Bearer ${tokens.readonly}`);
+    const freshReadonly = await signIn(USERS.readonly.email);
+    const read = await request(app).get('/api/clients').set('Authorization', `Bearer ${freshReadonly.accessToken}`);
     expect(read.status).toBe(200);
 
-    const freshReadonly = await signIn(USERS.readonly.email);
+    const readonlyForWrite = await signIn(USERS.readonly.email);
     const write = await request(app)
       .post('/api/clients')
-      .set('Authorization', `Bearer ${freshReadonly.accessToken}`)
+      .set('Authorization', `Bearer ${readonlyForWrite.accessToken}`)
       .send({ name: 'Readonly Forbidden', type: 'residential', address: 'Calle Auth 2', city: 'CDMX' });
     expect(write.status).toBe(403);
   });

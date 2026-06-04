@@ -1,7 +1,7 @@
 import { Router } from 'express';
 import { OnuFTTH, Tower } from '../../../src/types';
 import { store } from '../../../backend/state/store';
-import { requireRoles } from '../../common/rbac';
+import { READ_ROLES, requireRoles } from '../../common/rbac';
 
 const router = Router();
 
@@ -49,7 +49,7 @@ const recalculateTowerStatusFromSectors = (towerId: string): void => {
   applyTowerState(tower, 'online');
 };
 
-router.get('/api/network-towers', (req, res) => {
+router.get('/api/network-towers', requireRoles(READ_ROLES), (req, res) => {
   const status = parseTowerStatus(req.query.status);
   const q = String(req.query.q || '').trim().toLowerCase();
 
@@ -65,7 +65,7 @@ router.get('/api/network-towers', (req, res) => {
   res.json(rows);
 });
 
-router.get('/api/network-towers/:id', (req, res) => {
+router.get('/api/network-towers/:id', requireRoles(READ_ROLES), (req, res) => {
   const tower = store.TOWERS.find((item) => item.id === req.params.id);
   if (!tower) {
     return res.status(404).json({ error: 'Tower not found' });
@@ -209,7 +209,7 @@ router.post('/api/network-towers/:id/toggle-state', requireRoles(['super admin',
   }
 });
 
-router.get('/api/network-towers/:id/sectors', (req, res) => {
+router.get('/api/network-towers/:id/sectors', requireRoles(READ_ROLES), (req, res) => {
   const tower = store.TOWERS.find((item) => item.id === req.params.id);
   if (!tower) {
     return res.status(404).json({ error: 'Tower not found' });
@@ -280,9 +280,9 @@ router.delete('/api/network-sectors/:id', requireRoles(['super admin', 'administ
   res.status(204).send();
 });
 
-router.get('/api/olt', (_req, res) => res.json(store.OLTS));
-router.get('/api/onu', (_req, res) => res.json(store.ONUS));
-router.get('/api/naps', (_req, res) => res.json(store.NAP_BOXES));
+router.get('/api/olt', requireRoles(READ_ROLES), (_req, res) => res.json(store.OLTS));
+router.get('/api/onu', requireRoles(READ_ROLES), (_req, res) => res.json(store.ONUS));
+router.get('/api/naps', requireRoles(READ_ROLES), (_req, res) => res.json(store.NAP_BOXES));
 
 router.post('/api/onu/provision', requireRoles(['super admin', 'administrador', 'tecnico']), (req, res) => {
   const { clientId, oltId, port, mac, brand, model, napId, napPort } = req.body;

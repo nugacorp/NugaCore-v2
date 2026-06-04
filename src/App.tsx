@@ -548,6 +548,7 @@ export default function App() {
                 onAcknowledgeAlerts={handleAcknowledgeAlerts}
                 onRefresh={handleRefresh}
                 onPostAlert={handlePostAlert}
+                getAuthHeaders={getAuthHeaders}
               />
             )}
 
