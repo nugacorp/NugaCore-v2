@@ -202,23 +202,72 @@ Conteos finales de tablas relevantes:
 
 No quedaron datos de prueba activos.
 
+## Quick Login Validation
+
+Fecha: 2026-06-04T19:52Z
+
+Resultado: PASS
+
+Validacion final ejecutada despues de corregir la configuracion de Coolify para `nugacore-staging`.
+
+Configuracion:
+
+- `VITE_ENABLE_QUICK_LOGIN=true` configurado como build-time variable.
+- Verificado sin duplicados para staging normal: 1 entrada, `is_buildtime=true`, `is_runtime=true`, `is_preview=false`.
+
+Redeploy:
+
+- Redeploy completo ejecutado desde Coolify API con `force=true`.
+- Deployment finalizo correctamente.
+- Build de imagen completado.
+- Rolling update completado.
+- Contenedor nuevo healthy.
+
+Healthchecks post-deploy:
+
+| Endpoint | Resultado |
+| --- | --- |
+| `/api/health` | PASS, HTTP 200 |
+| `/api/health/live` | PASS, HTTP 200 |
+| `/api/health/ready` | PASS, HTTP 200 |
+
+Quick Login UI:
+
+- Panel `ACCESO RAPIDO STAGING (SOLO EMAIL)` visible en login.
+- Usuarios visibles unicamente:
+  - `superadmin@staging.nugacore.local`
+  - `admin@staging.nugacore.local`
+  - `billing@staging.nugacore.local`
+  - `tech@staging.nugacore.local`
+  - `support@staging.nugacore.local`
+  - `readonly@staging.nugacore.local`
+- No aparecen emails `@nugacorp.com` ni usuarios demo antiguos en el panel de login.
+- Click en Quick Login rellena solo el email.
+- El password queda vacio.
+- Quick Login no inicia sesion automaticamente.
+- Sin password correcto no inicia sesion.
+- Con password correcto inicia sesion via Supabase.
+
+Smoke test rapido Billing:
+
+| Usuario | Validacion | Resultado |
+| --- | --- | --- |
+| `billing@staging.nugacore.local` | Billing visible | PASS |
+| `billing@staging.nugacore.local` | KPIs cargan | PASS |
+| `readonly@staging.nugacore.local` | Billing visible | PASS |
+| `readonly@staging.nugacore.local` | Sin botones de escritura de Billing | PASS |
+
+No se crearon facturas nuevas ni datos de prueba durante esta validacion final.
+
 ## 10. Resultado final
 
-Resultado final: NO APROBADA
+Resultado final: APROBADA
 
 Motivo:
 
 - PASS en deploy, healthchecks, no-bypass login, secret scan, cache busting, Billing Cobranza, RBAC Solo lectura y limpieza.
-- FAIL en requisito explicito de quick login seguro porque `VITE_ENABLE_QUICK_LOGIN=true` no esta configurado como build-time variable en staging; el panel de quick login no aparece y no se puede validar prefill de email/password vacio para `billing` y `readonly`.
+- PASS en Quick Login seguro despues de configurar `VITE_ENABLE_QUICK_LOGIN=true` como build-time variable, redeployar y validar el panel de staging.
 
 ## Recomendacion siguiente
 
-No avanzar a Fase 4.4 todavia.
-
-Corregir configuracion de Coolify/staging:
-
-1. Agregar `VITE_ENABLE_QUICK_LOGIN=true` como build-time variable para la app staging.
-2. Redeployar commit `f70ba78` o superior.
-3. Repetir solo la validacion de quick login seguro y una smoke test Billing/RBAC corta.
-
-Si el quick login seguro pasa despues de esa correccion, la Fase 4.3 puede aprobarse.
+Fase 4.3 queda aprobada. No se avanzo a Fase 4.4 en esta validacion.
