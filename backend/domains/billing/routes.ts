@@ -1,232 +1,145 @@
 import { Router } from 'express';
-import { Invoice } from '../../../src/types';
 import { store } from '../../../backend/state/store';
-import { READ_ROLES, requireRoles } from '../../common/rbac';
+import { isDomainOnDb } from '../../config/feature-flags';
+import { AppRole, READ_ROLES, requireRoles } from '../../common/rbac';
+import { NotFoundError, asyncHandler } from '../../common/errors';
+import { getBillingService } from './service';
 
 const router = Router();
 
-const roundMoney = (value: number): number => Math.round(value * 100) / 100;
+const WRITE_ROLES: AppRole[] = ['super admin', 'administrador', 'cobranza'];
 
-const invoicePaidAmount = (invoice: Invoice): number => {
-  return roundMoney(invoice.payments.reduce((acc, payment) => acc + Number(payment.amount || 0), 0));
-};
+// ────────────────────────────────────────────────────────────────────
+// GET /api/billing/invoices
+// ────────────────────────────────────────────────────────────────────
+router.get('/api/billing/invoices', requireRoles(READ_ROLES), asyncHandler(async (_req, res) => {
+  res.json(await getBillingService().listInvoices());
+}));
 
-const invoicePendingAmount = (invoice: Invoice): number => {
-  return roundMoney(Math.max(invoice.amount - invoicePaidAmount(invoice), 0));
-};
+// ────────────────────────────────────────────────────────────────────
+// GET /api/billing/invoices/:id/account-state
+// ────────────────────────────────────────────────────────────────────
+router.get(
+  '/api/billing/invoices/:id/account-state',
+  requireRoles(READ_ROLES),
+  asyncHandler(async (req, res) => {
+    const state = await getBillingService().getAccountState(req.params.id);
+    if (!state) throw new NotFoundError('Invoice ledger not found', 'NOT_FOUND');
+    res.json(state);
+  }),
+);
 
-const syncInvoiceStatus = (invoice: Invoice): void => {
-  const pending = invoicePendingAmount(invoice);
-  const isPastDue = new Date(invoice.dueDateStr).getTime() < Date.now();
-  if (pending <= 0) {
-    invoice.status = 'paid';
-    invoice.cfdiStatus = 'generated';
-    if (!invoice.cfdiUuid) {
-      invoice.cfdiUuid =
-        '4F17A9B9-' +
-        Math.floor(Math.random() * 9000 + 1000) +
-        '-4EF2-BD44-FFBBAA123' +
-        Math.floor(Math.random() * 90 + 10);
-    }
-    return;
-  }
+// ────────────────────────────────────────────────────────────────────
+// GET /api/billing/account-summary
+// ────────────────────────────────────────────────────────────────────
+router.get('/api/billing/account-summary', requireRoles(READ_ROLES), asyncHandler(async (_req, res) => {
+  res.json(await getBillingService().getAccountSummary());
+}));
 
-  invoice.status = isPastDue ? 'overdue' : 'unpaid';
-  if (invoice.cfdiStatus === 'generated' && pending > 0) {
-    invoice.cfdiStatus = 'pending';
-  }
-};
+// ────────────────────────────────────────────────────────────────────
+// GET /api/billing/revenue-report
+// ────────────────────────────────────────────────────────────────────
+router.get('/api/billing/revenue-report', requireRoles(READ_ROLES), asyncHandler(async (_req, res) => {
+  res.json(await getBillingService().getRevenueReport());
+}));
 
-const withAccountState = (invoice: Invoice) => ({
-  ...invoice,
-  paidAmount: invoicePaidAmount(invoice),
-  pendingAmount: invoicePendingAmount(invoice),
-});
+// ────────────────────────────────────────────────────────────────────
+// POST /api/billing/invoices
+// ────────────────────────────────────────────────────────────────────
+router.post(
+  '/api/billing/invoices',
+  requireRoles(WRITE_ROLES),
+  asyncHandler(async (req, res) => {
+    const service = getBillingService();
+    const validated = service.validateCreateInvoice(req.body);
 
-const refreshAllInvoiceStatuses = () => {
-  store.INVOICES.forEach(syncInvoiceStatus);
-};
-
-router.get('/api/billing/invoices', requireRoles(READ_ROLES), (_req, res) => {
-  refreshAllInvoiceStatuses();
-  res.json(store.INVOICES.map(withAccountState));
-});
-
-router.get('/api/billing/invoices/:id/account-state', requireRoles(READ_ROLES), (req, res) => {
-  const invoice = store.INVOICES.find((row) => row.id === req.params.id);
-  if (!invoice) {
-    return res.status(404).json({ error: 'Invoice ledger not found' });
-  }
-
-  syncInvoiceStatus(invoice);
-  res.json({
-    invoice: withAccountState(invoice),
-    allocations: store.PAYMENT_ALLOCATIONS.filter((allocation) => allocation.invoiceId === invoice.id),
-  });
-});
-
-router.get('/api/billing/account-summary', requireRoles(READ_ROLES), (_req, res) => {
-  refreshAllInvoiceStatuses();
-
-  const totals = store.INVOICES.reduce(
-    (acc, invoice) => {
-      const paidAmount = invoicePaidAmount(invoice);
-      const pendingAmount = invoicePendingAmount(invoice);
-      acc.totalInvoiced += invoice.amount;
-      acc.totalCollected += paidAmount;
-      acc.totalPending += pendingAmount;
-      if (invoice.status === 'overdue') acc.overdueCount += 1;
-      if (invoice.status === 'paid') acc.paidCount += 1;
-      return acc;
-    },
-    {
-      totalInvoiced: 0,
-      totalCollected: 0,
-      totalPending: 0,
-      overdueCount: 0,
-      paidCount: 0,
-    },
-  );
-
-  res.json({
-    ...totals,
-    invoicesCount: store.INVOICES.length,
-    unpaidCount: store.INVOICES.filter((invoice) => invoice.status === 'unpaid').length,
-  });
-});
-
-router.get('/api/billing/revenue-report', requireRoles(READ_ROLES), (_req, res) => {
-  refreshAllInvoiceStatuses();
-
-  const byMethod = new Map<string, number>();
-  for (const invoice of store.INVOICES) {
-    for (const payment of invoice.payments) {
-      const method = payment.method || 'Otro';
-      byMethod.set(method, roundMoney((byMethod.get(method) || 0) + Number(payment.amount || 0)));
-    }
-  }
-
-  res.json({
-    generatedAt: new Date().toISOString(),
-    byMethod: Array.from(byMethod.entries()).map(([method, amount]) => ({ method, amount })),
-    topPendingInvoices: store.INVOICES
-      .map(withAccountState)
-      .filter((invoice) => invoice.pendingAmount > 0)
-      .sort((a, b) => b.pendingAmount - a.pendingAmount)
-      .slice(0, 10),
-  });
-});
-
-router.post('/api/billing/invoices/:id/pay', requireRoles(['super admin', 'administrador', 'cobranza']), (req, res) => {
-  const { id } = req.params;
-  const { method, amount, transactionId } = req.body;
-  const invoice = store.INVOICES.find((f) => f.id === id);
-  if (invoice) {
-    syncInvoiceStatus(invoice);
-    const currentPending = invoicePendingAmount(invoice);
-    if (currentPending <= 0) {
-      return res.status(400).json({ error: 'Invoice is already fully paid' });
+    let clientName = '';
+    if (!isDomainOnDb('billing')) {
+      const client = store.CLIENTS.find((c) => c.id === validated.clientId);
+      if (!client) {
+        res.status(404).json({ error: 'Client not found' });
+        return;
+      }
+      clientName = client.name;
+    } else {
+      // En modo DB se puede pasar clientName en el body, o se buscará desde clients
+      clientName =
+        typeof req.body.clientName === 'string' && req.body.clientName.trim()
+          ? req.body.clientName.trim()
+          : validated.clientId;
     }
 
-    const parsedAmount = Number(amount);
-    const paymentAmount = Number.isFinite(parsedAmount) && parsedAmount > 0 ? roundMoney(parsedAmount) : currentPending;
-
-    if (paymentAmount > currentPending) {
-      return res.status(400).json({ error: 'Payment amount exceeds invoice pending balance' });
-    }
-
-    const resolvedMethod = method || 'Transferencia';
-    const resolvedTransactionId =
-      transactionId || 'TXN_' + Math.random().toString(36).substring(3, 11).toUpperCase();
-
-    invoice.payments.push({
-      date: new Date().toISOString().replace('T', ' ').substring(0, 16),
-      amount: paymentAmount,
-      method: resolvedMethod,
-      transactionId: resolvedTransactionId,
+    const invoice = await service.createInvoice({
+      clientId: validated.clientId,
+      clientName,
+      amount: validated.amount,
+      dueDateStr: validated.dueDateStr,
+      items: validated.items,
     });
+    res.status(201).json(invoice);
+  }),
+);
 
-    syncInvoiceStatus(invoice);
-    const pendingAfterPayment = invoicePendingAmount(invoice);
+// ────────────────────────────────────────────────────────────────────
+// POST /api/billing/invoices/:id/pay
+// ────────────────────────────────────────────────────────────────────
+router.post(
+  '/api/billing/invoices/:id/pay',
+  requireRoles(WRITE_ROLES),
+  asyncHandler(async (req, res) => {
+    const service = getBillingService();
+    const invoice = await service.findInvoiceById(req.params.id);
+    if (!invoice) throw new NotFoundError('Invoice ledger not found', 'NOT_FOUND');
 
-    store.PAYMENT_ALLOCATIONS.unshift({
-      id: store.getUniquePaymentAllocationId(),
-      invoiceId: invoice.id,
-      amount: paymentAmount,
-      method: resolvedMethod,
-      paymentDate: new Date().toISOString(),
-      transactionId: resolvedTransactionId,
-      remainingAfterPayment: pendingAfterPayment,
-    });
+    const paymentInput = service.validatePayment(invoice, req.body);
+    const updated = await service.recordPayment(req.params.id, paymentInput);
 
-    const client = store.CLIENTS.find((c) => c.id === invoice.clientId);
-    if (client && client.status === 'suspended' && store.SUSPENSION_POLICY.allowAutoReactivateOnPayment) {
-      client.status = 'active';
-      store.MIKROTIK_LOGS.push({
-        timestamp: new Date().toISOString().replace('T', ' ').substring(0, 19),
-        message: `script,info Automations Flow: billing payment success of ${invoice.id} triggers reactivate customer state for ${client.pppoeUser}`,
-      });
-      store.createAlert('client', 'info', client.name, `Pago recibido via ${method}. Cuenta reactivada automaticamente a velocidad completa.`);
-      store.logSuspensionAction({
-        clientId: client.id,
-        clientName: client.name,
-        action: 'reactivate',
-        reason: `Pago conciliado en factura ${invoice.id}.`,
-        source: 'automation',
-        actorId: req.authContext?.userId,
-      });
-      store.addClientTimelineEvent({
-        clientId: client.id,
-        eventType: 'status_change',
-        summary: 'Cambio de estatus suspended -> active',
-        details: `Reactivacion automatica posterior al pago de factura ${invoice.id}.`,
-        createdBy: req.authContext?.userId,
-      });
+    // ── Reactivación automática al pagar (solo modo mock) ────────────
+    // En modo DB se implementará en Fase 4.5 junto con el dominio Suspension.
+    if (!isDomainOnDb('billing')) {
+      const client = store.CLIENTS.find((c) => c.id === invoice.clientId);
+      if (client && client.status === 'suspended' && store.SUSPENSION_POLICY.allowAutoReactivateOnPayment) {
+        client.status = 'active';
+        store.MIKROTIK_LOGS.push({
+          timestamp: new Date().toISOString().replace('T', ' ').substring(0, 19),
+          message: `script,info Automations Flow: billing payment success of ${invoice.id} triggers reactivate customer state for ${client.pppoeUser}`,
+        });
+        store.createAlert('client', 'info', client.name, `Pago recibido via ${paymentInput.method}. Cuenta reactivada automaticamente a velocidad completa.`);
+        store.logSuspensionAction({
+          clientId: client.id,
+          clientName: client.name,
+          action: 'reactivate',
+          reason: `Pago conciliado en factura ${invoice.id}.`,
+          source: 'automation',
+          actorId: req.authContext?.userId,
+        });
+        store.addClientTimelineEvent({
+          clientId: client.id,
+          eventType: 'status_change',
+          summary: 'Cambio de estatus suspended -> active',
+          details: `Reactivacion automatica posterior al pago de factura ${invoice.id}.`,
+          createdBy: req.authContext?.userId,
+        });
+      }
     }
 
-    res.json(withAccountState(invoice));
-  } else {
-    res.status(404).json({ error: 'Invoice ledger not found' });
-  }
-});
+    res.json(updated);
+  }),
+);
 
-router.post('/api/billing/invoices', requireRoles(['super admin', 'administrador', 'cobranza']), (req, res) => {
-  const { clientId, amount, dueDateStr, items } = req.body;
-  const client = store.CLIENTS.find((c) => c.id === clientId);
-  if (!client) {
-    return res.status(404).json({ error: 'Client not found' });
-  }
-
-  const resolvedAmount = Number(amount) || 0;
-  const newInvoice: Invoice = {
-    id: 'fac-' + (store.INVOICES.length + 101) + '-' + Math.floor(Math.random() * 900 + 100),
-    clientId,
-    clientName: client.name,
-    amount: resolvedAmount,
-    dateStr: new Date().toISOString().substring(0, 10),
-    dueDateStr: dueDateStr || new Date(Date.now() + 10 * 24 * 60 * 60 * 1000).toISOString().substring(0, 10),
-    status: 'unpaid',
-    cfdiStatus: 'pending',
-    items: items && items.length > 0 ? items : [{ description: 'Servicio de Internet banda ancha para Suscriptor', price: resolvedAmount, qty: 1 }],
-    payments: [],
-  };
-  store.INVOICES.unshift(newInvoice);
-  res.status(201).json(withAccountState(newInvoice));
-});
-
-router.put('/api/billing/invoices/:id', requireRoles(['super admin', 'administrador', 'cobranza']), (req, res) => {
-  const { id } = req.params;
-  const { amount, dueDateStr, items, status } = req.body;
-  const invoice = store.INVOICES.find((inv) => inv.id === id);
-  if (!invoice) {
-    return res.status(404).json({ error: 'Invoice not found' });
-  }
-  if (amount !== undefined) invoice.amount = Number(amount);
-  if (dueDateStr !== undefined) invoice.dueDateStr = dueDateStr;
-  if (items !== undefined) invoice.items = items;
-  if (status !== undefined) invoice.status = status;
-  syncInvoiceStatus(invoice);
-  res.json(withAccountState(invoice));
-});
+// ────────────────────────────────────────────────────────────────────
+// PUT /api/billing/invoices/:id
+// ────────────────────────────────────────────────────────────────────
+router.put(
+  '/api/billing/invoices/:id',
+  requireRoles(WRITE_ROLES),
+  asyncHandler(async (req, res) => {
+    const service = getBillingService();
+    const patch = service.validateUpdateInvoice(req.body);
+    const updated = await service.updateInvoice(req.params.id, patch);
+    if (!updated) throw new NotFoundError('Invoice not found', 'NOT_FOUND');
+    res.json(updated);
+  }),
+);
 
 export default router;
