@@ -217,7 +217,23 @@ ALTER TABLE public.clients
 | `npm run typecheck` | ✅ sin errores |
 | `npm test` (hermético, 77 pruebas) | ✅ 77 passed · 23 skipped |
 | `npm run build` | ✅ build exitoso (warning chunk-size preexistente) |
-| `RUN_DB_TESTS=true npm run test:db` | ⚠️ pendiente de aplicar migraciones en staging |
+| `RUN_DB_TESTS=true npm run test:db` | ✅ **12/12 passed** contra Supabase staging (2026-06-04) |
+
+## 10.1 Resultado de aplicación en staging (2026-06-04)
+
+**Método:** `psql` v18 — conexión directa `db.elshnzkceutvjzxvzqad.supabase.co:5432`.
+El CLI `supabase` v2.67.1 falló por `health_timeout` no reconocida en config.toml (campo de v2.105+).
+
+| Paso | Resultado |
+|------|-----------|
+| Migración 1 (`billing_schema.sql`) | ✅ Aplicada — 7 tablas + 26 índices + RLS + trigger |
+| Migración 2 PART 1 (UPDATE `*_cents`) | ✅ 0 filas actualizadas (sin facturas previas en DB) |
+| Migración 2 PART 2 (migrar `invoice_payments`) | ✅ 0 filas (tabla vacía) |
+| Migración 2 PART 3 (seed facturas mock) | ⚠️ DO block fallido en `fac-102→c-2` (FK: `c-2` no existe en staging). Las facturas `fac-101`…`fac-105` **no** se sembraron. Staging solo tiene `c-1`, `c-staging-1`, `c-staging-2`. El DO block hizo rollback completo. |
+| Migración 2 PART 4 (`service_subscriptions`) | ✅ 1 fila insertada: `sub-c-1` → `c-1/plan-basic/billing_day=1` |
+| `RUN_DB_TESTS=true npm run test:db` | ✅ **12/12 passed** (billing 8 + plans 2 + customers 2) |
+
+**Fallo esperado:** el seed de facturas asume los 5 clientes mock. Staging tiene solo `c-1` porque `USE_DB_CUSTOMERS=true` solo se usó para ese cliente. El DO block prueba `c-1` como proxy pero falla al insertar `fac-102` (referencia `c-2`). En Fase 4.2, el seed de facturas no será necesario — la UI los creará vía API.
 
 ---
 
@@ -225,10 +241,11 @@ ALTER TABLE public.clients
 
 | Riesgo | Severidad | Estado |
 |--------|:---------:|--------|
-| `balance_cents` GENERATED requiere PG 12+ | 🟢 | Supabase usa PG 15 → sin riesgo |
-| Migración `invoice_payments` → `payments` con IDs genéricos | 🟡 | Idempotente por `WHERE NOT EXISTS` |
-| Seed de facturas falla si clientes no están en DB | 🟡 | Manejado con DO block condicional; imprime NOTICE |
-| Columna `discount_cents` en ambas `invoices` e `invoice_items` | 🟢 | Son columnas en tablas distintas; no conflicto |
+| `balance_cents` GENERATED requiere PG 12+ | 🟢 | Supabase usa PG 17 en staging → sin riesgo |
+| Migración `invoice_payments` → `payments` con IDs genéricos | 🟢 | Idempotente; tabla vacía en staging |
+| Seed de facturas falla si clientes mock no están en DB | 🟡 | Ocurrió en staging (esperado); sin impacto en schema ni tests |
+| CLI `supabase` v2.67.1 falla con `health_timeout` en config.toml | 🟡 | Resuelto usando `psql` directo; actualizar CLI a v2.105+ cuando sea posible |
+| Columna `discount_cents` en ambas `invoices` e `invoice_items` | 🟢 | Tablas distintas; sin conflicto |
 | UNIQUE parcial en `idempotency_key` (solo cuando no es NULL) | 🟢 | Diseño correcto para campos opcionales |
 
 ---
