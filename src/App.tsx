@@ -171,8 +171,15 @@ export default function App() {
     return response.json();
   };
 
-  // Fetch initial system database
+  // Fetch initial system database.
+  // Debe ejecutarse solo cuando ya existe una sesión validada: los endpoints
+  // protegidos rechazan correctamente cualquier request sin Bearer JWT.
   const fetchData = async () => {
+    if (!sessionBootstrapped || !userSession) {
+      setLoading(false);
+      return;
+    }
+
     try {
       setLoading(true);
       const [
@@ -228,13 +235,18 @@ export default function App() {
   };
 
   useEffect(() => {
+    if (!sessionBootstrapped || !userSession) {
+      setLoading(false);
+      return;
+    }
+
     fetchData();
-    // Auto polling for live real-time NOC metrics & alarms
+    // Auto polling for live real-time NOC metrics & alarms, only after auth.
     const timer = setInterval(() => {
       fetchData();
     }, 60000);
     return () => clearInterval(timer);
-  }, []);
+  }, [sessionBootstrapped, userSession?.id]);
 
   const handleRefresh = async () => {
     await fetchData();

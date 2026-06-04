@@ -1,3 +1,4 @@
+import { readFileSync } from 'node:fs';
 import { describe, it, expect } from 'vitest';
 import { canAccessTab, getAllowedTabsByRole, getDefaultTabByRole } from '../../src/lib/rbac';
 import type { UserRole } from '../../src/lib/supabase';
@@ -65,5 +66,14 @@ describe('RBAC visual por rol (frontend)', () => {
     const next = canAccessTab(role, target) ? target : getDefaultTabByRole(role);
     expect(next).toBe('dashboard');
     expect(canAccessTab(role, next)).toBe(true);
+  });
+
+  it('App no dispara fetchData antes de tener sesión validada', () => {
+    // Regresión del bug: el dashboard hacía llamadas a /api/* en mount sin Bearer,
+    // causando spam de 401 antes/después del login.
+    const app = readFileSync('src/App.tsx', 'utf8');
+
+    expect(app).toContain('if (!sessionBootstrapped || !userSession)');
+    expect(app).toContain('}, [sessionBootstrapped, userSession?.id]);');
   });
 });
