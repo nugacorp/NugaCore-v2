@@ -4,7 +4,7 @@ import { encryptSecret } from '../../../backend/services/crypto';
 import { store, MikrotikRouterRegistryItem } from '../../../backend/state/store';
 import { READ_ROLES, requireRoles } from '../../common/rbac';
 import { generateApiCredential, generateApiUsername, generateProvisioningToken } from './provisioning/credentials';
-import { generateProvisioningScript, maskSecret } from './provisioning/script-generator';
+import { generateProvisioningScript } from './provisioning/script-generator';
 import { provisioningStore, toProvisionedView } from './provisioning/store';
 import { ScriptServerConfig } from './provisioning/types';
 
@@ -546,7 +546,8 @@ const emitProvisioning = (
     status: 'executed',
     actorId,
     requestPayload: { connectionType, routerName: routerItem.name },
-    resultSummary: `Script ${result.scriptVersion} (${connectionType}) generado. user=${apiCred.username} pass=${maskSecret(apiCred.plainPassword)} hash=${result.scriptHash.substring(0, 12)}`,
+    // Summary SIN secretos: solo usuario + hash del script (nunca el password).
+    resultSummary: `Script ${result.scriptVersion} (${connectionType}) generado. user=${apiCred.username} hash=${result.scriptHash.substring(0, 12)}`,
   });
 
   // Respuesta: el script (mostrar una vez) + metadata. SIN passwords sueltos.

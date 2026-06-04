@@ -8,6 +8,7 @@
 // ====================================================================
 
 import { MikrotikRouterRegistryItem } from '../../../state/store';
+import { redactObject, redactString } from '../../../common/secret-redaction';
 import { ConnectionType, ProvisionedRouterView } from './types';
 
 export interface ProvisioningTokenRecord {
@@ -92,10 +93,15 @@ export const provisioningStore = {
   },
 
   recordAudit(input: Omit<ProvisioningAuditRecord, 'id' | 'createdAt'>): ProvisioningAuditRecord {
+    // Red de seguridad: redacta cualquier secreto que se haya colado en el
+    // payload/summary/error antes de persistir la auditoría.
     const rec: ProvisioningAuditRecord = {
       id: `mkta-prov-${auditSeq++}`,
       createdAt: nowIso(),
       ...input,
+      requestPayload: input.requestPayload ? redactObject(input.requestPayload) : input.requestPayload,
+      resultSummary: input.resultSummary ? redactString(input.resultSummary) : input.resultSummary,
+      errorMessage: input.errorMessage ? redactString(input.errorMessage) : input.errorMessage,
     };
     this.AUDIT.unshift(rec);
     return rec;
