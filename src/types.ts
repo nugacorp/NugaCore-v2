@@ -209,6 +209,53 @@ export interface BillingRevenueReport {
   topPendingInvoices: Invoice[];
 }
 
+// ── MikroTik provisioning (Fase 4.4) ──────────────────────────────────
+export type MikrotikConnectionType = 'wireguard' | 'sstp' | 'direct' | 'zerotier' | 'tailscale';
+export type MikrotikProvisioningStatus = 'pending' | 'provisioned' | 'connected' | 'error';
+
+export interface MikrotikRouterView {
+  id: string;
+  name: string;
+  towerId?: string;
+  routerOsVersion: string;
+  connectionType: MikrotikConnectionType;
+  managementIp?: string;
+  vpnIp?: string;
+  apiPort: number;
+  apiSslPort: number;
+  status: MikrotikProvisioningStatus;
+  hasCredentials: boolean;
+  username: string;
+  lastSeenAt?: string;
+  notes?: string;
+  lastHealthCheckAt: string;
+  // Campos legacy presentes en la respuesta combinada:
+  ipAddress?: string;
+  isOnline?: boolean;
+}
+
+export interface ProvisioningScriptResponse {
+  router: MikrotikRouterView;
+  script: string;
+  scriptVersion: string;
+  scriptHash: string;
+  connectionType: 'wireguard' | 'sstp';
+  warnings: string[];
+  credentials: { apiUsername: string; vpnUsername: string };
+  provisioningToken: string;
+  tokenExpiresAt: string;
+  securityWarning: string;
+}
+
+export interface MikrotikTestConnectionResponse {
+  routerId: string;
+  dryRun: boolean;
+  mode: string;
+  reachable: boolean;
+  checks: { name: string; ok: boolean }[];
+  message: string;
+}
+
 export interface NocAlert {
   id: string;
   source: string;

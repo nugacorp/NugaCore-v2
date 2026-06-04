@@ -40,6 +40,16 @@ export interface MikrotikRouterRegistryItem {
   routerOsVersion: string;
   linkedTowerId?: string;
   lastHealthCheckAt: string;
+  // ── Provisioning (Fase 4.4) — campos opcionales/aditivos ──────────
+  connectionType?: 'wireguard' | 'sstp' | 'direct' | 'zerotier' | 'tailscale';
+  managementIp?: string;
+  vpnIp?: string;
+  apiSslPort?: number;
+  provisioningStatus?: 'pending' | 'provisioned' | 'connected' | 'error';
+  notes?: string;
+  lastSeenAt?: string;
+  encryptionVersion?: string;
+  credentialRotatedAt?: string;
 }
 
 export interface MikrotikCommandAudit {

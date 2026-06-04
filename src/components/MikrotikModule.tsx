@@ -65,13 +65,40 @@ export const MIKROTIK_ROUTERS: MikrotikRouter[] = [
   }
 ];
 
+import MikrotikRoutersPanel from './MikrotikRoutersPanel';
+import type {
+  MikrotikRouterView,
+  ProvisioningScriptResponse,
+  MikrotikTestConnectionResponse,
+} from '../types';
+import type { UserRole } from '../lib/supabase';
+
 interface MikrotikModuleProps {
   logs: any[];
   onSendCommand: (cmd: string, routerId?: string) => Promise<{ output: string }>;
   onAskCopilot: (prompt: string, routerContext?: any) => Promise<{ text: string }>;
+  // Provisioning (Fase 4.4)
+  provisionedRouters: MikrotikRouterView[];
+  userRole: UserRole;
+  onRefreshRouters: () => Promise<void>;
+  onCreateRouter: (payload: Record<string, unknown>) => Promise<void>;
+  onGenerateScript: (id: string, connectionType: 'wireguard' | 'sstp') => Promise<ProvisioningScriptResponse>;
+  onRotateCredentials: (id: string, connectionType: 'wireguard' | 'sstp') => Promise<ProvisioningScriptResponse>;
+  onTestConnection: (id: string) => Promise<MikrotikTestConnectionResponse>;
 }
 
-export default function MikrotikModule({ logs, onSendCommand, onAskCopilot }: MikrotikModuleProps) {
+export default function MikrotikModule({
+  logs,
+  onSendCommand,
+  onAskCopilot,
+  provisionedRouters,
+  userRole,
+  onRefreshRouters,
+  onCreateRouter,
+  onGenerateScript,
+  onRotateCredentials,
+  onTestConnection,
+}: MikrotikModuleProps) {
   // Connected Router State
   const [activeRouter, setActiveRouter] = useState<MikrotikRouter>(MIKROTIK_ROUTERS[0]);
 
@@ -218,6 +245,17 @@ export default function MikrotikModule({ logs, onSendCommand, onAskCopilot }: Mi
           </div>
         </div>
       </div>
+
+      {/* Routers MikroTik & Provisioning (Fase 4.4) */}
+      <MikrotikRoutersPanel
+        routers={provisionedRouters}
+        userRole={userRole}
+        onRefresh={onRefreshRouters}
+        onCreateRouter={onCreateRouter}
+        onGenerateScript={onGenerateScript}
+        onRotateCredentials={onRotateCredentials}
+        onTestConnection={onTestConnection}
+      />
 
       {/* Main Grid: Copilot on Left, Terminal and logs on Right */}
       <div className="grid grid-cols-1 lg:grid-cols-12 gap-6">

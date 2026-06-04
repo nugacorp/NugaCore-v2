@@ -30,7 +30,10 @@ import {
   NapBox,
   BillingAccountSummary,
   BillingRevenueReport,
-  AccountStateResponse
+  AccountStateResponse,
+  MikrotikRouterView,
+  ProvisioningScriptResponse,
+  MikrotikTestConnectionResponse
 } from './types';
 
 import { Cpu, AlertTriangle, CheckCircle, RefreshCw, Menu } from 'lucide-react';
@@ -132,6 +135,7 @@ export default function App() {
   const [alerts, setAlerts] = useState<NocAlert[]>([]);
   const [mikrotikLogs, setMikrotikLogs] = useState<any[]>([]);
   const [naps, setNaps] = useState<NapBox[]>([]);
+  const [provisionedRouters, setProvisionedRouters] = useState<MikrotikRouterView[]>([]);
 
   const getAuthHeaders = async (): Promise<Record<string, string>> => {
     const headers: Record<string, string> = {};
@@ -237,6 +241,8 @@ export default function App() {
       setMikrotikLogs(resMktLogs);
       setNaps(resNaps);
       setErrorStr('');
+      // Carga aislada (no participa del Promise.all para no romper a Cobranza).
+      await loadProvisionedRouters();
     } catch (err: any) {
       console.error(err);
       setErrorStr('Error contacting full-stack back-end server REST API.');
@@ -329,6 +335,57 @@ export default function App() {
   // bajo demanda al abrir el detalle de una factura.
   const fetchAccountState = async (invoiceId: string): Promise<AccountStateResponse> => {
     return fetchJson(`/api/billing/invoices/${invoiceId}/account-state`);
+  };
+
+  // ── MikroTik provisioning (Fase 4.4) ─────────────────────────────────
+  // Carga aislada con su propio try/catch: el endpoint excluye a Cobranza,
+  // así que un 403 NO debe romper la carga global de datos.
+  const loadProvisionedRouters = async () => {
+    try {
+      const data = await fetchJson('/api/mikrotik/routers');
+      setProvisionedRouters(data);
+    } catch {
+      setProvisionedRouters([]);
+    }
+  };
+
+  const handleCreateRouter = async (payload: Record<string, unknown>) => {
+    await fetchJson('/api/mikrotik/routers', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify(payload),
+    });
+    await loadProvisionedRouters();
+  };
+
+  const handleGenerateScript = async (
+    id: string,
+    connectionType: 'wireguard' | 'sstp',
+  ): Promise<ProvisioningScriptResponse> => {
+    return fetchJson(`/api/mikrotik/routers/${id}/provisioning-script`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ connectionType }),
+    });
+  };
+
+  const handleRotateCredentials = async (
+    id: string,
+    connectionType: 'wireguard' | 'sstp',
+  ): Promise<ProvisioningScriptResponse> => {
+    return fetchJson(`/api/mikrotik/routers/${id}/rotate-credentials`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ confirm: true, connectionType }),
+    });
+  };
+
+  const handleTestConnection = async (id: string): Promise<MikrotikTestConnectionResponse> => {
+    return fetchJson(`/api/mikrotik/routers/${id}/test-connection`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({}),
+    });
   };
 
   // TECHNICAL INFRASTRUCTURE CONTROLS
@@ -630,10 +687,17 @@ export default function App() {
             )}
 
             {activeTab === 'mikrotik' && (
-              <MikrotikModule 
-                logs={mikrotikLogs} 
+              <MikrotikModule
+                logs={mikrotikLogs}
                 onSendCommand={handleSendCommand}
                 onAskCopilot={handleAskCopilot}
+                provisionedRouters={provisionedRouters}
+                userRole={userSession.role}
+                onRefreshRouters={loadProvisionedRouters}
+                onCreateRouter={handleCreateRouter}
+                onGenerateScript={handleGenerateScript}
+                onRotateCredentials={handleRotateCredentials}
+                onTestConnection={handleTestConnection}
               />
             )}
 

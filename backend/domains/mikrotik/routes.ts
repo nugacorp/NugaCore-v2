@@ -1,10 +1,32 @@
 import { Router } from 'express';
 import { getGemini } from '../../../backend/services/gemini';
 import { encryptSecret } from '../../../backend/services/crypto';
-import { store } from '../../../backend/state/store';
+import { store, MikrotikRouterRegistryItem } from '../../../backend/state/store';
 import { READ_ROLES, requireRoles } from '../../common/rbac';
+import { generateApiCredential, generateApiUsername, generateProvisioningToken } from './provisioning/credentials';
+import { generateProvisioningScript, maskSecret } from './provisioning/script-generator';
+import { provisioningStore, toProvisionedView } from './provisioning/store';
+import { ScriptServerConfig } from './provisioning/types';
 
 const router = Router();
+
+// RBAC del provisioning (Fase 4.4)
+const PROV_VIEW_ROLES = ['super admin', 'administrador', 'tecnico', 'soporte', 'solo lectura'] as const;
+const PROV_SCRIPT_ROLES = ['super admin', 'administrador', 'tecnico'] as const;
+const PROV_ROTATE_ROLES = ['super admin', 'administrador'] as const;
+
+// Configuración de servidor/VPN de NugaCore (placeholders seguros si no hay env).
+const buildServerConfig = (overrides: Partial<ScriptServerConfig> = {}): ScriptServerConfig => ({
+  vpnHost: overrides.vpnHost || process.env.MIKROTIK_VPN_HOST || 'vpn.nugacore.local',
+  vpnCidr: overrides.vpnCidr || process.env.MIKROTIK_VPN_CIDR || '10.10.0.0/24',
+  serverManagementCidr:
+    overrides.serverManagementCidr || process.env.MIKROTIK_MGMT_CIDR || '10.0.0.0/24',
+  wgServerPublicKey: overrides.wgServerPublicKey || process.env.MIKROTIK_WG_SERVER_PUBKEY,
+  wgEndpoint: overrides.wgEndpoint || process.env.MIKROTIK_WG_ENDPOINT,
+  wgAllowedAddress: overrides.wgAllowedAddress,
+  wgInterfaceAddress: overrides.wgInterfaceAddress,
+  wgKeepalive: overrides.wgKeepalive,
+});
 
 const nowStamp = () => new Date().toISOString().replace('T', ' ').substring(0, 16);
 
@@ -34,6 +56,12 @@ const sanitizeRouter = (routerItem: {
   routerOsVersion: routerItem.routerOsVersion,
   linkedTowerId: routerItem.linkedTowerId,
   lastHealthCheckAt: routerItem.lastHealthCheckAt,
+});
+
+// Vista combinada: campos legacy + campos de provisioning (sin secretos).
+const fullRouterView = (routerItem: (typeof store.MIKROTIK_ROUTERS)[number]) => ({
+  ...sanitizeRouter(routerItem),
+  ...toProvisionedView(routerItem),
 });
 
 const isReadOnlyCommand = (command: string): boolean => {
@@ -144,48 +172,74 @@ Output: [RouterOS simulated mode]
 Script trigger OK. Modified address-list counters.`;
 };
 
-router.get('/api/mikrotik/routers', requireRoles(['super admin', 'administrador', 'tecnico', 'soporte']), (_req, res) => {
-  res.json(store.MIKROTIK_ROUTERS.map(sanitizeRouter));
+router.get('/api/mikrotik/routers', requireRoles([...PROV_VIEW_ROLES]), (_req, res) => {
+  res.json(store.MIKROTIK_ROUTERS.map(fullRouterView));
 });
 
-router.get('/api/mikrotik/routers/:id', requireRoles(['super admin', 'administrador', 'tecnico', 'soporte']), (req, res) => {
+router.get('/api/mikrotik/routers/:id', requireRoles([...PROV_VIEW_ROLES]), (req, res) => {
   const routerItem = store.MIKROTIK_ROUTERS.find((row) => row.id === req.params.id);
   if (!routerItem) {
     return res.status(404).json({ error: 'Router not found' });
   }
-  res.json(sanitizeRouter(routerItem));
+  res.json(fullRouterView(routerItem));
 });
 
-router.post('/api/mikrotik/routers', requireRoles(['super admin', 'administrador']), (req, res) => {
-  const { name, ipAddress, apiPort, username, password, linkedTowerId } = req.body;
+const VALID_CONNECTION_TYPES = ['wireguard', 'sstp', 'direct', 'zerotier', 'tailscale'] as const;
 
-  if (!name || !ipAddress || !username || !password) {
-    return res.status(400).json({ error: 'Missing required fields: name, ipAddress, username, password' });
+router.post('/api/mikrotik/routers', requireRoles(['super admin', 'administrador']), (req, res) => {
+  const { name, ipAddress, managementIp, apiPort, apiSslPort, username, password, linkedTowerId, connectionType, vpnIp, notes, routerOsVersion } = req.body;
+
+  const mgmt = managementIp ?? ipAddress;
+  if (!name || !mgmt) {
+    return res.status(400).json({ error: 'Missing required fields: name, managementIp (o ipAddress)' });
+  }
+  if (connectionType !== undefined && !VALID_CONNECTION_TYPES.includes(String(connectionType) as never)) {
+    return res.status(400).json({ error: 'Invalid connectionType' });
   }
 
-  const duplicatedIp = store.MIKROTIK_ROUTERS.some((row) => row.ipAddress === String(ipAddress));
+  const duplicatedIp = store.MIKROTIK_ROUTERS.some((row) => row.ipAddress === String(mgmt));
   if (duplicatedIp) {
     return res.status(409).json({ error: 'Router IP already registered' });
   }
 
-  const encryptedPassword = encryptSecret(String(password));
-  const routerItem = {
-    id: store.getUniqueMikrotikRouterId(),
+  const id = store.getUniqueMikrotikRouterId();
+  // Credenciales: NO se exige password manual. Username auto si no se da; el
+  // password real se genera al emitir el script de provisioning.
+  const resolvedUser = username ? String(username) : generateApiUsername(id);
+  const encryptedPassword = password ? encryptSecret(String(password)) : '';
+
+  const routerItem: MikrotikRouterRegistryItem = {
+    id,
     name: String(name),
-    ipAddress: String(ipAddress),
+    ipAddress: String(mgmt),
     apiPort: Number(apiPort) || 8728,
-    username: String(username),
+    username: resolvedUser,
     encryptedPassword,
     isOnline: true,
     cpuUsagePct: 0,
     memoryUsagePct: 0,
-    routerOsVersion: '7.x',
+    routerOsVersion: routerOsVersion ? String(routerOsVersion) : '7.x',
     linkedTowerId: linkedTowerId ? String(linkedTowerId) : undefined,
     lastHealthCheckAt: nowStamp(),
+    connectionType: connectionType ? (String(connectionType) as MikrotikRouterRegistryItem['connectionType']) : 'sstp',
+    managementIp: String(mgmt),
+    vpnIp: vpnIp ? String(vpnIp) : undefined,
+    apiSslPort: Number(apiSslPort) || 8729,
+    provisioningStatus: 'pending',
+    notes: notes ? String(notes) : undefined,
   };
 
   store.MIKROTIK_ROUTERS.push(routerItem);
-  res.status(201).json(sanitizeRouter(routerItem));
+  provisioningStore.recordAudit({
+    routerId: id,
+    action: 'create',
+    dryRun: false,
+    status: 'executed',
+    actorId: req.authContext?.userId,
+    requestPayload: { name: routerItem.name, connectionType: routerItem.connectionType },
+    resultSummary: `Router ${id} registrado (${routerItem.connectionType}).`,
+  });
+  res.status(201).json(fullRouterView(routerItem));
 });
 
 router.put('/api/mikrotik/routers/:id', requireRoles(['super admin', 'administrador']), (req, res) => {
@@ -193,22 +247,33 @@ router.put('/api/mikrotik/routers/:id', requireRoles(['super admin', 'administra
   if (index === -1) {
     return res.status(404).json({ error: 'Router not found' });
   }
+  const { connectionType } = req.body;
+  if (connectionType !== undefined && !VALID_CONNECTION_TYPES.includes(String(connectionType) as never)) {
+    return res.status(400).json({ error: 'Invalid connectionType' });
+  }
 
   const current = store.MIKROTIK_ROUTERS[index];
-  const { name, ipAddress, apiPort, username, password, linkedTowerId, isOnline } = req.body;
+  const { name, ipAddress, managementIp, apiPort, apiSslPort, username, password, linkedTowerId, isOnline, vpnIp, notes, routerOsVersion, status } = req.body;
   store.MIKROTIK_ROUTERS[index] = {
     ...current,
     ...(name !== undefined ? { name: String(name) } : {}),
     ...(ipAddress !== undefined ? { ipAddress: String(ipAddress) } : {}),
+    ...(managementIp !== undefined ? { managementIp: String(managementIp), ipAddress: String(managementIp) } : {}),
     ...(apiPort !== undefined ? { apiPort: Number(apiPort) || current.apiPort } : {}),
+    ...(apiSslPort !== undefined ? { apiSslPort: Number(apiSslPort) || current.apiSslPort } : {}),
     ...(username !== undefined ? { username: String(username) } : {}),
     ...(password !== undefined ? { encryptedPassword: encryptSecret(String(password)) } : {}),
     ...(linkedTowerId !== undefined ? { linkedTowerId: linkedTowerId ? String(linkedTowerId) : undefined } : {}),
     ...(isOnline !== undefined ? { isOnline: Boolean(isOnline) } : {}),
+    ...(connectionType !== undefined ? { connectionType: String(connectionType) as never } : {}),
+    ...(vpnIp !== undefined ? { vpnIp: vpnIp ? String(vpnIp) : undefined } : {}),
+    ...(notes !== undefined ? { notes: notes ? String(notes) : undefined } : {}),
+    ...(routerOsVersion !== undefined ? { routerOsVersion: String(routerOsVersion) } : {}),
+    ...(status !== undefined ? { provisioningStatus: String(status) as never } : {}),
     lastHealthCheckAt: nowStamp(),
   };
 
-  res.json(sanitizeRouter(store.MIKROTIK_ROUTERS[index]));
+  res.json(fullRouterView(store.MIKROTIK_ROUTERS[index]));
 });
 
 router.delete('/api/mikrotik/routers/:id', requireRoles(['super admin', 'administrador']), (req, res) => {
@@ -413,6 +478,166 @@ No se pudo comunicar con el modelo de IA debido a que el API Key no esta configu
 *Para habilitar las respuestas contextuales ilimitadas del Copiloto Gemini v3.5, introduce tu \`GEMINI_API_KEY\` en el panel de **Secrets > Settings**.*`,
     });
   }
+});
+
+// ────────────────────────────────────────────────────────────────────
+// Provisioning (Fase 4.4) — genera credenciales + script RouterOS.
+// El script (con secretos) se devuelve UNA sola vez; solo se persiste su
+// hash/metadata. Nunca se loguea el script ni los passwords.
+// ────────────────────────────────────────────────────────────────────
+const emitProvisioning = (
+  routerItem: (typeof store.MIKROTIK_ROUTERS)[number],
+  body: Record<string, unknown>,
+  actorId: string | undefined,
+  action: 'generate_script' | 'rotate_credentials',
+) => {
+  const connectionType: 'wireguard' | 'sstp' =
+    body.connectionType === 'wireguard' || routerItem.connectionType === 'wireguard'
+      ? 'wireguard'
+      : 'sstp';
+
+  // Credencial API (password fuerte, cifrado).
+  const apiCred = generateApiCredential(routerItem.id);
+  // Credencial VPN (solo SSTP la usa en el script).
+  const vpnCred = generateApiCredential(`vpn${routerItem.id}`);
+
+  // Persistir credencial cifrada en el registro (NUNCA el password en claro).
+  routerItem.username = apiCred.username;
+  routerItem.encryptedPassword = apiCred.encryptedPassword;
+  routerItem.encryptionVersion = apiCred.encryptionVersion;
+  routerItem.credentialRotatedAt = new Date().toISOString();
+  routerItem.connectionType = connectionType;
+  routerItem.provisioningStatus = 'provisioned';
+  routerItem.lastHealthCheckAt = nowStamp();
+
+  const serverOverrides = (body.server && typeof body.server === 'object' ? body.server : {}) as Partial<ScriptServerConfig>;
+  const server = buildServerConfig(serverOverrides);
+
+  const result = generateProvisioningScript({
+    connectionType,
+    routerName: routerItem.name,
+    apiUser: apiCred.username,
+    apiPassword: apiCred.plainPassword,
+    apiPort: routerItem.apiPort,
+    vpnUser: vpnCred.username,
+    vpnPassword: vpnCred.plainPassword,
+    server,
+  });
+
+  // Token de un solo uso + metadata del script (sin secretos).
+  const token = generateProvisioningToken();
+  provisioningStore.recordToken({
+    routerId: routerItem.id,
+    tokenHash: token.tokenHash,
+    expiresAt: token.expiresAt,
+    createdBy: actorId,
+  });
+  provisioningStore.recordScript({
+    routerId: routerItem.id,
+    scriptVersion: result.scriptVersion,
+    connectionType,
+    scriptHash: result.scriptHash,
+    generatedBy: actorId,
+  });
+  provisioningStore.recordAudit({
+    routerId: routerItem.id,
+    action,
+    dryRun: false,
+    status: 'executed',
+    actorId,
+    requestPayload: { connectionType, routerName: routerItem.name },
+    resultSummary: `Script ${result.scriptVersion} (${connectionType}) generado. user=${apiCred.username} pass=${maskSecret(apiCred.plainPassword)} hash=${result.scriptHash.substring(0, 12)}`,
+  });
+
+  // Respuesta: el script (mostrar una vez) + metadata. SIN passwords sueltos.
+  return {
+    router: fullRouterView(routerItem),
+    script: result.script,
+    scriptVersion: result.scriptVersion,
+    scriptHash: result.scriptHash,
+    connectionType,
+    warnings: result.warnings,
+    credentials: { apiUsername: apiCred.username, vpnUsername: vpnCred.username },
+    provisioningToken: token.token,
+    tokenExpiresAt: token.expiresAt,
+    securityWarning:
+      'Guarda este script ahora: contiene secretos y NO se volverá a mostrar. ' +
+      'Pégalo en RouterOS. NugaCore solo conserva el hash, nunca el script ni los passwords.',
+  };
+};
+
+router.post('/api/mikrotik/routers/:id/provisioning-script', requireRoles([...PROV_SCRIPT_ROLES]), (req, res) => {
+  const routerItem = store.MIKROTIK_ROUTERS.find((row) => row.id === req.params.id);
+  if (!routerItem) {
+    return res.status(404).json({ error: 'Router not found' });
+  }
+  if (req.body.connectionType !== undefined && !['wireguard', 'sstp'].includes(String(req.body.connectionType))) {
+    return res.status(400).json({ error: 'connectionType must be "wireguard" or "sstp"' });
+  }
+  try {
+    const payload = emitProvisioning(routerItem, req.body || {}, req.authContext?.userId, 'generate_script');
+    res.status(201).json(payload);
+  } catch (err) {
+    provisioningStore.recordAudit({
+      routerId: routerItem.id,
+      action: 'generate_script',
+      dryRun: false,
+      status: 'error',
+      actorId: req.authContext?.userId,
+      errorMessage: err instanceof Error ? err.message : 'unknown',
+    });
+    res.status(400).json({ error: err instanceof Error ? err.message : 'Could not generate script' });
+  }
+});
+
+router.post('/api/mikrotik/routers/:id/rotate-credentials', requireRoles([...PROV_ROTATE_ROLES]), (req, res) => {
+  const routerItem = store.MIKROTIK_ROUTERS.find((row) => row.id === req.params.id);
+  if (!routerItem) {
+    return res.status(404).json({ error: 'Router not found' });
+  }
+  // Confirmación explícita obligatoria (rotación invalida la credencial previa).
+  if (req.body?.confirm !== true) {
+    return res.status(400).json({ error: 'Confirmation required: send { "confirm": true } to rotate credentials.' });
+  }
+  const payload = emitProvisioning(routerItem, req.body || {}, req.authContext?.userId, 'rotate_credentials');
+  res.status(201).json(payload);
+});
+
+router.post('/api/mikrotik/routers/:id/test-connection', requireRoles([...PROV_SCRIPT_ROLES]), (req, res) => {
+  const routerItem = store.MIKROTIK_ROUTERS.find((row) => row.id === req.params.id);
+  if (!routerItem) {
+    return res.status(404).json({ error: 'Router not found' });
+  }
+  // DRY-RUN/MOCK: aún no hay worker. No se abre ninguna conexión real.
+  const hasCreds = !!routerItem.encryptedPassword;
+  const checks = [
+    { name: 'router_registered', ok: true },
+    { name: 'credentials_present', ok: hasCreds },
+    { name: 'connection_type_set', ok: !!routerItem.connectionType },
+    { name: 'api_port_valid', ok: routerItem.apiPort > 0 && routerItem.apiPort < 65536 },
+  ];
+  const reachable = checks.every((c) => c.ok);
+
+  provisioningStore.recordAudit({
+    routerId: routerItem.id,
+    action: 'test_connection',
+    dryRun: true,
+    status: reachable ? 'executed' : 'blocked',
+    actorId: req.authContext?.userId,
+    requestPayload: { routerName: routerItem.name },
+    resultSummary: `dry-run reachable=${reachable}`,
+  });
+
+  res.json({
+    routerId: routerItem.id,
+    dryRun: true,
+    mode: 'dry-run',
+    reachable,
+    checks,
+    message: reachable
+      ? 'Dry-run OK: el router tiene credenciales y configuración válidas. La conexión real se validará con el Worker MikroTik (fase siguiente).'
+      : 'Dry-run incompleto: faltan credenciales o tipo de conexión. Genera el script de provisioning primero.',
+  });
 });
 
 export default router;
