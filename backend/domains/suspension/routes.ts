@@ -1,8 +1,20 @@
 import { Router } from 'express';
 import { store } from '../../state/store';
 import { requireRoles } from '../../common/rbac';
+import { engineStore } from './engine-store';
+import {
+  customerServiceView,
+  evaluateAllCustomers,
+  evaluateCustomerById,
+} from './engine';
+import { SuspensionPolicyV2 } from './types';
 
 const router = Router();
+
+// RBAC del Motor de Suspensiones (Fase 4.5)
+const SUSP_VIEW_ROLES = ['super admin', 'administrador', 'cobranza', 'tecnico', 'solo lectura'] as const;
+const SUSP_EVALUATE_ROLES = ['super admin', 'administrador', 'cobranza'] as const;
+const SUSP_POLICY_ROLES = ['super admin', 'administrador'] as const;
 
 const toMsDays = (days: number): number => days * 24 * 60 * 60 * 1000;
 
@@ -191,6 +203,89 @@ router.post('/api/suspension/clients/:id/reactivate', requireRoles(['super admin
   }
 
   res.json(client);
+});
+
+// ════════════════════════════════════════════════════════════════════
+// MOTOR DE SUSPENSIONES (Fase 4.5) — decide y emite ÓRDENES. No ejecuta.
+// ════════════════════════════════════════════════════════════════════
+
+// ── Políticas ─────────────────────────────────────────────────────────
+router.get('/api/suspension/policies', requireRoles([...SUSP_VIEW_ROLES]), (_req, res) => {
+  res.json(engineStore.POLICY);
+});
+
+router.put('/api/suspension/policies', requireRoles([...SUSP_POLICY_ROLES]), (req, res) => {
+  const p = engineStore.POLICY;
+  const body = req.body || {};
+  const next: SuspensionPolicyV2 = { ...p };
+
+  if (body.enabled !== undefined) next.enabled = Boolean(body.enabled);
+  if (body.suspendAfterDue !== undefined) next.suspendAfterDue = Boolean(body.suspendAfterDue);
+  if (body.reactivateOnPayment !== undefined) next.reactivateOnPayment = Boolean(body.reactivateOnPayment);
+  if (body.reactivateOnPartialPayment !== undefined) next.reactivateOnPartialPayment = Boolean(body.reactivateOnPartialPayment);
+  if (body.autoReactivate !== undefined) next.autoReactivate = Boolean(body.autoReactivate);
+  if (body.name !== undefined) next.name = String(body.name);
+
+  if (body.graceDays !== undefined) {
+    const g = Number(body.graceDays);
+    if (!Number.isFinite(g) || g < 0 || g > 60) {
+      return res.status(400).json({ error: 'Invalid graceDays. Allowed range: 0 to 60.' });
+    }
+    next.graceDays = g;
+  }
+  if (body.dueSoonDays !== undefined) {
+    const d = Number(body.dueSoonDays);
+    if (!Number.isFinite(d) || d < 0 || d > 30) {
+      return res.status(400).json({ error: 'Invalid dueSoonDays. Allowed range: 0 to 30.' });
+    }
+    next.dueSoonDays = d;
+  }
+
+  next.updatedAt = new Date().toISOString();
+  engineStore.POLICY = next;
+  res.json(engineStore.POLICY);
+});
+
+// ── Estado de clientes (read-only) ────────────────────────────────────
+router.get('/api/suspension/customers', requireRoles([...SUSP_VIEW_ROLES]), (_req, res) => {
+  res.json(customerServiceView());
+});
+
+// ── Órdenes ───────────────────────────────────────────────────────────
+router.get('/api/suspension/orders', requireRoles([...SUSP_VIEW_ROLES]), (req, res) => {
+  const status = String(req.query.status || '').trim().toUpperCase();
+  const customerId = String(req.query.customerId || '').trim();
+  let rows = engineStore.ORDERS;
+  if (customerId) rows = rows.filter((o) => o.customerId === customerId);
+  if (status) rows = rows.filter((o) => o.status === status);
+  res.json(rows);
+});
+
+// ── Eventos / auditoría ───────────────────────────────────────────────
+router.get('/api/suspension/events', requireRoles([...SUSP_VIEW_ROLES]), (req, res) => {
+  const customerId = String(req.query.customerId || '').trim();
+  const rows = customerId
+    ? engineStore.EVENTS.filter((e) => e.customerId === customerId)
+    : engineStore.EVENTS;
+  res.json(rows);
+});
+
+// ── Evaluación (genera órdenes; NO ejecuta) ───────────────────────────
+router.post('/api/suspension/evaluate/:customerId', requireRoles([...SUSP_EVALUATE_ROLES]), (req, res) => {
+  const result = evaluateCustomerById(req.params.customerId, req.authContext?.userId);
+  if (!result) return res.status(404).json({ error: 'Customer not found' });
+  res.json(result);
+});
+
+router.post('/api/suspension/evaluate-all', requireRoles([...SUSP_EVALUATE_ROLES]), (req, res) => {
+  const results = evaluateAllCustomers(req.authContext?.userId);
+  const summary = {
+    evaluated: results.length,
+    suspensionOrders: results.filter((r) => r.action === 'create_suspension').length,
+    reactivationOrders: results.filter((r) => r.action === 'create_reactivation').length,
+    changed: results.filter((r) => r.changed).length,
+  };
+  res.json({ summary, results });
 });
 
 export default router;

@@ -6,10 +6,10 @@ import type { UserRole } from '../../src/lib/supabase';
 const ALL_ROLES: UserRole[] = ['Super Admin', 'Administrador', 'Cobranza', 'Técnico', 'Soporte', 'Solo lectura'];
 
 describe('RBAC visual por rol (frontend)', () => {
-  it('Super Admin ve todos los módulos (10)', () => {
+  it('Super Admin ve todos los módulos (11)', () => {
     const t = getAllowedTabsByRole('Super Admin');
-    expect(t.length).toBe(10);
-    expect(t).toEqual(expect.arrayContaining(['mikrotik', 'owner', 'finance', 'billing', 'inventory']));
+    expect(t.length).toBe(11);
+    expect(t).toEqual(expect.arrayContaining(['mikrotik', 'owner', 'finance', 'billing', 'inventory', 'suspension']));
   });
 
   it('Administrador NO ve mikrotik / finance / owner', () => {
@@ -21,7 +21,7 @@ describe('RBAC visual por rol (frontend)', () => {
   });
 
   it('Cobranza ve billing/finance; no mikrotik ni red', () => {
-    expect(getAllowedTabsByRole('Cobranza')).toEqual(['dashboard', 'crm', 'billing', 'finance']);
+    expect(getAllowedTabsByRole('Cobranza')).toEqual(['dashboard', 'crm', 'billing', 'finance', 'suspension']);
     expect(canAccessTab('Cobranza', 'mikrotik')).toBe(false);
     expect(canAccessTab('Cobranza', 'network')).toBe(false);
   });
@@ -40,7 +40,7 @@ describe('RBAC visual por rol (frontend)', () => {
   });
 
   it('Solo lectura: solo lectura; sin mikrotik/support/inventory/owner', () => {
-    expect(getAllowedTabsByRole('Solo lectura')).toEqual(['dashboard', 'crm', 'billing', 'network', 'gis']);
+    expect(getAllowedTabsByRole('Solo lectura')).toEqual(['dashboard', 'crm', 'billing', 'suspension', 'network', 'gis']);
     expect(canAccessTab('Solo lectura', 'mikrotik')).toBe(false);
     expect(canAccessTab('Solo lectura', 'owner')).toBe(false);
     expect(canAccessTab('Solo lectura', 'support')).toBe(false);

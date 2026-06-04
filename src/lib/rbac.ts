@@ -5,6 +5,7 @@ export type AppTab =
   | 'crm'
   | 'billing'
   | 'finance'
+  | 'suspension'
   | 'network'
   | 'mikrotik'
   | 'support'
@@ -19,12 +20,12 @@ export type AppTab =
 // la VISIBILIDAD del módulo.
 // ====================================================================
 const roleTabs: Record<UserRole, AppTab[]> = {
-  'Super Admin':  ['dashboard', 'crm', 'billing', 'finance', 'network', 'mikrotik', 'support', 'inventory', 'gis', 'owner'],
-  'Administrador':['dashboard', 'crm', 'billing', 'network', 'support', 'inventory', 'gis'],
-  'Cobranza':     ['dashboard', 'crm', 'billing', 'finance'],
-  'Técnico':      ['dashboard', 'network', 'mikrotik', 'support', 'inventory', 'gis'],
+  'Super Admin':  ['dashboard', 'crm', 'billing', 'finance', 'suspension', 'network', 'mikrotik', 'support', 'inventory', 'gis', 'owner'],
+  'Administrador':['dashboard', 'crm', 'billing', 'suspension', 'network', 'support', 'inventory', 'gis'],
+  'Cobranza':     ['dashboard', 'crm', 'billing', 'finance', 'suspension'],
+  'Técnico':      ['dashboard', 'suspension', 'network', 'mikrotik', 'support', 'inventory', 'gis'],
   'Soporte':      ['dashboard', 'crm', 'support', 'gis'],
-  'Solo lectura': ['dashboard', 'crm', 'billing', 'network', 'gis'],
+  'Solo lectura': ['dashboard', 'crm', 'billing', 'suspension', 'network', 'gis'],
 };
 
 // Fallback seguro para roles desconocidos / sin rol.
@@ -50,6 +51,7 @@ export const MODULE_LABELS: Record<AppTab, string> = {
   crm: 'CRM Clientes & Leads',
   billing: 'Facturación & Cobros',
   finance: 'Finanzas & EBITDA',
+  suspension: 'Suspensiones & Cortes',
   network: 'Red WISP & FTTH',
   mikrotik: 'MikroTik Core',
   support: 'Soporte & OT',

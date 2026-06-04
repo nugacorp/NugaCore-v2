@@ -9,6 +9,7 @@ import SupportModule from './components/SupportModule';
 import InventoryModule from './components/InventoryModule';
 import GisModule from './components/GisModule';
 import FinanceOwnerModule from './components/FinanceOwnerModule';
+import SuspensionModule from './components/SuspensionModule';
 import LoginForm from './components/LoginForm';
 import LandingPage from './components/LandingPage';
 import UserMenu from './components/UserMenu';
@@ -33,7 +34,11 @@ import {
   AccountStateResponse,
   MikrotikRouterView,
   ProvisioningScriptResponse,
-  MikrotikTestConnectionResponse
+  MikrotikTestConnectionResponse,
+  CustomerServiceView,
+  SuspensionOrder,
+  SuspensionEvent,
+  SuspensionPolicy
 } from './types';
 
 import { Cpu, AlertTriangle, CheckCircle, RefreshCw, Menu } from 'lucide-react';
@@ -136,6 +141,10 @@ export default function App() {
   const [mikrotikLogs, setMikrotikLogs] = useState<any[]>([]);
   const [naps, setNaps] = useState<NapBox[]>([]);
   const [provisionedRouters, setProvisionedRouters] = useState<MikrotikRouterView[]>([]);
+  const [suspensionCustomers, setSuspensionCustomers] = useState<CustomerServiceView[]>([]);
+  const [suspensionOrders, setSuspensionOrders] = useState<SuspensionOrder[]>([]);
+  const [suspensionEvents, setSuspensionEvents] = useState<SuspensionEvent[]>([]);
+  const [suspensionPolicy, setSuspensionPolicy] = useState<SuspensionPolicy | null>(null);
 
   const getAuthHeaders = async (): Promise<Record<string, string>> => {
     const headers: Record<string, string> = {};
@@ -241,8 +250,10 @@ export default function App() {
       setMikrotikLogs(resMktLogs);
       setNaps(resNaps);
       setErrorStr('');
-      // Carga aislada (no participa del Promise.all para no romper a Cobranza).
+      // Cargas aisladas (no participan del Promise.all para no romper a roles
+      // sin acceso a esos módulos).
       await loadProvisionedRouters();
+      await loadSuspension();
     } catch (err: any) {
       console.error(err);
       setErrorStr('Error contacting full-stack back-end server REST API.');
@@ -386,6 +397,56 @@ export default function App() {
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({}),
     });
+  };
+
+  // ── Motor de Suspensiones (Fase 4.5) ─────────────────────────────────
+  // Carga aislada: el endpoint excluye a Soporte, así que un 403 NO debe
+  // romper la carga global de datos.
+  const loadSuspension = async () => {
+    try {
+      const [customers, orders, events, policy] = await Promise.all([
+        fetchJson('/api/suspension/customers'),
+        fetchJson('/api/suspension/orders'),
+        fetchJson('/api/suspension/events'),
+        fetchJson('/api/suspension/policies'),
+      ]);
+      setSuspensionCustomers(customers);
+      setSuspensionOrders(orders);
+      setSuspensionEvents(events);
+      setSuspensionPolicy(policy);
+    } catch {
+      setSuspensionCustomers([]);
+      setSuspensionOrders([]);
+      setSuspensionEvents([]);
+      setSuspensionPolicy(null);
+    }
+  };
+
+  const handleEvaluateAllSuspension = async () => {
+    await fetchJson('/api/suspension/evaluate-all', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({}),
+    });
+    await loadSuspension();
+  };
+
+  const handleEvaluateCustomer = async (customerId: string) => {
+    await fetchJson(`/api/suspension/evaluate/${customerId}`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({}),
+    });
+    await loadSuspension();
+  };
+
+  const handleUpdateSuspensionPolicy = async (patch: Record<string, unknown>) => {
+    await fetchJson('/api/suspension/policies', {
+      method: 'PUT',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify(patch),
+    });
+    await loadSuspension();
   };
 
   // TECHNICAL INFRASTRUCTURE CONTROLS
@@ -730,8 +791,22 @@ export default function App() {
               />
             )}
 
+            {activeTab === 'suspension' && (
+              <SuspensionModule
+                customers={suspensionCustomers}
+                orders={suspensionOrders}
+                events={suspensionEvents}
+                policy={suspensionPolicy}
+                userRole={userSession.role}
+                onRefresh={loadSuspension}
+                onEvaluateAll={handleEvaluateAllSuspension}
+                onEvaluateCustomer={handleEvaluateCustomer}
+                onUpdatePolicy={handleUpdateSuspensionPolicy}
+              />
+            )}
+
             {activeTab === 'finance' && (
-              <FinanceOwnerModule 
+              <FinanceOwnerModule
                 key="finance"
                 clients={clients}
                 invoices={invoices}

@@ -256,6 +256,62 @@ export interface MikrotikTestConnectionResponse {
   message: string;
 }
 
+// ── Motor de Suspensiones (Fase 4.5) ──────────────────────────────────
+export type ServiceStatus = 'ACTIVE' | 'WARNING' | 'PENDING_SUSPENSION' | 'SUSPENDED' | 'PENDING_REACTIVATION';
+export type SuspensionBillingStatus = 'CURRENT' | 'DUE_SOON' | 'OVERDUE' | 'DELINQUENT';
+export type SuspensionOrderStatus = 'PENDING' | 'QUEUED' | 'EXECUTED' | 'FAILED' | 'CANCELLED';
+
+export interface CustomerServiceView {
+  customerId: string;
+  customerName: string;
+  serviceStatus: ServiceStatus;
+  billingStatus: SuspensionBillingStatus;
+  networkStatus: string;
+  reason: string;
+  worstInvoiceId?: string;
+  lastEvaluatedAt?: string;
+  lastSuspensionAt?: string;
+  lastReactivationAt?: string;
+}
+
+export interface SuspensionOrder {
+  id: string;
+  customerId: string;
+  invoiceId?: string;
+  orderType: 'suspension' | 'reactivation';
+  status: SuspensionOrderStatus;
+  source: 'engine' | 'manual';
+  reason?: string;
+  scheduledFor?: string;
+  executedAt?: string;
+  createdAt: string;
+}
+
+export interface SuspensionEvent {
+  id: string;
+  customerId: string;
+  invoiceId?: string;
+  eventType: string;
+  reason?: string;
+  automatic: boolean;
+  actorId?: string;
+  metadata?: Record<string, unknown>;
+  createdAt: string;
+}
+
+export interface SuspensionPolicy {
+  id: string;
+  name: string;
+  enabled: boolean;
+  graceDays: number;
+  suspendAfterDue: boolean;
+  reactivateOnPayment: boolean;
+  reactivateOnPartialPayment: boolean;
+  autoReactivate: boolean;
+  dueSoonDays: number;
+  updatedAt: string;
+}
+
 export interface NocAlert {
   id: string;
   source: string;

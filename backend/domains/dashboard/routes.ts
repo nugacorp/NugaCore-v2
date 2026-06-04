@@ -1,6 +1,7 @@
 import { Router } from 'express';
 import { store } from '../../../backend/state/store';
 import { READ_ROLES, requireRoles } from '../../common/rbac';
+import { suspensionKpis } from '../suspension/engine';
 
 const router = Router();
 
@@ -205,6 +206,8 @@ router.get('/api/dashboard-stats', requireRoles(READ_ROLES), (_req, res) => {
       towerAvailabilityPct: kpis.towers.availabilityPct,
       collectionRatePct: kpis.revenue.collectionRatePct,
     },
+    // Motor de Suspensiones (Fase 4.5) — read-only, sin efectos.
+    suspension: suspensionKpis(),
   });
 });
 

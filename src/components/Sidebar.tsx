@@ -12,6 +12,7 @@ import {
   Cpu,
   Shield,
   DollarSign,
+  Ban,
   X,
   LogOut
 } from 'lucide-react';
@@ -42,6 +43,7 @@ export default function Sidebar({
     { id: 'crm', name: 'CRM Clientes & Leads', icon: Users },
     { id: 'billing', name: 'Facturación & Cobros', icon: CreditCard },
     { id: 'finance', name: 'Finanzas & EBITDA', icon: DollarSign },
+    { id: 'suspension', name: 'Suspensiones & Cortes', icon: Ban },
     { id: 'network', name: 'Red WISP & FTTH', icon: Network },
     { id: 'mikrotik', name: 'MikroTik Core Control & Copilot', icon: Terminal, highlight: true },
     { id: 'support', name: 'Remesa Soporte & OT', icon: Wrench },
