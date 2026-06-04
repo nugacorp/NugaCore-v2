@@ -26,14 +26,11 @@ import {
   Lock,
   ChevronRight
 } from 'lucide-react';
-import { UserSessionProfile, MOCK_USER_PROFILES } from '../lib/supabase';
-
 interface LandingPageProps {
   onEnterLogin: () => void;
-  onInstantDemo: (profile: UserSessionProfile) => void;
 }
 
-export default function LandingPage({ onEnterLogin, onInstantDemo }: LandingPageProps) {
+export default function LandingPage({ onEnterLogin }: LandingPageProps) {
   // Calculator States
   const [clientCount, setClientCount] = useState<number>(350);
   const [avgPlanPrice, setAvgPlanPrice] = useState<number>(25);
@@ -67,11 +64,11 @@ export default function LandingPage({ onEnterLogin, onInstantDemo }: LandingPage
     { name: "Anillo Industrial Norte", location: "Fibra Troncal 3", load: "54%", status: "Optimo", rx: "-19.1 dBm" }
   ];
 
-  const handleQuickDemoClick = (roleEmail: string) => {
-    const profile = MOCK_USER_PROFILES.find(p => p.email === roleEmail);
-    if (profile) {
-      onInstantDemo(profile);
-    }
+  // Hardening 4.3.1: se eliminó el "instant demo" que iniciaba sesión con un
+  // perfil mock SIN autenticación. Los accesos de la landing ahora enrutan al
+  // login real (Supabase). No hay bypass de autenticación.
+  const handleQuickDemoClick = () => {
+    onEnterLogin();
   };
 
   return (
@@ -110,7 +107,7 @@ export default function LandingPage({ onEnterLogin, onInstantDemo }: LandingPage
 
           <div className="flex items-center space-x-3">
             <button
-              onClick={() => handleQuickDemoClick('admin@nugacorp.com')}
+              onClick={handleQuickDemoClick}
               className="hidden sm:inline-flex items-center px-4 py-2 border border-slate-800 hover:border-indigo-500/50 hover:bg-slate-900/60 rounded-xl text-xs font-semibold font-mono text-slate-300 transition"
             >
               Demo Admin (1-Clic)
@@ -156,7 +153,7 @@ export default function LandingPage({ onEnterLogin, onInstantDemo }: LandingPage
               <ArrowRight className="w-4 h-4" />
             </button>
             <button
-              onClick={() => handleQuickDemoClick('admin@nugacorp.com')}
+              onClick={handleQuickDemoClick}
               className="w-full bg-slate-900 hover:bg-slate-850 border border-slate-800 hover:border-slate-700 text-slate-300 py-3.5 px-6 rounded-2xl font-semibold text-sm transition flex items-center justify-center space-x-2 text-center"
             >
               <Sparkles className="w-4 h-4 text-amber-400" />
@@ -561,7 +558,7 @@ export default function LandingPage({ onEnterLogin, onInstantDemo }: LandingPage
             
             {/* Roles selector button 1 */}
             <button
-              onClick={() => handleQuickDemoClick('admin@nugacorp.com')}
+              onClick={handleQuickDemoClick}
               className="bg-slate-950 hover:bg-slate-850 p-5 rounded-2xl border border-slate-850 hover:border-indigo-500/50 transition text-left flex flex-col justify-between h-40 group"
             >
               <div>
@@ -577,7 +574,7 @@ export default function LandingPage({ onEnterLogin, onInstantDemo }: LandingPage
 
             {/* Roles selector button 2 */}
             <button
-              onClick={() => handleQuickDemoClick('cobranza@nugacorp.com')}
+              onClick={handleQuickDemoClick}
               className="bg-slate-950 hover:bg-slate-850 p-5 rounded-2xl border border-slate-850 hover:border-emerald-500/50 transition text-left flex flex-col justify-between h-40 group"
             >
               <div>
@@ -593,7 +590,7 @@ export default function LandingPage({ onEnterLogin, onInstantDemo }: LandingPage
 
             {/* Roles selector button 3 */}
             <button
-              onClick={() => handleQuickDemoClick('tecnico@nugacorp.com')}
+              onClick={handleQuickDemoClick}
               className="bg-slate-950 hover:bg-slate-850 p-5 rounded-2xl border border-slate-850 hover:border-amber-500/50 transition text-left flex flex-col justify-between h-40 group"
             >
               <div>
@@ -609,7 +606,7 @@ export default function LandingPage({ onEnterLogin, onInstantDemo }: LandingPage
 
             {/* Roles selector button 4 */}
             <button
-              onClick={() => handleQuickDemoClick('soporte@nugacorp.com')}
+              onClick={handleQuickDemoClick}
               className="bg-slate-950 hover:bg-slate-850 p-5 rounded-2xl border border-slate-850 hover:border-blue-500/50 transition text-left flex flex-col justify-between h-40 group"
             >
               <div>
@@ -644,7 +641,7 @@ export default function LandingPage({ onEnterLogin, onInstantDemo }: LandingPage
           <div className="flex items-center space-x-6 font-mono text-[11px]">
             <span>Desarrollado para NugaCorp</span>
             <span>Seguridad AES-256</span>
-            <span>Soporte NOC: noc@nugacorp.com</span>
+            <span>Soporte NOC: noc@example.com</span>
           </div>
         </div>
       </footer>

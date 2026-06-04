@@ -13,7 +13,7 @@ import {
   ArrowRight,
   ChevronLeft
 } from 'lucide-react';
-import { isSupabaseConfigured, supabase, MOCK_USER_PROFILES, UserSessionProfile } from '../lib/supabase';
+import { isSupabaseConfigured, supabase, STAGING_QUICK_LOGINS, isQuickLoginEnabled, UserSessionProfile } from '../lib/supabase';
 import { fetchProfileFromBackend } from '../lib/authSession';
 
 interface LoginFormProps {
@@ -35,10 +35,11 @@ export default function LoginForm({ onLoginSuccess, onBack }: LoginFormProps) {
   const [errorMessage, setErrorMessage] = useState('');
   const [successMessage, setSuccessMessage] = useState('');
 
-  // Auto-fill dynamic helper for demo or staging
-  const handleAutoFill = (mockEmail: string) => {
-    setEmail(mockEmail);
-    setPassword('nugacorp_secure_pwd2026');
+  // Quick-login helper (staging): SOLO prerellena el email. Nunca rellena el
+  // password — el operador debe teclear la contraseña real (Supabase auth).
+  const handleAutoFill = (stagingEmail: string) => {
+    setEmail(stagingEmail);
+    setPassword('');
     setErrorMessage('');
   };
 
@@ -85,20 +86,13 @@ export default function LoginForm({ onLoginSuccess, onBack }: LoginFormProps) {
           }, 800);
         }
       } else {
-        // --- PREVIEW / STAGING MODE (Fallback Auth) ---
-        // Validate against our local mock user lists
-        const foundMock = MOCK_USER_PROFILES.find(
-          p => p.email.toLowerCase() === email.trim().toLowerCase()
+        // --- BACKEND DE AUTENTICACIÓN NO CONFIGURADO ---
+        // Hardening 4.3.1: se eliminó el login-sin-password de modo preview.
+        // Sin Supabase configurado no hay forma segura de autenticar.
+        setErrorMessage(
+          'El backend de autenticación no está configurado (VITE_SUPABASE_URL / VITE_SUPABASE_ANON_KEY). ' +
+          'No es posible iniciar sesión en este entorno.'
         );
-
-        if (foundMock) {
-          setSuccessMessage(`Simulando acceso exitoso para ${foundMock.full_name} (${foundMock.role})`);
-          setTimeout(() => {
-            onLoginSuccess(foundMock);
-          }, 900);
-        } else {
-          setErrorMessage('Usuario demo no permitido. Usa uno de los accesos rápidos disponibles.');
-        }
       }
     } catch (err: any) {
       console.error(err);
@@ -224,7 +218,7 @@ export default function LoginForm({ onLoginSuccess, onBack }: LoginFormProps) {
                     type="email"
                     value={email}
                     onChange={(e) => setEmail(e.target.value)}
-                    placeholder="ejemplo@nugacorp.com"
+                    placeholder="operador@example.com"
                     required
                     className="w-full bg-slate-950 border border-slate-800 rounded-xl py-3 pl-11 pr-4 text-xs font-mono text-white placeholder-slate-600 focus:outline-none focus:border-indigo-500 transition-colors"
                   />
@@ -277,50 +271,33 @@ export default function LoginForm({ onLoginSuccess, onBack }: LoginFormProps) {
                 {!loading && <ArrowRight className="w-3.5 h-3.5" />}
               </button>
 
-              {/* DEMO / TESTING CREDENTIALS SLIDER PANEL (Shown when supabase isn't connected or as standard help documentation) */}
-              <div className="mt-6 pt-5 border-t border-slate-800/80 space-y-3">
-                <div className="flex items-center space-x-2 text-[10px] font-bold text-slate-400 uppercase font-mono tracking-wider">
-                  <Sparkles className="w-3.5 h-3.5 text-amber-400" />
-                  <span>Acceso Rápido (Perfiles Demo WISP/ISP)</span>
+              {/* QUICK LOGIN (solo staging, gateado). Prerellena el email del
+                  usuario de staging; el password se teclea manualmente. No se
+                  muestra en producción (VITE_ENABLE_QUICK_LOGIN apagado). */}
+              {isQuickLoginEnabled && (
+                <div className="mt-6 pt-5 border-t border-slate-800/80 space-y-3">
+                  <div className="flex items-center space-x-2 text-[10px] font-bold text-slate-400 uppercase font-mono tracking-wider">
+                    <Sparkles className="w-3.5 h-3.5 text-amber-400" />
+                    <span>Acceso Rápido Staging (solo email)</span>
+                  </div>
+                  <p className="text-[11px] text-slate-400">
+                    Prerellena el correo del usuario de staging. Escribe tu contraseña para iniciar sesión.
+                  </p>
+                  <div className="grid grid-cols-2 gap-2 text-[10px] font-mono">
+                    {STAGING_QUICK_LOGINS.map((entry) => (
+                      <button
+                        key={entry.email}
+                        type="button"
+                        onClick={() => handleAutoFill(entry.email)}
+                        className="bg-slate-950 hover:bg-slate-850 p-2 border border-slate-800 rounded-xl text-left hover:border-indigo-500 transition flex flex-col justify-between"
+                      >
+                        <span className="text-white font-bold block">{entry.label}</span>
+                        <span className="text-indigo-400 mt-1 truncate">{entry.email}</span>
+                      </button>
+                    ))}
+                  </div>
                 </div>
-                <p className="text-[11px] text-slate-400">
-                  Usa estos perfiles preconfigurados para explorar las diferentes vistas operativas del NOC:
-                </p>
-                <div className="grid grid-cols-2 gap-2 text-[10px] font-mono">
-                  <button
-                    type="button"
-                    onClick={() => handleAutoFill('admin@nugacorp.com')}
-                    className="bg-slate-950 hover:bg-slate-850 p-2 border border-slate-800 rounded-xl text-left hover:border-indigo-500 transition flex flex-col justify-between"
-                  >
-                    <span className="text-white font-bold block">1. Rodrigo (Super Admin)</span>
-                    <span className="text-indigo-400 mt-1">admin@nugacorp.com</span>
-                  </button>
-                  <button
-                    type="button"
-                    onClick={() => handleAutoFill('cobranza@nugacorp.com')}
-                    className="bg-slate-950 hover:bg-slate-850 p-2 border border-slate-800 rounded-xl text-left hover:border-emerald-500 transition flex flex-col justify-between"
-                  >
-                    <span className="text-white font-bold block">2. M. Luisa (Cobranza)</span>
-                    <span className="text-emerald-400 mt-1">cobranza@nugacorp.com</span>
-                  </button>
-                  <button
-                    type="button"
-                    onClick={() => handleAutoFill('tecnico@nugacorp.com')}
-                    className="bg-slate-950 hover:bg-slate-850 p-2 border border-slate-800 rounded-xl text-left hover:border-amber-500 transition flex flex-col justify-between"
-                  >
-                    <span className="text-white font-bold block">3. Carlos (Técnico)</span>
-                    <span className="text-amber-500 mt-1">tecnico@nugacorp.com</span>
-                  </button>
-                  <button
-                    type="button"
-                    onClick={() => handleAutoFill('soporte@nugacorp.com')}
-                    className="bg-slate-950 hover:bg-slate-850 p-2 border border-slate-800 rounded-xl text-left hover:border-blue-500 transition flex flex-col justify-between"
-                  >
-                    <span className="text-white font-bold block">4. Sofía (Soporte NOC)</span>
-                    <span className="text-blue-400 mt-1">soporte@nugacorp.com</span>
-                  </button>
-                </div>
-              </div>
+              )}
 
             </form>
           ) : (
@@ -361,7 +338,7 @@ export default function LoginForm({ onLoginSuccess, onBack }: LoginFormProps) {
                     type="email"
                     value={recoveryEmail}
                     onChange={(e) => setRecoveryEmail(e.target.value)}
-                    placeholder="usuario@nugacorp.com"
+                    placeholder="usuario@example.com"
                     required
                     className="w-full bg-slate-950 border border-slate-800 rounded-xl py-3 pl-11 pr-4 text-xs font-mono text-white placeholder-slate-600 focus:outline-none focus:border-indigo-500 transition-colors"
                   />
@@ -397,7 +374,7 @@ export default function LoginForm({ onLoginSuccess, onBack }: LoginFormProps) {
         {/* Footer brand info */}
         <div className="px-8 py-4 bg-slate-950 border-t border-slate-800 text-center flex items-center justify-between text-[10px] font-mono text-slate-500">
           <span>NugaCore ERP NOC System</span>
-          <span>Soporte: noc@nugacorp.com</span>
+          <span>Soporte: noc@example.com</span>
         </div>
 
       </div>

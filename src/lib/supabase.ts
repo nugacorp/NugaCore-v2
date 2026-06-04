@@ -47,38 +47,35 @@ export function normalizeUserRole(value: string | null | undefined): UserRole {
   return 'Solo lectura';
 }
 
-// Default mock profiles for local staging or preview mode
-export const MOCK_USER_PROFILES: UserSessionProfile[] = [
-  {
-    id: 'f72da078-4eb2-43bb-a5a4-ba09fd268bf1',
-    email: 'admin@nugacorp.com',
-    full_name: 'Ing. Rodrigo Nuga',
-    phone: '+52 55 1234 5678',
-    role: 'Super Admin',
-    avatar_url: 'https://images.unsplash.com/photo-1534528741775-53994a69daeb?auto=format&fit=crop&w=150&q=80'
-  },
-  {
-    id: 'f72da078-4eb2-43bb-a5a4-ba09fd268bf2',
-    email: 'cobranza@nugacorp.com',
-    full_name: 'María Luisa Rojas',
-    phone: '+52 55 8765 4321',
-    role: 'Cobranza',
-    avatar_url: 'https://images.unsplash.com/photo-1494790108377-be9c29b29330?auto=format&fit=crop&w=150&q=80'
-  },
-  {
-    id: 'f72da078-4eb2-43bb-a5a4-ba09fd268bf3',
-    email: 'tecnico@nugacorp.com',
-    full_name: 'Carlos Mendoza',
-    phone: '+52 55 5555 1234',
-    role: 'Técnico',
-    avatar_url: 'https://images.unsplash.com/photo-1507003211169-0a1dd7228f2d?auto=format&fit=crop&w=150&q=80'
-  },
-  {
-    id: 'f72da078-4eb2-43bb-a5a4-ba09fd268bf4',
-    email: 'soporte@nugacorp.com',
-    full_name: 'Sofía Valenzuela',
-    phone: '+52 55 9999 8888',
-    role: 'Soporte',
-    avatar_url: 'https://images.unsplash.com/photo-1438761681033-6461ffad8d80?auto=format&fit=crop&w=150&q=80'
-  }
+// ====================================================================
+// Quick-login de STAGING (Fase 4.3.1 hardening).
+//
+// Solo PRE-RELLENA el email de los usuarios de staging para acelerar la
+// validación de Hermes. NO contiene passwords, NI tokens, NI perfiles
+// embebidos: la autenticación real ocurre vía Supabase con la contraseña
+// que el operador teclea (el password de staging vive root-only, ver
+// docs/STAGING_AUTH_USERS.md).
+//
+// Gateado por VITE_ENABLE_QUICK_LOGIN: apagado por defecto, de modo que el
+// bundle de PRODUCCIÓN no muestra ningún acceso rápido.
+// ====================================================================
+export interface QuickLoginEntry {
+  role: UserRole;
+  email: string;
+  label: string;
+}
+
+export const STAGING_QUICK_LOGINS: QuickLoginEntry[] = [
+  { role: 'Super Admin', email: 'superadmin@staging.nugacore.local', label: 'Super Admin' },
+  { role: 'Administrador', email: 'admin@staging.nugacore.local', label: 'Administrador' },
+  { role: 'Cobranza', email: 'billing@staging.nugacore.local', label: 'Cobranza' },
+  { role: 'Técnico', email: 'tech@staging.nugacore.local', label: 'Técnico' },
+  { role: 'Soporte', email: 'support@staging.nugacore.local', label: 'Soporte' },
+  { role: 'Solo lectura', email: 'readonly@staging.nugacore.local', label: 'Solo lectura' },
 ];
+
+/**
+ * ¿Mostrar el panel de quick-login (prefill de email)? Apagado por defecto.
+ * Habilitar SOLO en staging con `VITE_ENABLE_QUICK_LOGIN=true` en build-time.
+ */
+export const isQuickLoginEnabled = (viteEnv.VITE_ENABLE_QUICK_LOGIN || '').trim() === 'true';

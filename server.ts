@@ -19,8 +19,32 @@ async function startServer() {
     app.use(vite.middlewares);
   } else {
     const distPath = path.join(process.cwd(), 'dist');
-    app.use((await import('express')).default.static(distPath));
+    const expressMod = (await import('express')).default;
+    const ONE_YEAR = 31536000; // segundos
+
+    // ── Cache busting (Fase 4.3.1) ───────────────────────────────────
+    // Vite genera assets con hash de contenido (dist/assets/index-<hash>.js).
+    //   - Assets hasheados → cache inmutable de 1 año (el hash invalida).
+    //   - index.html → SIN cache: cada deploy debe entregar los hashes nuevos
+    //     y evitar que un proxy/navegador sirva un bundle viejo (pantalla en
+    //     blanco tras deploy).
+    app.use(
+      expressMod.static(distPath, {
+        etag: true,
+        lastModified: true,
+        setHeaders: (res, filePath) => {
+          if (filePath.endsWith('index.html')) {
+            res.setHeader('Cache-Control', 'no-cache, no-store, must-revalidate');
+          } else if (filePath.includes(`${path.sep}assets${path.sep}`)) {
+            res.setHeader('Cache-Control', `public, max-age=${ONE_YEAR}, immutable`);
+          }
+        },
+      }),
+    );
+
+    // SPA fallback: el HTML del shell nunca se cachea de forma agresiva.
     app.get('*', (_req, res) => {
+      res.setHeader('Cache-Control', 'no-cache, no-store, must-revalidate');
       res.sendFile(path.join(distPath, 'index.html'));
     });
   }

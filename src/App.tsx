@@ -493,11 +493,8 @@ export default function App() {
       );
     } else {
       return (
-        <LandingPage 
-          onEnterLogin={() => setShowLogin(true)} 
-          onInstantDemo={(profile) => {
-            handleLoginSuccess(profile);
-          }} 
+        <LandingPage
+          onEnterLogin={() => setShowLogin(true)}
         />
       );
     }
