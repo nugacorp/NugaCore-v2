@@ -37,37 +37,62 @@ export const authSession = {
   },
 };
 
+// ====================================================================
+// Perfil CANÓNICO desde el backend (/api/auth/me).
+//
+// El rol y los datos del usuario salen del backend (service-role, bypassa
+// RLS). NO se consulta users_profile directamente desde el navegador porque
+// la RLS deny-by-default lo bloquea y haría caer a todos al rol por defecto.
+// ====================================================================
+interface AuthMeResponse {
+  userId: string;
+  email?: string;
+  fullName?: string;
+  phone?: string;
+  avatarUrl?: string;
+  role?: string;
+  permissions?: string[];
+  source?: 'supabase-jwt' | 'trusted-headers';
+}
+
+export async function fetchProfileFromBackend(accessToken: string): Promise<UserSessionProfile | null> {
+  try {
+    const res = await fetch('/api/auth/me', {
+      headers: { Authorization: `Bearer ${accessToken}` },
+    });
+    if (!res.ok) return null;
+    const me = (await res.json()) as AuthMeResponse;
+    return {
+      id: me.userId,
+      email: me.email || '',
+      full_name: me.fullName || 'Usuario Autenticado',
+      phone: me.phone || '',
+      role: normalizeUserRole(me.role),
+      avatar_url: me.avatarUrl || '',
+      source: me.source,
+      permissions: me.permissions || [],
+    };
+  } catch {
+    return null;
+  }
+}
+
+/**
+ * Recupera la sesión de Supabase y reconstruye el perfil desde /api/auth/me.
+ * Devuelve null si no hay sesión válida o el backend no responde el perfil.
+ */
 export async function restoreSessionProfileFromSupabase(): Promise<UserSessionProfile | null> {
   if (!supabase) return null;
 
   const { data, error } = await supabase.auth.getSession();
-  if (error || !data.session?.user) {
+  const accessToken = data.session?.access_token;
+  if (error || !accessToken) {
     return null;
   }
 
-  const sessionUser = data.session.user;
-  let backendRole: string | null = null;
-  try {
-    const authMe = await fetch('/api/auth/me', {
-      headers: { Authorization: `Bearer ${data.session.access_token}` },
-    });
-    if (authMe.ok) {
-      const authContext = await authMe.json();
-      backendRole = typeof authContext.role === 'string' ? authContext.role : null;
-    }
-  } catch {
-    backendRole = null;
-  }
+  const profile = await fetchProfileFromBackend(accessToken);
+  if (!profile) return null;
 
-  const userProfile: UserSessionProfile = {
-    id: sessionUser.id,
-    email: (sessionUser.email || '').trim(),
-    full_name: (sessionUser.user_metadata?.full_name as string | undefined) || 'Usuario Autenticado',
-    phone: (sessionUser.user_metadata?.phone as string | undefined) || '',
-    role: normalizeUserRole(backendRole),
-    avatar_url: (sessionUser.user_metadata?.avatar_url as string | undefined) || '',
-  };
-
-  authSession.save(userProfile, data.session.access_token);
-  return userProfile;
+  authSession.save(profile, accessToken);
+  return profile;
 }

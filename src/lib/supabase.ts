@@ -26,6 +26,10 @@ export interface UserSessionProfile {
   phone?: string;
   role: 'Super Admin' | 'Administrador' | 'Cobranza' | 'Técnico' | 'Soporte' | 'Solo lectura';
   avatar_url?: string;
+  /** Origen de la identidad verificada por el backend. */
+  source?: 'supabase-jwt' | 'trusted-headers';
+  /** Acciones permitidas para el rol (desde /api/auth/me). */
+  permissions?: string[];
 }
 
 export type UserRole = UserSessionProfile['role'];

@@ -13,7 +13,8 @@ import {
   ArrowRight,
   ChevronLeft
 } from 'lucide-react';
-import { isSupabaseConfigured, supabase, MOCK_USER_PROFILES, normalizeUserRole, UserSessionProfile } from '../lib/supabase';
+import { isSupabaseConfigured, supabase, MOCK_USER_PROFILES, UserSessionProfile } from '../lib/supabase';
+import { fetchProfileFromBackend } from '../lib/authSession';
 
 interface LoginFormProps {
   onLoginSuccess: (userProfile: UserSessionProfile, accessToken?: string) => void;
@@ -66,38 +67,22 @@ export default function LoginForm({ onLoginSuccess, onBack }: LoginFormProps) {
         }
 
         if (data?.user) {
-          const accessToken = data.session?.access_token;
-          let backendRole: string | null = null;
+          // El rol/perfil CANÓNICO viene del backend (/api/auth/me, service-role),
+          // NO de una consulta directa a users_profile (bloqueada por RLS deny-by-default).
+          const accessToken = data.session?.access_token || '';
+          const backendProfile = accessToken ? await fetchProfileFromBackend(accessToken) : null;
 
-          if (accessToken) {
-            try {
-              const authMe = await fetch('/api/auth/me', {
-                headers: { Authorization: `Bearer ${accessToken}` },
-              });
-              if (authMe.ok) {
-                const authContext = await authMe.json();
-                backendRole = typeof authContext.role === 'string' ? authContext.role : null;
-              }
-            } catch {
-              backendRole = null;
-            }
-          }
-
-          let assignedRole = backendRole || 'Solo lectura';
-
-          const userSession: UserSessionProfile = {
+          const userSession: UserSessionProfile = backendProfile || {
             id: data.user.id,
-            email: data.user.email || email.trim(),
-            full_name: (data.user.user_metadata?.full_name as string | undefined) || 'Usuario Autenticado',
-            phone: (data.user.user_metadata?.phone as string | undefined) || '',
-            role: normalizeUserRole(assignedRole),
-            avatar_url: (data.user.user_metadata?.avatar_url as string | undefined) || '',
+            email: data.user.email || email,
+            full_name: 'Usuario Autenticado',
+            role: 'Solo lectura',
           };
 
           setSuccessMessage(`¡Bienvenido de vuelta, ${userSession.full_name}!`);
           setTimeout(() => {
             onLoginSuccess(userSession, accessToken);
-          }, 1000);
+          }, 800);
         }
       } else {
         // --- PREVIEW / STAGING MODE (Fallback Auth) ---

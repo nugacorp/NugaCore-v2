@@ -25,3 +25,11 @@ export const hasActionPermission = (role: AppRole | null | undefined, action: Ac
   if (!role) return false;
   return permissionMatrix[action].includes(role);
 };
+
+/** Lista las acciones (permisos) que un rol tiene habilitadas. */
+export const listRolePermissions = (role: AppRole | null | undefined): ActionPermissionKey[] => {
+  if (!role) return [];
+  return (Object.keys(permissionMatrix) as ActionPermissionKey[]).filter((action) =>
+    permissionMatrix[action].includes(role),
+  );
+};

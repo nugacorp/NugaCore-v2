@@ -1,0 +1,69 @@
+import { describe, it, expect } from 'vitest';
+import { canAccessTab, getAllowedTabsByRole, getDefaultTabByRole } from '../../src/lib/rbac';
+import type { UserRole } from '../../src/lib/supabase';
+
+const ALL_ROLES: UserRole[] = ['Super Admin', 'Administrador', 'Cobranza', 'Técnico', 'Soporte', 'Solo lectura'];
+
+describe('RBAC visual por rol (frontend)', () => {
+  it('Super Admin ve todos los módulos (10)', () => {
+    const t = getAllowedTabsByRole('Super Admin');
+    expect(t.length).toBe(10);
+    expect(t).toEqual(expect.arrayContaining(['mikrotik', 'owner', 'finance', 'billing', 'inventory']));
+  });
+
+  it('Administrador NO ve mikrotik / finance / owner', () => {
+    const t = getAllowedTabsByRole('Administrador');
+    expect(t).toEqual(expect.arrayContaining(['dashboard', 'crm', 'billing', 'network', 'support', 'inventory', 'gis']));
+    expect(t).not.toContain('mikrotik');
+    expect(t).not.toContain('finance');
+    expect(t).not.toContain('owner');
+  });
+
+  it('Cobranza ve billing/finance; no mikrotik ni red', () => {
+    expect(getAllowedTabsByRole('Cobranza')).toEqual(['dashboard', 'crm', 'billing', 'finance']);
+    expect(canAccessTab('Cobranza', 'mikrotik')).toBe(false);
+    expect(canAccessTab('Cobranza', 'network')).toBe(false);
+  });
+
+  it('Técnico ve red/mikrotik/soporte; no finanzas ni billing', () => {
+    const t = getAllowedTabsByRole('Técnico');
+    expect(t).toEqual(expect.arrayContaining(['network', 'mikrotik', 'support', 'inventory', 'gis']));
+    expect(t).not.toContain('finance');
+    expect(t).not.toContain('billing');
+  });
+
+  it('Soporte: dashboard/crm/support/gis; no billing ni mikrotik', () => {
+    expect(getAllowedTabsByRole('Soporte')).toEqual(['dashboard', 'crm', 'support', 'gis']);
+    expect(canAccessTab('Soporte', 'billing')).toBe(false);
+    expect(canAccessTab('Soporte', 'mikrotik')).toBe(false);
+  });
+
+  it('Solo lectura: solo lectura; sin mikrotik/support/inventory/owner', () => {
+    expect(getAllowedTabsByRole('Solo lectura')).toEqual(['dashboard', 'crm', 'billing', 'network', 'gis']);
+    expect(canAccessTab('Solo lectura', 'mikrotik')).toBe(false);
+    expect(canAccessTab('Solo lectura', 'owner')).toBe(false);
+    expect(canAccessTab('Solo lectura', 'support')).toBe(false);
+  });
+
+  it('rol desconocido / sin rol -> fallback Solo lectura', () => {
+    const unknown = getAllowedTabsByRole('NoExiste' as unknown as UserRole);
+    expect(unknown).toEqual(getAllowedTabsByRole('Solo lectura'));
+  });
+
+  it('default = primer módulo permitido (dashboard) y siempre accesible', () => {
+    for (const r of ALL_ROLES) {
+      const def = getDefaultTabByRole(r);
+      expect(def).toBe('dashboard');
+      expect(canAccessTab(r, def)).toBe(true);
+    }
+  });
+
+  it('redirección: un tab no permitido cae a un módulo permitido', () => {
+    // Simula el efecto de App: si !canAccessTab -> getDefaultTabByRole
+    const role: UserRole = 'Solo lectura';
+    const target = 'mikrotik';
+    const next = canAccessTab(role, target) ? target : getDefaultTabByRole(role);
+    expect(next).toBe('dashboard');
+    expect(canAccessTab(role, next)).toBe(true);
+  });
+});

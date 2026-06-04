@@ -11,6 +11,7 @@ import GisModule from './components/GisModule';
 import FinanceOwnerModule from './components/FinanceOwnerModule';
 import LoginForm from './components/LoginForm';
 import LandingPage from './components/LandingPage';
+import UserMenu from './components/UserMenu';
 import { authSession, restoreSessionProfileFromSupabase } from './lib/authSession';
 import { UserSessionProfile, isSupabaseConfigured, supabase } from './lib/supabase';
 import { canAccessTab, getDefaultTabByRole } from './lib/rbac';
@@ -36,17 +37,14 @@ export default function App() {
   const [userSession, setUserSession] = useState<UserSessionProfile | null>(() => authSession.readProfile());
   const [sessionBootstrapped, setSessionBootstrapped] = useState<boolean>(!isSupabaseConfigured);
 
-  const [activeTab, setActiveTab] = useState<string>(() => {
-    const persisted = authSession.readProfile();
-    if (persisted?.role === 'Técnico') return 'support';
-    if (persisted?.role === 'Cobranza') return 'billing';
-    if (persisted?.role === 'Soporte') return 'support';
-    return 'dashboard';
-  });
+  // El tab inicial siempre es 'dashboard' (permitido para todos los roles).
+  // El efecto de RBAC corrige a un módulo permitido si el rol no lo autoriza.
+  const [activeTab, setActiveTab] = useState<string>('dashboard');
 
   const [mobileMenuOpen, setMobileMenuOpen] = useState<boolean>(false);
   const [loading, setLoading] = useState<boolean>(true);
   const [errorStr, setErrorStr] = useState<string>('');
+  const [notice, setNotice] = useState<string>('');
 
   const handleLoginSuccess = (profile: UserSessionProfile, accessToken?: string) => {
     setUserSession(profile);
@@ -76,6 +74,11 @@ export default function App() {
       if (restored) {
         setUserSession(restored);
         setActiveTab(getDefaultTabByRole(restored.role));
+      } else {
+        // Sin sesión válida en Supabase: limpiar cualquier perfil cacheado
+        // (evita mostrar el dashboard con una sesión obsoleta) -> login.
+        setUserSession(null);
+        authSession.clear();
       }
       setSessionBootstrapped(true);
     };
@@ -89,9 +92,16 @@ export default function App() {
   useEffect(() => {
     if (!userSession) return;
     if (!canAccessTab(userSession.role, activeTab)) {
+      setNotice('No tienes permiso para este módulo. Redirigiendo...');
       setActiveTab(getDefaultTabByRole(userSession.role));
     }
   }, [activeTab, userSession]);
+
+  useEffect(() => {
+    if (!notice) return;
+    const t = setTimeout(() => setNotice(''), 3500);
+    return () => clearTimeout(t);
+  }, [notice]);
 
   // DB States
   const [stats, setStats] = useState<any>({
@@ -485,25 +495,36 @@ export default function App() {
 
       {/* Main Content Area */}
       <div className="flex-1 flex flex-col min-w-0">
+        {/* Desktop top bar: identidad / perfil / logout */}
+        <div id="desktop-top-bar" className="hidden md:flex items-center justify-end gap-3 py-2.5 px-6 bg-slate-950 border-b border-slate-900 shrink-0 sticky top-0 z-20">
+          <UserMenu profile={userSession} onLogout={handleLogout} />
+        </div>
+
         {/* Mobile Navigation Header */}
         <div id="mobile-navigation-bar" className="md:hidden flex items-center justify-between py-3 px-4 bg-slate-950 border-b border-slate-900 shrink-0 sticky top-0 z-20">
-          <button 
+          <button
             onClick={() => setMobileMenuOpen(true)}
             className="p-1.5 rounded-lg text-slate-400 hover:text-white hover:bg-slate-900 focus:outline-none transition"
             title="Abrir menú"
           >
             <Menu className="w-5 h-5" />
           </button>
-          
+
           <div className="flex items-center space-x-1.5">
             <span className="w-2 h-2 rounded-full bg-indigo-500 animate-pulse"></span>
             <span className="font-bold text-xs text-white tracking-wide font-sans">NugaCore ERP</span>
           </div>
 
-          <div className="w-7 h-7 rounded-full bg-indigo-950 border border-indigo-900 text-indigo-400 font-mono text-[10px] font-bold flex items-center justify-center">
-            NOC
-          </div>
+          <UserMenu profile={userSession} onLogout={handleLogout} />
         </div>
+
+        {/* Aviso RBAC (sin permiso / redirección) */}
+        {notice && (
+          <div className="bg-amber-950/40 border-b border-amber-900/40 py-2 px-6 text-[11px] text-amber-300 font-mono flex items-center space-x-2">
+            <AlertTriangle className="w-3.5 h-3.5 shrink-0" />
+            <span>{notice}</span>
+          </div>
+        )}
         {/* Urgent Live Top Notification Slider */}
         {activeUnackCriticalAlert && (
           <div id="urgent-noc-banner" className="bg-rose-950/90 border-b border-rose-850 py-3 px-6 text-xs flex items-center justify-between text-rose-200 z-30 animate-pulse font-mono">
