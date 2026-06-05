@@ -10,6 +10,7 @@ import InventoryModule from './components/InventoryModule';
 import GisModule from './components/GisModule';
 import FinanceOwnerModule from './components/FinanceOwnerModule';
 import SuspensionModule from './components/SuspensionModule';
+import WireguardManagerModule from './components/WireguardManagerModule';
 import LoginForm from './components/LoginForm';
 import LandingPage from './components/LandingPage';
 import UserMenu from './components/UserMenu';
@@ -40,7 +41,11 @@ import {
   CustomerServiceView,
   SuspensionOrder,
   SuspensionEvent,
-  SuspensionPolicy
+  SuspensionPolicy,
+  WireguardServerView,
+  WireguardPeerView,
+  WireguardServerCreated,
+  WireguardPeerCreated
 } from './types';
 
 import { Cpu, AlertTriangle, CheckCircle, RefreshCw, Menu } from 'lucide-react';
@@ -148,6 +153,8 @@ export default function App() {
   const [suspensionOrders, setSuspensionOrders] = useState<SuspensionOrder[]>([]);
   const [suspensionEvents, setSuspensionEvents] = useState<SuspensionEvent[]>([]);
   const [suspensionPolicy, setSuspensionPolicy] = useState<SuspensionPolicy | null>(null);
+  const [wgServers, setWgServers] = useState<WireguardServerView[]>([]);
+  const [wgPeers, setWgPeers] = useState<WireguardPeerView[]>([]);
 
   const getAuthHeaders = async (): Promise<Record<string, string>> => {
     const headers: Record<string, string> = {};
@@ -258,6 +265,7 @@ export default function App() {
       await loadProvisionedRouters();
       await loadSuspension();
       await loadWorkerRuns();
+      await loadWireguard();
     } catch (err: any) {
       console.error(err);
       setErrorStr('Error contacting full-stack back-end server REST API.');
@@ -425,6 +433,41 @@ export default function App() {
 
   const handleReadRouter = async (id: string): Promise<RouterSnapshot> => {
     return fetchJson(`/api/mikrotik/routers/${id}/worker/read`);
+  };
+
+  // ── WireGuard Manager (Fase 4.6.1) ───────────────────────────────────
+  // Carga aislada: endpoints solo SA/Admin → un 403 NO rompe la carga global.
+  const loadWireguard = async () => {
+    try {
+      const [servers, peers] = await Promise.all([
+        fetchJson('/api/wireguard/servers'),
+        fetchJson('/api/wireguard/peers'),
+      ]);
+      setWgServers(servers);
+      setWgPeers(peers);
+    } catch {
+      setWgServers([]);
+      setWgPeers([]);
+    }
+  };
+
+  const handleCreateWgServer = async (payload: Record<string, unknown>): Promise<WireguardServerCreated> => {
+    return fetchJson('/api/wireguard/servers', {
+      method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(payload),
+    });
+  };
+  const handleCreateWgPeer = async (payload: Record<string, unknown>): Promise<WireguardPeerCreated> => {
+    return fetchJson('/api/wireguard/peers', {
+      method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(payload),
+    });
+  };
+  const handleRotateWgPeer = async (id: string): Promise<WireguardPeerCreated> => {
+    return fetchJson(`/api/wireguard/peers/${id}/rotate`, {
+      method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({}),
+    });
+  };
+  const handleRevokeWgPeer = async (id: string): Promise<void> => {
+    await fetchJson(`/api/wireguard/peers/${id}`, { method: 'DELETE' });
   };
 
   // ── Motor de Suspensiones (Fase 4.5) ─────────────────────────────────
@@ -820,6 +863,18 @@ export default function App() {
                 naps={naps}
                 onus={onus}
                 olts={olts}
+              />
+            )}
+
+            {activeTab === 'wireguard' && (
+              <WireguardManagerModule
+                servers={wgServers}
+                peers={wgPeers}
+                onRefresh={loadWireguard}
+                onCreateServer={handleCreateWgServer}
+                onCreatePeer={handleCreateWgPeer}
+                onRotatePeer={handleRotateWgPeer}
+                onRevokePeer={handleRevokeWgPeer}
               />
             )}
 

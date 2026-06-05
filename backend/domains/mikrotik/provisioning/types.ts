@@ -78,6 +78,12 @@ export interface ScriptServerConfig {
   serverVpnIp?: string;       // IP del servidor dentro del túnel
   allowedApiCidr?: string;    // CIDR autorizado para la API (default = red VPN)
   routerOsVersionHint?: string;
+
+  // ── Peer administrado por el WireGuard Manager (Fase 4.6.1) ──────────
+  // Si se proveen, el script fija la private-key del router y la preshared-key
+  // (elimina el intercambio manual de claves).
+  wgRouterPrivateKey?: string; // SECRETO (se incrusta una sola vez)
+  wgPresharedKey?: string;     // SECRETO
 }
 
 /** Entrada completa para el generador de script. */

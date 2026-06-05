@@ -14,6 +14,7 @@ import reportsRoutes from './domains/reports/routes';
 import securityRoutes from './domains/security/routes';
 import suspensionRoutes from './domains/suspension/routes';
 import ticketsRoutes from './domains/tickets/routes';
+import wireguardRoutes from './domains/wireguard/routes';
 
 export function registerRoutes(app: Express): void {
   app.use(healthRoutes);
@@ -27,6 +28,7 @@ export function registerRoutes(app: Express): void {
   app.use(suspensionRoutes);
   app.use(networkRoutes);
   app.use(mikrotikRoutes);
+  app.use(wireguardRoutes);
   app.use(ticketsRoutes);
   app.use(inventoryRoutes);
   app.use(gisRoutes);

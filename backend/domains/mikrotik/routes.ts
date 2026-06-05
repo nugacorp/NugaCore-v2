@@ -14,6 +14,8 @@ import {
 } from './provisioning/types';
 import { asyncHandler } from '../../common/errors';
 import { processPendingOrders, readRouterSnapshot, listWorkerRuns } from './worker/worker';
+import { getWireguardService } from '../wireguard/service';
+import type { PeerCreatedOnce } from '../wireguard/types';
 
 const router = Router();
 
@@ -505,7 +507,7 @@ No se pudo comunicar con el modelo de IA debido a que el API Key no esta configu
 // El script (con secretos) se devuelve UNA sola vez; solo se persiste su
 // hash/metadata. Nunca se loguea el script ni los passwords.
 // ────────────────────────────────────────────────────────────────────
-const emitProvisioning = (
+const emitProvisioning = async (
   routerItem: (typeof store.MIKROTIK_ROUTERS)[number],
   body: Record<string, unknown>,
   actorId: string | undefined,
@@ -535,6 +537,27 @@ const emitProvisioning = (
 
   const serverOverrides = (body.server && typeof body.server === 'object' ? body.server : {}) as Partial<ScriptServerConfig>;
   const server = buildServerConfig(serverOverrides);
+
+  // Integración con el WireGuard Manager (Fase 4.6.1): si se indica un
+  // wireguardServerId y el modo es WireGuard administrado, NugaCore asigna el
+  // peer (claves + IP) y lo incrusta en el script (sin intercambio manual).
+  let wgPeer: PeerCreatedOnce | undefined;
+  if (requestedMode === 'wireguard_managed' && body.wireguardServerId) {
+    try {
+      wgPeer = await getWireguardService().getPeerConfigForRouter(routerItem.id, String(body.wireguardServerId), actorId);
+      const [host, port] = wgPeer.serverEndpoint.split(':');
+      server.wgServerPublicKey = wgPeer.serverPublicKey;
+      server.vpnServerHost = host || server.vpnServerHost;
+      server.vpnServerPort = Number(port) || server.vpnServerPort;
+      server.routerVpnIp = wgPeer.assignedIp;
+      server.wgAllowedAddress = wgPeer.allowedCidr;
+      server.serverManagementCidr = wgPeer.allowedCidr || server.serverManagementCidr;
+      server.wgRouterPrivateKey = wgPeer.privateKey || undefined;
+      server.wgPresharedKey = wgPeer.presharedKey || undefined;
+    } catch {
+      // Si falla, el script se genera con placeholders (modo manual).
+    }
+  }
 
   const result = generateProvisioningScript({
     connectionType: requestedMode,
@@ -590,6 +613,18 @@ const emitProvisioning = (
       apiUsername: apiCred.username,
       ...(isSstp ? { vpnUsername: vpnCred.username } : {}),
     },
+    // Metadata del peer administrado (sin secretos: ya van dentro del script).
+    ...(wgPeer
+      ? {
+          wireguard: {
+            serverId: String(body.wireguardServerId),
+            peerId: wgPeer.peer.id,
+            assignedIp: wgPeer.assignedIp,
+            peerPublicKey: wgPeer.peer.publicKey,
+            managed: true,
+          },
+        }
+      : {}),
     provisioningToken: token.token,
     tokenExpiresAt: token.expiresAt,
     securityWarning:
@@ -598,21 +633,23 @@ const emitProvisioning = (
   };
 };
 
-router.post('/api/mikrotik/routers/:id/provisioning-script', requireRoles([...PROV_SCRIPT_ROLES]), (req, res) => {
+router.post('/api/mikrotik/routers/:id/provisioning-script', requireRoles([...PROV_SCRIPT_ROLES]), asyncHandler(async (req, res) => {
   const routerItem = store.MIKROTIK_ROUTERS.find((row) => row.id === req.params.id);
   if (!routerItem) {
-    return res.status(404).json({ error: 'Router not found' });
+    res.status(404).json({ error: 'Router not found' });
+    return;
   }
   if (
     req.body.connectionType !== undefined &&
     ![...PROVISIONING_MODES, 'wireguard', 'sstp'].includes(String(req.body.connectionType))
   ) {
-    return res.status(400).json({
+    res.status(400).json({
       error: 'connectionType must be one of: wireguard_managed, sstp_managed, tailscale_lab, direct_lab (or legacy wireguard/sstp).',
     });
+    return;
   }
   try {
-    const payload = emitProvisioning(routerItem, req.body || {}, req.authContext?.userId, 'generate_script');
+    const payload = await emitProvisioning(routerItem, req.body || {}, req.authContext?.userId, 'generate_script');
     res.status(201).json(payload);
   } catch (err) {
     provisioningStore.recordAudit({
@@ -625,20 +662,22 @@ router.post('/api/mikrotik/routers/:id/provisioning-script', requireRoles([...PR
     });
     res.status(400).json({ error: err instanceof Error ? err.message : 'Could not generate script' });
   }
-});
+}));
 
-router.post('/api/mikrotik/routers/:id/rotate-credentials', requireRoles([...PROV_ROTATE_ROLES]), (req, res) => {
+router.post('/api/mikrotik/routers/:id/rotate-credentials', requireRoles([...PROV_ROTATE_ROLES]), asyncHandler(async (req, res) => {
   const routerItem = store.MIKROTIK_ROUTERS.find((row) => row.id === req.params.id);
   if (!routerItem) {
-    return res.status(404).json({ error: 'Router not found' });
+    res.status(404).json({ error: 'Router not found' });
+    return;
   }
   // Confirmación explícita obligatoria (rotación invalida la credencial previa).
   if (req.body?.confirm !== true) {
-    return res.status(400).json({ error: 'Confirmation required: send { "confirm": true } to rotate credentials.' });
+    res.status(400).json({ error: 'Confirmation required: send { "confirm": true } to rotate credentials.' });
+    return;
   }
-  const payload = emitProvisioning(routerItem, req.body || {}, req.authContext?.userId, 'rotate_credentials');
+  const payload = await emitProvisioning(routerItem, req.body || {}, req.authContext?.userId, 'rotate_credentials');
   res.status(201).json(payload);
-});
+}));
 
 router.post('/api/mikrotik/routers/:id/test-connection', requireRoles([...PROV_SCRIPT_ROLES]), (req, res) => {
   const routerItem = store.MIKROTIK_ROUTERS.find((row) => row.id === req.params.id);

@@ -105,12 +105,24 @@ const buildWireguardScript = (input: ScriptGenerationInput, apiMode: ApiMode): {
   }
   if (endpointHost === '<ENDPOINT_HOST>') warnings.push('Falta vpnServerHost/wgEndpoint: se dejó un placeholder.');
 
+  // Si el WireGuard Manager proveyó la private-key del router, la fijamos en la
+  // interfaz (sin intercambio manual). Si no, RouterOS la autogenera.
+  const managed = !!server.wgRouterPrivateKey;
+  const interfaceLine = managed
+    ? `/interface wireguard add name=NugaCoreWG listen-port=13231 private-key="${server.wgRouterPrivateKey}" comment="NugaCore WireGuard"`
+    : `/interface wireguard add name=NugaCoreWG listen-port=13231 comment="NugaCore WireGuard"`;
+  const presharedPart = server.wgPresharedKey ? ` preshared-key="${server.wgPresharedKey}"` : '';
+  const keyNote = managed
+    ? `# Claves administradas por NugaCore (WireGuard Manager): private-key y
+# preshared-key incrustadas. El servidor ya registró la public-key del peer.`
+    : `# NOTA: intercambio de claves manual:
+#   1. El router genera su private-key automaticamente al crear la interfaz.
+#   2. Ejecuta  [/interface wireguard print]  y copia la public-key del router.
+#   3. Registra esa public-key del router en NugaCore para completar el tunel.`;
+
   const script = `${header(routerName, 'WireGuard administrado', apiMode)}
-# NOTA: WireGuard requiere RouterOS v7. Intercambio de claves (paso manual):
-#   1. NugaCore genera el peer del servidor (public key + endpoint).
-#   2. El router genera su private-key automaticamente al crear la interfaz.
-#   3. Ejecuta  [/interface wireguard print]  y copia la public-key del router.
-#   4. Registra esa public-key del router en NugaCore para completar el tunel.
+# WireGuard requiere RouterOS v7.
+${keyNote}
 
 ${commonCleanup()}
 /interface wireguard peers remove [find where comment~"NugaCore"]
@@ -118,14 +130,14 @@ ${commonCleanup()}
 
 ${userAndGroup(apiUser, apiPassword, apiMode, 'WireGuard')}
 
-# --- 4. Interfaz WireGuard (RouterOS genera la private-key) ---
-/interface wireguard add name=NugaCoreWG listen-port=13231 comment="NugaCore WireGuard"
+# --- 4. Interfaz WireGuard ---
+${interfaceLine}
 
 # --- 5. Direccion IP del router sobre la interfaz WG ---
 /ip address add address=${routerVpnIp} interface=NugaCoreWG comment="NugaCore WG address"
 
 # --- 6. Peer del servidor WireGuard de NugaCore ---
-/interface wireguard peers add interface=NugaCoreWG public-key="${wgServerPublicKey}" endpoint-address=${endpointHost} endpoint-port=${endpointPort} allowed-address=${wgAllowedAddress} persistent-keepalive=${keepalive}s comment="NugaCore WG server peer"
+/interface wireguard peers add interface=NugaCoreWG public-key="${wgServerPublicKey}"${presharedPart} endpoint-address=${endpointHost} endpoint-port=${endpointPort} allowed-address=${wgAllowedAddress} persistent-keepalive=${keepalive}s comment="NugaCore WG server peer"
 
 # --- 7. Ruta hacia la red de administracion NugaCore ---
 /ip route add dst-address="${server.serverManagementCidr}" gateway=NugaCoreWG comment="NugaCore management route"

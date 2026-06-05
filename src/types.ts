@@ -357,6 +357,54 @@ export interface SuspensionPolicy {
   updatedAt: string;
 }
 
+// ── WireGuard Manager (Fase 4.6.1) ────────────────────────────────────
+export interface WireguardServerView {
+  id: string;
+  name: string;
+  endpointHost: string;
+  endpointPort: number;
+  listenPort: number;
+  publicKey: string;
+  vpnCidr: string;
+  serverVpnIp: string;
+  status: 'active' | 'disabled';
+  peersCount: number;
+  createdAt: string;
+  updatedAt: string;
+}
+
+export interface WireguardPeerView {
+  id: string;
+  serverId: string;
+  routerId?: string;
+  name: string;
+  publicKey: string;
+  allocatedIp: string;
+  allowedCidr?: string;
+  status: 'active' | 'revoked';
+  hasSecrets: boolean;
+  lastRotatedAt?: string;
+  revokedAt?: string;
+  createdAt: string;
+}
+
+export interface WireguardServerCreated {
+  server: WireguardServerView;
+  serverPrivateKey: string;
+  securityWarning: string;
+}
+
+export interface WireguardPeerCreated {
+  peer: WireguardPeerView;
+  privateKey: string;
+  presharedKey: string;
+  serverPublicKey: string;
+  serverEndpoint: string;
+  assignedIp: string;
+  allowedCidr: string;
+  securityWarning: string;
+}
+
 export interface NocAlert {
   id: string;
   source: string;

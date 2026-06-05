@@ -46,6 +46,7 @@ export default function Sidebar({
     { id: 'suspension', name: 'Suspensiones & Cortes', icon: Ban },
     { id: 'network', name: 'Red WISP & FTTH', icon: Network },
     { id: 'mikrotik', name: 'MikroTik Core Control & Copilot', icon: Terminal, highlight: true },
+    { id: 'wireguard', name: 'WireGuard Manager', icon: Shield },
     { id: 'support', name: 'Remesa Soporte & OT', icon: Wrench },
     { id: 'inventory', name: 'Inventarios / ERP', icon: Box },
     { id: 'gis', name: 'GIS & Cobertura Co-Map', icon: Map },

@@ -8,6 +8,7 @@ export type AppTab =
   | 'suspension'
   | 'network'
   | 'mikrotik'
+  | 'wireguard'
   | 'support'
   | 'inventory'
   | 'gis'
@@ -20,8 +21,8 @@ export type AppTab =
 // la VISIBILIDAD del módulo.
 // ====================================================================
 const roleTabs: Record<UserRole, AppTab[]> = {
-  'Super Admin':  ['dashboard', 'crm', 'billing', 'finance', 'suspension', 'network', 'mikrotik', 'support', 'inventory', 'gis', 'owner'],
-  'Administrador':['dashboard', 'crm', 'billing', 'suspension', 'network', 'support', 'inventory', 'gis'],
+  'Super Admin':  ['dashboard', 'crm', 'billing', 'finance', 'suspension', 'network', 'mikrotik', 'wireguard', 'support', 'inventory', 'gis', 'owner'],
+  'Administrador':['dashboard', 'crm', 'billing', 'suspension', 'network', 'wireguard', 'support', 'inventory', 'gis'],
   'Cobranza':     ['dashboard', 'crm', 'billing', 'finance', 'suspension'],
   'Técnico':      ['dashboard', 'suspension', 'network', 'mikrotik', 'support', 'inventory', 'gis'],
   'Soporte':      ['dashboard', 'crm', 'support', 'gis'],
@@ -54,6 +55,7 @@ export const MODULE_LABELS: Record<AppTab, string> = {
   suspension: 'Suspensiones & Cortes',
   network: 'Red WISP & FTTH',
   mikrotik: 'MikroTik Core',
+  wireguard: 'WireGuard Manager',
   support: 'Soporte & OT',
   inventory: 'Inventario / ERP',
   gis: 'GIS & Cobertura',

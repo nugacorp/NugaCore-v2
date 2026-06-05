@@ -44,6 +44,12 @@ export function redactString(text: string): string {
     `$1${REDACTED}`,
   );
 
+  // WireGuard: private-key / preshared-key = ...  (NO toca public-key)
+  out = out.replace(
+    /(\b(?:private-key|preshared-key)\s*=\s*)("[^"]*"|'[^']*'|[^\s,;)]+)/gi,
+    `$1${REDACTED}`,
+  );
+
   // Bearer <token>
   out = out.replace(/\bBearer\s+[A-Za-z0-9._~+/=-]+/gi, `Bearer ${REDACTED}`);
 
