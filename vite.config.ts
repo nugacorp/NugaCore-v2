@@ -17,6 +17,11 @@ export default defineConfig(() => {
       hmr: process.env.DISABLE_HMR !== 'true',
       // Disable file watching when DISABLE_HMR is true to save CPU during agent edits.
       watch: process.env.DISABLE_HMR === 'true' ? null : {},
+      // allowedHosts EXPLICITO desde env (lista separada por comas). Nunca se
+      // usa wildcard: staging debe servir el build estatico (ver server.ts).
+      ...(process.env.VITE_ALLOWED_HOSTS
+        ? { allowedHosts: process.env.VITE_ALLOWED_HOSTS.split(',').map((h) => h.trim()).filter(Boolean) }
+        : {}),
     },
   };
 });

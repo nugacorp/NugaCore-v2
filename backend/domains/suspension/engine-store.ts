@@ -110,6 +110,13 @@ export const engineStore = {
     return cancelled;
   },
 
+  /** Elimina TODO el estado del motor para un cliente (cleanup test-tools). */
+  purgeCustomer(customerId: string): void {
+    this.CUSTOMER_STATE.delete(customerId);
+    this.EVENTS = this.EVENTS.filter((e) => e.customerId !== customerId);
+    this.ORDERS = this.ORDERS.filter((o) => o.customerId !== customerId);
+  },
+
   /** Sólo para tests/diagnóstico: reinicia el estado del motor. */
   reset(): void {
     this.POLICY = { ...DEFAULT_SUSPENSION_POLICY, updatedAt: nowIso() };

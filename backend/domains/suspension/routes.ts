@@ -11,6 +11,8 @@ import {
 import { SuspensionPolicyV2 } from './types';
 import { getCustomersService } from '../customers/service';
 import { getBillingService } from '../billing/service';
+import { isDomainOnDb } from '../../config/feature-flags';
+import { supabaseAdmin } from '../../services/supabase-admin';
 import type { Client } from '../../../src/types';
 
 const router = Router();
@@ -373,14 +375,61 @@ router.post('/api/suspension/test-tools/scenario', requireRoles(['super admin'])
   });
 }));
 
+// Solo limpia clientes creados por test-tools (prefijo en el nombre).
+const TEST_CUSTOMER_PREFIX = '__TEST__';
+
+// Purga la cadena de Billing del cliente en el ORDEN de FK correcto.
+// (payments.client_id y payment_applications.* son ON DELETE RESTRICT, por
+//  eso borrar el cliente directo daba 500.) Idempotente.
+async function purgeBillingForCustomer(customerId: string): Promise<void> {
+  if (isDomainOnDb('billing') && supabaseAdmin) {
+    const { data: invs } = await supabaseAdmin.from('invoices').select('id').eq('client_id', customerId);
+    const invoiceIds = (invs || []).map((r: { id: string }) => r.id);
+    const { data: pays } = await supabaseAdmin.from('payments').select('id').eq('client_id', customerId);
+    const paymentIds = (pays || []).map((r: { id: string }) => r.id);
+
+    if (invoiceIds.length) await supabaseAdmin.from('payment_applications').delete().in('invoice_id', invoiceIds);
+    if (paymentIds.length) await supabaseAdmin.from('payment_applications').delete().in('payment_id', paymentIds);
+    await supabaseAdmin.from('payments').delete().eq('client_id', customerId);
+    if (invoiceIds.length) await supabaseAdmin.from('invoice_items').delete().in('invoice_id', invoiceIds);
+    await supabaseAdmin.from('invoices').delete().eq('client_id', customerId);
+    return;
+  }
+
+  // Modo mock: limpia el store en memoria.
+  const invoiceIds = new Set(store.INVOICES.filter((i) => i.clientId === customerId).map((i) => i.id));
+  store.PAYMENT_ALLOCATIONS = store.PAYMENT_ALLOCATIONS.filter((a) => !invoiceIds.has(a.invoiceId));
+  store.INVOICES = store.INVOICES.filter((i) => i.clientId !== customerId);
+}
+
 router.delete('/api/suspension/test-tools/customer/:id', requireRoles(['super admin']), asyncHandler(async (req, res) => {
   if (!testToolsAvailable()) {
     res.status(404).json({ error: 'Test tools not available in this environment.' });
     return;
   }
-  await getSuspensionService().repo.deleteCustomerArtifacts(req.params.id);
-  const ok = await getCustomersService().remove(req.params.id);
-  res.json({ removed: ok, customerId: req.params.id });
+  const customerId = req.params.id;
+  const customer = await getCustomersService().getById(customerId);
+
+  // Idempotente: si ya no existe, respuesta controlada (no 500).
+  if (!customer) {
+    res.json({ removed: false, customerId, reason: 'not_found' });
+    return;
+  }
+  // Candado: SOLO clientes de prueba; nunca clientes reales.
+  if (!customer.name.startsWith(TEST_CUSTOMER_PREFIX)) {
+    res.status(403).json({ error: 'Refusing to delete a non-test customer.' });
+    return;
+  }
+
+  // Orden de borrado (hijos → padre):
+  // 1. payment_applications  2. payments  3. invoice_items  4. invoices
+  await purgeBillingForCustomer(customerId);
+  // 5-8. órdenes / eventos / estado del motor
+  await getSuspensionService().repo.purgeCustomer(customerId);
+  // 9. cliente
+  const removed = await getCustomersService().remove(customerId);
+
+  res.json({ removed, customerId, cleaned: ['billing', 'suspension', 'customer'] });
 }));
 
 export default router;

@@ -20,22 +20,9 @@ describe.skipIf(!optIn || !hasSupabase)('Suspension DB scenarios (Supabase stagi
   const createdCustomers: string[] = [];
 
   afterAll(async () => {
-    const { supabaseAdmin } = await import('../../backend/services/supabase-admin');
-    if (!supabaseAdmin) return;
+    // Cleanup AUTOSUFICIENTE vía el endpoint (lo que esta fase valida): sin SQL manual.
     for (const id of createdCustomers) {
-      await supabaseAdmin.from('suspension_orders').delete().eq('customer_id', id);
-      await supabaseAdmin.from('reactivation_orders').delete().eq('customer_id', id);
-      await supabaseAdmin.from('suspension_events').delete().eq('customer_id', id);
-      await supabaseAdmin.from('customer_service_state').delete().eq('customer_id', id);
-      await supabaseAdmin.from('payment_applications').delete().eq('invoice_id', `like.%`);
-      await supabaseAdmin.from('payments').delete().eq('client_id', id);
-      // invoices + items
-      const { data: invs } = await supabaseAdmin.from('invoices').select('id').eq('client_id', id);
-      for (const inv of (invs || []) as { id: string }[]) {
-        await supabaseAdmin.from('invoice_items').delete().eq('invoice_id', inv.id);
-      }
-      await supabaseAdmin.from('invoices').delete().eq('client_id', id);
-      await supabaseAdmin.from('clients').delete().eq('id', id);
+      await request(app).delete(`/api/suspension/test-tools/customer/${id}`).set(ADMIN);
     }
   }, DB_TIMEOUT_MS);
 

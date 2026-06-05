@@ -1,23 +1,56 @@
+import fs from 'fs';
 import path from 'path';
 import { createApp } from './backend/app';
 import { env, isProduction, validateEnvironment } from './backend/config/env';
 import { logger } from './backend/common/logger';
 
+// ── Modo de servido (Fase 4.5.2) ─────────────────────────────────────
+// El Vite dev server bloquea hosts desconocidos ("This host is not allowed")
+// y escribe en node_modules/.vite (falla como usuario no-root). Eso es SOLO
+// para desarrollo. En staging/producción debe servirse el build estático.
+//
+// Regla robusta (no depende de que NODE_ENV sea exactamente 'production'):
+//   - SERVE_MODE=static|dev fuerza el modo.
+//   - production → static.
+//   - si existe dist/index.html (imagen ya construida, p.ej. staging) → static.
+//   - solo sin build y en desarrollo → Vite dev server.
+function resolveServeMode(): 'static' | 'dev' {
+  const explicit = (process.env.SERVE_MODE || '').trim().toLowerCase();
+  if (explicit === 'static' || explicit === 'dev') return explicit;
+  if (isProduction) return 'static';
+  const hasBuild = fs.existsSync(path.join(process.cwd(), 'dist', 'index.html'));
+  return hasBuild ? 'static' : 'dev';
+}
+
 async function startServer() {
   validateEnvironment();
 
   const app = createApp();
+  const serveMode = resolveServeMode();
 
-  if (!isProduction) {
+  if (serveMode === 'dev') {
     // Import perezoso de Vite: así NO queda como dependencia eager en el
     // bundle de producción y la imagen de runtime puede usar `--omit=dev`.
     const { createServer: createViteServer } = await import('vite');
+    // allowedHosts EXPLÍCITO desde env (lista separada por comas). Nunca
+    // wildcard por defecto: solo se permiten los hosts declarados.
+    const allowedHosts = (process.env.VITE_ALLOWED_HOSTS || '')
+      .split(',')
+      .map((h) => h.trim())
+      .filter(Boolean);
     const vite = await createViteServer({
-      server: { middlewareMode: true },
+      server: {
+        middlewareMode: true,
+        ...(allowedHosts.length ? { allowedHosts } : {}),
+      },
       appType: 'spa',
     });
     app.use(vite.middlewares);
+    logger.info('NugaCore: modo desarrollo (Vite middleware)', {
+      allowedHosts: allowedHosts.length ? allowedHosts.join(',') : 'default',
+    });
   } else {
+    logger.info('NugaCore: sirviendo build estático de producción (dist/)', { mode: env.NODE_ENV });
     const distPath = path.join(process.cwd(), 'dist');
     const expressMod = (await import('express')).default;
     const ONE_YEAR = 31536000; // segundos
