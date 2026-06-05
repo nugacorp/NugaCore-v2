@@ -378,6 +378,7 @@ router.delete('/api/suspension/test-tools/customer/:id', requireRoles(['super ad
     res.status(404).json({ error: 'Test tools not available in this environment.' });
     return;
   }
+  await getSuspensionService().repo.deleteCustomerArtifacts(req.params.id);
   const ok = await getCustomersService().remove(req.params.id);
   res.json({ removed: ok, customerId: req.params.id });
 }));

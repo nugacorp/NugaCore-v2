@@ -71,20 +71,28 @@ describe('Escenario B — suspendido + factura pagada → ReactivationOrder', ()
   let app: Express;
   beforeAll(() => { app = createApp(); });
 
-  it('crea escenario, evalúa y genera orden de reactivación PENDING', async () => {
+  it('crea escenario, evalúa y genera orden de reactivación PENDING con invoiceId trazable', async () => {
     const created = await createScenario(app, 'B');
     expect(created.status).toBe(201);
-    const { customerId } = created.body;
+    const { customerId, invoiceId } = created.body;
+    expect(invoiceId).toBeTruthy();
 
     const evalRes = await request(app).post(`/api/suspension/evaluate/${customerId}`).set(COBR).send({});
     expect(evalRes.status).toBe(200);
     expect(evalRes.body.serviceStatus).toBe('PENDING_REACTIVATION');
     expect(evalRes.body.action).toBe('create_reactivation');
+    expect(evalRes.body.invoiceId).toBe(invoiceId);
 
     const orders = (await request(app).get(`/api/suspension/orders?customerId=${customerId}`).set(ADMIN)).body;
     const react = orders.filter((o: any) => o.orderType === 'reactivation');
     expect(react.length).toBe(1);
     expect(react[0].status).toBe('PENDING');
+    expect(react[0].invoiceId).toBe(invoiceId);
+
+    const events = (await request(app).get(`/api/suspension/events?customerId=${customerId}`).set(ADMIN)).body;
+    const createdEvents = events.filter((e: any) => e.eventType === 'reactivation_order_created');
+    expect(createdEvents.length).toBe(1);
+    expect(createdEvents[0].invoiceId).toBe(invoiceId);
 
     // El cliente sigue suspendido en red (el motor no ejecuta).
     const client = (await request(app).get(`/api/clients/${customerId}`).set(ADMIN)).body;
@@ -99,5 +107,29 @@ describe('Escenario B — suspendido + factura pagada → ReactivationOrder', ()
     const orders = (await request(app).get(`/api/suspension/orders?customerId=${customerId}`).set(ADMIN)).body;
     const openReact = orders.filter((o: any) => o.orderType === 'reactivation' && o.status === 'PENDING');
     expect(openReact.length).toBe(1);
+  });
+
+  it('cleanup elimina cliente de prueba y artefactos del motor', async () => {
+    const created = await createScenario(app, 'B');
+    const { customerId } = created.body;
+    await request(app).post(`/api/suspension/evaluate/${customerId}`).set(ADMIN).send({});
+
+    const beforeOrders = (await request(app).get(`/api/suspension/orders?customerId=${customerId}`).set(ADMIN)).body;
+    const beforeEvents = (await request(app).get(`/api/suspension/events?customerId=${customerId}`).set(ADMIN)).body;
+    expect(beforeOrders.length).toBeGreaterThan(0);
+    expect(beforeEvents.length).toBeGreaterThan(0);
+
+    const cleanup = await request(app).delete(`/api/suspension/test-tools/customer/${customerId}`).set(ADMIN).send({});
+    expect(cleanup.status).toBe(200);
+    expect(cleanup.body.removed).toBe(true);
+
+    const client = await request(app).get(`/api/clients/${customerId}`).set(ADMIN);
+    expect(client.status).toBe(404);
+    const afterOrders = (await request(app).get(`/api/suspension/orders?customerId=${customerId}`).set(ADMIN)).body;
+    const afterEvents = (await request(app).get(`/api/suspension/events?customerId=${customerId}`).set(ADMIN)).body;
+    const states = (await request(app).get('/api/suspension/customers').set(ADMIN)).body;
+    expect(afterOrders).toEqual([]);
+    expect(afterEvents).toEqual([]);
+    expect(states.some((s: any) => s.customerId === customerId)).toBe(false);
   });
 });

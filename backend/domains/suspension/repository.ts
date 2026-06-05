@@ -65,6 +65,7 @@ export interface SuspensionRepository {
   openOrders(customerId: string, orderType?: SuspensionOrder['orderType']): Promise<SuspensionOrder[]>;
   createOrder(input: CreateOrderInput): Promise<SuspensionOrder>;
   cancelOpenOrders(customerId: string, orderType: SuspensionOrder['orderType'], reason: string, actorId?: string): Promise<number>;
+  deleteCustomerArtifacts(customerId: string): Promise<void>;
 }
 
 // ════════════════════════════════════════════════════════════════════
@@ -95,6 +96,11 @@ export class StoreSuspensionRepository implements SuspensionRepository {
   async createOrder(input: CreateOrderInput) { return engineStore.createOrder(input); }
   async cancelOpenOrders(customerId: string, orderType: SuspensionOrder['orderType'], reason: string, actorId?: string) {
     return engineStore.cancelOpenOrders(customerId, orderType, reason, actorId);
+  }
+  async deleteCustomerArtifacts(customerId: string) {
+    engineStore.CUSTOMER_STATE.delete(customerId);
+    engineStore.EVENTS = engineStore.EVENTS.filter((e) => e.customerId !== customerId);
+    engineStore.ORDERS = engineStore.ORDERS.filter((o) => o.customerId !== customerId);
   }
 }
 
@@ -207,5 +213,16 @@ export class SupabaseSuspensionRepository implements SuspensionRepository {
       });
     }
     return cancelled;
+  }
+
+  async deleteCustomerArtifacts(customerId: string): Promise<void> {
+    const deletes = await Promise.all([
+      this.client.from('suspension_events').delete().eq('customer_id', customerId),
+      this.client.from('suspension_orders').delete().eq('customer_id', customerId),
+      this.client.from('reactivation_orders').delete().eq('customer_id', customerId),
+      this.client.from('customer_service_state').delete().eq('customer_id', customerId),
+    ]);
+    const firstError = deletes.find((r) => r.error)?.error;
+    if (firstError) throw new Error(`deleteCustomerArtifacts: ${firstError.message}`);
   }
 }

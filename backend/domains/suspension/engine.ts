@@ -61,10 +61,12 @@ export function aggregateBillingStatus(
   let worst = 'current';
   let worstInvoiceId: string | undefined;
   let partialPaid = false;
+  let lastClosedInvoiceId: string | undefined;
 
   for (const inv of invoices) {
     if (isOpen(inv) && paidOf(inv) > 0) partialPaid = true;
     const klass = evaluateInvoice(inv, policy, now);
+    if (klass === 'closed') lastClosedInvoiceId = inv.id;
     if (SEVERITY[klass] > SEVERITY[worst]) {
       worst = klass;
       if (klass !== 'closed' && klass !== 'current') worstInvoiceId = inv.id;
@@ -77,7 +79,7 @@ export function aggregateBillingStatus(
     : worst === 'due_soon' ? 'DUE_SOON'
     : 'CURRENT';
 
-  return { billingStatus, worstInvoiceId, partialPaid };
+  return { billingStatus, worstInvoiceId: worstInvoiceId ?? lastClosedInvoiceId, partialPaid };
 }
 
 // ── Decisión pura (sin efectos) ───────────────────────────────────────

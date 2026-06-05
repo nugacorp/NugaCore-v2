@@ -5,6 +5,23 @@ Ambiente: NugaCore Staging
 Commit funcional validado: `acfd9a0 fix(suspension): align engine with persistent billing data`
 Resultado final: **NO APROBADA**
 
+## Seguimiento posterior — 2026-06-05T00:29:48Z
+
+Se corrigieron localmente los dos pendientes detectados en esta validación, sin tocar MikroTik ni ejecutar acciones reales:
+
+- Trazabilidad de Escenario B: cuando una factura ya está cerrada/pagada y dispara reactivación, el motor conserva el `invoiceId` en la respuesta de evaluación, la `ReactivationOrder` y el evento `reactivation_order_created`.
+- Cleanup de test-tools: `DELETE /api/suspension/test-tools/customer/:id` ahora elimina artefactos del motor para ese cliente (`customer_service_state`, eventos, órdenes de suspensión y órdenes de reactivación) antes de borrar el cliente de prueba.
+
+Evidencia local:
+
+- RED inicial: los tests nuevos fallaron por `invoiceId` ausente y por órdenes remanentes tras cleanup.
+- GREEN: `npm test -- --run tests/contract/suspension.scenarios.contract.test.ts -t "cleanup elimina|reactivación PENDING con invoiceId"` -> PASS.
+- Regresión focal completa: `npm test -- --run tests/contract/suspension.scenarios.contract.test.ts` -> 7/7 PASS.
+- `npm run typecheck` -> PASS.
+- `npm run build` -> PASS.
+
+Nota: este seguimiento corrige el código y la cobertura local. La aprobación de la Fase 4.5.1 sigue requiriendo redeploy/revalidación en staging antes de avanzar al Worker MikroTik / Fase 4.6.
+
 Esta revalidación NO avanzó al Worker MikroTik, no conectó routers, no tocó routers y no ejecutó acciones reales.
 
 ## 1. Actualización y despliegue
