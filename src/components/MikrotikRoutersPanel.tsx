@@ -15,6 +15,7 @@ import {
 import type {
   MikrotikRouterView,
   MikrotikConnectionType,
+  MikrotikProvisioningMode,
   ProvisioningScriptResponse,
   MikrotikTestConnectionResponse,
 } from '../types';
@@ -22,13 +23,23 @@ import type { UserRole } from '../lib/supabase';
 import { canManageRouters, canGenerateScript, canRotateCredentials } from '../lib/mikrotikRbac';
 import { connectionTypeLabel, statusBadge, clipboardScript, type StatusTone } from '../lib/mikrotikView';
 
+// Modos de provisioning (Fase 4.6.0). WireGuard = principal; SSTP = fallback;
+// Tailscale/Direct = laboratorio.
+export const PROVISIONING_MODE_OPTIONS: { value: MikrotikProvisioningMode; label: string; tag: string; help: string }[] = [
+  { value: 'wireguard_managed', label: 'WireGuard administrado por NugaCore', tag: 'Recomendado', help: 'Recomendado para RouterOS v7 y operación normal.' },
+  { value: 'sstp_managed', label: 'SSTP administrado por NugaCore', tag: 'Fallback', help: 'Fallback para NAT/firewalls difíciles o RouterOS v6.' },
+  { value: 'tailscale_lab', label: 'Tailscale / Direct (laboratorio)', tag: 'Laboratorio', help: 'Solo laboratorio o soporte. No recomendado para clientes externos.' },
+  { value: 'direct_lab', label: 'Direct (laboratorio)', tag: 'Laboratorio', help: 'Solo laboratorio o soporte. No recomendado para clientes externos.' },
+];
+const modeHelp = (m: string): string => PROVISIONING_MODE_OPTIONS.find((o) => o.value === m)?.help || '';
+
 interface Props {
   routers: MikrotikRouterView[];
   userRole: UserRole;
   onRefresh: () => Promise<void>;
   onCreateRouter: (payload: Record<string, unknown>) => Promise<void>;
-  onGenerateScript: (id: string, connectionType: 'wireguard' | 'sstp') => Promise<ProvisioningScriptResponse>;
-  onRotateCredentials: (id: string, connectionType: 'wireguard' | 'sstp') => Promise<ProvisioningScriptResponse>;
+  onGenerateScript: (id: string, connectionType: string, server?: Record<string, unknown>) => Promise<ProvisioningScriptResponse>;
+  onRotateCredentials: (id: string, connectionType: string, server?: Record<string, unknown>) => Promise<ProvisioningScriptResponse>;
   onTestConnection: (id: string) => Promise<MikrotikTestConnectionResponse>;
 }
 
@@ -62,16 +73,31 @@ export default function MikrotikRoutersPanel({
   // create form
   const [fName, setFName] = useState('');
   const [fIp, setFIp] = useState('');
-  const [fType, setFType] = useState<'wireguard' | 'sstp'>('wireguard');
+  const [fType, setFType] = useState<MikrotikProvisioningMode>('wireguard_managed');
   const [fApiPort, setFApiPort] = useState('8728');
   const [fNotes, setFNotes] = useState('');
+
+  // Configuración avanzada del servidor VPN (opcional; se envía como `server`).
+  const [showAdvanced, setShowAdvanced] = useState(false);
+  const [adv, setAdv] = useState<Record<string, string>>({});
+  const buildServer = (): Record<string, unknown> | undefined => {
+    const map: Record<string, string> = {
+      vpnServerHost: adv.vpnServerHost, vpnNetworkCidr: adv.vpnNetworkCidr,
+      routerVpnIp: adv.routerVpnIp, serverVpnIp: adv.serverVpnIp,
+      allowedApiCidr: adv.allowedApiCidr, serverManagementCidr: adv.serverManagementCidr,
+    };
+    const out: Record<string, unknown> = {};
+    for (const [k, v] of Object.entries(map)) if (v && v.trim()) out[k] = v.trim();
+    if (adv.vpnServerPort && adv.vpnServerPort.trim()) out.vpnServerPort = Number(adv.vpnServerPort);
+    return Object.keys(out).length ? out : undefined;
+  };
 
   // script modal (shown once)
   const [scriptResult, setScriptResult] = useState<ProvisioningScriptResponse | null>(null);
   // test result
   const [testResult, setTestResult] = useState<MikrotikTestConnectionResponse | null>(null);
   // per-router connection type selection for generating script
-  const [genType, setGenType] = useState<Record<string, 'wireguard' | 'sstp'>>({});
+  const [genType, setGenType] = useState<Record<string, MikrotikProvisioningMode>>({});
 
   const flash = (kind: 'success' | 'error', msg: string) => {
     setToast({ kind, msg });
@@ -83,10 +109,15 @@ export default function MikrotikRoutersPanel({
     if (!fName || !fIp) return;
     setBusy('Creando router...');
     try {
+      // El registro guarda el connectionType base; el modo administrado se
+      // elige al generar el script.
+      const baseType = ({
+        wireguard_managed: 'wireguard', sstp_managed: 'sstp', tailscale_lab: 'tailscale', direct_lab: 'direct',
+      } as Record<MikrotikProvisioningMode, string>)[fType];
       await onCreateRouter({
         name: fName,
         managementIp: fIp,
-        connectionType: fType,
+        connectionType: baseType,
         apiPort: Number(fApiPort) || 8728,
         notes: fNotes || undefined,
       });
@@ -101,10 +132,10 @@ export default function MikrotikRoutersPanel({
   };
 
   const handleGenerate = async (id: string) => {
-    const type = genType[id] || 'wireguard';
+    const type = genType[id] || 'wireguard_managed';
     setBusy('Generando script...');
     try {
-      const resp = await onGenerateScript(id, type);
+      const resp = await onGenerateScript(id, type, buildServer());
       setScriptResult(resp);
       setCopied(false);
       await onRefresh();
@@ -116,13 +147,13 @@ export default function MikrotikRoutersPanel({
   };
 
   const handleRotate = (id: string) => {
-    const type = genType[id] || 'wireguard';
+    const type = genType[id] || 'wireguard_managed';
     const ok = window.confirm(
       'Rotar credenciales invalida la credencial anterior del router y genera un script nuevo. ¿Continuar?',
     );
     if (!ok) return;
     setBusy('Rotando credenciales...');
-    onRotateCredentials(id, type)
+    onRotateCredentials(id, type, buildServer())
       .then((resp) => {
         setScriptResult(resp);
         setCopied(false);
@@ -214,6 +245,44 @@ export default function MikrotikRoutersPanel({
         </div>
       </div>
 
+      {/* Configuración avanzada del servidor VPN (opcional, aplica al generar) */}
+      {canScript && (
+        <div className="border border-slate-900 rounded-2xl">
+          <button
+            onClick={() => setShowAdvanced((s) => !s)}
+            className="w-full flex items-center justify-between px-3 py-2 text-[11px] font-mono text-slate-400 hover:text-slate-200"
+          >
+            <span>Configuración del servidor VPN (avanzado · opcional)</span>
+            <span>{showAdvanced ? '−' : '+'}</span>
+          </button>
+          {showAdvanced && (
+            <div className="px-3 pb-3 grid grid-cols-2 md:grid-cols-3 gap-2 text-[11px]">
+              {[
+                ['vpnServerHost', 'Server host (WG/SSTP)'],
+                ['vpnServerPort', 'Server port'],
+                ['vpnNetworkCidr', 'VPN CIDR'],
+                ['routerVpnIp', 'Router tunnel IP (/32)'],
+                ['serverVpnIp', 'Server tunnel IP'],
+                ['allowedApiCidr', 'Allowed API CIDR'],
+                ['serverManagementCidr', 'Management CIDR'],
+              ].map(([key, label]) => (
+                <div key={key} className="space-y-1">
+                  <label className="text-slate-500 font-mono">{label}</label>
+                  <input
+                    value={adv[key] || ''}
+                    onChange={(e) => setAdv((m) => ({ ...m, [key]: e.target.value }))}
+                    className="w-full bg-slate-900 text-white border border-slate-800 rounded-lg p-1.5 font-mono"
+                  />
+                </div>
+              ))}
+              <p className="col-span-2 md:col-span-3 text-[10px] text-slate-600 font-mono">
+                Vacío usa los valores del servidor NugaCore (env). WireGuard usa server host/port, VPN CIDR, router/server tunnel IP, allowed API CIDR. SSTP usa server host/port, router tunnel IP, management CIDR. Lab usa allowed API CIDR.
+              </p>
+            </div>
+          )}
+        </div>
+      )}
+
       {/* Router list */}
       <div className="space-y-2.5">
         {routers.length === 0 ? (
@@ -224,7 +293,7 @@ export default function MikrotikRoutersPanel({
         ) : (
           routers.map((r) => {
             const badge = statusBadge(r.status);
-            const selType = genType[r.id] || 'wireguard';
+            const selType = genType[r.id] || 'wireguard_managed';
             return (
               <div key={r.id} id={`mkt-router-${r.id}`} className="bg-slate-900/40 border border-slate-900 rounded-2xl p-3.5 space-y-3">
                 <div className="flex items-start justify-between">
@@ -250,11 +319,12 @@ export default function MikrotikRoutersPanel({
                     {canScript && (
                       <select
                         value={selType}
-                        onChange={(e) => setGenType((m) => ({ ...m, [r.id]: e.target.value as 'wireguard' | 'sstp' }))}
-                        className="bg-slate-950 border border-slate-800 text-[11px] text-slate-300 rounded-lg px-2 py-1.5 focus:outline-none"
+                        onChange={(e) => setGenType((m) => ({ ...m, [r.id]: e.target.value as MikrotikProvisioningMode }))}
+                        className="bg-slate-950 border border-slate-800 text-[11px] text-slate-300 rounded-lg px-2 py-1.5 focus:outline-none max-w-[260px]"
                       >
-                        <option value="wireguard">WireGuard (v7)</option>
-                        <option value="sstp">SSTP (v6/v7)</option>
+                        {PROVISIONING_MODE_OPTIONS.map((o) => (
+                          <option key={o.value} value={o.value}>{o.label} — {o.tag}</option>
+                        ))}
                       </select>
                     )}
                     {canScript && (
@@ -283,6 +353,9 @@ export default function MikrotikRoutersPanel({
                         <RefreshCw className="w-3.5 h-3.5 text-amber-400" />
                         <span>Rotar credenciales</span>
                       </button>
+                    )}
+                    {canScript && (
+                      <p className="w-full text-[10px] text-slate-500 font-mono">{modeHelp(selType)}</p>
                     )}
                   </div>
                 )}
@@ -314,11 +387,13 @@ export default function MikrotikRoutersPanel({
               </div>
               <div className="grid grid-cols-2 gap-3">
                 <div className="space-y-1">
-                  <label className="text-slate-400 font-mono">Tipo de conexión</label>
-                  <select value={fType} onChange={(e) => setFType(e.target.value as 'wireguard' | 'sstp')} className="w-full bg-slate-900 text-white border border-slate-800 rounded-xl p-2.5">
-                    <option value="wireguard">WireGuard (v7)</option>
-                    <option value="sstp">SSTP (v6/v7)</option>
+                  <label className="text-slate-400 font-mono">Modo de conexión</label>
+                  <select value={fType} onChange={(e) => setFType(e.target.value as MikrotikProvisioningMode)} className="w-full bg-slate-900 text-white border border-slate-800 rounded-xl p-2.5">
+                    {PROVISIONING_MODE_OPTIONS.map((o) => (
+                      <option key={o.value} value={o.value}>{o.label} — {o.tag}</option>
+                    ))}
                   </select>
+                  <p className="text-[10px] text-slate-500 font-mono">{modeHelp(fType)}</p>
                 </div>
                 <div className="space-y-1">
                   <label className="text-slate-400 font-mono">Puerto API</label>

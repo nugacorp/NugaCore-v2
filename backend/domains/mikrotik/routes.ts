@@ -6,7 +6,12 @@ import { READ_ROLES, requireRoles } from '../../common/rbac';
 import { generateApiCredential, generateApiUsername, generateProvisioningToken } from './provisioning/credentials';
 import { generateProvisioningScript } from './provisioning/script-generator';
 import { provisioningStore, toProvisionedView } from './provisioning/store';
-import { ScriptServerConfig } from './provisioning/types';
+import {
+  ScriptServerConfig,
+  PROVISIONING_MODES,
+  modeToConnectionType,
+  normalizeProvisioningMode,
+} from './provisioning/types';
 import { asyncHandler } from '../../common/errors';
 import { processPendingOrders, readRouterSnapshot, listWorkerRuns } from './worker/worker';
 
@@ -18,17 +23,30 @@ const PROV_SCRIPT_ROLES = ['super admin', 'administrador', 'tecnico'] as const;
 const PROV_ROTATE_ROLES = ['super admin', 'administrador'] as const;
 
 // Configuración de servidor/VPN de NugaCore (placeholders seguros si no hay env).
-const buildServerConfig = (overrides: Partial<ScriptServerConfig> = {}): ScriptServerConfig => ({
-  vpnHost: overrides.vpnHost || process.env.MIKROTIK_VPN_HOST || 'vpn.nugacore.local',
-  vpnCidr: overrides.vpnCidr || process.env.MIKROTIK_VPN_CIDR || '10.10.0.0/24',
-  serverManagementCidr:
-    overrides.serverManagementCidr || process.env.MIKROTIK_MGMT_CIDR || '10.0.0.0/24',
-  wgServerPublicKey: overrides.wgServerPublicKey || process.env.MIKROTIK_WG_SERVER_PUBKEY,
-  wgEndpoint: overrides.wgEndpoint || process.env.MIKROTIK_WG_ENDPOINT,
-  wgAllowedAddress: overrides.wgAllowedAddress,
-  wgInterfaceAddress: overrides.wgInterfaceAddress,
-  wgKeepalive: overrides.wgKeepalive,
-});
+const buildServerConfig = (overrides: Partial<ScriptServerConfig> = {}): ScriptServerConfig => {
+  const vpnHost = overrides.vpnServerHost || overrides.vpnHost || process.env.MIKROTIK_VPN_HOST || 'vpn.nugacore.local';
+  const vpnCidr = overrides.vpnNetworkCidr || overrides.vpnCidr || process.env.MIKROTIK_VPN_CIDR || '10.10.0.0/24';
+  const mgmtCidr = overrides.serverManagementCidr || process.env.MIKROTIK_MGMT_CIDR || '10.0.0.0/24';
+  return {
+    // Compatibilidad (Fase 4.4)
+    vpnHost,
+    vpnCidr,
+    serverManagementCidr: mgmtCidr,
+    wgServerPublicKey: overrides.wgServerPublicKey || process.env.MIKROTIK_WG_SERVER_PUBKEY,
+    wgEndpoint: overrides.wgEndpoint || process.env.MIKROTIK_WG_ENDPOINT,
+    wgAllowedAddress: overrides.wgAllowedAddress,
+    wgInterfaceAddress: overrides.wgInterfaceAddress,
+    wgKeepalive: overrides.wgKeepalive,
+    // Modelo administrado (Fase 4.6.0)
+    vpnServerHost: vpnHost,
+    vpnServerPort: overrides.vpnServerPort || Number(process.env.MIKROTIK_VPN_SERVER_PORT) || undefined,
+    vpnNetworkCidr: vpnCidr,
+    routerVpnIp: overrides.routerVpnIp,
+    serverVpnIp: overrides.serverVpnIp || process.env.MIKROTIK_VPN_SERVER_IP,
+    allowedApiCidr: overrides.allowedApiCidr || process.env.MIKROTIK_ALLOWED_API_CIDR,
+    routerOsVersionHint: overrides.routerOsVersionHint,
+  };
+};
 
 const nowStamp = () => new Date().toISOString().replace('T', ' ').substring(0, 16);
 
@@ -493,10 +511,13 @@ const emitProvisioning = (
   actorId: string | undefined,
   action: 'generate_script' | 'rotate_credentials',
 ) => {
-  const connectionType: 'wireguard' | 'sstp' =
-    body.connectionType === 'wireguard' || routerItem.connectionType === 'wireguard'
-      ? 'wireguard'
-      : 'sstp';
+  // Modo administrado (acepta los 4 modos + alias legacy 'wireguard'/'sstp').
+  const requestedMode = body.connectionType
+    ? normalizeProvisioningMode(String(body.connectionType))
+    : normalizeProvisioningMode(routerItem.connectionType || 'wireguard');
+  const baseConnectionType = modeToConnectionType(requestedMode);
+  const isSstp = requestedMode === 'sstp_managed';
+  const apiMode = body.apiMode === 'read_only' || body.apiMode === 'operator' ? body.apiMode : undefined;
 
   // Credencial API (password fuerte, cifrado).
   const apiCred = generateApiCredential(routerItem.id);
@@ -508,7 +529,7 @@ const emitProvisioning = (
   routerItem.encryptedPassword = apiCred.encryptedPassword;
   routerItem.encryptionVersion = apiCred.encryptionVersion;
   routerItem.credentialRotatedAt = new Date().toISOString();
-  routerItem.connectionType = connectionType;
+  routerItem.connectionType = baseConnectionType;
   routerItem.provisioningStatus = 'provisioned';
   routerItem.lastHealthCheckAt = nowStamp();
 
@@ -516,15 +537,17 @@ const emitProvisioning = (
   const server = buildServerConfig(serverOverrides);
 
   const result = generateProvisioningScript({
-    connectionType,
+    connectionType: requestedMode,
     routerName: routerItem.name,
     apiUser: apiCred.username,
     apiPassword: apiCred.plainPassword,
     apiPort: routerItem.apiPort,
     vpnUser: vpnCred.username,
     vpnPassword: vpnCred.plainPassword,
+    apiMode,
     server,
   });
+  const connectionType = requestedMode;
 
   // Token de un solo uso + metadata del script (sin secretos).
   const token = generateProvisioningToken();
@@ -537,7 +560,7 @@ const emitProvisioning = (
   provisioningStore.recordScript({
     routerId: routerItem.id,
     scriptVersion: result.scriptVersion,
-    connectionType,
+    connectionType: baseConnectionType,
     scriptHash: result.scriptHash,
     generatedBy: actorId,
   });
@@ -559,8 +582,14 @@ const emitProvisioning = (
     scriptVersion: result.scriptVersion,
     scriptHash: result.scriptHash,
     connectionType,
+    mode: result.mode,
+    apiMode: result.apiMode,
+    routerVpnIp: result.routerVpnIp,
     warnings: result.warnings,
-    credentials: { apiUsername: apiCred.username, vpnUsername: vpnCred.username },
+    credentials: {
+      apiUsername: apiCred.username,
+      ...(isSstp ? { vpnUsername: vpnCred.username } : {}),
+    },
     provisioningToken: token.token,
     tokenExpiresAt: token.expiresAt,
     securityWarning:
@@ -574,8 +603,13 @@ router.post('/api/mikrotik/routers/:id/provisioning-script', requireRoles([...PR
   if (!routerItem) {
     return res.status(404).json({ error: 'Router not found' });
   }
-  if (req.body.connectionType !== undefined && !['wireguard', 'sstp'].includes(String(req.body.connectionType))) {
-    return res.status(400).json({ error: 'connectionType must be "wireguard" or "sstp"' });
+  if (
+    req.body.connectionType !== undefined &&
+    ![...PROVISIONING_MODES, 'wireguard', 'sstp'].includes(String(req.body.connectionType))
+  ) {
+    return res.status(400).json({
+      error: 'connectionType must be one of: wireguard_managed, sstp_managed, tailscale_lab, direct_lab (or legacy wireguard/sstp).',
+    });
   }
   try {
     const payload = emitProvisioning(routerItem, req.body || {}, req.authContext?.userId, 'generate_script');

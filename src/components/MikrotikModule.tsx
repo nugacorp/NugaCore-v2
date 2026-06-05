@@ -85,8 +85,8 @@ interface MikrotikModuleProps {
   userRole: UserRole;
   onRefreshRouters: () => Promise<void>;
   onCreateRouter: (payload: Record<string, unknown>) => Promise<void>;
-  onGenerateScript: (id: string, connectionType: 'wireguard' | 'sstp') => Promise<ProvisioningScriptResponse>;
-  onRotateCredentials: (id: string, connectionType: 'wireguard' | 'sstp') => Promise<ProvisioningScriptResponse>;
+  onGenerateScript: (id: string, connectionType: string, server?: Record<string, unknown>) => Promise<ProvisioningScriptResponse>;
+  onRotateCredentials: (id: string, connectionType: string, server?: Record<string, unknown>) => Promise<ProvisioningScriptResponse>;
   onTestConnection: (id: string) => Promise<MikrotikTestConnectionResponse>;
   // Worker (Fase 4.6)
   workerRuns: MikrotikWorkerRun[];

@@ -234,14 +234,19 @@ export interface MikrotikRouterView {
   isOnline?: boolean;
 }
 
+export type MikrotikProvisioningMode = 'wireguard_managed' | 'sstp_managed' | 'tailscale_lab' | 'direct_lab';
+
 export interface ProvisioningScriptResponse {
   router: MikrotikRouterView;
   script: string;
   scriptVersion: string;
   scriptHash: string;
-  connectionType: 'wireguard' | 'sstp';
+  connectionType: string;
+  mode?: MikrotikProvisioningMode;
+  apiMode?: 'read_only' | 'operator';
+  routerVpnIp?: string;
   warnings: string[];
-  credentials: { apiUsername: string; vpnUsername: string };
+  credentials: { apiUsername: string; vpnUsername?: string };
   provisioningToken: string;
   tokenExpiresAt: string;
   securityWarning: string;

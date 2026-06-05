@@ -1,33 +1,36 @@
 // ====================================================================
-// Generador de script RouterOS para provisioning NugaCore (Fase 4.4).
+// Generador de script RouterOS para provisioning NugaCore.
 //
-// Produce un script que el operador copia y pega en RouterOS para:
-//   1. crear grupo NugaCore con permisos MÍNIMOS
-//   2. crear usuario API NugaCore
-//   3. habilitar API solo desde la red VPN/management
-//   4. crear el cliente VPN (WireGuard | SSTP)
-//   5. agregar rutas hacia la red de administración de NugaCore
-//   6. agregar scheduler de reconexión
-//   7. comentarios claros
-//   8. ser IDEMPOTENTE (remove/find de config NugaCore previa, recrea)
+// Modos (Fase 4.6.0):
+//   wireguard_managed = PRINCIPAL (recomendado, RouterOS v7)
+//   sstp_managed      = FALLBACK (v6/v7, NAT/CGNAT difícil)
+//   tailscale_lab / direct_lab = LABORATORIO/soporte (sin VPN propia)
 //
-// Prefijos: NugaCore / nugacore / NUGACORE. Nunca "wisphub".
-// Permisos mínimos: read,write,api,test (sin sniff/sensitive/romon/reboot/password/policy).
+// En todos los modos: usuario API NugaCore con permisos MÍNIMOS, API limitada
+// a la red VPN/lab (nunca expuesta a internet), idempotente, prefijo NugaCore.
+// Nunca "wisphub". Sin sniff/sensitive/romon/reboot/password/policy/ftp.
 // ====================================================================
 
 import { sha256Hex } from './credentials';
 import {
+  ApiMode,
+  ProvisioningMode,
   SCRIPT_VERSION,
   ScriptGenerationInput,
   ScriptGenerationResult,
+  ScriptServerConfig,
+  isLabMode,
+  normalizeProvisioningMode,
 } from './types';
 
-// Política mínima del grupo NugaCore. Mantener corto y justificado:
-//   read  → leer interfaces/queues/ppp
-//   write → alta/suspensión/reactivación/velocidad de clientes
-//   api   → acceso vía API
-//   test  → ping/bandwidth-test de diagnóstico
+// Política del grupo según el modo de API.
+//   operator  → read,write,api,test (alta/suspensión/reactivación/velocidad)
+//   read_only → read,api,test       (solo lectura + diagnóstico)
 export const NUGACORE_GROUP_POLICY = 'read,write,api,test';
+export const NUGACORE_READONLY_POLICY = 'read,api,test';
+
+export const policyForApiMode = (apiMode: ApiMode): string =>
+  apiMode === 'read_only' ? NUGACORE_READONLY_POLICY : NUGACORE_GROUP_POLICY;
 
 // Políticas explícitamente PROHIBIDAS (no deben aparecer en el grupo).
 export const FORBIDDEN_POLICIES = ['sniff', 'sensitive', 'romon', 'reboot', 'password', 'policy', 'ftp'];
@@ -45,13 +48,18 @@ export const maskSecret = (value: string): string => {
   return `${value.substring(0, 2)}****${value.substring(value.length - 2)}`;
 };
 
-const header = (routerName: string, kind: string): string =>
+// Resolución de campos (preferir modelo administrado nuevo, fallback al legacy).
+const apiCidrOf = (s: ScriptServerConfig): string => s.allowedApiCidr || s.vpnNetworkCidr || s.vpnCidr;
+const vpnCidrOf = (s: ScriptServerConfig): string => s.vpnNetworkCidr || s.vpnCidr;
+const vpnHostOf = (s: ScriptServerConfig): string => s.vpnServerHost || s.vpnHost;
+
+const header = (routerName: string, kind: string, apiMode: ApiMode): string =>
   `# ============================================================
 # NugaCore — Provisioning Script (${kind})  ${SCRIPT_VERSION}
 # Router: ${routerName}
-# Genera: VPN ${kind} + usuario API con permisos MINIMOS (${NUGACORE_GROUP_POLICY})
+# API user: permisos ${apiMode} (${policyForApiMode(apiMode)})
 # Idempotente: elimina la configuracion NugaCore previa y la recrea.
-# La API queda limitada a la red VPN de NugaCore.
+# La API queda limitada a la red VPN/lab de NugaCore (no expuesta a internet).
 # ============================================================`;
 
 const commonCleanup = (): string =>
@@ -61,79 +69,43 @@ const commonCleanup = (): string =>
 /ip route remove [find where comment~"NugaCore"]
 /ip address remove [find where comment~"NugaCore"]`;
 
-const commonUserAndGroup = (apiUser: string, apiPassword: string): string =>
-  `# --- 2. Grupo con permisos minimos ---
-/user group add name=nugacore policy="${NUGACORE_GROUP_POLICY}" comment="NugaCore minimal API group"
+const userAndGroup = (apiUser: string, apiPassword: string, apiMode: ApiMode, tag: string): string =>
+  `# --- 2. Grupo con permisos minimos (${apiMode}) ---
+/user group add name=nugacore policy="${policyForApiMode(apiMode)}" comment="NugaCore ${tag} group"
 
 # --- 3. Usuario API NugaCore ---
-/user add name="${apiUser}" password="${apiPassword}" group=nugacore comment="NugaCore API user"`;
+/user add name="${apiUser}" password="${apiPassword}" group=nugacore comment="NugaCore API user (${tag})"`;
 
-// ── SSTP ──────────────────────────────────────────────────────────────
-const buildSstpScript = (input: ScriptGenerationInput): { script: string; warnings: string[] } => {
-  const { routerName, apiUser, apiPassword, apiPort, vpnUser, vpnPassword, server } = input;
-  const warnings: string[] = [];
-  requireField(server.vpnHost, 'server.vpnHost');
-  requireField(server.vpnCidr, 'server.vpnCidr');
-  requireField(server.serverManagementCidr, 'server.serverManagementCidr');
-
-  const script = `${header(routerName, 'SSTP')}
-
-${commonCleanup()}
-/interface sstp-client remove [find where name~"NugaCore"]
-/ppp profile remove [find where name~"nugacore"]
-
-${commonUserAndGroup(apiUser, apiPassword)}
-
-# --- 4. Perfil PPP NugaCore ---
-/ppp profile add name=nugacore-profile comment="NugaCore VPN profile"
-
-# --- 5. Cliente SSTP hacia el concentrador NugaCore ---
-/interface sstp-client add name="NugaCoreVPN" connect-to="${server.vpnHost}" user="${vpnUser}" password="${vpnPassword}" profile="nugacore-profile" comment="NugaCore VPN" add-default-route=no disabled=no
-
-# --- 6. Ruta hacia la red de administracion NugaCore ---
-/ip route add dst-address="${server.serverManagementCidr}" gateway=NugaCoreVPN comment="NugaCore management route"
-
-# --- 7. API limitada a la red VPN de NugaCore ---
-/ip service set api port=${apiPort} address="${server.vpnCidr}" disabled=no
-/ip service set api-ssl address="${server.vpnCidr}"
-
-# --- 8. Scheduler de reconexion VPN ---
-/system scheduler add name=NugaCore-VPN-Watchdog interval=00:01:00 comment="NugaCore VPN reconnect watchdog" on-event="/interface sstp-client enable [find where name=\\"NugaCoreVPN\\" disabled=yes]"
-
-# ============================================================
-# Fin del script NugaCore (SSTP). La API solo responde dentro de ${server.vpnCidr}.
-# ============================================================`;
-
-  return { script, warnings };
-};
-
-// ── WireGuard (RouterOS v7) ───────────────────────────────────────────
-const buildWireguardScript = (input: ScriptGenerationInput): { script: string; warnings: string[] } => {
+// ── WireGuard administrado ────────────────────────────────────────────
+const buildWireguardScript = (input: ScriptGenerationInput, apiMode: ApiMode): { script: string; warnings: string[]; routerVpnIp: string } => {
   const { routerName, apiUser, apiPassword, apiPort, server } = input;
   const warnings: string[] = [];
-  requireField(server.vpnCidr, 'server.vpnCidr');
+  requireField(vpnCidrOf(server), 'server.vpnNetworkCidr');
   requireField(server.serverManagementCidr, 'server.serverManagementCidr');
 
+  const apiCidr = apiCidrOf(server);
   const wgServerPublicKey = server.wgServerPublicKey || '<PEGAR_PUBLIC_KEY_DEL_SERVIDOR_NUGACORE>';
-  const wgInterfaceAddress = server.wgInterfaceAddress || '<ASIGNAR_IP_WG_DEL_ROUTER>/32';
+  const routerVpnIp = server.routerVpnIp || server.wgInterfaceAddress || '<ASIGNAR_IP_WG_DEL_ROUTER>/32';
   const wgAllowedAddress = server.wgAllowedAddress || server.serverManagementCidr;
   const keepalive = server.wgKeepalive ?? 25;
 
   if (!server.wgServerPublicKey) warnings.push('Falta wgServerPublicKey: se dejó un placeholder en el script.');
-  if (!server.wgEndpoint) warnings.push('Falta wgEndpoint (host:port): se dejó un placeholder en el script.');
-  if (!server.wgInterfaceAddress) warnings.push('Falta wgInterfaceAddress: asignar la IP WG del router.');
+  if (!server.routerVpnIp && !server.wgInterfaceAddress) warnings.push('Falta routerVpnIp: asignar la IP WG del router.');
 
-  let endpointHost = '<ENDPOINT_HOST>';
-  let endpointPort = '13231';
-  if (server.wgEndpoint && server.wgEndpoint.includes(':')) {
-    const [h, p] = server.wgEndpoint.split(':');
-    endpointHost = h;
-    endpointPort = p || endpointPort;
-  } else if (server.wgEndpoint) {
-    endpointHost = server.wgEndpoint;
+  // Endpoint del servidor: preferir vpnServerHost/Port; fallback wgEndpoint.
+  let endpointHost = server.vpnServerHost || '<ENDPOINT_HOST>';
+  let endpointPort = String(server.vpnServerPort || '13231');
+  if (!server.vpnServerHost && server.wgEndpoint) {
+    if (server.wgEndpoint.includes(':')) {
+      const [h, p] = server.wgEndpoint.split(':');
+      endpointHost = h; endpointPort = p || endpointPort;
+    } else {
+      endpointHost = server.wgEndpoint;
+    }
   }
+  if (endpointHost === '<ENDPOINT_HOST>') warnings.push('Falta vpnServerHost/wgEndpoint: se dejó un placeholder.');
 
-  const script = `${header(routerName, 'WireGuard')}
+  const script = `${header(routerName, 'WireGuard administrado', apiMode)}
 # NOTA: WireGuard requiere RouterOS v7. Intercambio de claves (paso manual):
 #   1. NugaCore genera el peer del servidor (public key + endpoint).
 #   2. El router genera su private-key automaticamente al crear la interfaz.
@@ -144,13 +116,13 @@ ${commonCleanup()}
 /interface wireguard peers remove [find where comment~"NugaCore"]
 /interface wireguard remove [find where name~"NugaCore"]
 
-${commonUserAndGroup(apiUser, apiPassword)}
+${userAndGroup(apiUser, apiPassword, apiMode, 'WireGuard')}
 
 # --- 4. Interfaz WireGuard (RouterOS genera la private-key) ---
 /interface wireguard add name=NugaCoreWG listen-port=13231 comment="NugaCore WireGuard"
 
 # --- 5. Direccion IP del router sobre la interfaz WG ---
-/ip address add address=${wgInterfaceAddress} interface=NugaCoreWG comment="NugaCore WG address"
+/ip address add address=${routerVpnIp} interface=NugaCoreWG comment="NugaCore WG address"
 
 # --- 6. Peer del servidor WireGuard de NugaCore ---
 /interface wireguard peers add interface=NugaCoreWG public-key="${wgServerPublicKey}" endpoint-address=${endpointHost} endpoint-port=${endpointPort} allowed-address=${wgAllowedAddress} persistent-keepalive=${keepalive}s comment="NugaCore WG server peer"
@@ -159,14 +131,96 @@ ${commonUserAndGroup(apiUser, apiPassword)}
 /ip route add dst-address="${server.serverManagementCidr}" gateway=NugaCoreWG comment="NugaCore management route"
 
 # --- 8. API limitada a la red VPN de NugaCore ---
-/ip service set api port=${apiPort} address="${server.vpnCidr}" disabled=no
-/ip service set api-ssl address="${server.vpnCidr}"
+/ip service set api port=${apiPort} address="${apiCidr}" disabled=no
+/ip service set api-ssl address="${apiCidr}"
 
 # --- 9. Scheduler watchdog (imprime la public-key para registrarla) ---
 /system scheduler add name=NugaCore-WG-Watchdog interval=00:05:00 comment="NugaCore WG watchdog" on-event="/interface wireguard print where name=NugaCoreWG"
 
 # ============================================================
-# Fin del script NugaCore (WireGuard). La API solo responde dentro de ${server.vpnCidr}.
+# Fin del script NugaCore (WireGuard). La API solo responde dentro de ${apiCidr}.
+# ============================================================`;
+
+  return { script, warnings, routerVpnIp };
+};
+
+// ── SSTP administrado ─────────────────────────────────────────────────
+const buildSstpScript = (input: ScriptGenerationInput, apiMode: ApiMode): { script: string; warnings: string[]; routerVpnIp: string } => {
+  const { routerName, apiUser, apiPassword, apiPort, vpnUser, vpnPassword, server } = input;
+  const warnings: string[] = [];
+  requireField(vpnHostOf(server), 'server.vpnServerHost');
+  requireField(vpnCidrOf(server), 'server.vpnNetworkCidr');
+  requireField(server.serverManagementCidr, 'server.serverManagementCidr');
+
+  const apiCidr = apiCidrOf(server);
+  const vpnHost = vpnHostOf(server);
+  const routerVpnIp = server.routerVpnIp || '';
+
+  const script = `${header(routerName, 'SSTP administrado', apiMode)}
+
+${commonCleanup()}
+/interface sstp-client remove [find where name~"NugaCore"]
+/ppp profile remove [find where name~"nugacore"]
+
+${userAndGroup(apiUser, apiPassword, apiMode, 'SSTP')}
+
+# --- 4. Perfil PPP NugaCore ---
+/ppp profile add name=nugacore-profile comment="NugaCore VPN profile"
+
+# --- 5. Cliente SSTP hacia el concentrador NugaCore ---
+/interface sstp-client add name="NugaCoreVPN" connect-to="${vpnHost}" user="${vpnUser}" password="${vpnPassword}" profile="nugacore-profile" comment="NugaCore VPN" add-default-route=no disabled=no
+
+# --- 6. Ruta hacia la red de administracion NugaCore ---
+/ip route add dst-address="${server.serverManagementCidr}" gateway=NugaCoreVPN comment="NugaCore management route"
+
+# --- 7. API limitada a la red VPN de NugaCore ---
+/ip service set api port=${apiPort} address="${apiCidr}" disabled=no
+/ip service set api-ssl address="${apiCidr}"
+
+# --- 8. Scheduler de reconexion VPN ---
+/system scheduler add name=NugaCore-VPN-Watchdog interval=00:01:00 comment="NugaCore VPN reconnect watchdog" on-event="/interface sstp-client enable [find where name=\\"NugaCoreVPN\\" disabled=yes]"
+
+# ============================================================
+# Fin del script NugaCore (SSTP). La API solo responde dentro de ${apiCidr}.
+# ============================================================`;
+
+  return { script, warnings, routerVpnIp };
+};
+
+// ── Laboratorio (tailscale / direct) ──────────────────────────────────
+const buildLabScript = (input: ScriptGenerationInput, mode: ProvisioningMode, apiMode: ApiMode): { script: string; warnings: string[] } => {
+  const { routerName, apiUser, apiPassword, apiPort, server } = input;
+  const warnings: string[] = [];
+
+  const labCidr =
+    mode === 'tailscale_lab'
+      ? (server.allowedApiCidr || '100.64.0.0/10')
+      : (server.allowedApiCidr || server.serverManagementCidr || vpnCidrOf(server) || '');
+
+  if (!labCidr) {
+    requireField(labCidr, 'server.allowedApiCidr');
+  }
+  warnings.push('Modo LABORATORIO/soporte: no crea VPN ni rutas. No recomendado como arquitectura principal.');
+  if (mode === 'tailscale_lab') warnings.push('Tailscale: NugaCore no administra el túnel. API limitada al CIDR de Tailscale.');
+
+  const kind = mode === 'tailscale_lab' ? 'Tailscale LAB' : 'Direct LAB';
+  const script = `${header(routerName, kind, apiMode)}
+# AVISO: Modo LABORATORIO/soporte. NO crea VPN propia, NO agrega rutas, NO
+# cambia la red. Solo crea un usuario API restringido. No usar como
+# arquitectura principal para clientes externos (usar WireGuard administrado).
+
+# --- 1. Limpieza idempotente de configuracion NugaCore previa ---
+/user remove [find where name~"nugacore_"]
+/user group remove [find where name~"nugacore"]
+
+${userAndGroup(apiUser, apiPassword, apiMode, kind)}
+
+# --- 4. API limitada al CIDR de laboratorio (sin VPN, sin rutas) ---
+/ip service set api port=${apiPort} address="${labCidr}" disabled=no
+/ip service set api-ssl address="${labCidr}"
+
+# ============================================================
+# Fin del script NugaCore (${kind}). La API solo responde dentro de ${labCidr}.
 # ============================================================`;
 
   return { script, warnings };
@@ -181,16 +235,22 @@ export const generateProvisioningScript = (
   requireField(input.apiPassword, 'apiPassword');
   requireField(input.apiPort, 'apiPort');
 
-  const { script, warnings } =
-    input.connectionType === 'wireguard'
-      ? buildWireguardScript(input)
-      : buildSstpScript(input);
+  const mode = normalizeProvisioningMode(String(input.connectionType));
+  const apiMode: ApiMode = input.apiMode ?? (isLabMode(mode) ? 'read_only' : 'operator');
+
+  let built: { script: string; warnings: string[]; routerVpnIp?: string };
+  if (mode === 'wireguard_managed') built = buildWireguardScript(input, apiMode);
+  else if (mode === 'sstp_managed') built = buildSstpScript(input, apiMode);
+  else built = buildLabScript(input, mode, apiMode);
 
   return {
-    script,
-    scriptHash: sha256Hex(script),
+    script: built.script,
+    scriptHash: sha256Hex(built.script),
     scriptVersion: SCRIPT_VERSION,
-    connectionType: input.connectionType,
-    warnings,
+    connectionType: String(input.connectionType),
+    mode,
+    apiMode,
+    routerVpnIp: built.routerVpnIp || undefined,
+    warnings: built.warnings,
   };
 };

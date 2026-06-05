@@ -375,23 +375,25 @@ export default function App() {
 
   const handleGenerateScript = async (
     id: string,
-    connectionType: 'wireguard' | 'sstp',
+    connectionType: string,
+    server?: Record<string, unknown>,
   ): Promise<ProvisioningScriptResponse> => {
     return fetchJson(`/api/mikrotik/routers/${id}/provisioning-script`, {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ connectionType }),
+      body: JSON.stringify({ connectionType, ...(server ? { server } : {}) }),
     });
   };
 
   const handleRotateCredentials = async (
     id: string,
-    connectionType: 'wireguard' | 'sstp',
+    connectionType: string,
+    server?: Record<string, unknown>,
   ): Promise<ProvisioningScriptResponse> => {
     return fetchJson(`/api/mikrotik/routers/${id}/rotate-credentials`, {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ confirm: true, connectionType }),
+      body: JSON.stringify({ confirm: true, connectionType, ...(server ? { server } : {}) }),
     });
   };
 
