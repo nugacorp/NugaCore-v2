@@ -256,6 +256,46 @@ export interface MikrotikTestConnectionResponse {
   message: string;
 }
 
+// ── Worker MikroTik (Fase 4.6 — Read Only + Dry Run) ──────────────────
+export interface WorkerOrderResult {
+  orderId: string;
+  orderType: 'suspension' | 'reactivation';
+  customerId: string;
+  dryRun: true;
+  outcome: 'simulated' | 'skipped' | 'failed';
+  plannedCommands: string[];
+  targetRouterId?: string;
+  note: string;
+}
+
+export interface MikrotikWorkerRun {
+  id: string;
+  startedAt: string;
+  finishedAt: string;
+  mode: 'live' | 'simulated';
+  dryRun: true;
+  pendingFound: number;
+  processed: number;
+  results: WorkerOrderResult[];
+  actorId?: string;
+}
+
+export interface RouterReadResult {
+  command: string;
+  ok: boolean;
+  source: 'live' | 'simulated';
+  data: string;
+  error?: string;
+}
+
+export interface RouterSnapshot {
+  routerId: string;
+  routerName: string;
+  generatedAt: string;
+  source: 'live' | 'simulated';
+  reads: RouterReadResult[];
+}
+
 // ── Motor de Suspensiones (Fase 4.5) ──────────────────────────────────
 export type ServiceStatus = 'ACTIVE' | 'WARNING' | 'PENDING_SUSPENSION' | 'SUSPENDED' | 'PENDING_REACTIVATION';
 export type SuspensionBillingStatus = 'CURRENT' | 'DUE_SOON' | 'OVERDUE' | 'DELINQUENT';

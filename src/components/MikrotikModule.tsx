@@ -66,10 +66,13 @@ export const MIKROTIK_ROUTERS: MikrotikRouter[] = [
 ];
 
 import MikrotikRoutersPanel from './MikrotikRoutersPanel';
+import MikrotikWorkerPanel from './MikrotikWorkerPanel';
 import type {
   MikrotikRouterView,
   ProvisioningScriptResponse,
   MikrotikTestConnectionResponse,
+  MikrotikWorkerRun,
+  RouterSnapshot,
 } from '../types';
 import type { UserRole } from '../lib/supabase';
 
@@ -85,6 +88,11 @@ interface MikrotikModuleProps {
   onGenerateScript: (id: string, connectionType: 'wireguard' | 'sstp') => Promise<ProvisioningScriptResponse>;
   onRotateCredentials: (id: string, connectionType: 'wireguard' | 'sstp') => Promise<ProvisioningScriptResponse>;
   onTestConnection: (id: string) => Promise<MikrotikTestConnectionResponse>;
+  // Worker (Fase 4.6)
+  workerRuns: MikrotikWorkerRun[];
+  onRunWorker: () => Promise<void>;
+  onReadRouter: (id: string) => Promise<RouterSnapshot>;
+  onRefreshWorkerRuns: () => Promise<void>;
 }
 
 export default function MikrotikModule({
@@ -98,6 +106,10 @@ export default function MikrotikModule({
   onGenerateScript,
   onRotateCredentials,
   onTestConnection,
+  workerRuns,
+  onRunWorker,
+  onReadRouter,
+  onRefreshWorkerRuns,
 }: MikrotikModuleProps) {
   // Connected Router State
   const [activeRouter, setActiveRouter] = useState<MikrotikRouter>(MIKROTIK_ROUTERS[0]);
@@ -255,6 +267,16 @@ export default function MikrotikModule({
         onGenerateScript={onGenerateScript}
         onRotateCredentials={onRotateCredentials}
         onTestConnection={onTestConnection}
+      />
+
+      {/* Worker MikroTik · Read Only + Dry Run (Fase 4.6) */}
+      <MikrotikWorkerPanel
+        routers={provisionedRouters}
+        runs={workerRuns}
+        userRole={userRole}
+        onRunWorker={onRunWorker}
+        onReadRouter={onReadRouter}
+        onRefreshRuns={onRefreshWorkerRuns}
       />
 
       {/* Main Grid: Copilot on Left, Terminal and logs on Right */}

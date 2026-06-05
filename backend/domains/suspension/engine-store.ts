@@ -110,6 +110,14 @@ export const engineStore = {
     return cancelled;
   },
 
+  /** Actualiza una orden por id (usado por el Worker dry-run). */
+  updateOrder(orderId: string, patch: Partial<SuspensionOrder>): SuspensionOrder | null {
+    const order = this.ORDERS.find((o) => o.id === orderId);
+    if (!order) return null;
+    Object.assign(order, patch);
+    return order;
+  },
+
   /** Elimina TODO el estado del motor para un cliente (cleanup test-tools). */
   purgeCustomer(customerId: string): void {
     this.CUSTOMER_STATE.delete(customerId);

@@ -11,6 +11,7 @@
 import type { SupabaseClient } from '@supabase/supabase-js';
 import {
   CustomerServiceState,
+  OrderUpdate,
   SuspensionEvent,
   SuspensionEventType,
   SuspensionOrder,
@@ -66,6 +67,9 @@ export interface SuspensionRepository {
   createOrder(input: CreateOrderInput): Promise<SuspensionOrder>;
   cancelOpenOrders(customerId: string, orderType: SuspensionOrder['orderType'], reason: string, actorId?: string): Promise<number>;
 
+  /** Actualiza una orden (usado por el Worker dry-run). */
+  updateOrder(order: SuspensionOrder, patch: OrderUpdate): Promise<SuspensionOrder>;
+
   /** Borra estado/eventos/órdenes del motor para un cliente (cleanup test-tools). */
   purgeCustomer(customerId: string): Promise<void>;
 }
@@ -98,6 +102,9 @@ export class StoreSuspensionRepository implements SuspensionRepository {
   async createOrder(input: CreateOrderInput) { return engineStore.createOrder(input); }
   async cancelOpenOrders(customerId: string, orderType: SuspensionOrder['orderType'], reason: string, actorId?: string) {
     return engineStore.cancelOpenOrders(customerId, orderType, reason, actorId);
+  }
+  async updateOrder(order: SuspensionOrder, patch: OrderUpdate) {
+    return engineStore.updateOrder(order.id, patch) ?? { ...order, ...patch };
   }
   async purgeCustomer(customerId: string) { engineStore.purgeCustomer(customerId); }
 }
@@ -211,6 +218,21 @@ export class SupabaseSuspensionRepository implements SuspensionRepository {
       });
     }
     return cancelled;
+  }
+
+  async updateOrder(order: SuspensionOrder, patch: OrderUpdate): Promise<SuspensionOrder> {
+    const table = order.orderType === 'suspension' ? 'suspension_orders' : 'reactivation_orders';
+    const row: Record<string, unknown> = {};
+    if (patch.status !== undefined) row.status = patch.status;
+    if (patch.executedAt !== undefined) row.executed_at = patch.executedAt;
+    if (patch.dryRun !== undefined) row.dry_run = patch.dryRun;
+    if (patch.workerRunId !== undefined) row.worker_run_id = patch.workerRunId;
+    if (patch.workerNote !== undefined) row.worker_note = patch.workerNote;
+    if (Object.keys(row).length > 0) {
+      const { error } = await this.client.from(table).update(row).eq('id', order.id);
+      if (error) throw new Error(`updateOrder: ${error.message}`);
+    }
+    return { ...order, ...patch };
   }
 
   async purgeCustomer(customerId: string): Promise<void> {

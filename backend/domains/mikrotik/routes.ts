@@ -7,6 +7,8 @@ import { generateApiCredential, generateApiUsername, generateProvisioningToken }
 import { generateProvisioningScript } from './provisioning/script-generator';
 import { provisioningStore, toProvisionedView } from './provisioning/store';
 import { ScriptServerConfig } from './provisioning/types';
+import { asyncHandler } from '../../common/errors';
+import { processPendingOrders, readRouterSnapshot, listWorkerRuns } from './worker/worker';
 
 const router = Router();
 
@@ -640,5 +642,33 @@ router.post('/api/mikrotik/routers/:id/test-connection', requireRoles([...PROV_S
       : 'Dry-run incompleto: faltan credenciales o tipo de conexión. Genera el script de provisioning primero.',
   });
 });
+
+// ════════════════════════════════════════════════════════════════════
+// WORKER MIKROTIK (Fase 4.6) — Read Only + Dry Run.
+// Consume órdenes PENDING y las procesa en dry-run (sin ejecutar, sin tocar
+// client.status). Lecturas read-only (reales si MIKROTIK_WORKER_LIVE=true).
+// ════════════════════════════════════════════════════════════════════
+
+// Procesa las órdenes PENDING en dry-run.
+router.post('/api/mikrotik/worker/run', requireRoles([...PROV_SCRIPT_ROLES]), asyncHandler(async (req, res) => {
+  const run = await processPendingOrders(req.authContext?.userId);
+  res.status(201).json(run);
+}));
+
+// Historial de corridas del worker.
+router.get('/api/mikrotik/worker/runs', requireRoles([...PROV_VIEW_ROLES]), (req, res) => {
+  const limit = Math.max(1, Math.min(200, Number(req.query.limit) || 50));
+  res.json(listWorkerRuns(limit));
+});
+
+// Lectura read-only de un router (real o simulada).
+router.get('/api/mikrotik/routers/:id/worker/read', requireRoles([...PROV_VIEW_ROLES]), asyncHandler(async (req, res) => {
+  const snapshot = await readRouterSnapshot(req.params.id);
+  if (!snapshot) {
+    res.status(404).json({ error: 'Router not found' });
+    return;
+  }
+  res.json(snapshot);
+}));
 
 export default router;

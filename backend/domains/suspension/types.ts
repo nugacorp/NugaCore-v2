@@ -96,6 +96,19 @@ export interface SuspensionOrder {
   scheduledFor?: string;
   executedAt?: string;
   createdAt: string;
+  // ── Worker dry-run (Fase 4.6) ─────────────────────────────────────
+  dryRun?: boolean;
+  workerRunId?: string;
+  workerNote?: string;
+}
+
+/** Parche que el Worker aplica a una orden tras procesarla (dry-run). */
+export interface OrderUpdate {
+  status?: OrderStatus;
+  executedAt?: string;
+  dryRun?: boolean;
+  workerRunId?: string;
+  workerNote?: string;
 }
 
 // ── Resultado de evaluación ────────────────────────────────────────────

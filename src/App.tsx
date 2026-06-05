@@ -35,6 +35,8 @@ import {
   MikrotikRouterView,
   ProvisioningScriptResponse,
   MikrotikTestConnectionResponse,
+  MikrotikWorkerRun,
+  RouterSnapshot,
   CustomerServiceView,
   SuspensionOrder,
   SuspensionEvent,
@@ -141,6 +143,7 @@ export default function App() {
   const [mikrotikLogs, setMikrotikLogs] = useState<any[]>([]);
   const [naps, setNaps] = useState<NapBox[]>([]);
   const [provisionedRouters, setProvisionedRouters] = useState<MikrotikRouterView[]>([]);
+  const [workerRuns, setWorkerRuns] = useState<MikrotikWorkerRun[]>([]);
   const [suspensionCustomers, setSuspensionCustomers] = useState<CustomerServiceView[]>([]);
   const [suspensionOrders, setSuspensionOrders] = useState<SuspensionOrder[]>([]);
   const [suspensionEvents, setSuspensionEvents] = useState<SuspensionEvent[]>([]);
@@ -254,6 +257,7 @@ export default function App() {
       // sin acceso a esos módulos).
       await loadProvisionedRouters();
       await loadSuspension();
+      await loadWorkerRuns();
     } catch (err: any) {
       console.error(err);
       setErrorStr('Error contacting full-stack back-end server REST API.');
@@ -397,6 +401,28 @@ export default function App() {
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({}),
     });
+  };
+
+  // ── Worker MikroTik (Fase 4.6 — Read Only + Dry Run) ─────────────────
+  const loadWorkerRuns = async () => {
+    try {
+      setWorkerRuns(await fetchJson('/api/mikrotik/worker/runs'));
+    } catch {
+      setWorkerRuns([]);
+    }
+  };
+
+  const handleRunWorker = async () => {
+    await fetchJson('/api/mikrotik/worker/run', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({}),
+    });
+    await loadWorkerRuns();
+  };
+
+  const handleReadRouter = async (id: string): Promise<RouterSnapshot> => {
+    return fetchJson(`/api/mikrotik/routers/${id}/worker/read`);
   };
 
   // ── Motor de Suspensiones (Fase 4.5) ─────────────────────────────────
@@ -759,6 +785,10 @@ export default function App() {
                 onGenerateScript={handleGenerateScript}
                 onRotateCredentials={handleRotateCredentials}
                 onTestConnection={handleTestConnection}
+                workerRuns={workerRuns}
+                onRunWorker={handleRunWorker}
+                onReadRouter={handleReadRouter}
+                onRefreshWorkerRuns={loadWorkerRuns}
               />
             )}
 
