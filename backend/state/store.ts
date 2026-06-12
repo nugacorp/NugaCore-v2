@@ -186,6 +186,53 @@ export interface BackupPolicy {
   lastBackupAt?: string;
 }
 
+// ── Payment Engine (Fase 4.8) ─────────────────────────────────────────
+export type PaymentOrderStatus = 'pending' | 'processing' | 'completed' | 'failed' | 'expired' | 'cancelled';
+export type PaymentEventStatus = 'pending' | 'processing' | 'completed' | 'failed';
+export type MikrotikActionType = 'reactivate' | 'suspend' | 'speed_change' | 'disconnect' | 'custom';
+export type MikrotikActionStatus = 'pending' | 'executing' | 'completed' | 'failed' | 'skipped';
+
+export interface PaymentOrderRecord {
+  id: string;
+  customerId: string;
+  invoiceId: string;
+  provider: string;
+  providerOrderId?: string;
+  amountCents: number;
+  status: PaymentOrderStatus;
+  checkoutUrl?: string;
+  expiresAt?: string;
+  metadata?: Record<string, unknown>;
+  createdAt: string;
+  updatedAt: string;
+}
+
+export interface PaymentEventRecord {
+  id: string;
+  provider: string;
+  providerEventId: string;
+  eventType: string;
+  processed: boolean;
+  paymentOrderId?: string;
+  payload: Record<string, unknown>;
+  receivedAt: string;
+  processedAt?: string;
+}
+
+export interface MikrotikActionRecord {
+  id: string;
+  customerId: string;
+  routerId?: string;
+  actionType: MikrotikActionType;
+  status: MikrotikActionStatus;
+  dryRun: boolean;
+  payload?: Record<string, unknown>;
+  result?: Record<string, unknown>;
+  triggeredBy?: string;
+  createdAt: string;
+  updatedAt: string;
+}
+
 export const store: {
   PLANS: Plan[];
   CLIENTS: Client[];
@@ -215,6 +262,9 @@ export const store: {
   BACKUP_POLICY: BackupPolicy;
   NOTIFICATION_SETTINGS: NotificationSettings;
   MONITORING_SNAPSHOTS: MonitoringSnapshot[];
+  PAYMENT_ORDERS: PaymentOrderRecord[];
+  PAYMENT_EVENTS: PaymentEventRecord[];
+  MIKROTIK_ACTIONS: MikrotikActionRecord[];
   createAlert: (type: AlertSourceType, severity: AlertSeverity, source: string, message: string) => void;
   addClientTimelineEvent: (event: Omit<ClientTimelineEvent, 'id' | 'createdAt'>) => void;
   getPlanMetadata: (planId: string) => PlanMetadata;
@@ -235,6 +285,9 @@ export const store: {
   getUniqueSectorId: () => string;
   getUniqueMikrotikRouterId: () => string;
   getUniqueAutomationRuleId: () => string;
+  getUniquePaymentOrderId: () => string;
+  getUniquePaymentEventId: () => string;
+  getUniqueMikrotikActionId: () => string;
 } = {
   PLANS: [
     { id: 'plan-basic', name: 'Nuga Residencial 20M', speedMbpsDown: 20, speedMbpsUp: 5, price: 299, type: 'PPPoE' },
@@ -592,6 +645,9 @@ export const store: {
     browserSubscribed: false,
     webhooksCount: 2,
   },
+  PAYMENT_ORDERS: [],
+  PAYMENT_EVENTS: [],
+  MIKROTIK_ACTIONS: [],
   MONITORING_SNAPSHOTS: [
     {
       id: 'mon-1',
@@ -797,5 +853,29 @@ export const store: {
       nextNum++;
     }
     return `rule-${nextNum}`;
+  },
+  getUniquePaymentOrderId() {
+    let nextNum = this.PAYMENT_ORDERS.length + 1;
+    const ids = new Set(this.PAYMENT_ORDERS.map((p) => p.id));
+    while (ids.has(`po-${nextNum}`)) {
+      nextNum++;
+    }
+    return `po-${nextNum}`;
+  },
+  getUniquePaymentEventId() {
+    let nextNum = this.PAYMENT_EVENTS.length + 1;
+    const ids = new Set(this.PAYMENT_EVENTS.map((e) => e.id));
+    while (ids.has(`pe-${nextNum}`)) {
+      nextNum++;
+    }
+    return `pe-${nextNum}`;
+  },
+  getUniqueMikrotikActionId() {
+    let nextNum = this.MIKROTIK_ACTIONS.length + 1;
+    const ids = new Set(this.MIKROTIK_ACTIONS.map((a) => a.id));
+    while (ids.has(`ma-${nextNum}`)) {
+      nextNum++;
+    }
+    return `ma-${nextNum}`;
   },
 };

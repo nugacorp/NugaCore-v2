@@ -1,6 +1,7 @@
 import { Express } from 'express';
 import authRoutes from './domains/auth/routes';
 import healthRoutes from './domains/health/routes';
+import paymentsRoutes from './domains/payments/routes';
 import automationsRoutes from './domains/automations/routes';
 import billingRoutes from './domains/billing/routes';
 import customersRoutes from './domains/customers/routes';
@@ -39,4 +40,5 @@ export function registerRoutes(app: Express): void {
   app.use(inventoryRoutes);
   app.use(gisRoutes);
   app.use(dashboardRoutes);
+  app.use(paymentsRoutes);
 }

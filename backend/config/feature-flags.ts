@@ -29,7 +29,8 @@ export type DomainKey =
   | 'gis'
   | 'automations'
   | 'reports'
-  | 'security';
+  | 'security'
+  | 'payments';
 
 // Mapa dominio -> variable de entorno (USE_DB_<DOMINIO>).
 const FLAG_ENV: Record<DomainKey, string> = {
@@ -47,6 +48,7 @@ const FLAG_ENV: Record<DomainKey, string> = {
   automations: 'USE_DB_AUTOMATIONS',
   reports: 'USE_DB_REPORTS',
   security: 'USE_DB_SECURITY',
+  payments: 'USE_DB_PAYMENTS',
 };
 
 const buildFlags = (): Record<DomainKey, boolean> => {

@@ -17,7 +17,8 @@ import {
   BookOpen,
   Wifi,
   X,
-  LogOut
+  LogOut,
+  Banknote
 } from 'lucide-react';
 import { UserSessionProfile } from '../lib/supabase';
 import { canAccessTab } from '../lib/rbac';
@@ -53,6 +54,7 @@ export default function Sidebar({
     { id: 'routeros-resources', name: 'Recursos MikroTik (.rsc)', icon: FileCode },
     { id: 'routeros-templates', name: 'Templates RouterOS Library', icon: BookOpen },
     { id: 'router-enrollment', name: 'Enrollment WireGuard Auto', icon: Wifi },
+    { id: 'payments', name: 'Portal Pagos & Reactivación', icon: Banknote },
     { id: 'support', name: 'Remesa Soporte & OT', icon: Wrench },
     { id: 'inventory', name: 'Inventarios / ERP', icon: Box },
     { id: 'gis', name: 'GIS & Cobertura Co-Map', icon: Map },

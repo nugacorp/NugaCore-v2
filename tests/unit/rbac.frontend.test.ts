@@ -6,10 +6,10 @@ import type { UserRole } from '../../src/lib/supabase';
 const ALL_ROLES: UserRole[] = ['Super Admin', 'Administrador', 'Cobranza', 'Técnico', 'Soporte', 'Solo lectura'];
 
 describe('RBAC visual por rol (frontend)', () => {
-  it('Super Admin ve todos los módulos (15)', () => {
+  it('Super Admin ve todos los módulos (16)', () => {
     const t = getAllowedTabsByRole('Super Admin');
-    expect(t.length).toBe(15);
-    expect(t).toEqual(expect.arrayContaining(['mikrotik', 'wireguard', 'routeros-resources', 'routeros-templates', 'router-enrollment', 'owner', 'finance', 'billing', 'inventory', 'suspension']));
+    expect(t.length).toBe(16);
+    expect(t).toEqual(expect.arrayContaining(['mikrotik', 'wireguard', 'routeros-resources', 'routeros-templates', 'router-enrollment', 'payments', 'owner', 'finance', 'billing', 'inventory', 'suspension']));
   });
 
   it('Administrador NO ve mikrotik / finance / owner', () => {
@@ -20,8 +20,8 @@ describe('RBAC visual por rol (frontend)', () => {
     expect(t).not.toContain('owner');
   });
 
-  it('Cobranza ve billing/finance; no mikrotik ni red', () => {
-    expect(getAllowedTabsByRole('Cobranza')).toEqual(['dashboard', 'crm', 'billing', 'finance', 'suspension']);
+  it('Cobranza ve billing/finance/payments; no mikrotik ni red', () => {
+    expect(getAllowedTabsByRole('Cobranza')).toEqual(['dashboard', 'crm', 'billing', 'finance', 'suspension', 'payments']);
     expect(canAccessTab('Cobranza', 'mikrotik')).toBe(false);
     expect(canAccessTab('Cobranza', 'network')).toBe(false);
   });
