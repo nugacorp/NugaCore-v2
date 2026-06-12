@@ -1,5 +1,24 @@
 # NugaCore Master Plan
 
+> Última actualización: 2026-06-12
+> Roadmap detallado por fases: [NUGACORE_ROADMAP.md](NUGACORE_ROADMAP.md)
+> Arquitectura del sistema: [ARCHITECTURE.md](ARCHITECTURE.md)
+
+## Estado de implementación (2026-06-12)
+
+| Fases | Estado |
+|-------|--------|
+| Fase 0 — Base técnica | ✅ Completado |
+| Fase 1 — Autenticación y usuarios | ✅ Completado |
+| Fase 2 — Clientes | ✅ Completado |
+| Fase 3 — Planes | ✅ Completado |
+| Fase 4.1–4.7 — Billing, Suspension Engine, WireGuard, Enrollment | ✅ Completado |
+| Fase 4.8 — Payment Engine + Reactivación Automática | 🔲 Planificado — No iniciado |
+| Fase 4.9 — CFDI / Facturación electrónica | 🔲 Futuro |
+| Fases 5–16 | 🔲 Futuro |
+
+---
+
 ## 1. Objetivo maestro
 Convertir el frontend actual de NugaCore en una plataforma SaaS interna funcional para WISP/ISP, sin alterar apariencia visual sin autorizacion.
 
