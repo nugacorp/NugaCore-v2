@@ -182,6 +182,40 @@ Logs recientes revisados sin imprimir líneas sensibles:
 - El archivo temporal usado para comprobar `head -1` quedó fuera del repositorio.
 - Los scripts generados por API quedan sujetos al TTL de la implementación.
 
+## Final redeploy validation
+
+Fecha UTC: 2026-06-12T16:13:47Z
+
+Validación ejecutada después de corregir el desfase observado entre el repo staging y el contenedor servido por el dominio público.
+
+| Ítem | Resultado |
+| --- | --- |
+| Repo `/opt/nugacore-staging` | `cee74d05d62c5c7651ca4ad27a2179ddc14f34b6` |
+| Commit funcional contenido en HEAD | `8157005 fix(routeros): close templates staging blockers` |
+| Contenedor Coolify activo | Healthy |
+| Commit/source del contenedor activo | `8157005c76397847a77924535ef0c4cd97c06a2b` |
+| `GET /api/health` | HTTP 200; no reporta el commit viejo `2a88694` |
+| `GET /api/health/live` | HTTP 200 |
+| `GET /api/health/ready` | HTTP 200 |
+| `npm run typecheck` | PASS |
+| `npm test` | PASS — 505 passed / 0 failed / 34 skipped |
+| `npm run build` | PASS |
+| `tests/unit/rbac.frontend.test.ts` | PASS |
+| RBAC backend live con JWT real | PASS: Super Admin, Administrador y Técnico reciben 200; Cobranza, Soporte y Solo lectura reciben 403 |
+| Header `.rsc` generado/descargado | PASS: primera línea exacta `# NugaCore` |
+| UI por rol | PASS: `routeros-templates` visible para Super Admin, Administrador y Técnico; no visible para Cobranza, Soporte ni Solo lectura |
+| Seguridad | PASS: sin marcas externas, sin policies prohibidas y sin JWT/private keys/preshared keys/service-role keys en logs revisados |
+
+Guardrails mantenidos:
+
+- No se modificó código.
+- No se importaron scripts RouterOS.
+- No se ejecutaron scripts RouterOS en routers.
+- No se tocó ningún router real.
+- No se activó commit mode.
+- No se avanzó a Fase 4.7.
+- No se documentaron secretos.
+
 ## Aprobación final
 
 La Fase 4.6.3 queda **APROBADA** en staging para RouterOS Templates Library.
