@@ -12,6 +12,7 @@ CREATE TABLE IF NOT EXISTS router_enrollment (
   wg_peer_id           TEXT        NOT NULL,
   enrolled_by          TEXT        NOT NULL,
   status               TEXT        NOT NULL DEFAULT 'script_generated',
+  routeros_version     TEXT        NOT NULL DEFAULT '7' CHECK (routeros_version IN ('6', '7')),
   script_hash          TEXT,
   script_downloaded_at TIMESTAMPTZ,
   check_online_attempts INTEGER    NOT NULL DEFAULT 0,

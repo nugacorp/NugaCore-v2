@@ -19,13 +19,14 @@ import type { UserRole } from '../../src/lib/supabase';
 
 // ── Helpers ────────────────────────────────────────────────────────────
 
-const makeRecord = (id: string, status: EnrollmentStatus = 'script_generated'): RouterEnrollmentRecord => ({
+const makeRecord = (id: string, status: EnrollmentStatus = 'script_generated', routerosVersion: '6' | '7' = '7'): RouterEnrollmentRecord => ({
   id,
   routerId: 'mkt-test',
   wgServerId: 'wgs-test',
   wgPeerId: 'wgp-test',
   enrolledBy: 'user-test',
   status,
+  routerosVersion,
   scriptHash: 'abc123',
   checkOnlineAttempts: 0,
   createdAt: new Date().toISOString(),
@@ -169,6 +170,7 @@ describe('RouterEnrollmentRecord — estructura', () => {
     expect(rec).toHaveProperty('wgPeerId');
     expect(rec).toHaveProperty('enrolledBy');
     expect(rec).toHaveProperty('status');
+    expect(rec).toHaveProperty('routerosVersion');
     expect(rec).toHaveProperty('checkOnlineAttempts');
     expect(rec).toHaveProperty('createdAt');
     expect(rec).toHaveProperty('updatedAt');
@@ -179,5 +181,12 @@ describe('RouterEnrollmentRecord — estructura', () => {
     expect(rec).not.toHaveProperty('script');
     expect(rec).not.toHaveProperty('privateKey');
     expect(rec).not.toHaveProperty('presharedKey');
+  });
+
+  it('routerosVersion acepta "6" y "7" (FIX-2)', () => {
+    const rec6 = makeRecord('enr-1', 'script_generated', '6');
+    const rec7 = makeRecord('enr-2', 'script_generated', '7');
+    expect(rec6.routerosVersion).toBe('6');
+    expect(rec7.routerosVersion).toBe('7');
   });
 });

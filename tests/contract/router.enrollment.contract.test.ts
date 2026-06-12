@@ -9,6 +9,7 @@ import type { Express } from 'express';
 import { createApp } from '../../backend/app';
 import { enrollmentRepository } from '../../backend/domains/router-enrollment/repository';
 import { resetWireguardService } from '../../backend/domains/wireguard/service';
+import { store } from '../../backend/state/store';
 
 // ── Cabeceras por rol ──────────────────────────────────────────────────
 
@@ -335,6 +336,134 @@ describe('Enrollment — flujo start → download → check-online → revoke', 
       .get(`/api/router-enrollment/${enrollmentId}`)
       .set(ADMIN);
     expect(res.body.statusLabel).toBe('Revocado');
+  });
+});
+
+// ── FIX-1: prevención de routers huérfanos ─────────────────────────────
+
+describe('Enrollment — prevención de routers huérfanos (FIX-1)', () => {
+  let app: Express;
+  let routerCountBefore: number;
+
+  beforeAll(() => {
+    enrollmentRepository._reset();
+    resetWireguardService();
+    app = createApp();
+    routerCountBefore = store.MIKROTIK_ROUTERS.length;
+  });
+
+  it('start() con wgServerId inexistente devuelve error (≥400) y NO agrega router al store', async () => {
+    const res = await request(app)
+      .post('/api/router-enrollment/start')
+      .set(ADMIN)
+      .send({ routerName: 'Router Falla Test', wgServerId: 'wgs-no-existe', routerosVersion: '7' });
+
+    expect(res.status).toBeGreaterThanOrEqual(400);
+    expect(store.MIKROTIK_ROUTERS.length).toBe(routerCountBefore);
+  });
+
+  it('start() fallido NO crea enrollment huérfano', async () => {
+    await request(app)
+      .post('/api/router-enrollment/start')
+      .set(ADMIN)
+      .send({ routerName: 'Enrollment Fallido', wgServerId: 'wgs-no-existe', routerosVersion: '7' });
+
+    expect(enrollmentRepository.list()).toHaveLength(0);
+  });
+
+  it('start() fallido no incrementa el contador de routers', async () => {
+    const before = store.MIKROTIK_ROUTERS.length;
+
+    await request(app)
+      .post('/api/router-enrollment/start')
+      .set(ADMIN)
+      .send({ routerName: 'Router Contador Test', wgServerId: 'wgs-tampoco-existe', routerosVersion: '7' });
+
+    expect(store.MIKROTIK_ROUTERS.length).toBe(before);
+  });
+});
+
+// ── FIX-2: routerosVersion persistida y usada en re-descarga ───────────
+
+describe('Enrollment — routerosVersion persistida en record y usada en download (FIX-2)', () => {
+  let app: Express;
+  let serverId: string;
+
+  beforeAll(async () => {
+    enrollmentRepository._reset();
+    resetWireguardService();
+    app = createApp();
+    const srvRes = await request(app)
+      .post('/api/wireguard/servers')
+      .set(ADMIN)
+      .send({ name: 'VPN Fix2 Test', endpointHost: 'vpn.fix2.local', endpointPort: 13231 });
+    expect(srvRes.status).toBe(201);
+    serverId = srvRes.body.server.id;
+  });
+
+  it('start() con routerosVersion="6" persiste "6" en el enrollment', async () => {
+    const res = await request(app)
+      .post('/api/router-enrollment/start')
+      .set(ADMIN)
+      .send({ routerName: 'Router ROS6', wgServerId: serverId, routerosVersion: '6' });
+    expect(res.status).toBe(201);
+    expect(res.body.enrollment.routerosVersion).toBe('6');
+  });
+
+  it('start() con routerosVersion="7" persiste "7" en el enrollment', async () => {
+    const res = await request(app)
+      .post('/api/router-enrollment/start')
+      .set(ADMIN)
+      .send({ routerName: 'Router ROS7', wgServerId: serverId, routerosVersion: '7' });
+    expect(res.status).toBe(201);
+    expect(res.body.enrollment.routerosVersion).toBe('7');
+  });
+
+  it('download() de enrollment con routerosVersion="6" genera script con header v6+ (no v7+)', async () => {
+    const startRes = await request(app)
+      .post('/api/router-enrollment/start')
+      .set(ADMIN)
+      .send({ routerName: 'Router ROS6 DL', wgServerId: serverId, routerosVersion: '6' });
+    expect(startRes.status).toBe(201);
+    const id = startRes.body.enrollment.id;
+
+    const dlRes = await request(app)
+      .get(`/api/router-enrollment/${id}/download`)
+      .set(ADMIN);
+    expect(dlRes.status).toBe(200);
+    expect(dlRes.text).toContain('v6+');
+    expect(dlRes.text).not.toContain('v7+');
+  });
+
+  it('download() de enrollment con routerosVersion="7" genera script con header v7+ (no v6+)', async () => {
+    const startRes = await request(app)
+      .post('/api/router-enrollment/start')
+      .set(ADMIN)
+      .send({ routerName: 'Router ROS7 DL', wgServerId: serverId, routerosVersion: '7' });
+    expect(startRes.status).toBe(201);
+    const id = startRes.body.enrollment.id;
+
+    const dlRes = await request(app)
+      .get(`/api/router-enrollment/${id}/download`)
+      .set(ADMIN);
+    expect(dlRes.status).toBe(200);
+    expect(dlRes.text).toContain('v7+');
+    expect(dlRes.text).not.toContain('v6+');
+  });
+
+  it('GET /:id muestra routerosVersion en el view', async () => {
+    const startRes = await request(app)
+      .post('/api/router-enrollment/start')
+      .set(ADMIN)
+      .send({ routerName: 'Router View Version', wgServerId: serverId, routerosVersion: '6' });
+    expect(startRes.status).toBe(201);
+    const id = startRes.body.enrollment.id;
+
+    const getRes = await request(app)
+      .get(`/api/router-enrollment/${id}`)
+      .set(ADMIN);
+    expect(getRes.status).toBe(200);
+    expect(getRes.body.routerosVersion).toBe('6');
   });
 });
 

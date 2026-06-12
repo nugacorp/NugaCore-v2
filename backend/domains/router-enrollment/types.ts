@@ -32,6 +32,7 @@ export interface RouterEnrollmentRecord {
   wgPeerId: string;
   enrolledBy: string;
   status: EnrollmentStatus;
+  routerosVersion: '6' | '7';
   scriptHash?: string;
   scriptDownloadedAt?: string;
   checkOnlineAttempts: number;
@@ -54,6 +55,7 @@ export interface RouterEnrollmentView {
   enrolledBy: string;
   status: EnrollmentStatus;
   statusLabel: string;
+  routerosVersion: '6' | '7';
   scriptHash?: string;
   scriptDownloadedAt?: string;
   checkOnlineAttempts: number;

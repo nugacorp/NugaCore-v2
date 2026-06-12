@@ -43,6 +43,7 @@ const toView = (rec: RouterEnrollmentRecord): RouterEnrollmentView => {
     enrolledBy: rec.enrolledBy,
     status: rec.status,
     statusLabel: ENROLLMENT_STATUS_LABELS[rec.status],
+    routerosVersion: rec.routerosVersion,
     scriptHash: rec.scriptHash,
     scriptDownloadedAt: rec.scriptDownloadedAt,
     checkOnlineAttempts: rec.checkOnlineAttempts,
@@ -121,7 +122,38 @@ export const enrollmentService = {
     if (!input.wgServerId?.trim()) throw new BadRequestError('wgServerId es obligatorio.');
     if (!input.routerosVersion) throw new BadRequestError('routerosVersion es obligatorio.');
 
+    // Pre-compute routerId (needed by buildScript for peer naming) but DO NOT push yet.
+    // The push happens AFTER buildScript succeeds to prevent orphan routers on failure.
     const routerId = store.getUniqueMikrotikRouterId();
+
+    let buildResult: Awaited<ReturnType<typeof buildScript>>;
+    try {
+      buildResult = await buildScript(routerId, input, actorId);
+    } catch (err) {
+      // Best-effort peer rollback: if getPeerConfigForRouter created a peer but a later
+      // step (generateFromTemplate) failed, revoke the orphan peer.
+      try {
+        const wgSvc = getWireguardService();
+        const orphans = await wgSvc.listPeers({ serverId: input.wgServerId, routerId, status: 'active' });
+        if (orphans.length > 0) {
+          await wgSvc.revokePeer(orphans[0].id);
+          logger.warn('Enrollment: peer WG huérfano revocado en rollback', {
+            routerId,
+            peerId: orphans[0].id,
+          });
+        }
+      } catch (rollbackErr) {
+        logger.warn('Enrollment: rollback de peer WG falló (best-effort)', {
+          routerId,
+          error: String(rollbackErr),
+        });
+      }
+      throw err;
+    }
+
+    const { script, scriptFilename, scriptHash, wgPeerId, wgAssignedIp, wgServerPublicKey } = buildResult;
+
+    // Push to store only after buildScript succeeds — no orphan router on failure.
     store.MIKROTIK_ROUTERS.push({
       id: routerId,
       name: input.routerName.trim(),
@@ -137,11 +169,9 @@ export const enrollmentService = {
       lastHealthCheckAt: nowIso(),
       connectionType: 'wireguard',
       provisioningStatus: 'pending',
+      vpnIp: wgAssignedIp,
       notes: input.notes,
     });
-
-    const { script, scriptFilename, scriptHash, wgPeerId, wgAssignedIp, wgServerPublicKey } =
-      await buildScript(routerId, input, actorId);
 
     const id = enrollmentRepository.nextId();
     const rec: RouterEnrollmentRecord = {
@@ -151,6 +181,7 @@ export const enrollmentService = {
       wgPeerId,
       enrolledBy: actorId,
       status: 'script_generated',
+      routerosVersion: input.routerosVersion,
       scriptHash,
       checkOnlineAttempts: 0,
       createdAt: nowIso(),
@@ -208,7 +239,7 @@ export const enrollmentService = {
       apiPort: router.apiPort,
       linkedTowerId: router.linkedTowerId,
       wgServerId: rec.wgServerId,
-      routerosVersion: '7',
+      routerosVersion: rec.routerosVersion,
       notes: router.notes,
     };
 
