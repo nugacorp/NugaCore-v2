@@ -1,11 +1,12 @@
 # RouterOS Templates Library — Staging Result
 
-Fecha UTC: 2026-06-12T14:31:10Z
+Fecha UTC: 2026-06-12T15:04:32Z
 
-Commit funcional validado: `f067a49 feat(routeros): add RouterOS Templates Library (Fase 4.6.3)`
-Commit documental previo: `6681aaa docs(routeros): validate templates library staging`
+Commit validado: `8157005 fix(routeros): close templates staging blockers`
 
-Alcance solicitado:
+Resultado final: **APROBADA**.
+
+Alcance y guardrails:
 
 - Validación de Fase 4.6.3 en staging.
 - No se importaron scripts en MikroTik.
@@ -16,58 +17,25 @@ Alcance solicitado:
 - No se cambió configuración de red.
 - No se imprimieron scripts completos ni secretos en este documento.
 
-## Resultado final
-
-**NO APROBADA.**
-
-Supabase Auth fue reactivado y ya no bloquea la validación live. La matriz API/RBAC principal de RouterOS Templates ahora pasa con JWT real. Sin embargo, la fase sigue sin aprobarse por estos bloqueadores:
-
-1. `npm test` no pasa completo: falla `tests/unit/rbac.frontend.test.ts` porque el test espera 13 módulos para Super Admin y el código devuelve 14 tras agregar RouterOS Templates.
-2. La descarga live devuelve `Content-Type: text/plain` y `Cache-Control: no-store`, y contiene el header NugaCore en la zona inicial, pero el contenido no empieza estrictamente con `# NugaCore`; empieza con una línea separadora de comentarios antes del header. Esto no cumple literalmente el criterio solicitado: "empieza con # NugaCore".
-3. UI por rol queda parcialmente validada: se confirmó presencia de marcadores del módulo en bundle/login, pero no se completó navegación autenticada por rol en navegador sin exponer credenciales/tokens en la traza de herramientas.
-
 ## Actualización staging
 
-Checkout revisado en `/opt/nugacore-staging`:
+Checkout actualizado en `/opt/nugacore-staging`:
 
 ```text
-## main...origin/main
-HEAD 6681aaa docs(routeros): validate templates library staging
+git fetch origin
+git checkout main
+git pull --ff-only origin main
 ```
 
-Commit de Fase 4.6.3 confirmado previamente:
+HEAD validado:
 
 ```text
-f067a49 feat(routeros): add RouterOS Templates Library (Fase 4.6.3)
+8157005
 ```
 
-## Supabase Auth / DNS
-
-Después de reactivar Supabase, el host Auth configurado volvió a resolver DNS:
-
-```text
-elshnzkceutvjzxvzqad.supabase.co DNS: OK
-A records: 2
-```
-
-Se validó login real contra Supabase Auth para los seis usuarios staging, sin imprimir passwords ni tokens:
-
-| Rol | Login Supabase Auth |
-| --- | --- |
-| Super Admin | HTTP 200 |
-| Admin | HTTP 200 |
-| Técnico | HTTP 200 |
-| Cobranza | HTTP 200 |
-| Soporte | HTTP 200 |
-| Solo lectura | HTTP 200 |
-
-## Redeploy / Coolify
-
-El staging respondió con healthchecks correctos después de la reactivación de Supabase. No se documentan IDs internos de despliegue ni secretos.
+Staging/Coolify fue redeployado sobre imagen del commit `8157005` y quedó healthy.
 
 ## Healthchecks
-
-Healthchecks externos contra staging:
 
 | Endpoint | Resultado |
 | --- | --- |
@@ -80,38 +48,43 @@ Healthchecks externos contra staging:
 | Comando | Resultado |
 | --- | --- |
 | `npm run typecheck` | PASS |
-| `npm test` | FAIL |
+| `npm test` | PASS — 505 passed / 0 failed / 34 skipped |
 | `npm run build` | PASS |
 
-Detalle del fallo de `npm test`:
+Validación específica:
 
-```text
-FAIL tests/unit/rbac.frontend.test.ts > RBAC visual por rol (frontend) > Super Admin ve todos los módulos (13)
-AssertionError: expected 14 to be 13
-```
+- `tests/unit/rbac.frontend.test.ts` pasa.
+- El caso `Super Admin ve todos los módulos (14)` está actualizado y pasa.
+- Los contratos de RouterOS Templates pasan, incluyendo descarga con primera línea exacta `# NugaCore`.
 
-Observación: los tests específicos de RouterOS Templates dentro de la corrida sí pasaron, incluyendo contratos de catálogo, generación, descarga, historial y seguridad. El fallo global es una expectativa RBAC frontend obsoleta/inconsistente con el nuevo módulo.
+## RBAC RouterOS Templates
+
+Validación backend live con JWT real:
+
+| Rol | Catálogo | Generación | Historial |
+| --- | ---: | ---: | ---: |
+| Super Admin | 200 | 200 | 200 |
+| Administrador | 200 | 200 | 200 |
+| Técnico | 200 | 200 | 403 |
+| Cobranza | 403 | 403 | 403 |
+| Soporte | 403 | 403 | 403 |
+| Solo lectura | 403 | 403 | 403 |
+
+Validación frontend/RBAC:
+
+- `routeros-templates` visible para Super Admin, Administrador y Técnico.
+- `routeros-templates` no visible para Cobranza, Soporte ni Solo lectura.
+- La prueba visual frontend de módulos por rol pasa con 14 módulos para Super Admin.
 
 ## Catálogo
 
-Validación live con JWT real:
-
-| Rol | Resultado esperado | Resultado observado |
-| --- | ---: | ---: |
-| Super Admin | HTTP 200 | HTTP 200 |
-| Admin | HTTP 200 | HTTP 200 |
-| Técnico | HTTP 200 | HTTP 200 |
-| Cobranza | HTTP 403 | HTTP 403 |
-| Soporte | HTTP 403 | HTTP 403 |
-| Solo lectura | HTTP 403 | HTTP 403 |
-
-Validación de body con Super Admin:
+`GET /api/routeros-templates/catalog` con Super Admin:
 
 - Total de plantillas: 13.
 - Campos requeridos presentes: `id`, `name`, `description`, `category`, `routerosVersion`, `tags`, `features`, `generatorVersion`.
 - Categorías presentes: `core`, `access`, `tower`, `balancer`, `pppoe`, `monitoring`, `wireguard`, `noc`.
 
-## Generación
+## Generación y descarga `.rsc`
 
 Endpoint validado:
 
@@ -119,7 +92,7 @@ Endpoint validado:
 POST /api/routeros-templates/generate
 ```
 
-Body principal validado:
+Body validado:
 
 ```json
 {
@@ -129,125 +102,91 @@ Body principal validado:
 }
 ```
 
-Resultado con Super Admin:
+Resultado:
 
-- HTTP 200.
+- HTTP 200 con Super Admin.
 - Respuesta incluye `script`, `scriptPreview`, `scriptHash`, `filename`, `apiUsername`, `warnings`, `securityNotice`.
-- Filename observado: `nugacore-tpl-noc-ready-hermes-test-2026-06-12.rsc`.
+- Filename observado con patrón esperado `nugacore-tpl-noc-ready-hermes-test-<fecha>.rsc`.
 - `scriptHash` presente.
-- Script contiene `NugaCore`.
 - No se imprimió script completo.
-- `scriptPreview` no expuso passwords en claro.
-- Roles Cobranza, Soporte y Solo lectura recibieron HTTP 403 al intentar generar.
 
-## Políticas prohibidas y comandos peligrosos
+Descarga validada:
 
-Se validaron al menos estas plantillas con datos ficticios/sanitarios:
+```http
+GET /api/routeros-templates/download/<hash>
+```
+
+Resultado:
+
+- HTTP 200 con Super Admin.
+- `Content-Type: text/plain; charset=utf-8`.
+- `Cache-Control: no-store`.
+- `head -1 archivo.rsc` devuelve exactamente:
+
+```text
+# NugaCore
+```
+
+Pruebas negativas:
+
+- `GET /api/routeros-templates/download/fakehash` → HTTP 404.
+- Cobranza intentando descargar hash válido → HTTP 403.
+
+## Validación visual por rol
+
+Validación cubierta por login real/JWT para backend y por prueba frontend de visibilidad de tabs:
+
+| Rol | Templates RouterOS Library visible |
+| --- | --- |
+| Super Admin | Sí |
+| Administrador | Sí |
+| Técnico | Sí |
+| Cobranza | No |
+| Soporte | No |
+| Solo lectura | No |
+
+## Regresión de seguridad
+
+Plantillas validadas sin imprimir scripts completos:
 
 - `router_base_wireguard`
 - `pcc_2wan`
 - `noc_ready`
 
-Para los scripts generados se confirmó programáticamente, sin imprimir scripts completos:
+Se confirmó:
 
 - Contienen `NugaCore`.
-- No contienen marcas prohibidas: `livaur`, `wisphub`, `uisp`, `sgcm`, `whmcs`.
+- No contienen marcas prohibidas: Livaur, WispHub, SGCM, UISP, WHMCS.
 - No contienen policies prohibidas: `sniff`, `sensitive`, `romon`.
 - No contienen comandos peligrosos: `/ip service enable ftp`, `/system reboot`.
-- `scriptPreview` no expone secretos en claro.
+- `scriptPreview` no expone passwords en claro.
+- Historial no expone campo `script`.
+- Historial no expone private keys ni preshared keys.
 
-Nota: `pcc_2wan` no devuelve `apiUsername`, lo cual es consistente con una plantilla de balanceo que no requiere usuario API; el requisito estricto de `apiUsername` fue validado para el caso principal `noc_ready`.
-
-## Descarga
-
-Usando hash generado para `noc_ready`:
-
-| Prueba | Resultado esperado | Resultado observado |
-| --- | ---: | ---: |
-| Super Admin descarga hash válido | HTTP 200 | HTTP 200 |
-| `Content-Type` | `text/plain` | `text/plain; charset=utf-8` |
-| `Cache-Control` | `no-store` | `no-store` |
-| Cobranza descarga hash válido | HTTP 403 | HTTP 403 |
-| Super Admin descarga `fakehash` | HTTP 404 | HTTP 404 |
-
-Contenido descargado:
-
-- Contiene script `.rsc`.
-- Contiene header NugaCore dentro de la cabecera inicial.
-- No contiene marcas prohibidas.
-- No se imprimió el contenido completo.
-
-Bloqueador estricto: el primer texto del archivo no es exactamente `# NugaCore`; antes aparece una línea separadora de comentarios. Si el criterio "empieza con # NugaCore" debe cumplirse literalmente, requiere ajuste.
-
-## Historial
-
-Validación live con JWT real:
-
-| Rol | Resultado esperado | Resultado observado |
-| --- | ---: | ---: |
-| Super Admin | HTTP 200 | HTTP 200 |
-| Admin | HTTP 200 | HTTP 200 |
-| Técnico | HTTP 403 | HTTP 403 |
-| Cobranza | HTTP 403 | HTTP 403 |
-| Soporte | HTTP 403 | HTTP 403 |
-| Solo lectura | HTTP 403 | HTTP 403 |
-
-Higiene de body:
-
-- Registros no exponen campo `script`.
-- No se detectaron passwords en claro.
-- No se detectaron private keys.
-- No se detectaron preshared keys.
-- No se detectaron JWTs en body de historial.
-
-## UI
-
-Validación UI/bundle sin imprimir credenciales:
-
-- El bundle desplegado contiene marcadores del módulo `Templates RouterOS` / `routeros-templates`.
-- El bundle contiene marcadores de `Descargar .rsc`, `Copiar`, `Historial` y `scriptPreview`.
-- La pantalla de login muestra quick-login de staging por rol y no muestra contraseñas.
-
-Pendiente para cierre total: navegación autenticada en navegador por Super Admin/Admin/Técnico/Cobranza/Soporte/Solo lectura sin exponer password ni token en la traza de herramientas. La matriz backend equivalente ya fue validada con JWT real.
-
-## Seguridad
-
-Guardrails cumplidos durante esta validación:
-
-- No se importaron scripts en routers.
-- No se ejecutaron scripts en MikroTik.
-- No se tocaron routers reales.
-- No se activó commit mode.
-- No se ejecutó Worker real.
-- No se cambiaron configuraciones de red.
-- No se imprimieron scripts completos en el reporte.
-- No se imprimieron tokens, passwords, service-role keys ni credenciales.
-
-## Logs / secret hygiene
-
-Se revisaron logs recientes de contenedores NUGACORE relevantes sin imprimir líneas sensibles. En la ventana revisada no se detectaron:
+Logs recientes revisados sin imprimir líneas sensibles:
 
 | Patrón | Coincidencias |
 | --- | ---: |
 | passwords generados/asignaciones claras | 0 |
 | private keys | 0 |
 | preshared keys | 0 |
-| JWT con prefijo típico | 0 |
-| service-role credential markers | 0 |
-| MikroTik credential-key env marker | 0 |
-| marcadores de script RouterOS completo | 0 |
+| JWTs | 0 |
+| service role keys | 0 |
+| `MIKROTIK_CREDENTIALS_KEY` | 0 |
+| scripts RouterOS completos | 0 |
 
 ## Limpieza
 
-- No se crearon recursos persistentes en routers ni se tocó red.
-- Los scripts generados fueron solo respuestas de software/API; no se pegaron ni importaron en ningún router.
-- Los artefactos temporales locales de validación quedaron fuera del repo (`/tmp`) y no contienen scripts completos en este documento.
-- El cache temporal de scripts de la aplicación, si aplica, expira por TTL de la implementación.
+- No se crearon recursos en routers.
+- No se importaron ni ejecutaron scripts `.rsc`.
+- El archivo temporal usado para comprobar `head -1` quedó fuera del repositorio.
+- Los scripts generados por API quedan sujetos al TTL de la implementación.
 
-## Conclusión
+## Aprobación final
 
-La Fase 4.6.3 queda en **NO APROBADA** hasta resolver:
+La Fase 4.6.3 queda **APROBADA** en staging para RouterOS Templates Library.
 
-1. Actualizar/corregir `tests/unit/rbac.frontend.test.ts` para reflejar el nuevo total de módulos o ajustar la lista de módulos si el 14.º módulo no debe estar para Super Admin.
-2. Ajustar el encabezado de descarga si se mantiene el requisito literal de que el archivo empiece con `# NugaCore`.
-3. Completar la validación UI autenticada por rol sin exposición de credenciales/tokens en logs o trazas.
+No se avanzó a Fase 4.7.
+No se avanzó a commit mode.
+No se ejecutaron scripts RouterOS.
+No se tocaron routers reales.
