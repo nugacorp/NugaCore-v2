@@ -6,10 +6,10 @@ import type { UserRole } from '../../src/lib/supabase';
 const ALL_ROLES: UserRole[] = ['Super Admin', 'Administrador', 'Cobranza', 'Técnico', 'Soporte', 'Solo lectura'];
 
 describe('RBAC visual por rol (frontend)', () => {
-  it('Super Admin ve todos los módulos (13)', () => {
+  it('Super Admin ve todos los módulos (14)', () => {
     const t = getAllowedTabsByRole('Super Admin');
-    expect(t.length).toBe(13);
-    expect(t).toEqual(expect.arrayContaining(['mikrotik', 'wireguard', 'routeros-resources', 'owner', 'finance', 'billing', 'inventory', 'suspension']));
+    expect(t.length).toBe(14);
+    expect(t).toEqual(expect.arrayContaining(['mikrotik', 'wireguard', 'routeros-resources', 'routeros-templates', 'owner', 'finance', 'billing', 'inventory', 'suspension']));
   });
 
   it('Administrador NO ve mikrotik / finance / owner', () => {
@@ -66,6 +66,18 @@ describe('RBAC visual por rol (frontend)', () => {
     const next = canAccessTab(role, target) ? target : getDefaultTabByRole(role);
     expect(next).toBe('dashboard');
     expect(canAccessTab(role, next)).toBe(true);
+  });
+
+  it('routeros-templates visible para Super Admin, Administrador, Técnico', () => {
+    expect(canAccessTab('Super Admin',  'routeros-templates')).toBe(true);
+    expect(canAccessTab('Administrador','routeros-templates')).toBe(true);
+    expect(canAccessTab('Técnico',      'routeros-templates')).toBe(true);
+  });
+
+  it('routeros-templates NO visible para Cobranza, Soporte, Solo lectura', () => {
+    expect(canAccessTab('Cobranza',    'routeros-templates')).toBe(false);
+    expect(canAccessTab('Soporte',     'routeros-templates')).toBe(false);
+    expect(canAccessTab('Solo lectura','routeros-templates')).toBe(false);
   });
 
   it('App no dispara fetchData antes de tener sesión validada', () => {

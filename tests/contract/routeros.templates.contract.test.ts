@@ -291,6 +291,14 @@ describe('Templates Library — GET /api/routeros-templates/download/:hash', () 
       .set(ADMIN);
     expect(res.headers['cache-control']).toBe('no-store');
   });
+
+  it('El contenido descargado empieza exactamente con "# NugaCore"', async () => {
+    const res = await request(app)
+      .get(`/api/routeros-templates/download/${scriptHash}`)
+      .set(ADMIN);
+    expect(res.status).toBe(200);
+    expect(res.text.split('\n')[0]).toBe('# NugaCore');
+  });
 });
 
 // ── GET /api/routeros-templates/history ──────────────────────────

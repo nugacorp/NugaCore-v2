@@ -93,6 +93,25 @@ describe('Template Library Catalog', () => {
 
 // ── Generación ─────────────────────────────────────────────────────
 
+describe('Generator — primera línea del script', () => {
+  it('todo script generado empieza exactamente con "# NugaCore"', () => {
+    const ids = TEMPLATE_LIBRARY_IDS;
+    for (const id of ids) {
+      let params: any = { templateId: id, ...BASE_PARAMS };
+      if (['router_base_wireguard', 'tower_wisp', 'wireguard_client'].includes(id)) params = { ...params, ...WG_PARAMS };
+      if (id === 'router_base_sstp') params.sstpHost = 'vpn.test.com';
+      if (id === 'wireguard_server') params.wgRouterIp = '10.10.0.1/24';
+      if (['pcc_2wan', 'pcc_3wan', 'pcc_4wan', 'pcc_5wan'].includes(id)) {
+        const n = parseInt(id.replace('pcc_', '').replace('wan', ''));
+        params.wanInterfaces = Array.from({ length: n }, (_, i) => `ether${i + 1}`);
+        params.wanGateways   = Array.from({ length: n }, (_, i) => `10.0.${i}.1`);
+      }
+      const result = generateFromTemplate(params);
+      expect(result.script.split('\n')[0]).toBe('# NugaCore');
+    }
+  });
+});
+
 describe('Generator — Core templates', () => {
   it('genera script router_base_wireguard', () => {
     const result = generateFromTemplate({ templateId: 'router_base_wireguard', ...WG_PARAMS });

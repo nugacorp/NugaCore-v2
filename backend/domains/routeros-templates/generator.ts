@@ -59,7 +59,8 @@ const getDefaults = (p: TemplateLibraryParams): Defaults => ({
 
 const header = (p: TemplateLibraryParams, name: string): string => {
   const ts = new Date().toISOString().replace('T', ' ').substring(0, 19);
-  return `# ============================================================
+  return `# NugaCore
+# ============================================================
 # NugaCore — Templates Library Script
 # Plantilla : ${name}
 # Router    : ${p.routerName}
