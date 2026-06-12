@@ -73,7 +73,8 @@ export interface StartEnrollmentInput {
   ipAddress?: string;
   apiPort?: number;
   linkedTowerId?: string;
-  wgServerId: string;
+  /** Opcional: si se omite, se usa el servidor WireGuard default del VPS. */
+  wgServerId?: string;
   routerosVersion: '6' | '7';
   lanBridgeName?: string;
   lanCidr?: string;
@@ -84,6 +85,15 @@ export interface StartEnrollmentInput {
 
 /** Respuesta de POST /start. El script se devuelve UNA sola vez, nunca se persiste. */
 export interface StartEnrollmentResult {
+  // ── Aliases top-level (contrato Hermes) ──────────────────────────────
+  enrollmentId: string;
+  peerId: string;
+  assignedIp: string;
+  filename: string;
+  /** Vista saneada del script: sin privateKey, presharedKey, passwords. */
+  scriptPreview: string;
+  securityNotice: string;
+  // ── Campos originales (backward compat) ─────────────────────────────
   enrollment: RouterEnrollmentView;
   routerId: string;
   wgPeerId: string;

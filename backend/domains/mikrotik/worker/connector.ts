@@ -107,3 +107,7 @@ export const getRouterConnector = (): RouterConnector => {
   if (!singleton) singleton = new DefaultRouterConnector();
   return singleton;
 };
+
+/** Solo para tests: inyecta un conector mock y devuelve una función de cleanup. */
+export const setTestRouterConnector = (c: RouterConnector): void => { singleton = c; };
+export const resetTestRouterConnector = (): void => { singleton = null; };

@@ -19,7 +19,7 @@ router.get('/api/wireguard/servers', requireRoles([...WG_READ_ROLES]), asyncHand
 }));
 
 router.post('/api/wireguard/servers', requireRoles([...WG_ROLES]), asyncHandler(async (req, res) => {
-  const { name, endpointHost, endpointPort, listenPort, vpnCidr, serverVpnIp } = req.body || {};
+  const { name, endpointHost, endpointPort, listenPort, vpnCidr, serverVpnIp, isDefault } = req.body || {};
   if (!name || !endpointHost) {
     res.status(400).json({ error: 'Missing required fields: name, endpointHost' });
     return;
@@ -30,6 +30,7 @@ router.post('/api/wireguard/servers', requireRoles([...WG_ROLES]), asyncHandler(
     listenPort: listenPort !== undefined ? Number(listenPort) : undefined,
     vpnCidr: vpnCidr ? String(vpnCidr) : undefined,
     serverVpnIp: serverVpnIp ? String(serverVpnIp) : undefined,
+    isDefault: isDefault === true || isDefault === 'true',
   });
   res.status(201).json({
     ...created,

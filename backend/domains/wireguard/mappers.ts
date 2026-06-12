@@ -14,6 +14,7 @@ export interface ServerRow {
   id: string; name: string; endpoint_host: string; endpoint_port: number;
   listen_port: number; public_key: string; encrypted_private_key: string;
   encryption_version: string; vpn_cidr: string; server_vpn_ip: string;
+  is_default?: boolean;
   status: WireguardServerRecord['status']; created_at?: string; updated_at?: string;
 }
 
@@ -21,13 +22,15 @@ export const rowToServer = (r: ServerRow): WireguardServerRecord => ({
   id: r.id, name: r.name, endpointHost: r.endpoint_host, endpointPort: r.endpoint_port,
   listenPort: r.listen_port, publicKey: r.public_key, encryptedPrivateKey: r.encrypted_private_key,
   encryptionVersion: r.encryption_version, vpnCidr: r.vpn_cidr, serverVpnIp: r.server_vpn_ip,
+  isDefault: r.is_default ?? false,
   status: r.status, createdAt: r.created_at || new Date().toISOString(), updatedAt: r.updated_at || new Date().toISOString(),
 });
 
 export const serverToRow = (s: WireguardServerRecord): Record<string, unknown> => ({
   id: s.id, name: s.name, endpoint_host: s.endpointHost, endpoint_port: s.endpointPort,
   listen_port: s.listenPort, public_key: s.publicKey, encrypted_private_key: s.encryptedPrivateKey,
-  encryption_version: s.encryptionVersion, vpn_cidr: s.vpnCidr, server_vpn_ip: s.serverVpnIp, status: s.status,
+  encryption_version: s.encryptionVersion, vpn_cidr: s.vpnCidr, server_vpn_ip: s.serverVpnIp,
+  is_default: s.isDefault ?? false, status: s.status,
 });
 
 // ── Peer ─────────────────────────────────────────────────────────────

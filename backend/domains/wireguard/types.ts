@@ -23,6 +23,7 @@ export interface WireguardServerRecord {
   encryptionVersion: string;
   vpnCidr: string;
   serverVpnIp: string;
+  isDefault: boolean;           // servidor principal del VPS NugaCore
   status: ServerStatus;
   createdAt: string;
   updatedAt: string;
@@ -37,6 +38,7 @@ export interface WireguardServerView {
   publicKey: string;
   vpnCidr: string;
   serverVpnIp: string;
+  isDefault: boolean;
   status: ServerStatus;
   peersCount: number;
   createdAt: string;

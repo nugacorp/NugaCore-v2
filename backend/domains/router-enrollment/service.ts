@@ -1,14 +1,15 @@
 // ====================================================================
-// Servicio de Router Enrollment (Fase 4.7).
+// Servicio de Router Enrollment (Fase 4.7 + Hotfix Hermes).
 //
 // Orquesta: crear router → asignar peer WireGuard → generar script .rsc
 // con credenciales incrustadas → entregar script UNA vez → confirmar
-// online via Worker read-only.
+// online via Worker read-only (solo source=live confirma online).
 //
 // RESTRICCIONES:
 //  - NO commit mode. NO comandos reales al router.
 //  - Script NUNCA persistido. Solo scriptHash para auditoría.
 //  - Worker usado solo para lectura (readRouterSnapshot).
+//  - Solo source=live puede marcar enrollment como online.
 // ====================================================================
 
 import { logger } from '../../common/logger';
@@ -17,6 +18,7 @@ import { generateFromTemplate } from '../routeros-templates/generator';
 import { buildTemplateFilename } from '../routeros-templates/validators';
 import { store } from '../../state/store';
 import { readRouterSnapshot } from '../mikrotik/worker/worker';
+import { isLiveWorkerEnabled } from '../mikrotik/worker/connector';
 import { getWireguardService } from '../wireguard/service';
 import { enrollmentRepository } from './repository';
 import {
@@ -56,11 +58,22 @@ const toView = (rec: RouterEnrollmentRecord): RouterEnrollmentView => {
   };
 };
 
-// ── Generación del script ────────────────────────────────────────────
+// ── Script helpers ───────────────────────────────────────────────────
+
+/**
+ * Genera un preview saneado del script: reemplaza claves privadas y
+ * preshared keys con [REDACTED]. El public key del servidor se conserva.
+ */
+const buildScriptPreview = (script: string): string =>
+  script
+    .replace(/(private-key=)[^\s\\\n]+/gi, '$1[REDACTED]')
+    .replace(/(preshared-key=)[^\s\\\n]+/gi, '$1[REDACTED]')
+    .replace(/(password=)[^\s"\\]+/gi, '$1[REDACTED]');
 
 const buildScript = async (
   routerId: string,
   input: StartEnrollmentInput,
+  wgServerId: string,
   actorId: string,
 ): Promise<{
   script: string;
@@ -72,7 +85,7 @@ const buildScript = async (
 }> => {
   const wgService = getWireguardService();
 
-  const peerConfig = await wgService.getPeerConfigForRouter(routerId, input.wgServerId, actorId);
+  const peerConfig = await wgService.getPeerConfigForRouter(routerId, wgServerId, actorId);
 
   const routerIpWithoutMask = peerConfig.assignedIp.replace(/\/\d+$/, '');
 
@@ -116,27 +129,49 @@ const buildScript = async (
 // ── API pública ──────────────────────────────────────────────────────
 
 export const enrollmentService = {
-  /** Crea router + peer WG + script. El script se devuelve UNA vez y no se persiste. */
+  /**
+   * Crea router + peer WG + script.
+   * El script se devuelve UNA vez y no se persiste.
+   * Si wgServerId se omite, usa el servidor WireGuard default del VPS.
+   */
   async start(input: StartEnrollmentInput, actorId: string): Promise<StartEnrollmentResult> {
     if (!input.routerName?.trim()) throw new BadRequestError('routerName es obligatorio.');
-    if (!input.wgServerId?.trim()) throw new BadRequestError('wgServerId es obligatorio.');
     if (!input.routerosVersion) throw new BadRequestError('routerosVersion es obligatorio.');
 
-    // Pre-compute routerId (needed by buildScript for peer naming) but DO NOT push yet.
-    // The push happens AFTER buildScript succeeds to prevent orphan routers on failure.
+    // ── Resolver servidor WireGuard ───────────────────────────────────
+    const wgService = getWireguardService();
+    let resolvedServerId: string;
+
+    if (input.wgServerId?.trim()) {
+      resolvedServerId = input.wgServerId.trim();
+      // Validar que existe: 404 en lugar de 500
+      const server = await wgService.findServer(resolvedServerId);
+      if (!server) {
+        throw new NotFoundError(`Servidor WireGuard '${resolvedServerId}' no encontrado.`);
+      }
+    } else {
+      const defaultServer = await wgService.getDefaultServer();
+      if (!defaultServer) {
+        throw new BadRequestError(
+          'No hay servidor WireGuard default configurado. ' +
+          'Crea un servidor con isDefault=true antes de iniciar un enrollment.',
+        );
+      }
+      resolvedServerId = defaultServer.id;
+    }
+
+    // ── Generar router ID (sin push aún) ─────────────────────────────
     const routerId = store.getUniqueMikrotikRouterId();
 
     let buildResult: Awaited<ReturnType<typeof buildScript>>;
     try {
-      buildResult = await buildScript(routerId, input, actorId);
+      buildResult = await buildScript(routerId, input, resolvedServerId, actorId);
     } catch (err) {
-      // Best-effort peer rollback: if getPeerConfigForRouter created a peer but a later
-      // step (generateFromTemplate) failed, revoke the orphan peer.
+      // Best-effort: revocar peer WG si fue creado antes del fallo
       try {
-        const wgSvc = getWireguardService();
-        const orphans = await wgSvc.listPeers({ serverId: input.wgServerId, routerId, status: 'active' });
+        const orphans = await wgService.listPeers({ serverId: resolvedServerId, routerId, status: 'active' });
         if (orphans.length > 0) {
-          await wgSvc.revokePeer(orphans[0].id);
+          await wgService.revokePeer(orphans[0].id);
           logger.warn('Enrollment: peer WG huérfano revocado en rollback', {
             routerId,
             peerId: orphans[0].id,
@@ -153,7 +188,7 @@ export const enrollmentService = {
 
     const { script, scriptFilename, scriptHash, wgPeerId, wgAssignedIp, wgServerPublicKey } = buildResult;
 
-    // Push to store only after buildScript succeeds — no orphan router on failure.
+    // Push al store SOLO tras buildScript exitoso → no hay router huérfano
     store.MIKROTIK_ROUTERS.push({
       id: routerId,
       name: input.routerName.trim(),
@@ -177,7 +212,7 @@ export const enrollmentService = {
     const rec: RouterEnrollmentRecord = {
       id,
       routerId,
-      wgServerId: input.wgServerId,
+      wgServerId: resolvedServerId,
       wgPeerId,
       enrolledBy: actorId,
       status: 'script_generated',
@@ -189,9 +224,21 @@ export const enrollmentService = {
     };
     enrollmentRepository.create(rec);
 
-    logger.info('Enrollment iniciado', { enrollmentId: id, routerId, wgPeerId });
+    logger.info('Enrollment iniciado', { enrollmentId: id, routerId, wgPeerId, wgServerId: resolvedServerId });
+
+    const securityMsg =
+      'Este script contiene claves privadas WireGuard. ' +
+      'Guárdalo de forma segura, úsalo UNA VEZ y elimínalo del dispositivo tras importarlo.';
 
     return {
+      // ── Aliases top-level (contrato Hermes) ──────────────────────
+      enrollmentId: id,
+      peerId: wgPeerId,
+      assignedIp: wgAssignedIp,
+      filename: scriptFilename,
+      scriptPreview: buildScriptPreview(script),
+      securityNotice: securityMsg,
+      // ── Campos originales ────────────────────────────────────────
       enrollment: toView(rec),
       routerId,
       wgPeerId,
@@ -200,9 +247,7 @@ export const enrollmentService = {
       script,
       scriptFilename,
       scriptHash,
-      securityWarning:
-        'Este script contiene claves privadas WireGuard. ' +
-        'Guárdalo de forma segura, úsalo UNA VEZ y elimínalo del dispositivo tras importarlo.',
+      securityWarning: securityMsg,
     };
   },
 
@@ -238,27 +283,27 @@ export const enrollmentService = {
       ipAddress: router.ipAddress,
       apiPort: router.apiPort,
       linkedTowerId: router.linkedTowerId,
-      wgServerId: rec.wgServerId,
       routerosVersion: rec.routerosVersion,
       notes: router.notes,
     };
 
-    const { script, scriptFilename } = await buildScript(rec.routerId, input, actorId);
+    const { script, scriptFilename } = await buildScript(rec.routerId, input, rec.wgServerId, actorId);
 
     const updated = enrollmentRepository.update(id, {
       scriptDownloadedAt: nowIso(),
       status: rec.status === 'script_generated' ? 'script_downloaded' : rec.status,
     });
 
-    logger.info('Enrollment: script descargado', {
-      enrollmentId: id,
-      // NO loguear script ni claves
-    });
+    logger.info('Enrollment: script descargado', { enrollmentId: id });
 
     return { script, filename: scriptFilename, enrollment: toView(updated!) };
   },
 
-  /** Lectura read-only via Worker para confirmar que el router está online. */
+  /**
+   * Lectura read-only via Worker para confirmar que el router está online.
+   * SOLO source=live puede marcar el enrollment como online.
+   * source=simulated deja el enrollment en waiting_for_router.
+   */
   async checkOnline(id: string): Promise<CheckOnlineResult> {
     const rec = enrollmentRepository.getById(id);
     if (!rec) throw new NotFoundError('Enrollment no encontrado.');
@@ -277,7 +322,8 @@ export const enrollmentService = {
     const snapshot = await readRouterSnapshot(rec.routerId);
     const attempts = rec.checkOnlineAttempts + 1;
 
-    if (snapshot && snapshot.reads.some((r) => r.ok)) {
+    // Solo source=live puede confirmar online
+    if (snapshot && snapshot.source === 'live' && snapshot.reads.some((r) => r.ok)) {
       const router = store.MIKROTIK_ROUTERS.find((r) => r.id === rec.routerId);
       if (router) {
         router.isOnline = true;
@@ -296,22 +342,24 @@ export const enrollmentService = {
       logger.info('Enrollment: router confirmado online', {
         enrollmentId: id,
         routerId: rec.routerId,
-        source: snapshot.source,
+        source: 'live',
       });
 
       return {
         enrollment: toView(updated!),
         isOnline: true,
-        snapshotSource: snapshot.source,
-        message: `Router online confirmado (fuente: ${snapshot.source}).`,
+        snapshotSource: 'live',
+        message: 'Router online confirmado (fuente: live).',
       };
     }
 
+    // No confirmado: simulated o sin snapshot
+    const isSimulated = snapshot?.source === 'simulated';
     const nextStatus: EnrollmentStatus =
       attempts > MAX_CHECK_ATTEMPTS ? 'failed' : 'waiting_for_router';
     const failureReason =
       nextStatus === 'failed'
-        ? `Sin respuesta tras ${attempts} intentos. Verifica que el script fue importado correctamente.`
+        ? `Sin confirmación live tras ${attempts} intentos.`
         : undefined;
 
     const updated = enrollmentRepository.update(id, {
@@ -321,14 +369,22 @@ export const enrollmentService = {
       failureReason,
     });
 
+    let message: string;
+    if (nextStatus === 'failed') {
+      message = `Enrollment fallido: sin confirmación live tras ${attempts} intentos.`;
+    } else if (isSimulated) {
+      message = isLiveWorkerEnabled()
+        ? `Lectura simulada (live falló con fallback). No se puede confirmar online. Intento ${attempts}/${MAX_CHECK_ATTEMPTS}.`
+        : `MIKROTIK_WORKER_LIVE desactivado — lectura simulada. Solo source=live puede confirmar online. Intento ${attempts}/${MAX_CHECK_ATTEMPTS}.`;
+    } else {
+      message = `Router aún no responde. Intento ${attempts}/${MAX_CHECK_ATTEMPTS}.`;
+    }
+
     return {
       enrollment: toView(updated!),
       isOnline: false,
-      snapshotSource: null,
-      message:
-        nextStatus === 'failed'
-          ? `Enrollment fallido tras ${attempts} intentos.`
-          : `Router aún no responde. Intento ${attempts}/${MAX_CHECK_ATTEMPTS}.`,
+      snapshotSource: snapshot?.source ?? null,
+      message,
     };
   },
 

@@ -8,6 +8,7 @@
 
 import { encryptSecret, decryptSecret } from '../../services/crypto';
 import { logger } from '../../common/logger';
+import { NotFoundError } from '../../common/errors';
 import { isSupabaseAdminConfigured, supabaseAdmin } from '../../services/supabase-admin';
 import { generatePresharedKey, generateWgKeyPair } from './keys';
 import { DEFAULT_SERVER_IP, DEFAULT_WG_POOL, nextFreeIp } from './ipam';
@@ -36,6 +37,7 @@ export interface CreateServerInput {
   listenPort?: number;
   vpnCidr?: string;
   serverVpnIp?: string;
+  isDefault?: boolean;
 }
 
 export interface CreatePeerInput {
@@ -53,7 +55,7 @@ export class WireguardService {
     return {
       id: rec.id, name: rec.name, endpointHost: rec.endpointHost, endpointPort: rec.endpointPort,
       listenPort: rec.listenPort, publicKey: rec.publicKey, vpnCidr: rec.vpnCidr, serverVpnIp: rec.serverVpnIp,
-      status: rec.status, peersCount, createdAt: rec.createdAt, updatedAt: rec.updatedAt,
+      isDefault: rec.isDefault, status: rec.status, peersCount, createdAt: rec.createdAt, updatedAt: rec.updatedAt,
     };
   }
   private toPeerView(rec: WireguardPeerRecord): WireguardPeerView {
@@ -85,6 +87,11 @@ export class WireguardService {
   }
 
   async createServer(input: CreateServerInput): Promise<ServerCreatedOnce> {
+    // Si este servidor es default, quitar el default anterior.
+    if (input.isDefault) {
+      const prev = await this.repo.getDefaultServer();
+      if (prev) await this.repo.updateServer(prev.id, { isDefault: false });
+    }
     const kp = generateWgKeyPair();
     const id = await this.repo.nextId('server');
     const rec: WireguardServerRecord = {
@@ -92,11 +99,28 @@ export class WireguardService {
       endpointPort: input.endpointPort || 13231, listenPort: input.listenPort || input.endpointPort || 13231,
       publicKey: kp.publicKey, encryptedPrivateKey: encryptSecret(kp.privateKey), encryptionVersion: ENCRYPTION_VERSION,
       vpnCidr: input.vpnCidr || DEFAULT_WG_POOL, serverVpnIp: input.serverVpnIp || DEFAULT_SERVER_IP,
+      isDefault: input.isDefault ?? false,
       status: 'active', createdAt: nowIso(), updatedAt: nowIso(),
     };
     await this.repo.createServer(rec);
-    logger.info('WireGuard: servidor creado', { serverId: id, name: rec.name });
+    logger.info('WireGuard: servidor creado', { serverId: id, name: rec.name, isDefault: rec.isDefault });
     return { server: this.toServerView(rec, 0), serverPrivateKey: kp.privateKey };
+  }
+
+  /** Devuelve la vista del servidor default activo, o null si no existe. */
+  async getDefaultServer(): Promise<WireguardServerView | null> {
+    const rec = await this.repo.getDefaultServer();
+    if (!rec) return null;
+    const peers = await this.repo.listPeers({ serverId: rec.id, status: 'active' });
+    return this.toServerView(rec, peers.length);
+  }
+
+  /** Busca un servidor por ID y devuelve su vista, o null si no existe. */
+  async findServer(id: string): Promise<WireguardServerView | null> {
+    const rec = await this.repo.getServer(id);
+    if (!rec) return null;
+    const peers = await this.repo.listPeers({ serverId: rec.id, status: 'active' });
+    return this.toServerView(rec, peers.length);
   }
 
   // ── peers ─────────────────────────────────────────────────────────────
@@ -106,7 +130,7 @@ export class WireguardService {
 
   async createPeer(input: CreatePeerInput, actorId?: string): Promise<PeerCreatedOnce> {
     const server = await this.repo.getServer(input.serverId);
-    if (!server) throw new Error('Server not found');
+    if (!server) throw new NotFoundError(`Servidor WireGuard '${input.serverId}' no encontrado.`);
 
     const allocations = await this.repo.listAllocations(server.id);
     const ip = nextFreeIp(allocations.map((a) => ({ ip: a.ip, status: a.status })), server.vpnCidr, [server.serverVpnIp]);
@@ -174,7 +198,7 @@ export class WireguardService {
     const existing = (await this.repo.listPeers({ serverId, routerId, status: 'active' }))[0];
     if (!existing) return this.createPeer({ serverId, name: `router-${routerId}`, routerId }, actorId);
     const server = await this.repo.getServer(serverId);
-    if (!server) throw new Error('Server not found');
+    if (!server) throw new NotFoundError(`Servidor WireGuard '${serverId}' no encontrado.`);
     const privateKey = existing.encryptedPrivateKey ? decryptSecret(existing.encryptedPrivateKey) : '';
     const presharedKey = existing.encryptedPresharedKey ? decryptSecret(existing.encryptedPresharedKey) : '';
     return this.peerOnce(server, existing, privateKey, presharedKey);

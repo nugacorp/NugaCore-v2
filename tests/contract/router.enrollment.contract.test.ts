@@ -1,15 +1,23 @@
 // ====================================================================
-// Tests de contrato — Router Enrollment (Fase 4.7).
-// Cubre: todos los endpoints, RBAC, seguridad de secretos, script .rsc.
+// Tests de contrato — Router Enrollment (Fase 4.7 + Hotfix Hermes).
+// Cubre: todos los endpoints, RBAC, seguridad de secretos, script .rsc,
+// default WireGuard server, aliases top-level, scriptPreview, check-online.
 // ====================================================================
 
-import { describe, it, expect, beforeAll } from 'vitest';
+import { describe, it, expect, beforeAll, afterAll } from 'vitest';
 import request from 'supertest';
 import type { Express } from 'express';
 import { createApp } from '../../backend/app';
 import { enrollmentRepository } from '../../backend/domains/router-enrollment/repository';
 import { resetWireguardService } from '../../backend/domains/wireguard/service';
 import { store } from '../../backend/state/store';
+import {
+  setTestRouterConnector,
+  resetTestRouterConnector,
+  RouterConnector,
+} from '../../backend/domains/mikrotik/worker/connector';
+import type { MikrotikRouterRegistryItem } from '../../backend/state/store';
+import type { RouterReadResult, RouterSnapshot } from '../../backend/domains/mikrotik/worker/types';
 
 // ── Cabeceras por rol ──────────────────────────────────────────────────
 
@@ -19,6 +27,24 @@ const TEC    = { 'x-user-role': 'tecnico',       'x-user-id': 'enr-tec'   };
 const COBR   = { 'x-user-role': 'cobranza',      'x-user-id': 'enr-cobr'  };
 const SOP    = { 'x-user-role': 'soporte',       'x-user-id': 'enr-sop'   };
 const READER = { 'x-user-role': 'solo lectura',  'x-user-id': 'enr-reader' };
+
+// ── Connector mock que devuelve source=live ────────────────────────────
+
+const makeLiveConnector = (): RouterConnector => ({
+  read: async (_router: MikrotikRouterRegistryItem, command: string): Promise<RouterReadResult> => ({
+    command,
+    ok: true,
+    source: 'live',
+    data: 'uptime: 1h',
+  }),
+  snapshot: async (router: MikrotikRouterRegistryItem): Promise<RouterSnapshot> => ({
+    routerId: router.id,
+    routerName: router.name,
+    generatedAt: new Date().toISOString(),
+    source: 'live',
+    reads: [{ command: '/system/resource/print', ok: true, source: 'live', data: 'uptime: 1h' }],
+  }),
+});
 
 // ── RBAC — acceso a endpoints ──────────────────────────────────────────
 
@@ -76,7 +102,7 @@ describe('Enrollment — flujo start → download → check-online → revoke', 
 
   // ── POST /start ─────────────────────────────────────────────────────
 
-  it('POST /start devuelve 201 con enrollment + script (200)', async () => {
+  it('POST /start devuelve 201 con enrollment + script', async () => {
     const res = await request(app)
       .post('/api/router-enrollment/start')
       .set(ADMIN)
@@ -98,7 +124,7 @@ describe('Enrollment — flujo start → download → check-online → revoke', 
     expect(body.enrollment.wgServerId).toBe(serverId);
     enrollmentId = body.enrollment.id;
 
-    // Datos WireGuard
+    // Datos WireGuard originales
     expect(body.routerId).toBeTruthy();
     expect(body.wgPeerId).toBeTruthy();
     expect(body.wgAssignedIp).toBeTruthy();
@@ -111,8 +137,52 @@ describe('Enrollment — flujo start → download → check-online → revoke', 
     scriptFilename = body.scriptFilename;
     scriptHash = body.scriptHash;
 
-    // Advertencia de seguridad
+    // Advertencia de seguridad (campo original)
     expect(body.securityWarning).toBeTruthy();
+  });
+
+  it('POST /start devuelve aliases top-level (contrato Hermes)', async () => {
+    const res = await request(app)
+      .post('/api/router-enrollment/start')
+      .set(ADMIN)
+      .send({ routerName: 'Router Alias Test', wgServerId: serverId, routerosVersion: '7' });
+    expect(res.status).toBe(201);
+    const body = res.body;
+
+    expect(body.enrollmentId).toBeTruthy();
+    expect(body.peerId).toBeTruthy();
+    expect(body.assignedIp).toBeTruthy();
+    expect(body.filename).toBeTruthy();
+    expect(body.securityNotice).toBeTruthy();
+
+    // Los aliases deben coincidir con los campos originales
+    expect(body.enrollmentId).toBe(body.enrollment.id);
+    expect(body.peerId).toBe(body.wgPeerId);
+    expect(body.assignedIp).toBe(body.wgAssignedIp);
+    expect(body.filename).toBe(body.scriptFilename);
+  });
+
+  it('POST /start devuelve scriptPreview saneado (sin claves privadas)', async () => {
+    const res = await request(app)
+      .post('/api/router-enrollment/start')
+      .set(ADMIN)
+      .send({ routerName: 'Router Preview Test', wgServerId: serverId, routerosVersion: '7' });
+    expect(res.status).toBe(201);
+    const { scriptPreview, script } = res.body;
+
+    // scriptPreview existe y es string
+    expect(scriptPreview).toBeTruthy();
+    expect(typeof scriptPreview).toBe('string');
+
+    // El script completo PUEDE tener private-key=... el preview NO
+    expect(scriptPreview).not.toMatch(/private-key=[^[]/);
+    expect(scriptPreview).not.toMatch(/preshared-key=[^[]/);
+    // El preview debe tener [REDACTED] donde iban las claves privadas
+    if (script.match(/private-key=/i)) {
+      expect(scriptPreview).toContain('[REDACTED]');
+    }
+    // El preview sí conserva el public-key del servidor (es público)
+    expect(scriptPreview).toContain('NugaCore');
   });
 
   it('Script comienza con "# NugaCore" como primera línea absoluta', () => {
@@ -161,7 +231,8 @@ describe('Enrollment — flujo start → download → check-online → revoke', 
     expect(res.status).toBe(400);
   });
 
-  it('POST /start sin wgServerId → 400', async () => {
+  it('POST /start sin wgServerId y sin servidor default → 400', async () => {
+    // Este suite no tiene servidor default (isDefault=false), así que debe fallar
     const res = await request(app)
       .post('/api/router-enrollment/start')
       .set(ADMIN)
@@ -285,6 +356,20 @@ describe('Enrollment — flujo start → download → check-online → revoke', 
     expect(typeof res.body.isOnline).toBe('boolean');
   });
 
+  it('POST /:id/check-online con MIKROTIK_WORKER_LIVE=false → isOnline=false (source=simulated no confirma)', async () => {
+    const res = await request(app)
+      .post(`/api/router-enrollment/${enrollmentId}/check-online`)
+      .set(ADMIN);
+    expect(res.status).toBe(200);
+    expect(res.body.isOnline).toBe(false);
+    expect(res.body.snapshotSource).toBe('simulated');
+    // El enrollment NO debe quedar en 'online'
+    const enrRes = await request(app)
+      .get(`/api/router-enrollment/${enrollmentId}`)
+      .set(ADMIN);
+    expect(enrRes.body.status).not.toBe('online');
+  });
+
   it('POST /:id/check-online con Técnico → 200', async () => {
     const res = await request(app)
       .post(`/api/router-enrollment/${enrollmentId}/check-online`)
@@ -352,13 +437,13 @@ describe('Enrollment — prevención de routers huérfanos (FIX-1)', () => {
     routerCountBefore = store.MIKROTIK_ROUTERS.length;
   });
 
-  it('start() con wgServerId inexistente devuelve error (≥400) y NO agrega router al store', async () => {
+  it('start() con wgServerId inexistente devuelve 404 y NO agrega router al store', async () => {
     const res = await request(app)
       .post('/api/router-enrollment/start')
       .set(ADMIN)
       .send({ routerName: 'Router Falla Test', wgServerId: 'wgs-no-existe', routerosVersion: '7' });
 
-    expect(res.status).toBeGreaterThanOrEqual(400);
+    expect(res.status).toBe(404);
     expect(store.MIKROTIK_ROUTERS.length).toBe(routerCountBefore);
   });
 
@@ -464,6 +549,230 @@ describe('Enrollment — routerosVersion persistida en record y usada en downloa
       .set(ADMIN);
     expect(getRes.status).toBe(200);
     expect(getRes.body.routerosVersion).toBe('6');
+  });
+});
+
+// ── DEFAULT WIREGUARD SERVER ──────────────────────────────────────────────
+
+describe('Enrollment — DEFAULT_WIREGUARD_SERVER', () => {
+  let app: Express;
+  let defaultServerId: string;
+
+  beforeAll(async () => {
+    enrollmentRepository._reset();
+    resetWireguardService();
+    app = createApp();
+
+    // Crear servidor default
+    const srvRes = await request(app)
+      .post('/api/wireguard/servers')
+      .set(ADMIN)
+      .send({
+        name: 'VPS NugaCore WG Principal',
+        endpointHost: 'vpn.nugacore.local',
+        endpointPort: 13231,
+        isDefault: true,
+      });
+    expect(srvRes.status).toBe(201);
+    defaultServerId = srvRes.body.server.id;
+    expect(srvRes.body.server.isDefault).toBe(true);
+  });
+
+  it('start() sin wgServerId usa el servidor default', async () => {
+    const res = await request(app)
+      .post('/api/router-enrollment/start')
+      .set(ADMIN)
+      .send({ routerName: 'Router Default Test', routerosVersion: '7' });
+
+    expect(res.status).toBe(201);
+    expect(res.body.enrollment.wgServerId).toBe(defaultServerId);
+    expect(res.body.enrollmentId).toBeTruthy();
+  });
+
+  it('start() sin wgServerId crea solo UN peer (no un servidor nuevo)', async () => {
+    const routersBefore = store.MIKROTIK_ROUTERS.length;
+
+    const res = await request(app)
+      .post('/api/router-enrollment/start')
+      .set(ADMIN)
+      .send({ routerName: 'Router Peer Count', routerosVersion: '7' });
+    expect(res.status).toBe(201);
+
+    // Solo debe haber un servidor
+    const srvsRes = await request(app).get('/api/wireguard/servers').set(ADMIN);
+    expect(srvsRes.body.length).toBe(1);
+
+    // Se debe haber agregado exactamente un router
+    expect(store.MIKROTIK_ROUTERS.length).toBe(routersBefore + 1);
+  });
+
+  it('start() sin wgServerId registra vpnIp en el router del store', async () => {
+    const res = await request(app)
+      .post('/api/router-enrollment/start')
+      .set(ADMIN)
+      .send({ routerName: 'Router VpnIp Test', routerosVersion: '7' });
+    expect(res.status).toBe(201);
+
+    const routerId = res.body.routerId;
+    const router = store.MIKROTIK_ROUTERS.find((r) => r.id === routerId);
+    expect(router).toBeDefined();
+    expect(router?.vpnIp).toBeTruthy();
+    expect(router?.vpnIp).toBe(res.body.assignedIp);
+  });
+
+  it('solo se crea UN peer por router (no duplicados)', async () => {
+    const startRes = await request(app)
+      .post('/api/router-enrollment/start')
+      .set(ADMIN)
+      .send({ routerName: 'Router Un Peer', routerosVersion: '7' });
+    expect(startRes.status).toBe(201);
+    const routerId = startRes.body.routerId;
+    const peerId = startRes.body.peerId;
+
+    // Verificar que solo hay un peer activo para ese router
+    const peersRes = await request(app)
+      .get(`/api/wireguard/peers?serverId=${defaultServerId}`)
+      .set(ADMIN);
+    const routerPeers = peersRes.body.filter(
+      (p: { routerId?: string; status: string }) => p.routerId === routerId && p.status === 'active',
+    );
+    expect(routerPeers.length).toBe(1);
+    expect(routerPeers[0].id).toBe(peerId);
+  });
+
+  it('dos routers distintos usan el mismo servidor default (un server, N peers)', async () => {
+    const r1 = await request(app)
+      .post('/api/router-enrollment/start')
+      .set(ADMIN)
+      .send({ routerName: 'Router Multi A', routerosVersion: '7' });
+    const r2 = await request(app)
+      .post('/api/router-enrollment/start')
+      .set(ADMIN)
+      .send({ routerName: 'Router Multi B', routerosVersion: '7' });
+
+    expect(r1.status).toBe(201);
+    expect(r2.status).toBe(201);
+
+    // Mismo serverId, distinto peerId y distinta IP
+    expect(r1.body.enrollment.wgServerId).toBe(r2.body.enrollment.wgServerId);
+    expect(r1.body.peerId).not.toBe(r2.body.peerId);
+    expect(r1.body.assignedIp).not.toBe(r2.body.assignedIp);
+  });
+});
+
+describe('Enrollment — sin servidor default → error controlado', () => {
+  let app: Express;
+
+  beforeAll(() => {
+    enrollmentRepository._reset();
+    resetWireguardService();
+    app = createApp();
+    // NO crear ningún servidor
+  });
+
+  it('start() sin wgServerId y sin servidor default → 400 (no 500)', async () => {
+    const res = await request(app)
+      .post('/api/router-enrollment/start')
+      .set(ADMIN)
+      .send({ routerName: 'Sin Servidor', routerosVersion: '7' });
+
+    expect(res.status).toBe(400);
+    expect(res.body.error).toContain('WireGuard');
+  });
+
+  it('start() con wgServerId inexistente → 404 (no 500)', async () => {
+    const res = await request(app)
+      .post('/api/router-enrollment/start')
+      .set(ADMIN)
+      .send({ routerName: 'Router 404', wgServerId: 'wgs-nunca-existe', routerosVersion: '7' });
+
+    expect(res.status).toBe(404);
+  });
+});
+
+// ── CHECK-ONLINE: source=live confirma; source=simulated no ──────────────
+
+describe('Enrollment — check-online source=live vs source=simulated', () => {
+  let app: Express;
+  let serverId: string;
+  let enrollmentIdForLive: string;
+  let enrollmentIdForSimulated: string;
+
+  beforeAll(async () => {
+    enrollmentRepository._reset();
+    resetWireguardService();
+    app = createApp();
+
+    const srvRes = await request(app)
+      .post('/api/wireguard/servers')
+      .set(ADMIN)
+      .send({ name: 'VPN CheckOnline Test', endpointHost: 'vpn.check.local', endpointPort: 13231 });
+    serverId = srvRes.body.server.id;
+
+    // Crear enrollment para test live
+    const liveStart = await request(app)
+      .post('/api/router-enrollment/start')
+      .set(ADMIN)
+      .send({ routerName: 'Router Live Test', wgServerId: serverId, routerosVersion: '7' });
+    enrollmentIdForLive = liveStart.body.enrollment.id;
+
+    // Crear enrollment para test simulated
+    const simStart = await request(app)
+      .post('/api/router-enrollment/start')
+      .set(ADMIN)
+      .send({ routerName: 'Router Simulated Test', wgServerId: serverId, routerosVersion: '7' });
+    enrollmentIdForSimulated = simStart.body.enrollment.id;
+  });
+
+  afterAll(() => {
+    resetTestRouterConnector();
+  });
+
+  it('check-online con source=simulated (MIKROTIK_WORKER_LIVE=false) NO marca online', async () => {
+    // El connector por defecto es simulated
+    const res = await request(app)
+      .post(`/api/router-enrollment/${enrollmentIdForSimulated}/check-online`)
+      .set(ADMIN);
+
+    expect(res.status).toBe(200);
+    expect(res.body.isOnline).toBe(false);
+    expect(res.body.snapshotSource).toBe('simulated');
+    expect(res.body.message).toContain('simulad');
+
+    // Verificar que el status no es 'online'
+    const enrRes = await request(app)
+      .get(`/api/router-enrollment/${enrollmentIdForSimulated}`)
+      .set(ADMIN);
+    expect(enrRes.body.status).not.toBe('online');
+    expect(enrRes.body.status).toBe('waiting_for_router');
+  });
+
+  it('check-online con source=live marca enrollment como online', async () => {
+    // Inyectar connector mock que devuelve source=live
+    setTestRouterConnector(makeLiveConnector());
+
+    const res = await request(app)
+      .post(`/api/router-enrollment/${enrollmentIdForLive}/check-online`)
+      .set(ADMIN);
+
+    expect(res.status).toBe(200);
+    expect(res.body.isOnline).toBe(true);
+    expect(res.body.snapshotSource).toBe('live');
+    expect(res.body.enrollment.status).toBe('online');
+    expect(res.body.enrollment.onlineConfirmedAt).toBeTruthy();
+  });
+
+  it('check-online de enrollment ya online → isOnline=true sin re-check', async () => {
+    // Quitar mock live (no lo necesitamos; el enrollment ya está online)
+    resetTestRouterConnector();
+
+    const res = await request(app)
+      .post(`/api/router-enrollment/${enrollmentIdForLive}/check-online`)
+      .set(ADMIN);
+
+    expect(res.status).toBe(200);
+    expect(res.body.isOnline).toBe(true);
+    expect(res.body.message).toContain('ya está confirmado');
   });
 });
 

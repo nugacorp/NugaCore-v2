@@ -19,7 +19,9 @@ import {
 export interface WireguardRepository {
   listServers(): Promise<WireguardServerRecord[]>;
   getServer(id: string): Promise<WireguardServerRecord | null>;
+  getDefaultServer(): Promise<WireguardServerRecord | null>;
   createServer(rec: WireguardServerRecord): Promise<WireguardServerRecord>;
+  updateServer(id: string, patch: Partial<WireguardServerRecord>): Promise<WireguardServerRecord | null>;
 
   listPeers(filter?: { serverId?: string; routerId?: string; status?: string }): Promise<WireguardPeerRecord[]>;
   getPeer(id: string): Promise<WireguardPeerRecord | null>;
@@ -54,7 +56,14 @@ export class StoreWireguardRepository implements WireguardRepository {
 
   async listServers() { return this.SERVERS; }
   async getServer(id: string) { return this.SERVERS.find((s) => s.id === id) ?? null; }
+  async getDefaultServer() { return this.SERVERS.find((s) => s.isDefault && s.status === 'active') ?? null; }
   async createServer(rec: WireguardServerRecord) { this.SERVERS.push(rec); return rec; }
+  async updateServer(id: string, patch: Partial<WireguardServerRecord>) {
+    const s = this.SERVERS.find((x) => x.id === id);
+    if (!s) return null;
+    Object.assign(s, patch, { updatedAt: new Date().toISOString() });
+    return s;
+  }
 
   async listPeers(filter?: { serverId?: string; routerId?: string; status?: string }) {
     return this.PEERS.filter((p) =>
@@ -109,10 +118,24 @@ export class SupabaseWireguardRepository implements WireguardRepository {
     const { data } = await this.client.from('wireguard_servers').select('*').eq('id', id).single();
     return data ? rowToServer(data as ServerRow) : null;
   }
+  async getDefaultServer() {
+    const { data } = await this.client.from('wireguard_servers').select('*').eq('is_default', true).eq('status', 'active').maybeSingle();
+    return data ? rowToServer(data as ServerRow) : null;
+  }
   async createServer(rec: WireguardServerRecord) {
     const { error } = await this.client.from('wireguard_servers').insert(serverToRow(rec));
     if (error) throw new Error(`createServer: ${error.message}`);
     return rec;
+  }
+  async updateServer(id: string, patch: Partial<WireguardServerRecord>) {
+    const row: Record<string, unknown> = {};
+    if (patch.isDefault !== undefined) row.is_default = patch.isDefault;
+    if (patch.status !== undefined) row.status = patch.status;
+    if (Object.keys(row).length) {
+      const { error } = await this.client.from('wireguard_servers').update(row).eq('id', id);
+      if (error) throw new Error(`updateServer: ${error.message}`);
+    }
+    return this.getServer(id);
   }
 
   async listPeers(filter?: { serverId?: string; routerId?: string; status?: string }) {
