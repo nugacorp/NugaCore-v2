@@ -6,10 +6,10 @@ import type { UserRole } from '../../src/lib/supabase';
 const ALL_ROLES: UserRole[] = ['Super Admin', 'Administrador', 'Cobranza', 'Técnico', 'Soporte', 'Solo lectura'];
 
 describe('RBAC visual por rol (frontend)', () => {
-  it('Super Admin ve todos los módulos (12)', () => {
+  it('Super Admin ve todos los módulos (13)', () => {
     const t = getAllowedTabsByRole('Super Admin');
-    expect(t.length).toBe(12);
-    expect(t).toEqual(expect.arrayContaining(['mikrotik', 'owner', 'finance', 'billing', 'inventory', 'suspension', 'wireguard']));
+    expect(t.length).toBe(13);
+    expect(t).toEqual(expect.arrayContaining(['mikrotik', 'wireguard', 'routeros-resources', 'owner', 'finance', 'billing', 'inventory', 'suspension']));
   });
 
   it('Administrador NO ve mikrotik / finance / owner', () => {

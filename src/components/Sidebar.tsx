@@ -1,18 +1,19 @@
 import React from 'react';
-import { 
-  Activity, 
-  Users, 
-  CreditCard, 
-  Network, 
-  Terminal, 
-  Wrench, 
-  Box, 
-  Map, 
-  Sparkles, 
+import {
+  Activity,
+  Users,
+  CreditCard,
+  Network,
+  Terminal,
+  Wrench,
+  Box,
+  Map,
+  Sparkles,
   Cpu,
   Shield,
   DollarSign,
   Ban,
+  FileCode,
   X,
   LogOut
 } from 'lucide-react';
@@ -47,6 +48,7 @@ export default function Sidebar({
     { id: 'network', name: 'Red WISP & FTTH', icon: Network },
     { id: 'mikrotik', name: 'MikroTik Core Control & Copilot', icon: Terminal, highlight: true },
     { id: 'wireguard', name: 'WireGuard Manager', icon: Shield },
+    { id: 'routeros-resources', name: 'Recursos MikroTik (.rsc)', icon: FileCode },
     { id: 'support', name: 'Remesa Soporte & OT', icon: Wrench },
     { id: 'inventory', name: 'Inventarios / ERP', icon: Box },
     { id: 'gis', name: 'GIS & Cobertura Co-Map', icon: Map },
