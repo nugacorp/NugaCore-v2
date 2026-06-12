@@ -13,6 +13,7 @@ import SuspensionModule from './components/SuspensionModule';
 import WireguardManagerModule from './components/WireguardManagerModule';
 import RouterOsResourcesModule from './components/RouterOsResourcesModule';
 import RouterOsTemplatesModule from './components/RouterOsTemplatesModule';
+import RouterEnrollmentWizard from './components/RouterEnrollmentWizard';
 import LoginForm from './components/LoginForm';
 import LandingPage from './components/LandingPage';
 import UserMenu from './components/UserMenu';
@@ -848,6 +849,13 @@ export default function App() {
 
             {activeTab === 'routeros-templates' && (
               <RouterOsTemplatesModule
+                userRole={userSession.role}
+                getAuthHeaders={getAuthHeaders}
+              />
+            )}
+
+            {activeTab === 'router-enrollment' && (
+              <RouterEnrollmentWizard
                 userRole={userSession.role}
                 getAuthHeaders={getAuthHeaders}
               />
