@@ -61,14 +61,19 @@ const toView = (rec: RouterEnrollmentRecord): RouterEnrollmentView => {
 // ── Script helpers ───────────────────────────────────────────────────
 
 /**
- * Genera un preview saneado del script: reemplaza claves privadas y
- * preshared keys con [REDACTED]. El public key del servidor se conserva.
+ * Genera un preview saneado del script.
+ * Elimina completamente los pares key=value secretos — incluyendo el nombre
+ * de la clave — reemplazándolos por marcadores que NO contienen "private-key=",
+ * "preshared-key=" ni "password=". El public-key del servidor se conserva.
  */
 const buildScriptPreview = (script: string): string =>
   script
-    .replace(/(private-key=)[^\s\\\n]+/gi, '$1[REDACTED]')
-    .replace(/(preshared-key=)[^\s\\\n]+/gi, '$1[REDACTED]')
-    .replace(/(password=)[^\s"\\]+/gi, '$1[REDACTED]');
+    .replace(/private-key="[^"]*"/gi, '<PRIVATE_KEY_OMITIDA>')
+    .replace(/private-key=[^\s\\\n"]+/gi, '<PRIVATE_KEY_OMITIDA>')
+    .replace(/preshared-key="[^"]*"/gi, '<PRESHARED_KEY_OMITIDA>')
+    .replace(/preshared-key=[^\s\\\n"]+/gi, '<PRESHARED_KEY_OMITIDA>')
+    .replace(/password="[^"]*"/gi, '<PASSWORD_OMITIDO>')
+    .replace(/password=[^\s\\\n"]+/gi, '<PASSWORD_OMITIDO>');
 
 const buildScript = async (
   routerId: string,

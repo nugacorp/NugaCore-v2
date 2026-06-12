@@ -162,7 +162,7 @@ describe('Enrollment — flujo start → download → check-online → revoke', 
     expect(body.filename).toBe(body.scriptFilename);
   });
 
-  it('POST /start devuelve scriptPreview saneado (sin claves privadas)', async () => {
+  it('POST /start devuelve scriptPreview saneado (contrato Hermes)', async () => {
     const res = await request(app)
       .post('/api/router-enrollment/start')
       .set(ADMIN)
@@ -174,14 +174,18 @@ describe('Enrollment — flujo start → download → check-online → revoke', 
     expect(scriptPreview).toBeTruthy();
     expect(typeof scriptPreview).toBe('string');
 
-    // El script completo PUEDE tener private-key=... el preview NO
-    expect(scriptPreview).not.toMatch(/private-key=[^[]/);
-    expect(scriptPreview).not.toMatch(/preshared-key=[^[]/);
-    // El preview debe tener [REDACTED] donde iban las claves privadas
-    if (script.match(/private-key=/i)) {
-      expect(scriptPreview).toContain('[REDACTED]');
-    }
-    // El preview sí conserva el public-key del servidor (es público)
+    // El preview NO debe contener los patrones secretos (ni siquiera el nombre de la clave)
+    expect(scriptPreview).not.toMatch(/private-key=/i);
+    expect(scriptPreview).not.toMatch(/preshared-key=/i);
+    expect(scriptPreview).not.toMatch(/password=/i);
+
+    // El preview sí debe contener los marcadores de redacción
+    expect(scriptPreview).toMatch(/<(PRIVATE_KEY|PRESHARED_KEY|PASSWORD)_OMITI?D[OA]>/i);
+
+    // El script completo SÍ debe tener private-key= (RouterOS lo necesita)
+    expect(script).toMatch(/private-key=/i);
+
+    // El preview sí conserva contenido estructural (public-key del servidor es público)
     expect(scriptPreview).toContain('NugaCore');
   });
 
