@@ -188,15 +188,20 @@ const sectionWireguard = (p: ResourceGeneratorParams): { section: string; warnin
   if (!p.wgEndpoint) warnings.push('wgEndpoint no configurado: completar host:port del servidor WireGuard de NugaCore.');
   if (!p.wgRouterIp) warnings.push('wgRouterIp no configurada: asignar la IP que tendrá este router dentro de la red WireGuard.');
 
+  const ifaceAdd = p.wgPeerPrivateKey
+    ? `  add name="NugaCoreWG" listen-port=13231 private-key="${p.wgPeerPrivateKey}" comment="NugaCore WireGuard"`
+    : `  add name="NugaCoreWG" listen-port=13231 comment="NugaCore WireGuard"`;
+
+  const wgNote = p.wgPeerPrivateKey
+    ? `# Peer pre-registrado en NugaCore WireGuard Manager.\n# El tunel se levantara automaticamente al importar el script.`
+    : `# Paso 1: Este script crea la interfaz WireGuard. RouterOS generara la private-key automaticamente.\n# Paso 2: Tras ejecutar el script, copia la public-key del router:\n#   /interface wireguard print where name=NugaCoreWG\n# Paso 3: Registra esa public-key en NugaCore para completar el tunel.`;
+
   const section = `
 # --- 15. WireGuard (RouterOS v7) ---
-# Paso 1: Este script crea la interfaz WireGuard. RouterOS generara la private-key automaticamente.
-# Paso 2: Tras ejecutar el script, copia la public-key del router:
-#   /interface wireguard print where name=NugaCoreWG
-# Paso 3: Registra esa public-key en NugaCore para completar el tunel.
+${wgNote}
 /interface wireguard
 :if ([:len [find name="NugaCoreWG"]] = 0) do={
-  add name="NugaCoreWG" listen-port=13231 comment="NugaCore WireGuard"
+${ifaceAdd}
 }
 /ip address
 :if ([:len [find interface="NugaCoreWG" comment~"NugaCore"]] = 0) do={

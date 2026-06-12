@@ -43,6 +43,9 @@ export interface ResourceGeneratorParams {
   wgManagementCidr?: string;
   wgVpnCidr?: string;
   wgKeepalive?: number;
+  // Si viene pre-generado por el Manager, se embebe en el script en lugar de
+  // dejar que RouterOS autogenere. Solo se persiste el hash; nunca la clave en claro.
+  wgPeerPrivateKey?: string;
   // SSTP — requerido si templateId === 'base_wisp_sstp'
   sstpHost?: string;
   sstpVpnCidr?: string;

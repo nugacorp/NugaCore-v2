@@ -14,6 +14,7 @@ import {
   Shield,
   Wifi,
   Server,
+  Plus,
 } from 'lucide-react';
 import { UserRole } from '../lib/supabase';
 import { canGenerateResource, canViewHistory } from '../lib/routerosResourcesRbac';
@@ -51,6 +52,38 @@ interface HistoryEntry {
   warnings: string[];
 }
 
+interface WgServerView {
+  id: string;
+  name: string;
+  endpointHost: string;
+  endpointPort: number;
+  publicKey: string;
+  vpnCidr: string;
+  serverVpnIp: string;
+  status: 'active' | 'disabled';
+  peersCount: number;
+}
+
+interface WgPeerView {
+  id: string;
+  serverId: string;
+  name: string;
+  publicKey: string;
+  allocatedIp: string;
+  allowedCidr?: string;
+  status: 'active' | 'revoked';
+}
+
+interface WgPeerCreated {
+  peer: WgPeerView;
+  privateKey: string;
+  serverPublicKey: string;
+  serverEndpoint: string;
+  assignedIp: string;
+  allowedCidr: string;
+  securityWarning: string;
+}
+
 interface FormParams {
   templateId: string;
   routerName: string;
@@ -75,6 +108,7 @@ interface FormParams {
   wgManagementCidr: string;
   wgVpnCidr: string;
   wgKeepalive: number;
+  wgPeerPrivateKey: string;
   // SSTP
   sstpHost: string;
   sstpManagementCidr: string;
@@ -104,6 +138,7 @@ const DEFAULT_PARAMS: FormParams = {
   wgManagementCidr: '10.10.0.0/24',
   wgVpnCidr: '10.10.0.0/24',
   wgKeepalive: 25,
+  wgPeerPrivateKey: '',
   sstpHost: '',
   sstpManagementCidr: '10.10.0.0/24',
   sstpVpnCidr: '10.10.0.0/24',
@@ -129,8 +164,23 @@ export default function RouterOsResourcesModule({ userRole, getAuthHeaders }: Pr
   const [loadingHistory, setLoadingHistory] = useState(false);
   const [error, setError] = useState('');
 
+  // WireGuard Manager integration state
+  const [wgIntegMode, setWgIntegMode] = useState<'manager' | 'manual'>('manager');
+  const [wgServers, setWgServers] = useState<WgServerView[]>([]);
+  const [loadingWgServers, setLoadingWgServers] = useState(false);
+  const [selectedServerId, setSelectedServerId] = useState('');
+  const [wgPeers, setWgPeers] = useState<WgPeerView[]>([]);
+  const [loadingWgPeers, setLoadingWgPeers] = useState(false);
+  const [wgPeerSource, setWgPeerSource] = useState<'existing' | 'new'>('new');
+  const [selectedPeerId, setSelectedPeerId] = useState('');
+  const [newPeerName, setNewPeerName] = useState('');
+  const [creatingPeer, setCreatingPeer] = useState(false);
+  const [createdPeerId, setCreatedPeerId] = useState('');
+  const [peerCreateError, setPeerCreateError] = useState('');
+
   const canGenerate = canGenerateResource(userRole);
   const canSeeHistory = canViewHistory(userRole);
+  const canCreateWgPeer = userRole === 'Super Admin' || userRole === 'Administrador';
 
   const fetchJson = useCallback(
     async (url: string, init?: RequestInit) => {
@@ -157,6 +207,100 @@ export default function RouterOsResourcesModule({ userRole, getAuthHeaders }: Pr
       .catch(() => setError('No se pudieron cargar las plantillas.'));
   }, [fetchJson]);
 
+  // Cargar servidores WireGuard cuando el modo manager está activo y la plantilla es wireguard
+  useEffect(() => {
+    if (params.templateId === 'base_wisp_wireguard' && wgIntegMode === 'manager') {
+      loadWgServers();
+    }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [params.templateId, wgIntegMode]);
+
+  const loadWgServers = async () => {
+    setLoadingWgServers(true);
+    try {
+      const data = await fetchJson('/api/wireguard/servers');
+      setWgServers(Array.isArray(data) ? data : []);
+    } catch {
+      setWgServers([]);
+    } finally {
+      setLoadingWgServers(false);
+    }
+  };
+
+  const loadWgPeers = async (serverId: string) => {
+    setLoadingWgPeers(true);
+    try {
+      const data = await fetchJson(`/api/wireguard/peers?serverId=${serverId}&status=active`);
+      setWgPeers(Array.isArray(data) ? data : []);
+    } catch {
+      setWgPeers([]);
+    } finally {
+      setLoadingWgPeers(false);
+    }
+  };
+
+  const handleServerSelect = (serverId: string) => {
+    setSelectedServerId(serverId);
+    setSelectedPeerId('');
+    setCreatedPeerId('');
+    setPeerCreateError('');
+    const server = wgServers.find((s) => s.id === serverId);
+    if (server) {
+      setParams((prev) => ({
+        ...prev,
+        wgServerPublicKey: server.publicKey,
+        wgEndpoint: `${server.endpointHost}:${server.endpointPort}`,
+        wgManagementCidr: server.vpnCidr,
+        wgVpnCidr: server.vpnCidr,
+        wgPeerPrivateKey: '',
+      }));
+      loadWgPeers(serverId);
+    }
+  };
+
+  const handlePeerSelect = (peerId: string) => {
+    setSelectedPeerId(peerId);
+    const peer = wgPeers.find((p) => p.id === peerId);
+    if (peer) {
+      const ip = peer.allocatedIp.includes('/') ? peer.allocatedIp : `${peer.allocatedIp}/32`;
+      setParams((prev) => ({
+        ...prev,
+        wgRouterIp: ip,
+        wgPeerPrivateKey: '', // no recuperable — usuario debe ingresarla si la tiene
+      }));
+    }
+  };
+
+  const handleCreatePeer = async () => {
+    if (!newPeerName.trim() || !selectedServerId) return;
+    setCreatingPeer(true);
+    setPeerCreateError('');
+    try {
+      const data: WgPeerCreated = await fetchJson('/api/wireguard/peers', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ serverId: selectedServerId, name: newPeerName.trim() }),
+      });
+      const ip = data.assignedIp.includes('/') ? data.assignedIp : `${data.assignedIp}/32`;
+      setCreatedPeerId(data.peer.id);
+      setParams((prev) => ({
+        ...prev,
+        wgRouterIp: ip,
+        wgManagementCidr: data.allowedCidr,
+        wgVpnCidr: data.allowedCidr,
+        wgServerPublicKey: data.serverPublicKey,
+        wgEndpoint: data.serverEndpoint,
+        wgPeerPrivateKey: data.privateKey,
+      }));
+      // Refrescar lista de peers
+      await loadWgPeers(selectedServerId);
+    } catch (err: unknown) {
+      setPeerCreateError(err instanceof Error ? err.message : 'No se pudo crear el peer.');
+    } finally {
+      setCreatingPeer(false);
+    }
+  };
+
   const loadHistory = async () => {
     if (!canSeeHistory) return;
     setLoadingHistory(true);
@@ -176,8 +320,13 @@ export default function RouterOsResourcesModule({ userRole, getAuthHeaders }: Pr
       ...prev,
       templateId: t.id,
       routerosVersion: t.rosVersionRequired === '7' ? '7' : prev.routerosVersion,
+      wgPeerPrivateKey: '',
     }));
     setResult(null);
+    setSelectedServerId('');
+    setSelectedPeerId('');
+    setCreatedPeerId('');
+    setPeerCreateError('');
     setActiveTab('form');
   };
 
@@ -309,6 +458,332 @@ export default function RouterOsResourcesModule({ userRole, getAuthHeaders }: Pr
 
   const inputCls =
     'w-full bg-slate-900 border border-slate-700 text-slate-100 text-xs rounded-lg px-3 py-2 focus:outline-none focus:border-indigo-500 font-mono';
+
+  const renderWireguardSection = () => (
+    <section className="border border-indigo-900/40 rounded-xl p-4 bg-indigo-950/10">
+      {/* Header + mode toggle */}
+      <div className="flex items-center justify-between mb-4">
+        <div className="flex items-center gap-2">
+          <Wifi className="w-4 h-4 text-indigo-400" />
+          <h3 className="text-[11px] font-bold uppercase text-indigo-400 tracking-widest">
+            WireGuard (NugaCore Server)
+          </h3>
+        </div>
+        <div className="flex items-center gap-0.5 bg-slate-900 rounded-lg p-0.5 border border-slate-700">
+          <button
+            type="button"
+            onClick={() => {
+              setWgIntegMode('manager');
+              setParams((prev) => ({ ...prev, wgPeerPrivateKey: '' }));
+            }}
+            className={`px-2.5 py-1 text-[10px] rounded font-medium transition ${
+              wgIntegMode === 'manager'
+                ? 'bg-indigo-600 text-white'
+                : 'text-slate-400 hover:text-slate-200'
+            }`}
+          >
+            Manager
+          </button>
+          <button
+            type="button"
+            onClick={() => {
+              setWgIntegMode('manual');
+              setCreatedPeerId('');
+              setSelectedServerId('');
+              setSelectedPeerId('');
+              setParams((prev) => ({ ...prev, wgPeerPrivateKey: '' }));
+            }}
+            className={`px-2.5 py-1 text-[10px] rounded font-medium transition ${
+              wgIntegMode === 'manual'
+                ? 'bg-slate-700 text-white'
+                : 'text-slate-400 hover:text-slate-200'
+            }`}
+          >
+            Manual
+          </button>
+        </div>
+      </div>
+
+      {wgIntegMode === 'manager' ? (
+        <div className="space-y-4">
+          {/* Server selector */}
+          <Field
+            label="Servidor WireGuard"
+            hint="Selecciona el servidor NugaCore al que conectará este router"
+          >
+            {loadingWgServers ? (
+              <div className="flex items-center gap-2 text-xs text-slate-500 py-2">
+                <RefreshCw className="w-3 h-3 animate-spin" />
+                Cargando servidores...
+              </div>
+            ) : wgServers.length === 0 ? (
+              <div className="text-[11px] text-amber-400 py-1.5 flex items-center gap-1.5">
+                <AlertTriangle className="w-3.5 h-3.5 shrink-0" />
+                No hay servidores activos. Crea uno en el módulo WireGuard Manager o usa el modo Manual.
+              </div>
+            ) : (
+              <select
+                className={inputCls}
+                value={selectedServerId}
+                onChange={(e) => handleServerSelect(e.target.value)}
+              >
+                <option value="">— Seleccionar servidor —</option>
+                {wgServers
+                  .filter((s) => s.status === 'active')
+                  .map((s) => (
+                    <option key={s.id} value={s.id}>
+                      {s.name} — {s.endpointHost}:{s.endpointPort}
+                    </option>
+                  ))}
+              </select>
+            )}
+          </Field>
+
+          {selectedServerId && (
+            <>
+              {/* Peer source toggle */}
+              <div className="flex items-center gap-4 pt-1">
+                <label className="flex items-center gap-1.5 cursor-pointer">
+                  <input
+                    type="radio"
+                    name="wgPeerSource"
+                    checked={wgPeerSource === 'new'}
+                    onChange={() => {
+                      setWgPeerSource('new');
+                      setSelectedPeerId('');
+                      setCreatedPeerId('');
+                      setPeerCreateError('');
+                      setParams((prev) => ({ ...prev, wgPeerPrivateKey: '', wgRouterIp: '' }));
+                    }}
+                    className="accent-indigo-500"
+                  />
+                  <span className="text-[11px] text-slate-300">Crear peer nuevo</span>
+                </label>
+                <label className="flex items-center gap-1.5 cursor-pointer">
+                  <input
+                    type="radio"
+                    name="wgPeerSource"
+                    checked={wgPeerSource === 'existing'}
+                    onChange={() => {
+                      setWgPeerSource('existing');
+                      setCreatedPeerId('');
+                      setParams((prev) => ({ ...prev, wgPeerPrivateKey: '', wgRouterIp: '' }));
+                    }}
+                    className="accent-indigo-500"
+                  />
+                  <span className="text-[11px] text-slate-300">Usar peer existente</span>
+                </label>
+              </div>
+
+              {wgPeerSource === 'new' ? (
+                <div className="space-y-3">
+                  {createdPeerId ? (
+                    <div className="flex items-start gap-2 p-3 bg-emerald-950/30 border border-emerald-800/40 rounded-lg">
+                      <CheckCircle className="w-4 h-4 text-emerald-400 shrink-0 mt-0.5" />
+                      <div>
+                        <p className="text-[11px] font-bold text-emerald-400">
+                          Peer creado — listo para generar el script
+                        </p>
+                        <p className="text-[10px] text-emerald-400/80 mt-0.5">
+                          IP asignada:{' '}
+                          <span className="font-mono">{params.wgRouterIp}</span>
+                        </p>
+                        <p className="text-[10px] text-amber-400/80 mt-1">
+                          La private key quedará embebida en el script. Descarga el .rsc y guárdalo de forma segura.
+                        </p>
+                      </div>
+                    </div>
+                  ) : (
+                    <div className="flex items-end gap-3">
+                      <Field
+                        label="Nombre del peer"
+                        hint="Identificador del router en NugaCore (ej: WISP-NORTE-01)"
+                      >
+                        <input
+                          className={inputCls}
+                          value={newPeerName}
+                          onChange={(e) => setNewPeerName(e.target.value)}
+                          placeholder={params.routerName || 'WISP-NORTE-01'}
+                        />
+                      </Field>
+                      <button
+                        type="button"
+                        onClick={handleCreatePeer}
+                        disabled={!newPeerName.trim() || creatingPeer || !canCreateWgPeer}
+                        className="flex items-center gap-1.5 px-4 py-2 bg-indigo-700 hover:bg-indigo-600 disabled:bg-slate-700 disabled:cursor-not-allowed text-white text-xs font-bold rounded-lg transition shrink-0"
+                        title={!canCreateWgPeer ? 'Solo Admin puede crear peers' : undefined}
+                      >
+                        {creatingPeer ? (
+                          <RefreshCw className="w-3.5 h-3.5 animate-spin" />
+                        ) : (
+                          <Plus className="w-3.5 h-3.5" />
+                        )}
+                        {creatingPeer ? 'Creando...' : 'Crear peer'}
+                      </button>
+                    </div>
+                  )}
+                  {!canCreateWgPeer && !createdPeerId && (
+                    <p className="text-[10px] text-slate-500">
+                      Solo Administrador o Super Admin pueden crear peers. Usa "Peer existente" o el modo Manual.
+                    </p>
+                  )}
+                  {peerCreateError && (
+                    <div className="text-[11px] text-rose-400 flex items-center gap-1.5">
+                      <AlertTriangle className="w-3 h-3 shrink-0" />
+                      {peerCreateError}
+                    </div>
+                  )}
+                </div>
+              ) : (
+                /* Peer existente */
+                <div className="space-y-3">
+                  <Field label="Peer" hint="Selecciona el peer asignado a este router">
+                    {loadingWgPeers ? (
+                      <div className="flex items-center gap-2 text-xs text-slate-500 py-1">
+                        <RefreshCw className="w-3 h-3 animate-spin" />
+                        Cargando peers...
+                      </div>
+                    ) : wgPeers.filter((p) => p.status === 'active').length === 0 ? (
+                      <div className="text-[11px] text-amber-400 py-1.5 flex items-center gap-1.5">
+                        <AlertTriangle className="w-3.5 h-3.5 shrink-0" />
+                        No hay peers activos en este servidor. Crea uno nuevo.
+                      </div>
+                    ) : (
+                      <select
+                        className={inputCls}
+                        value={selectedPeerId}
+                        onChange={(e) => handlePeerSelect(e.target.value)}
+                      >
+                        <option value="">— Seleccionar peer —</option>
+                        {wgPeers
+                          .filter((p) => p.status === 'active')
+                          .map((p) => (
+                            <option key={p.id} value={p.id}>
+                              {p.name} — {p.allocatedIp}
+                            </option>
+                          ))}
+                      </select>
+                    )}
+                  </Field>
+
+                  {selectedPeerId && (
+                    <>
+                      <div className="flex items-start gap-2 p-2.5 bg-amber-950/20 border border-amber-800/30 rounded-lg text-[10px] text-amber-400">
+                        <Info className="w-3 h-3 shrink-0 mt-0.5" />
+                        La private key no se puede recuperar. Si la tienes guardada del momento de creación,
+                        ingrésala abajo. Si no, usa la opción &quot;Crear peer nuevo&quot; para obtener claves frescas.
+                      </div>
+                      <Field
+                        label="Private key del peer (opcional)"
+                        hint="Se embebe en el script si la ingresas; de lo contrario RouterOS autogenera una."
+                      >
+                        <input
+                          className={inputCls}
+                          type="password"
+                          value={params.wgPeerPrivateKey}
+                          onChange={(e) => updateParam('wgPeerPrivateKey', e.target.value)}
+                          placeholder="cGVlcl9wcml2YXRlX2tleT0="
+                          autoComplete="off"
+                        />
+                      </Field>
+                    </>
+                  )}
+                </div>
+              )}
+
+              {/* Resumen de parámetros WG */}
+              {params.wgServerPublicKey && (
+                <div className="grid grid-cols-2 gap-2 pt-3 border-t border-indigo-900/30">
+                  <div>
+                    <p className="text-[10px] text-slate-500 uppercase tracking-wide">Endpoint</p>
+                    <p className="text-[11px] text-slate-300 font-mono truncate">{params.wgEndpoint}</p>
+                  </div>
+                  <div>
+                    <p className="text-[10px] text-slate-500 uppercase tracking-wide">IP asignada</p>
+                    <p className="text-[11px] text-slate-300 font-mono">{params.wgRouterIp || '—'}</p>
+                  </div>
+                  <div>
+                    <p className="text-[10px] text-slate-500 uppercase tracking-wide">CIDR gestión</p>
+                    <p className="text-[11px] text-slate-300 font-mono">{params.wgManagementCidr}</p>
+                  </div>
+                  <div>
+                    <p className="text-[10px] text-slate-500 uppercase tracking-wide">Private key</p>
+                    <p className="text-[11px] font-mono">
+                      {params.wgPeerPrivateKey ? (
+                        <span className="text-emerald-400">Lista (embebida en script)</span>
+                      ) : (
+                        <span className="text-slate-500">RouterOS autogenera</span>
+                      )}
+                    </p>
+                  </div>
+                </div>
+              )}
+            </>
+          )}
+        </div>
+      ) : (
+        /* Modo manual */
+        <div className="space-y-4">
+          <p className="text-[11px] text-slate-500">
+            El router generará su propia private-key automáticamente. Tras ejecutar el script,
+            copia la public-key del router y regístrala en NugaCore.
+          </p>
+          <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+            <Field
+              label="Public key del servidor NugaCore"
+              hint="La clave pública del servidor WireGuard de NugaCore"
+            >
+              <input
+                className={inputCls}
+                value={params.wgServerPublicKey}
+                onChange={(e) => updateParam('wgServerPublicKey', e.target.value)}
+                placeholder="<pegar public key del servidor>"
+              />
+            </Field>
+            <Field label="Endpoint del servidor" hint="host:puerto (ej: vpn.nugacore.net:13231)">
+              <input
+                className={inputCls}
+                value={params.wgEndpoint}
+                onChange={(e) => updateParam('wgEndpoint', e.target.value)}
+                placeholder="vpn.nugacore.net:13231"
+              />
+            </Field>
+            <Field
+              label="IP del router en la red WG"
+              hint="ej: 10.10.0.5/32 — IP que tendrá este router en la VPN"
+            >
+              <input
+                className={inputCls}
+                value={params.wgRouterIp}
+                onChange={(e) => updateParam('wgRouterIp', e.target.value)}
+                placeholder="10.10.0.5/32"
+              />
+            </Field>
+            <Field
+              label="CIDR de gestión NugaCore"
+              hint="Red de administración de NugaCore (ej: 10.10.0.0/24)"
+            >
+              <input
+                className={inputCls}
+                value={params.wgManagementCidr}
+                onChange={(e) => updateParam('wgManagementCidr', e.target.value)}
+              />
+            </Field>
+            <Field label="Keepalive (segundos)" hint="Persistent keepalive para NAT traversal">
+              <input
+                className={inputCls}
+                type="number"
+                value={params.wgKeepalive}
+                onChange={(e) => updateParam('wgKeepalive', parseInt(e.target.value, 10))}
+                min={0}
+                max={120}
+              />
+            </Field>
+          </div>
+        </div>
+      )}
+    </section>
+  );
 
   const renderForm = () => (
     <div className="space-y-6 max-w-3xl">
@@ -493,69 +968,7 @@ export default function RouterOsResourcesModule({ userRole, getAuthHeaders }: Pr
       </section>
 
       {/* Sección: WireGuard */}
-      {params.templateId === 'base_wisp_wireguard' && (
-        <section className="border border-indigo-900/40 rounded-xl p-4 bg-indigo-950/10">
-          <div className="flex items-center gap-2 mb-3">
-            <Wifi className="w-4 h-4 text-indigo-400" />
-            <h3 className="text-[11px] font-bold uppercase text-indigo-400 tracking-widest">
-              WireGuard (NugaCore Server)
-            </h3>
-          </div>
-          <p className="text-[11px] text-slate-500 mb-4">
-            El router generará su propia private-key automáticamente. Tras ejecutar el script,
-            copia la public-key del router y regístrala en NugaCore.
-          </p>
-          <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
-            <Field
-              label="Public key del servidor NugaCore"
-              hint="La clave pública del servidor WireGuard de NugaCore"
-            >
-              <input
-                className={inputCls}
-                value={params.wgServerPublicKey}
-                onChange={(e) => updateParam('wgServerPublicKey', e.target.value)}
-                placeholder="<pegar public key del servidor>"
-              />
-            </Field>
-            <Field label="Endpoint del servidor" hint="host:puerto (ej: vpn.nugacore.net:13231)">
-              <input
-                className={inputCls}
-                value={params.wgEndpoint}
-                onChange={(e) => updateParam('wgEndpoint', e.target.value)}
-                placeholder="vpn.nugacore.net:13231"
-              />
-            </Field>
-            <Field
-              label="IP del router en la red WG"
-              hint="ej: 10.10.0.5/32 — IP que tendrá este router en la VPN"
-            >
-              <input
-                className={inputCls}
-                value={params.wgRouterIp}
-                onChange={(e) => updateParam('wgRouterIp', e.target.value)}
-                placeholder="10.10.0.5/32"
-              />
-            </Field>
-            <Field label="CIDR de gestión NugaCore" hint="Red de administración de NugaCore (ej: 10.10.0.0/24)">
-              <input
-                className={inputCls}
-                value={params.wgManagementCidr}
-                onChange={(e) => updateParam('wgManagementCidr', e.target.value)}
-              />
-            </Field>
-            <Field label="Keepalive (segundos)" hint="Persistent keepalive para NAT traversal">
-              <input
-                className={inputCls}
-                type="number"
-                value={params.wgKeepalive}
-                onChange={(e) => updateParam('wgKeepalive', parseInt(e.target.value, 10))}
-                min={0}
-                max={120}
-              />
-            </Field>
-          </div>
-        </section>
-      )}
+      {params.templateId === 'base_wisp_wireguard' && renderWireguardSection()}
 
       {/* Sección: SSTP */}
       {params.templateId === 'base_wisp_sstp' && (

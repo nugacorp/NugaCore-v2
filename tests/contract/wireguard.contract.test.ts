@@ -16,10 +16,16 @@ describe('WireGuard Manager — RBAC', () => {
   let app: Express;
   beforeAll(() => { app = createApp(); });
 
-  it('solo SA/Admin acceden; técnico y cobranza → 403', async () => {
+  it('SA/Admin/Técnico pueden listar servers; cobranza → 403', async () => {
+    // Técnico necesita leer servers/peers para generar scripts .rsc
     expect((await request(app).get('/api/wireguard/servers').set(ADMIN)).status).toBe(200);
-    expect((await request(app).get('/api/wireguard/servers').set(TEC)).status).toBe(403);
+    expect((await request(app).get('/api/wireguard/servers').set(TEC)).status).toBe(200);
     expect((await request(app).get('/api/wireguard/servers').set(COBR)).status).toBe(403);
+  });
+
+  it('técnico NO puede crear servidores ni peers → 403', async () => {
+    expect((await request(app).post('/api/wireguard/servers').set(TEC).send({ name: 'x', endpointHost: 'x' })).status).toBe(403);
+    expect((await request(app).post('/api/wireguard/peers').set(TEC).send({ serverId: 'x', name: 'x' })).status).toBe(403);
   });
 });
 

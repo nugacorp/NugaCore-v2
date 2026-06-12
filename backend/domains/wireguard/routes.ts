@@ -10,9 +10,11 @@ import { getWireguardService } from './service';
 
 const router = Router();
 const WG_ROLES = ['super admin', 'administrador'] as const;
+// Técnico necesita leer servidores/peers para generar scripts .rsc; no puede crear ni revocar.
+const WG_READ_ROLES = [...WG_ROLES, 'tecnico'] as const;
 
 // ── Servidores ───────────────────────────────────────────────────────
-router.get('/api/wireguard/servers', requireRoles([...WG_ROLES]), asyncHandler(async (_req, res) => {
+router.get('/api/wireguard/servers', requireRoles([...WG_READ_ROLES]), asyncHandler(async (_req, res) => {
   res.json(await getWireguardService().listServers());
 }));
 
@@ -36,7 +38,7 @@ router.post('/api/wireguard/servers', requireRoles([...WG_ROLES]), asyncHandler(
 }));
 
 // ── Peers ─────────────────────────────────────────────────────────────
-router.get('/api/wireguard/peers', requireRoles([...WG_ROLES]), asyncHandler(async (req, res) => {
+router.get('/api/wireguard/peers', requireRoles([...WG_READ_ROLES]), asyncHandler(async (req, res) => {
   const serverId = String(req.query.serverId || '').trim() || undefined;
   const status = String(req.query.status || '').trim() || undefined;
   res.json(await getWireguardService().listPeers({ serverId, status }));
