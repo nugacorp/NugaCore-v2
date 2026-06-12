@@ -14,6 +14,7 @@ import {
   DollarSign,
   Ban,
   FileCode,
+  BookOpen,
   X,
   LogOut
 } from 'lucide-react';
@@ -49,6 +50,7 @@ export default function Sidebar({
     { id: 'mikrotik', name: 'MikroTik Core Control & Copilot', icon: Terminal, highlight: true },
     { id: 'wireguard', name: 'WireGuard Manager', icon: Shield },
     { id: 'routeros-resources', name: 'Recursos MikroTik (.rsc)', icon: FileCode },
+    { id: 'routeros-templates', name: 'Templates RouterOS Library', icon: BookOpen },
     { id: 'support', name: 'Remesa Soporte & OT', icon: Wrench },
     { id: 'inventory', name: 'Inventarios / ERP', icon: Box },
     { id: 'gis', name: 'GIS & Cobertura Co-Map', icon: Map },

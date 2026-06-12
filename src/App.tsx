@@ -12,6 +12,7 @@ import FinanceOwnerModule from './components/FinanceOwnerModule';
 import SuspensionModule from './components/SuspensionModule';
 import WireguardManagerModule from './components/WireguardManagerModule';
 import RouterOsResourcesModule from './components/RouterOsResourcesModule';
+import RouterOsTemplatesModule from './components/RouterOsTemplatesModule';
 import LoginForm from './components/LoginForm';
 import LandingPage from './components/LandingPage';
 import UserMenu from './components/UserMenu';
@@ -840,6 +841,13 @@ export default function App() {
 
             {activeTab === 'routeros-resources' && (
               <RouterOsResourcesModule
+                userRole={userSession.role}
+                getAuthHeaders={getAuthHeaders}
+              />
+            )}
+
+            {activeTab === 'routeros-templates' && (
+              <RouterOsTemplatesModule
                 userRole={userSession.role}
                 getAuthHeaders={getAuthHeaders}
               />

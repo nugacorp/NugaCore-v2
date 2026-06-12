@@ -10,6 +10,7 @@ export type AppTab =
   | 'mikrotik'
   | 'wireguard'
   | 'routeros-resources'
+  | 'routeros-templates'
   | 'support'
   | 'inventory'
   | 'gis'
@@ -22,10 +23,10 @@ export type AppTab =
 // la VISIBILIDAD del módulo.
 // ====================================================================
 const roleTabs: Record<UserRole, AppTab[]> = {
-  'Super Admin':  ['dashboard', 'crm', 'billing', 'finance', 'suspension', 'network', 'mikrotik', 'wireguard', 'routeros-resources', 'support', 'inventory', 'gis', 'owner'],
-  'Administrador':['dashboard', 'crm', 'billing', 'suspension', 'network', 'wireguard', 'routeros-resources', 'support', 'inventory', 'gis'],
+  'Super Admin':  ['dashboard', 'crm', 'billing', 'finance', 'suspension', 'network', 'mikrotik', 'wireguard', 'routeros-resources', 'routeros-templates', 'support', 'inventory', 'gis', 'owner'],
+  'Administrador':['dashboard', 'crm', 'billing', 'suspension', 'network', 'wireguard', 'routeros-resources', 'routeros-templates', 'support', 'inventory', 'gis'],
   'Cobranza':     ['dashboard', 'crm', 'billing', 'finance', 'suspension'],
-  'Técnico':      ['dashboard', 'suspension', 'network', 'mikrotik', 'routeros-resources', 'support', 'inventory', 'gis'],
+  'Técnico':      ['dashboard', 'suspension', 'network', 'mikrotik', 'routeros-resources', 'routeros-templates', 'support', 'inventory', 'gis'],
   'Soporte':      ['dashboard', 'crm', 'support', 'gis'],
   'Solo lectura': ['dashboard', 'crm', 'billing', 'suspension', 'network', 'gis'],
 };
@@ -58,6 +59,7 @@ export const MODULE_LABELS: Record<AppTab, string> = {
   mikrotik: 'MikroTik Core',
   wireguard: 'WireGuard Manager',
   'routeros-resources': 'Recursos MikroTik',
+  'routeros-templates': 'Templates RouterOS',
   support: 'Soporte & OT',
   inventory: 'Inventario / ERP',
   gis: 'GIS & Cobertura',
