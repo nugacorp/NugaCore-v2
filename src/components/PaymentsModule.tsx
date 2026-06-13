@@ -19,6 +19,7 @@ import {
   Plus,
 } from 'lucide-react';
 import type { UserRole } from '../lib/supabase';
+import { canWritePayments } from '../lib/paymentsRbac';
 
 // ── Tipos locales ────────────────────────────────────────────────────
 
@@ -87,8 +88,7 @@ const PROVIDER_LABELS: Record<PaymentProvider, string> = {
   spei: 'SPEI',
 };
 
-const canWrite = (role: UserRole | string | null) =>
-  role === 'super admin' || role === 'administrador' || role === 'cobranza';
+const canWrite = canWritePayments;
 
 // ── Componente principal ──────────────────────────────────────────────
 
