@@ -33,6 +33,8 @@ export interface RouterEnrollmentRecord {
   enrolledBy: string;
   status: EnrollmentStatus;
   routerosVersion: '6' | '7';
+  /** Plantilla real usada para generar el script. Persiste para re-descarga. */
+  templateId: string;
   scriptHash?: string;
   scriptDownloadedAt?: string;
   checkOnlineAttempts: number;
@@ -56,6 +58,8 @@ export interface RouterEnrollmentView {
   status: EnrollmentStatus;
   statusLabel: string;
   routerosVersion: '6' | '7';
+  /** Plantilla real usada en la generación. */
+  templateId: string;
   scriptHash?: string;
   scriptDownloadedAt?: string;
   checkOnlineAttempts: number;
@@ -76,6 +80,11 @@ export interface StartEnrollmentInput {
   /** Opcional: si se omite, se usa el servidor WireGuard default del VPS. */
   wgServerId?: string;
   routerosVersion: '6' | '7';
+  /**
+   * Plantilla a usar. Si se omite, usa 'router_base_wireguard' (comportamiento
+   * anterior). Valores válidos: ver ENROLLMENT_SUPPORTED_TEMPLATES.
+   */
+  templateId?: string;
   lanBridgeName?: string;
   lanCidr?: string;
   lanGateway?: string;
@@ -93,6 +102,10 @@ export interface StartEnrollmentResult {
   /** Vista saneada del script: sin privateKey, presharedKey, passwords. */
   scriptPreview: string;
   securityNotice: string;
+  // ── Metadata de template (Fase 4.9.1) ───────────────────────────────
+  templateId: string;
+  templateName: string;
+  generatorVersion: string;
   // ── Campos originales (backward compat) ─────────────────────────────
   enrollment: RouterEnrollmentView;
   routerId: string;

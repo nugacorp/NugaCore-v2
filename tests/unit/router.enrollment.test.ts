@@ -27,6 +27,7 @@ const makeRecord = (id: string, status: EnrollmentStatus = 'script_generated', r
   enrolledBy: 'user-test',
   status,
   routerosVersion,
+  templateId: 'router_base_wireguard',
   scriptHash: 'abc123',
   checkOnlineAttempts: 0,
   createdAt: new Date().toISOString(),

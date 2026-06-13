@@ -21,6 +21,7 @@ import { readRouterSnapshot } from '../mikrotik/worker/worker';
 import { isLiveWorkerEnabled } from '../mikrotik/worker/connector';
 import { getWireguardService } from '../wireguard/service';
 import { enrollmentRepository } from './repository';
+import { resolveTemplateParams } from './template-mapper';
 import {
   CheckOnlineResult,
   EnrollmentStatus,
@@ -46,6 +47,7 @@ const toView = (rec: RouterEnrollmentRecord): RouterEnrollmentView => {
     status: rec.status,
     statusLabel: ENROLLMENT_STATUS_LABELS[rec.status],
     routerosVersion: rec.routerosVersion,
+    templateId: rec.templateId,
     scriptHash: rec.scriptHash,
     scriptDownloadedAt: rec.scriptDownloadedAt,
     checkOnlineAttempts: rec.checkOnlineAttempts,
@@ -84,38 +86,31 @@ const buildScript = async (
   script: string;
   scriptFilename: string;
   scriptHash: string;
+  templateId: string;
+  templateName: string;
+  generatorVersion: string;
   wgPeerId: string;
   wgAssignedIp: string;
   wgServerPublicKey: string;
 }> => {
   const wgService = getWireguardService();
 
+  // Siempre se crea/reutiliza el peer WG para management NugaCore.
   const peerConfig = await wgService.getPeerConfigForRouter(routerId, wgServerId, actorId);
-
   const routerIpWithoutMask = peerConfig.assignedIp.replace(/\/\d+$/, '');
 
-  const resource = generateFromTemplate({
-    templateId: 'router_base_wireguard',
-    routerName: input.routerName,
-    routerosVersion: input.routerosVersion,
-    wgServerPublicKey: peerConfig.serverPublicKey,
-    wgEndpoint: peerConfig.serverEndpoint,
-    wgRouterIp: peerConfig.assignedIp,
-    wgManagementCidr: peerConfig.allowedCidr,
-    wgVpnCidr: peerConfig.allowedCidr,
-    wgPrivateKey: peerConfig.privateKey,
-    wgKeepalive: 25,
-    lanBridgeName: input.lanBridgeName,
-    lanCidr: input.lanCidr,
-    lanGateway: input.lanGateway,
-    wanInterface: input.wanInterface,
-  });
+  // Resuelve templateId con fallback a router_base_wireguard (backward compat).
+  const effectiveTemplateId = input.templateId?.trim() || 'router_base_wireguard';
 
-  const filename = buildTemplateFilename(input.routerName, 'router_base_wireguard');
+  const resolved = resolveTemplateParams(effectiveTemplateId, input, peerConfig);
+  const resource = generateFromTemplate(resolved.params);
+  const filename = buildTemplateFilename(input.routerName, resolved.libraryId);
 
   logger.info('Enrollment: script generado', {
     routerId,
     peerId: peerConfig.peer.id,
+    templateId: resolved.libraryId,
+    templateName: resolved.templateName,
     scriptHash: resource.scriptHash,
     filename,
     // NUNCA loguear el script ni las claves
@@ -125,6 +120,9 @@ const buildScript = async (
     script: resource.script,
     scriptFilename: filename,
     scriptHash: resource.scriptHash,
+    templateId: resolved.libraryId,
+    templateName: resolved.templateName,
+    generatorVersion: resolved.generatorVersion,
     wgPeerId: peerConfig.peer.id,
     wgAssignedIp: routerIpWithoutMask,
     wgServerPublicKey: peerConfig.serverPublicKey,
@@ -191,7 +189,7 @@ export const enrollmentService = {
       throw err;
     }
 
-    const { script, scriptFilename, scriptHash, wgPeerId, wgAssignedIp, wgServerPublicKey } = buildResult;
+    const { script, scriptFilename, scriptHash, templateId: resolvedTemplateId, templateName, generatorVersion, wgPeerId, wgAssignedIp, wgServerPublicKey } = buildResult;
 
     // Push al store SOLO tras buildScript exitoso → no hay router huérfano
     store.MIKROTIK_ROUTERS.push({
@@ -222,6 +220,7 @@ export const enrollmentService = {
       enrolledBy: actorId,
       status: 'script_generated',
       routerosVersion: input.routerosVersion,
+      templateId: resolvedTemplateId,
       scriptHash,
       checkOnlineAttempts: 0,
       createdAt: nowIso(),
@@ -229,7 +228,13 @@ export const enrollmentService = {
     };
     enrollmentRepository.create(rec);
 
-    logger.info('Enrollment iniciado', { enrollmentId: id, routerId, wgPeerId, wgServerId: resolvedServerId });
+    logger.info('Enrollment iniciado', {
+      enrollmentId: id,
+      routerId,
+      wgPeerId,
+      wgServerId: resolvedServerId,
+      templateId: resolvedTemplateId,
+    });
 
     const securityMsg =
       'Este script contiene claves privadas WireGuard. ' +
@@ -243,6 +248,10 @@ export const enrollmentService = {
       filename: scriptFilename,
       scriptPreview: buildScriptPreview(script),
       securityNotice: securityMsg,
+      // ── Metadata de template (Fase 4.9.1) ───────────────────────
+      templateId: resolvedTemplateId,
+      templateName,
+      generatorVersion,
       // ── Campos originales ────────────────────────────────────────
       enrollment: toView(rec),
       routerId,
@@ -289,6 +298,8 @@ export const enrollmentService = {
       apiPort: router.apiPort,
       linkedTowerId: router.linkedTowerId,
       routerosVersion: rec.routerosVersion,
+      // Usa el templateId persistido en el record para regenerar el mismo script.
+      templateId: rec.templateId,
       notes: router.notes,
     };
 
