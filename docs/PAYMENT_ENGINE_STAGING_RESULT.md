@@ -1,9 +1,15 @@
 # Payment Engine + Reactivación Automática — Validación Staging Fase 4.8
 
-Fecha: 2026-06-12
-Commit validado: `f5a97f1 feat(payments): add Payment Engine and logical reactivation (Fase 4.8)`
-Deployment Coolify: `m7h2snc4ypkszoh1tp1jei40`
-Resultado final: **NO APROBADO**
+Fecha inicial: 2026-06-12
+Revalidación final: 2026-06-13
+
+Commits validados:
+
+- `f5a97f1 feat(payments): add Payment Engine and logical reactivation (Fase 4.8)`
+- `5830b3e fix(payments): align payment engine with persistent customers and billing`
+- `cdcf0cb fix(payments): normalize UI write permissions by role`
+
+Resultado final: **APROBADO**
 
 ## Alcance y restricciones
 
@@ -12,10 +18,10 @@ Validación ejecutada en staging sin activar commit mode y sin tocar routers rea
 Restricciones mantenidas:
 
 - No se activó commit mode.
-- No se ejecutó PPP.
-- No se ejecutó Queue.
-- No se ejecutaron comandos MikroTik.
-- No se cambió configuración de red.
+- No se ejecutó PPP real.
+- No se ejecutó Queue real.
+- No se ejecutaron comandos MikroTik/RouterOS reales.
+- No se cambió configuración real de red.
 - No se documentaron secretos, tokens, JWTs, claves privadas ni payloads sensibles.
 
 ## 1. Actualización de staging
@@ -31,9 +37,12 @@ git pull --ff-only origin main
 git log --oneline -10
 ```
 
-Resultado:
+Log confirmado:
 
 ```text
+cdcf0cb fix(payments): normalize UI write permissions by role
+5830b3e fix(payments): align payment engine with persistent customers and billing
+9834113 docs(payments): validate payment engine staging
 f5a97f1 feat(payments): add Payment Engine and logical reactivation (Fase 4.8)
 c6a3b5a docs(router-enrollment): approve WireGuard auto enrollment
 031bd1f fix(router-enrollment): remove secret key names from script preview
@@ -41,31 +50,28 @@ c6a3b5a docs(router-enrollment): approve WireGuard auto enrollment
 1a38180 docs(roadmap): register Fase 4.8 Payment Engine and update architecture docs
 65c1359 fix(router-enrollment): use default WireGuard server and complete start contract
 6bc9ad4 docs(router-enrollment): validate WireGuard auto enrollment staging
-b683867 fix(router-enrollment): prevent orphan routers and preserve routeros version
-84f6439 feat(router-enrollment): add WireGuard auto enrollment workflow
-4d5e648 docs(routeros): approve templates library phase 4.6.3
 ```
 
 ## 2. Redeploy Coolify y healthchecks
 
-Redeploy Coolify ejecutado sobre el commit completo:
+Redeploy Coolify ejecutado sobre:
 
 ```text
-f5a97f19a1441ba36cc91e847a400591645b69e0
+cdcf0cb9052650ecc2c8c4b3ac531aae028af905
 ```
 
 Resultado Coolify:
 
 ```text
-deployment_uuid=m7h2snc4ypkszoh1tp1jei40
+deployment_uuid=ee7qw2adia1q53gp1bs0gb76
 status=finished
-commit=f5a97f19a1441ba36cc91e847a400591645b69e0
+commit=cdcf0cb9052650ecc2c8c4b3ac531aae028af905
 ```
 
-Contenedor activo:
+Contenedor activo post-deploy:
 
 ```text
-zmjc5lnl0wj3kh0uj14s2p4i:f5a97f19a1441ba36cc91e847a400591645b69e0 — healthy
+zmjc5lnl0wj3kh0uj14s2p4i:cdcf0cb9052650ecc2c8c4b3ac531aae028af905 — healthy
 ```
 
 Healthchecks post-deploy y post-limpieza:
@@ -75,12 +81,6 @@ Healthchecks post-deploy y post-limpieza:
 | `/api/health` | 200 |
 | `/api/health/live` | 200 |
 | `/api/health/ready` | 200 |
-
-`/api/health` reportó persistencia `mixed` con dominios DB:
-
-```text
-customers, plans, billing
-```
 
 ## 3. Tests locales
 
@@ -97,315 +97,177 @@ Resultado:
 | Gate | Resultado |
 |---|---|
 | TypeScript | PASS |
-| Tests | PASS — 611 passed, 34 skipped, 47 files |
+| Tests | PASS — 635 passed, 34 skipped, 48 files |
 | Build | PASS |
 
 Build generó `dist/` correctamente. Solo apareció el warning normal de chunk grande de Vite.
 
-## 4. RBAC real validado en staging
+## 4. Fix UI RBAC validado
 
-Se crearon usuarios temporales Supabase por rol, se autenticaron por JWT y se eliminaron al finalizar. No se imprimieron JWTs ni contraseñas.
+Commit de cierre:
 
-Endpoints validados:
+```text
+cdcf0cb fix(payments): normalize UI write permissions by role
+```
 
-- `GET /api/payments/orders`
-- `POST /api/payments/orders`
-- `GET /api/payments/actions`
-- `POST /api/payments/customers/:id/reactivate`
+Cambio validado:
 
-Matriz real observada:
+- Nuevo helper `src/lib/paymentsRbac.ts`.
+- `PaymentsModule.tsx` usa `canWritePayments()`.
+- Comparación case-insensitive.
+- Roles con escritura: Super Admin, Administrador, Cobranza.
+- Roles sin escritura: Técnico, Soporte, Solo lectura.
 
-| Rol | GET orders | POST orders | GET actions | POST reactivate |
-|---|---:|---:|---:|---:|
-| Super Admin | 200 | 201 | 200 | 200 |
-| Administrador | 200 | 201 | 200 | 200 |
-| Cobranza | 200 | 201 | 200 | 200 |
-| Técnico | 200 | 403 | 200 | 403 |
-| Soporte | 200 | 403 | 200 | 403 |
-| Solo lectura | 200 | 403 | 200 | 403 |
+Tests unitarios nuevos validados:
 
-Comparación contra tests:
+```text
+tests/unit/payments.rbac.test.ts — 17 tests PASS
+```
 
-- Coincide con `WRITE_ROLES = ['super admin', 'administrador', 'cobranza']`.
-- Coincide con `READ_ROLES` amplio: técnico, soporte y solo lectura pueden leer órdenes/acciones.
-- Los tests cubren explícitamente reader 403 en creación/reactivación; staging confirmó además técnico y soporte con 403 en escritura.
+## 5. Validación UI — Super Admin
 
-## 5. Fixture de factura de prueba
+Login real Supabase desde formulario web con usuario temporal Super Admin.
 
-Se intentó validar con fixture staging no real. El entorno actual tiene `customers` y `billing` en DB, pero `payments` permanece en store en memoria.
+Resultado observado en `Portal Pagos & Reactivación`:
+
+| Validación | Resultado |
+|---|---|
+| Login real | PASS |
+| Módulo visible | PASS |
+| Pestañas `Órdenes` / `Acciones MikroTik` visibles | PASS |
+| Botón `Nueva Orden` visible | PASS |
+| Bloque `Reactivación Lógica Manual` visible | PASS |
+
+## 6. Validación UI — Administrador
+
+Login real Supabase desde formulario web con usuario temporal Administrador.
+
+Resultado observado en `Portal Pagos & Reactivación`:
+
+| Validación | Resultado |
+|---|---|
+| Login real | PASS |
+| Módulo visible | PASS |
+| Pestañas `Órdenes` / `Acciones MikroTik` visibles | PASS |
+| Botón `Nueva Orden` visible | PASS |
+| Bloque `Reactivación Lógica Manual` visible | PASS |
+
+## 7. Validación UI — Cobranza
+
+Login real Supabase desde formulario web con usuario temporal Cobranza.
+
+Resultado observado en `Portal Pagos & Reactivación`:
+
+| Validación | Resultado |
+|---|---|
+| Login real | PASS |
+| Módulo visible | PASS |
+| Pestañas `Órdenes` / `Acciones MikroTik` visibles | PASS |
+| Botón `Nueva Orden` visible | PASS |
+| Bloque `Reactivación Lógica Manual` visible | PASS |
+
+## 8. Validación UI — roles sin escritura
+
+Login real Supabase desde formulario web con usuarios temporales Técnico, Soporte y Solo lectura.
 
 Resultado observado:
 
-- `GET /api/clients/c-4` devolvió 404 porque `customers` está en DB y `c-4` existe solo en el store mock del backend.
-- `POST /api/suspension/test-tools/scenario` creó un cliente/factura de prueba en DB.
-- Factura creada: `fac-101`.
-- Cliente de prueba DB: `c-2`.
-- Factura antes del pago:
-  - `status=overdue`
-  - `amount=299`
-  - `paidAmount=0`
-  - `pendingAmount=299`
+| Rol | Login real | Módulo pagos | `Nueva Orden` | `Reactivación Lógica Manual` |
+|---|---:|---:|---:|---:|
+| Técnico | PASS | Oculto por RBAC de navegación | No visible | No visible |
+| Soporte | PASS | Oculto por RBAC de navegación | No visible | No visible |
+| Solo lectura | PASS | Oculto por RBAC de navegación | No visible | No visible |
 
-Problema de integración encontrado:
+El comportamiento es aceptable para roles sin escritura: no tienen controles de escritura visibles. Además, los endpoints de escritura siguen protegidos por backend:
 
-- La reactivación del Payment Engine usa `store.CLIENTS` directamente, no el servicio/repository de Customers.
-- Por eso no puede reactivar clientes creados en DB por test-tools.
-- Para ejercer la rama de reactivación lógica, la orden se creó con `customerId=c-4` (cliente mock en memoria) y `invoiceId=fac-101` (factura DB del cliente test `c-2`).
-- Esto demuestra que el flujo técnico puede marcar la factura pagada y crear `mikrotik_action`, pero no valida correctamente la relación real `customerId == invoice.clientId` en staging DB.
+| Rol | `POST /api/payments/orders` | `POST /api/payments/customers/:id/reactivate` |
+|---|---:|---:|
+| Técnico | 403 | 403 |
+| Soporte | 403 | 403 |
+| Solo lectura | 403 | 403 |
 
-Este punto bloquea aprobación porque el requisito pedía usar cliente/factura de staging test, no cliente mock/seed desacoplado.
+## 9. Regresión backend rápida
 
-## 6. Payment order
+Se ejecutó un probe de regresión con clientes/facturas DB de prueba y usuarios temporales. No se imprimieron JWTs ni contraseñas.
 
-Endpoint:
+Resultados:
 
-```http
-POST /api/payments/orders
-```
+| Validación | Resultado |
+|---|---|
+| `amount` en pesos | PASS — `POST /api/payments/orders` -> 201, `amountPesos=299` |
+| `amountCents` | PASS — `POST /api/payments/orders` -> 201, `amountPesos=299` |
+| `AMOUNT_MISMATCH` | PASS — HTTP 400, `code=AMOUNT_MISMATCH` |
+| `INVOICE_CLIENT_MISMATCH` | PASS — HTTP 400, `code=INVOICE_CLIENT_MISMATCH` |
+| Webhook manual primer envío | PASS — HTTP 200, `invoiceUpdated=true`, `reactivationTriggered=true` |
+| Webhook manual segundo envío | PASS — HTTP 200, `idempotent=true`, sin duplicados |
+| Factura post-webhook | PASS — `status=paid`, `paidAmount=299`, `pendingAmount=0`, un pago |
+| Reactivación lógica | PASS — `dryRun=true`, una acción lógica |
+| `MIKROTIK_WORKER_LIVE` | PASS — `false` |
 
-Body sugerido por la solicitud:
+## 10. Reactivación lógica y no MikroTik real
 
-```json
-{
-  "customerId": "<customerId>",
-  "invoiceId": "<invoiceId>",
-  "provider": "manual",
-  "amount": 299
-}
-```
-
-Resultado real con `amount`: **400**.
-
-El endpoint implementado exige `amountCents`, no `amount`:
-
-```json
-{
-  "customerId": "c-4",
-  "invoiceId": "fac-101",
-  "provider": "manual",
-  "amountCents": 29900
-}
-```
-
-Resultado con `amountCents`: **201**.
-
-Respuesta observada:
+Validaciones finales:
 
 ```text
-id=po-4
-provider=manual
-providerOrderId=manual-po-4
-status=pending
-amountPesos=299
-invoiceId=fac-101
-customerId=c-4
-checkoutUrl=null/no presente, aceptable para manual
+MIKROTIK_WORKER_LIVE=false
+allActionsDryRun=true
+routeros_live_commands=false
 ```
 
-## 7. Webhook manual
+No se ejecutaron comandos PPP, Queue, address-list ni RouterOS reales. La reactivación validada fue lógica y creó acciones con `dryRun=true` únicamente.
 
-Endpoint:
+## 11. Secret hygiene
 
-```http
-POST /api/payments/webhook/manual
-```
-
-Payload controlado usado:
-
-```text
-id=evt-phase48-1781304546686-93c6bc9d72fc4
-type=payment.approved
-order_id=manual-po-4
-status=approved
-amount=299
-invoiceId=fac-101
-```
-
-Resultado primer envío:
-
-```text
-HTTP 200
-eventId=pe-1
-idempotent=false
-invoiceUpdated=true
-reactivationTriggered=true
-mikrotikActionId=ma-1
-message=Pago confirmado, factura actualizada y reactivación programada.
-```
-
-Factura después del webhook:
-
-```text
-invoiceId=fac-101
-status=paid
-amount=299
-paidAmount=299
-pendingAmount=0
-paymentCountOnInvoice=1
-```
-
-## 8. Idempotencia del webhook
-
-Se envió el mismo webhook manual por segunda vez.
+Se revisaron logs recientes con búsqueda de patrones, sin imprimir valores sensibles.
 
 Resultado:
-
-```text
-HTTP 200
-eventId=pe-1
-idempotent=true
-invoiceUpdated=false
-reactivationTriggered=false
-message=Evento ya procesado anteriormente.
-```
-
-Validaciones:
-
-- No se duplicó el evento procesado para el mismo provider event id.
-- No se duplicó el payment en la factura observada.
-- La factura permaneció `paid` con `pendingAmount=0`.
-- No se creó una segunda acción de reactivación para el mismo flujo observado.
-- La respuesta fue controlada.
-
-## 9. Reactivación lógica
-
-Para el cliente mock suspendido `c-4`, el pago confirmado generó una acción lógica:
-
-```text
-id=ma-1
-customerId=c-4
-actionType=reactivate
-status=pending
-dryRun=true
-```
-
-Validación de cliente ya activo:
-
-```text
-POST /api/payments/customers/c-1/reactivate -> 200
-alreadyActive=true
-mikrotikAction=null
-message=Cliente ya activo.
-```
-
-Problema de diseño observado:
-
-- `reactivateCustomerService()` no usa `CustomersService` ni DB cuando `USE_DB_CUSTOMERS=true`.
-- Busca el cliente en `store.CLIENTS`.
-- En staging actual, los clientes reales/test de DB no son reactivables por Payment Engine si no existen también en el store mock.
-
-## 10. Payment providers
-
-Providers validados en modo mock/stub:
-
-| Provider | createPaymentOrder | webhook/verifyWebhook | Resultado |
-|---|---:|---:|---|
-| manual | 201 | 200 | PASS |
-| mercado_pago | 201 | 200 | PASS |
-| openpay | 201 | 200 | PASS |
-
-No se usaron credenciales reales de provider.
-
-Por revisión de implementación, los providers exponen `createPaymentOrder`, `verifyWebhook` y `getPaymentStatus`.
-
-## 11. Payment events
-
-No hay endpoint público directo para listar `payment_events`.
-
-Validación por respuesta controlada del webhook:
-
-```text
-provider=manual
-provider_event_id=evt-phase48-1781304546686-93c6bc9d72fc4
-event_type=payment.approved
-processed=true
-received_at presente de forma interna por eventId generado
-payload no expuesto por endpoint público
-```
-
-La API pública de orders/actions no expuso `rawPayload`.
-
-## 12. Portal Pagos UI
-
-Validación parcial:
-
-- El bundle desplegado contiene el módulo `PaymentsModule` y la navegación incluye el módulo Pagos para roles con permiso según el código desplegado.
-- API backend para el módulo respondió correctamente según la matriz RBAC real.
-- No se observaron campos `rawPayload`, tokens o secretos en respuestas públicas de orders/actions.
-
-Bloqueo UI observado:
-
-- Se crearon usuarios temporales Supabase para prueba de UI y se confirmó sign-in exitoso desde Node dentro del contenedor.
-- El formulario web respondió `Invalid login credentials` para esos mismos usuarios temporales desde el navegador.
-- Por este bloqueo de autenticación del navegador no se pudo completar una validación visual end-to-end del módulo Pagos en UI con rol permitido/no permitido.
-
-Esto también impide aprobación completa de la Fase 4.8 desde la perspectiva de portal.
-
-## 13. Secret hygiene
-
-Se revisaron logs recientes con búsqueda por patrones, sin imprimir valores sensibles.
-
-Resultado de patrones en logs recientes:
 
 ```text
 provider_tokens=false
 rawPayload_sensitive=false
 supabase_service_role=false
 jwt=false
-mikrotik_credentials_key=false
+mikrotik_credentials_key_value=false
 private_keys=false
-routeros_scripts=false
+routeros_scripts_or_live_commands=false
 ```
 
-No se documentaron secretos.
+La API pública de pagos no expuso `rawPayload` ni secretos.
 
-## 14. No MikroTik real
-
-Validaciones:
-
-```text
-MIKROTIK_WORKER_LIVE=false
-allActionsDryRun=true
-anyActionDryRunFalse=false
-```
-
-No se ejecutaron comandos RouterOS reales, PPP, Queue ni cambios de red.
-
-El contenedor fue reiniciado después del probe para limpiar artefactos en memoria del Payment Engine (`payment_orders`, `payment_events`, `mikrotik_actions`).
-
-## 15. Limpieza
+## 12. Limpieza
 
 Acciones ejecutadas:
 
-- Cliente/factura de prueba creada por test-tools eliminada con `DELETE /api/suspension/test-tools/customer/:id`.
+- Clientes DB de prueba eliminados.
+- Facturas DB de prueba eliminadas.
+- Payments/payment_applications asociados eliminados.
 - Usuarios temporales Supabase eliminados.
-- Contenedor staging reiniciado para limpiar artefactos en memoria de Payment Engine.
-- Healthchecks post-limpieza siguieron en 200.
+- Contenedor staging reiniciado para limpiar `payment_orders`, `payment_events` y `mikrotik_actions` en memoria.
 
-Resultado post-limpieza:
+Verificación post-limpieza:
 
 ```text
-/api/health -> 200
-/api/health/live -> 200
-/api/health/ready -> 200
-contenedor healthy
+remainingTestClients=0
+remainingTestInvoices=0
+remainingTempProfiles=0
+/api/health=200
+/api/health/live=200
+/api/health/ready=200
+contenedor=healthy
 MIKROTIK_WORKER_LIVE=false
 ```
 
-## 16. Resultado final
+## 13. Resultado final
 
-**Fase 4.8 NO APROBADA.**
+**Fase 4.8 APROBADA.**
 
-Motivos bloqueantes:
+La validación final confirma:
 
-1. `POST /api/payments/orders` no acepta el body sugerido con `amount`; exige `amountCents`. Esto debe documentarse/corregirse para evitar integración rota con clientes que envíen pesos.
-2. En staging DB (`USE_DB_CUSTOMERS=true`, `USE_DB_BILLING=true`), Payment Engine mantiene pagos/actions en memoria y `reactivateCustomerService()` consulta `store.CLIENTS`. Esto no permite reactivar clientes test reales de DB y permitió validar la reactivación solo con un cliente mock desacoplado de la factura DB.
-3. La validación UI end-to-end del módulo Pagos no pudo completarse porque el navegador devolvió `Invalid login credentials` para usuarios temporales que sí autenticaron desde Node contra Supabase.
-
-Acciones recomendadas:
-
-- Hacer que Payment Engine valide que `payment_order.customerId` coincide con `invoice.clientId` antes de procesar el webhook.
-- Implementar reactivación contra `CustomersService`/repository, respetando `USE_DB_CUSTOMERS=true`, en lugar de acceder directo a `store.CLIENTS`.
-- Decidir contrato de monto: aceptar `amount` en pesos y/o mantener `amountCents`, pero actualizar API/UI/tests/docs de forma consistente.
-- Añadir endpoint administrativo seguro o test-tool para inspeccionar `payment_events` sin exponer payload sensible.
-- Corregir/diagnosticar login web de usuarios temporales staging para poder completar validación visual del portal Pagos.
+- Payment order funciona con `amount` y `amountCents`.
+- Mismatches de monto y factura/cliente son rechazados correctamente.
+- Webhook manual confirma pago, marca factura pagada y es idempotente.
+- Reactivación lógica funciona sobre DB y conserva `dryRun=true`.
+- UI RBAC del Portal Pagos funciona para Super Admin, Administrador y Cobranza.
+- Técnico, Soporte y Solo lectura no ven controles de escritura y backend devuelve 403.
+- No hubo exposición de secretos.
+- No se tocó MikroTik real.
