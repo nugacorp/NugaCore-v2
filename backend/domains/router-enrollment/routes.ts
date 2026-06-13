@@ -41,7 +41,7 @@ router.get(
   '/api/router-enrollment',
   requireRoles([...CAN_ENROLL]),
   asyncHandler(async (_req, res) => {
-    res.json(enrollmentService.list());
+    res.json(await enrollmentService.list());
   }),
 );
 
@@ -51,7 +51,7 @@ router.get(
   '/api/router-enrollment/:id',
   requireRoles([...CAN_ENROLL]),
   asyncHandler(async (req, res) => {
-    const enrollment = enrollmentService.getById(req.params.id);
+    const enrollment = await enrollmentService.getById(req.params.id);
     if (!enrollment) return res.status(404).json({ error: 'Enrollment no encontrado.' });
     res.json(enrollment);
   }),

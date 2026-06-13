@@ -67,3 +67,15 @@ export const isDomainOnDb = (domain: DomainKey): boolean => featureFlags[domain]
 /** Lista de dominios actualmente apuntando a la DB (para diagnósticos/health). */
 export const domainsOnDb = (): DomainKey[] =>
   (Object.keys(featureFlags) as DomainKey[]).filter((d) => featureFlags[d]);
+
+// ── Router Enrollment (Fase 4.9.2.1) ───────────────────────────────────
+// Flag independiente del mapa DomainKey (enrollment no es un dominio de
+// negocio del health check). Mismo patrón directo que USE_DB_WIREGUARD.
+//
+//   false (default) → store en memoria
+//   true            → SupabaseRouterEnrollmentRepository
+//
+// Se lee en cada consulta (no se cachea en módulo) para que los tests
+// puedan alternarlo reconstruyendo el repositorio con resetEnrollmentRepository().
+export const useDbRouterEnrollment = (): boolean =>
+  asBool(process.env.USE_DB_ROUTER_ENROLLMENT);

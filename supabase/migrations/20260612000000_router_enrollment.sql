@@ -40,6 +40,15 @@ CREATE INDEX IF NOT EXISTS idx_router_enrollment_status
 CREATE INDEX IF NOT EXISTS idx_router_enrollment_enrolled_by
   ON router_enrollment (enrolled_by);
 
+-- Trigger updated_at (mismo patrón que el resto del esquema).
+DO $$ BEGIN
+  IF NOT EXISTS (SELECT 1 FROM pg_trigger WHERE tgname = 'trg_router_enrollment_modtime') THEN
+    CREATE TRIGGER trg_router_enrollment_modtime
+      BEFORE UPDATE ON public.router_enrollment
+      FOR EACH ROW EXECUTE PROCEDURE update_modified_column();
+  END IF;
+END $$;
+
 -- RLS deny-by-default
 ALTER TABLE router_enrollment ENABLE ROW LEVEL SECURITY;
 

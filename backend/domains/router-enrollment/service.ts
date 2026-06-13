@@ -20,7 +20,7 @@ import { store } from '../../state/store';
 import { readRouterSnapshot } from '../mikrotik/worker/worker';
 import { isLiveWorkerEnabled } from '../mikrotik/worker/connector';
 import { getWireguardService } from '../wireguard/service';
-import { enrollmentRepository } from './repository';
+import { getEnrollmentRepository } from './repository';
 import { resolveTemplateParams, validateEnrollmentTemplateId, getTemplateMetadata } from './template-mapper';
 import { validateTemplateParameters, redactSecretValues, applyDefaults } from '../router-template-parameters/validators';
 import { mapParametersToLibraryParams } from '../router-template-parameters/mappers';
@@ -253,7 +253,8 @@ export const enrollmentService = {
       notes: input.notes,
     });
 
-    const id = enrollmentRepository.nextId();
+    const repo = getEnrollmentRepository();
+    const id = await repo.nextId();
     const rec: RouterEnrollmentRecord = {
       id,
       routerId,
@@ -270,7 +271,7 @@ export const enrollmentService = {
       createdAt: nowIso(),
       updatedAt: nowIso(),
     };
-    enrollmentRepository.create(rec);
+    await repo.create(rec);
 
     logger.info('Enrollment iniciado', {
       enrollmentId: id,
@@ -309,12 +310,14 @@ export const enrollmentService = {
     };
   },
 
-  list(): RouterEnrollmentView[] {
-    return enrollmentRepository.list().map(toView);
+  async list(): Promise<RouterEnrollmentView[]> {
+    const repo = getEnrollmentRepository();
+    return (await repo.list()).map(toView);
   },
 
-  getById(id: string): RouterEnrollmentView | null {
-    const rec = enrollmentRepository.getById(id);
+  async getById(id: string): Promise<RouterEnrollmentView | null> {
+    const repo = getEnrollmentRepository();
+    const rec = await repo.findById(id);
     return rec ? toView(rec) : null;
   },
 
@@ -327,7 +330,8 @@ export const enrollmentService = {
     id: string,
     actorId: string,
   ): Promise<{ script: string; filename: string; enrollment: RouterEnrollmentView } | null> {
-    const rec = enrollmentRepository.getById(id);
+    const repo = getEnrollmentRepository();
+    const rec = await repo.findById(id);
     if (!rec) return null;
 
     if (rec.status === 'revoked') throw new BadRequestError('El enrollment ha sido revocado.');
@@ -351,7 +355,7 @@ export const enrollmentService = {
 
     const { script, scriptFilename } = await buildScript(rec.routerId, input, rec.wgServerId, actorId);
 
-    const updated = enrollmentRepository.update(id, {
+    const updated = await repo.update(id, {
       scriptDownloadedAt: nowIso(),
       status: rec.status === 'script_generated' ? 'script_downloaded' : rec.status,
     });
@@ -367,7 +371,8 @@ export const enrollmentService = {
    * source=simulated deja el enrollment en waiting_for_router.
    */
   async checkOnline(id: string): Promise<CheckOnlineResult> {
-    const rec = enrollmentRepository.getById(id);
+    const repo = getEnrollmentRepository();
+    const rec = await repo.findById(id);
     if (!rec) throw new NotFoundError('Enrollment no encontrado.');
 
     if (rec.status === 'online') {
@@ -394,7 +399,7 @@ export const enrollmentService = {
         router.lastHealthCheckAt = nowIso();
       }
 
-      const updated = enrollmentRepository.update(id, {
+      const updated = await repo.update(id, {
         status: 'online',
         onlineConfirmedAt: nowIso(),
         checkOnlineAttempts: attempts,
@@ -424,7 +429,7 @@ export const enrollmentService = {
         ? `Sin confirmación live tras ${attempts} intentos.`
         : undefined;
 
-    const updated = enrollmentRepository.update(id, {
+    const updated = await repo.update(id, {
       status: nextStatus,
       checkOnlineAttempts: attempts,
       lastCheckAt: nowIso(),
@@ -452,7 +457,8 @@ export const enrollmentService = {
 
   /** Revoca el peer WireGuard y marca el enrollment como revocado. */
   async revoke(id: string, actorId: string): Promise<RouterEnrollmentView | null> {
-    const rec = enrollmentRepository.getById(id);
+    const repo = getEnrollmentRepository();
+    const rec = await repo.findById(id);
     if (!rec) return null;
 
     if (rec.status === 'revoked') throw new BadRequestError('El enrollment ya está revocado.');
@@ -466,7 +472,7 @@ export const enrollmentService = {
       router.provisioningStatus = 'error';
     }
 
-    const updated = enrollmentRepository.update(id, {
+    const updated = await repo.update(id, {
       status: 'revoked',
       revokedAt: nowIso(),
       revokedBy: actorId,

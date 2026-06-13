@@ -18,7 +18,7 @@ import { spawnSync } from 'node:child_process';
 const MODES = {
   db: {
     flag: 'RUN_DB_TESTS',
-    file: 'tests/contract/customers.db.contract.test.ts tests/contract/plans.db.contract.test.ts tests/contract/billing.schema.db.test.ts tests/contract/billing.db.contract.test.ts',
+    file: 'tests/contract/customers.db.contract.test.ts tests/contract/plans.db.contract.test.ts tests/contract/billing.schema.db.test.ts tests/contract/billing.db.contract.test.ts tests/contract/router-enrollment.db.contract.test.ts',
     timeoutMs: 30000,
   },
   auth: {
