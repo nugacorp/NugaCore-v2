@@ -52,21 +52,41 @@ router.post(
   '/api/payments/orders',
   requireRoles(WRITE_ROLES),
   asyncHandler(async (req, res) => {
-    const { customerId, invoiceId, provider, amountCents } = req.body || {};
+    const { customerId, invoiceId, provider, amountCents, amount } = req.body || {};
 
     if (!customerId || !invoiceId || !provider) {
       throw new BadRequestError('customerId, invoiceId y provider son obligatorios.');
     }
-    const parsedCents = Math.round(Number(amountCents));
-    if (!Number.isFinite(parsedCents) || parsedCents <= 0) {
-      throw new BadRequestError('amountCents debe ser un entero positivo.');
+
+    // Dual-format: amount (pesos, alias UI) o amountCents (centavos, canónico).
+    // Si vienen ambos y no coinciden → 400 para evitar ambigüedad.
+    let resolvedCents: number;
+    if (amountCents !== undefined && amount !== undefined) {
+      const fromCents = Math.round(Number(amountCents));
+      const fromPesos = Math.round(Number(amount) * 100);
+      if (!Number.isFinite(fromCents) || !Number.isFinite(fromPesos) || fromCents !== fromPesos) {
+        throw new BadRequestError(
+          'amount y amountCents no coinciden. Envíe solo uno de los dos.',
+          'AMOUNT_MISMATCH',
+        );
+      }
+      resolvedCents = fromCents;
+    } else if (amountCents !== undefined) {
+      resolvedCents = Math.round(Number(amountCents));
+    } else if (amount !== undefined) {
+      resolvedCents = Math.round(Number(amount) * 100);
+    } else {
+      throw new BadRequestError('Se requiere amount (pesos) o amountCents (centavos).');
+    }
+    if (!Number.isFinite(resolvedCents) || resolvedCents <= 0) {
+      throw new BadRequestError('El monto debe ser un valor positivo.');
     }
 
     const order = await getPaymentService().createOrder({
       customerId: String(customerId),
       invoiceId: String(invoiceId),
       provider: String(provider) as PaymentProvider,
-      amountCents: parsedCents,
+      amountCents: resolvedCents,
     });
     res.status(201).json(order);
   }),

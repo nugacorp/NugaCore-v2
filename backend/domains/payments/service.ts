@@ -19,6 +19,7 @@ import { isDomainOnDb } from '../../config/feature-flags';
 import { isSupabaseAdminConfigured, supabaseAdmin } from '../../services/supabase-admin';
 import { getBillingService } from '../billing/service';
 import { store } from '../../state/store';
+import { buildPaymentDataProvider } from './data-provider';
 import { getProvider } from './providers/index';
 import {
   StorePaymentRepository,
@@ -78,6 +79,16 @@ export class PaymentService {
 
     if (!Number.isInteger(input.amountCents) || input.amountCents <= 0) {
       throw new BadRequestError('amountCents debe ser un entero positivo (centavos).');
+    }
+
+    // Validar que la factura existe y pertenece al cliente indicado
+    const invoice = await getBillingService().findInvoiceById(input.invoiceId);
+    if (!invoice) throw new BadRequestError(`Factura '${input.invoiceId}' no encontrada.`);
+    if (invoice.clientId !== input.customerId) {
+      throw new BadRequestError(
+        'La factura no pertenece al cliente indicado.',
+        'INVOICE_CLIENT_MISMATCH',
+      );
     }
 
     const providerImpl = getProvider(provider);
@@ -232,7 +243,8 @@ export class PaymentService {
   ): Promise<ReactivationResult> {
     if (!customerId?.trim()) throw new BadRequestError('customerId es obligatorio.');
 
-    const client = store.CLIENTS.find((c) => c.id === customerId);
+    const dataProvider = buildPaymentDataProvider();
+    const client = await dataProvider.getCustomer(customerId);
     if (!client) throw new NotFoundError(`Cliente '${customerId}' no encontrado.`);
 
     // Idempotente: si ya está activo, no crear acción redundante
@@ -243,7 +255,7 @@ export class PaymentService {
 
     // Cambio de estado lógico (sin tocar MikroTik real)
     const prevStatus = client.status;
-    client.status = 'active';
+    await dataProvider.reactivateCustomer(customerId);
 
     // Timeline del cliente
     store.addClientTimelineEvent({

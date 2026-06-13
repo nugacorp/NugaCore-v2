@@ -185,10 +185,10 @@ describe('POST /api/payments/webhook/manual — idempotencia', () => {
 
 describe('Webhook aprobado → pago confirmado + reactivación lógica', () => {
   it('pago aprobado con order registrada → invoiceUpdated + reactivationTriggered', async () => {
-    // Crear orden primero
+    // fac-103 pertenece a c-4 (Rodrigo Flores Ortiz, status=unpaid)
     const orderRes = await request(app).post('/api/payments/orders').set(ADMIN).send({
       customerId: 'c-4',
-      invoiceId: store.INVOICES[0]?.id ?? 'fac-100',
+      invoiceId: 'fac-103',
       provider: 'manual',
       amountCents: 29900,
     });
@@ -325,5 +325,69 @@ describe('Webhooks MercadoPago / OpenPay — modo simulado', () => {
     const res = await request(app).post('/api/payments/webhook/mercadopago').send(payload);
     expect(res.status).toBe(200);
     expect(res.body.idempotent).toBe(true);
+  });
+});
+
+// ── HOTFIX: Contrato amount / amountCents (Blocker 1) ─────────────────
+
+describe('POST /api/payments/orders — formato amount (pesos) y amountCents', () => {
+  it('amount en pesos → crea orden (amountPesos=299)', async () => {
+    const res = await request(app).post('/api/payments/orders').set(ADMIN).send({
+      customerId: 'c-1', invoiceId: 'fac-101', provider: 'manual', amount: 299,
+    });
+    expect(res.status).toBe(201);
+    expect(res.body.amountPesos).toBeCloseTo(299);
+  });
+
+  it('amount y amountCents coincidentes → 201 (ambos aceptados)', async () => {
+    const res = await request(app).post('/api/payments/orders').set(ADMIN).send({
+      customerId: 'c-1', invoiceId: 'fac-101', provider: 'manual', amount: 299, amountCents: 29900,
+    });
+    expect(res.status).toBe(201);
+  });
+
+  it('amount y amountCents contradictorios → 400 AMOUNT_MISMATCH', async () => {
+    const res = await request(app).post('/api/payments/orders').set(ADMIN).send({
+      customerId: 'c-1', invoiceId: 'fac-101', provider: 'manual', amount: 200, amountCents: 29900,
+    });
+    expect(res.status).toBe(400);
+    expect(res.body.code).toBe('AMOUNT_MISMATCH');
+  });
+
+  it('sin amount ni amountCents → 400', async () => {
+    const res = await request(app).post('/api/payments/orders').set(ADMIN).send({
+      customerId: 'c-1', invoiceId: 'fac-101', provider: 'manual',
+    });
+    expect(res.status).toBe(400);
+  });
+});
+
+// ── HOTFIX: Validación factura-cliente (Blocker 2 / Blocker 3) ────────
+
+describe('POST /api/payments/orders — validación factura pertenece al cliente', () => {
+  it('factura de otro cliente → 400 INVOICE_CLIENT_MISMATCH', async () => {
+    // fac-102 pertenece a c-2; se intenta pagar como c-1
+    const res = await request(app).post('/api/payments/orders').set(ADMIN).send({
+      customerId: 'c-1', invoiceId: 'fac-102', provider: 'manual', amountCents: 10000,
+    });
+    expect(res.status).toBe(400);
+    expect(res.body.code).toBe('INVOICE_CLIENT_MISMATCH');
+  });
+
+  it('factura inexistente → 400', async () => {
+    const res = await request(app).post('/api/payments/orders').set(ADMIN).send({
+      customerId: 'c-1', invoiceId: 'fac-9999', provider: 'manual', amountCents: 10000,
+    });
+    expect(res.status).toBe(400);
+  });
+
+  it('factura correcta del cliente → 201', async () => {
+    // fac-103 pertenece a c-4
+    const res = await request(app).post('/api/payments/orders').set(ADMIN).send({
+      customerId: 'c-4', invoiceId: 'fac-103', provider: 'manual', amountCents: 29900,
+    });
+    expect(res.status).toBe(201);
+    expect(res.body.customerId).toBe('c-4');
+    expect(res.body.invoiceId).toBe('fac-103');
   });
 });
