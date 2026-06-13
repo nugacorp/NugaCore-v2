@@ -5,6 +5,8 @@
 // importar en MikroTik → confirmar online via Worker read-only.
 // ====================================================================
 
+import type { TemplateParameterValues } from '../router-template-parameters/types';
+
 export type EnrollmentStatus =
   | 'draft'
   | 'script_generated'
@@ -35,6 +37,13 @@ export interface RouterEnrollmentRecord {
   routerosVersion: '6' | '7';
   /** Plantilla real usada para generar el script. Persiste para re-descarga. */
   templateId: string;
+  /**
+   * Parámetros dinámicos de la plantilla (Fase 4.9.2). Persisten para
+   * regenerar el .rsc en /download sin defaults. Las claves secret
+   * (passwords PPPoE) se guardan aquí para regeneración pero NUNCA se
+   * exponen en vista/logs/preview.
+   */
+  templateParameters?: TemplateParameterValues;
   scriptHash?: string;
   scriptDownloadedAt?: string;
   checkOnlineAttempts: number;
@@ -64,6 +73,8 @@ export interface RouterEnrollmentView {
   templateName: string;
   /** Versión del generador (derivada de templateId, no persistida). */
   generatorVersion: string;
+  /** Parámetros dinámicos usados (Fase 4.9.2), con secretos redactados. */
+  templateParameters?: TemplateParameterValues;
   scriptHash?: string;
   scriptDownloadedAt?: string;
   checkOnlineAttempts: number;
@@ -89,6 +100,11 @@ export interface StartEnrollmentInput {
    * anterior). Valores válidos: ver ENROLLMENT_SUPPORTED_TEMPLATES.
    */
   templateId?: string;
+  /**
+   * Parámetros dinámicos de la plantilla (Fase 4.9.2). Se validan contra el
+   * esquema del registry y se mapean a TemplateLibraryParams para el generador.
+   */
+  templateParameters?: TemplateParameterValues;
   lanBridgeName?: string;
   lanCidr?: string;
   lanGateway?: string;

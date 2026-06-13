@@ -47,6 +47,18 @@ import {
   getWanCountForTemplate,
   buildDefaultWanConfigs,
 } from '../lib/routerOnboardingView';
+import {
+  TemplateParameterSchema,
+  TemplateParameterGroup,
+  TemplateParameter,
+  TemplateParameterValues,
+  buildDefaultParameterValues,
+  getParamValue,
+  setParamValue,
+  groupValuesOf,
+  isParameterVisible,
+  countConfiguredParameters,
+} from '../lib/templateParametersView';
 
 /** Clona el formulario por defecto con objetos anidados frescos (evita refs compartidas). */
 const freshDefaultForm = (): AdvancedOnboardingForm => ({
@@ -115,6 +127,10 @@ export default function RouterOnboardingWizard({
   const [step, setStep] = useState(1);
   const [form, setForm] = useState<AdvancedOnboardingForm>(freshDefaultForm);
   const [activeWanTab, setActiveWanTab] = useState(0);
+  // Fase 4.9.2: esquema y valores del formulario dinámico de parámetros.
+  const [paramSchema, setParamSchema] = useState<TemplateParameterSchema | null>(null);
+  const [paramValues, setParamValues] = useState<TemplateParameterValues>({});
+  const [paramsLoading, setParamsLoading] = useState(false);
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState('');
   const [wgDefaultOk, setWgDefaultOk] = useState<boolean | null>(null);
@@ -126,6 +142,97 @@ export default function RouterOnboardingWizard({
 
   const setF = (patch: Partial<AdvancedOnboardingForm>) => setForm((f) => ({ ...f, ...patch }));
   const clearError = () => setError('');
+
+  // ── Parámetros dinámicos (Fase 4.9.2) ───────────────────────────────
+
+  /** Carga el esquema de parámetros de la plantilla seleccionada e inicializa valores. */
+  const loadParameters = async (templateId: string) => {
+    setParamsLoading(true);
+    try {
+      const headers = await getAuthHeaders();
+      const res = await fetch(`/api/router-templates/${templateId}/parameters`, { headers });
+      if (res.ok) {
+        const schema = (await res.json()) as TemplateParameterSchema;
+        setParamSchema(schema);
+        setParamValues(buildDefaultParameterValues(schema));
+      } else {
+        // Plantilla sin parámetros declarados: formulario dinámico vacío.
+        setParamSchema(null);
+        setParamValues({});
+      }
+    } catch {
+      setParamSchema(null);
+      setParamValues({});
+    } finally {
+      setParamsLoading(false);
+    }
+  };
+
+  const setParam = (group: TemplateParameterGroup, param: TemplateParameter, value: unknown) =>
+    setParamValues((v) => setParamValue(v, group, param.id, value));
+
+  /** Renderiza un campo del formulario dinámico según el tipo del parámetro. */
+  const renderField = (group: TemplateParameterGroup, param: TemplateParameter) => {
+    const gv = groupValuesOf(paramValues, group);
+    if (!isParameterVisible(group, param, gv)) return null;
+    const value = getParamValue(paramValues, group, param.id);
+    const testId = `param-${group.id}-${param.id}`;
+    const reqMark = param.required ? <span className="text-rose-400"> *</span> : null;
+
+    if (param.type === 'boolean') {
+      return (
+        <div key={param.id} className="col-span-2 flex items-center gap-2">
+          <input
+            type="checkbox"
+            id={testId}
+            data-testid={testId}
+            checked={Boolean(value)}
+            onChange={(e) => setParam(group, param, e.target.checked)}
+            className="w-3.5 h-3.5 accent-indigo-500"
+          />
+          <label htmlFor={testId} className="text-xs text-slate-300 cursor-pointer">{param.label}</label>
+        </div>
+      );
+    }
+
+    if (param.type === 'select') {
+      return (
+        <div key={param.id}>
+          <label className="block text-[10px] font-medium text-slate-400 mb-1">{param.label}{reqMark}</label>
+          <select
+            data-testid={testId}
+            value={String(value ?? '')}
+            onChange={(e) => setParam(group, param, e.target.value)}
+            className="w-full bg-slate-800 border border-slate-600/50 rounded-lg px-3 py-2 text-xs text-slate-200 focus:outline-none focus:border-orange-500/40"
+          >
+            {param.options?.map((o) => <option key={o.value} value={o.value}>{o.label}</option>)}
+          </select>
+        </div>
+      );
+    }
+
+    // string | number | ip | cidr
+    return (
+      <div key={param.id} className={param.id === 'dnsServers' ? 'col-span-2' : ''}>
+        <label className="block text-[10px] font-medium text-slate-400 mb-1">{param.label}{reqMark}</label>
+        <input
+          data-testid={testId}
+          type={param.secret ? 'password' : param.type === 'number' ? 'number' : 'text'}
+          value={value === undefined || value === null ? '' : String(value)}
+          onChange={(e) =>
+            setParam(
+              group,
+              param,
+              param.type === 'number' ? (e.target.value === '' ? '' : Number(e.target.value)) : e.target.value,
+            )
+          }
+          placeholder={param.defaultValue !== undefined ? String(param.defaultValue) : ''}
+          className="w-full bg-slate-800 border border-slate-600/50 rounded-lg px-3 py-2 text-xs text-slate-200 placeholder-slate-500 focus:outline-none focus:border-orange-500/40 font-mono"
+        />
+        {param.description && <p className="text-[10px] text-slate-600 mt-0.5">{param.description}</p>}
+      </div>
+    );
+  };
 
   // ── Acciones ───────────────────────────────────────────────────────
 
@@ -155,7 +262,8 @@ export default function RouterOnboardingWizard({
     setLoading(true);
     clearError();
     try {
-      const payload = buildAdvancedEnrollmentPayload(form);
+      // Fase 4.9.2: adjunta los parámetros dinámicos al payload.
+      const payload = { ...buildAdvancedEnrollmentPayload(form), templateParameters: paramValues };
       const headers = await getAuthHeaders();
       const res = await fetch('/api/router-enrollment/start', {
         method: 'POST',
@@ -226,6 +334,8 @@ export default function RouterOnboardingWizard({
     setStep(1);
     setForm(freshDefaultForm());
     setActiveWanTab(0);
+    setParamSchema(null);
+    setParamValues({});
     setStartResult(null);
     setCheckResult(null);
     clearError();
@@ -522,18 +632,8 @@ export default function RouterOnboardingWizard({
                 </button>
                 <button
                   onClick={() => {
-                    // Reinicializar wanConfigs según template seleccionado
-                    const count = getWanCountForTemplate(form.templateId);
-                    if (count > 0) {
-                      const existing = form.wanConfigs;
-                      setForm((f) => ({
-                        ...f,
-                        wanConfigs: buildDefaultWanConfigs(count).map((def, i) =>
-                          i < existing.length ? existing[i] : def,
-                        ),
-                      }));
-                      setActiveWanTab(0);
-                    }
+                    // Carga el esquema de parámetros dinámicos de la plantilla.
+                    loadParameters(form.templateId);
                     stepTo(4);
                   }}
                   className="flex items-center gap-2 px-4 py-2 bg-indigo-600 hover:bg-indigo-500 text-white rounded-lg text-sm font-medium transition-colors"
@@ -544,242 +644,41 @@ export default function RouterOnboardingWizard({
             </div>
           )}
 
-          {/* ── Paso 4: Configuración (Básico / Avanzado) ────────────── */}
+          {/* ── Paso 4: Configuración dinámica según plantilla ────────── */}
           {step === 4 && (
             <div className="space-y-4">
-              <div className="flex items-center justify-between">
-                <div className="flex items-center gap-2">
-                  <Network size={16} className="text-orange-400" />
-                  <h3 className="text-sm font-semibold text-white">Configuración</h3>
-                </div>
-                {/* Toggle Básico / Avanzado */}
-                <div className="flex items-center gap-0.5 p-0.5 bg-slate-800/80 border border-slate-700/50 rounded-lg">
-                  <button
-                    onClick={() => setF({ configMode: 'basic' })}
-                    className={`flex items-center gap-1.5 px-3 py-1.5 text-xs font-medium rounded-md transition-colors ${
-                      form.configMode === 'basic'
-                        ? 'bg-slate-700 text-white'
-                        : 'text-slate-400 hover:text-slate-200'
-                    }`}
-                  >
-                    <Settings size={11} /> Básico
-                  </button>
-                  <button
-                    onClick={() => setF({ configMode: 'advanced' })}
-                    className={`flex items-center gap-1.5 px-3 py-1.5 text-xs font-medium rounded-md transition-colors ${
-                      form.configMode === 'advanced'
-                        ? 'bg-slate-700 text-white'
-                        : 'text-slate-400 hover:text-slate-200'
-                    }`}
-                  >
-                    <SlidersHorizontal size={11} /> Avanzado
-                  </button>
-                </div>
+              <div className="flex items-center gap-2">
+                <SlidersHorizontal size={16} className="text-orange-400" />
+                <h3 className="text-sm font-semibold text-white">
+                  Configuración de {getTemplateLabel(form.templateId)}
+                </h3>
               </div>
 
-              {/* ── MODO BÁSICO ── */}
-              {form.configMode === 'basic' && (
-                <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
-                  <div>
-                    <label className="block text-xs font-medium text-slate-400 mb-1">CIDR LAN</label>
-                    <input value={form.lanCidr} onChange={(e) => setF({ lanCidr: e.target.value })}
-                      placeholder="192.168.88.0/24"
-                      className="w-full bg-slate-800 border border-slate-600/50 rounded-lg px-3 py-2 text-sm text-slate-200 placeholder-slate-500 focus:outline-none focus:border-indigo-500/50 font-mono" />
-                  </div>
-                  <div>
-                    <label className="block text-xs font-medium text-slate-400 mb-1">Gateway LAN</label>
-                    <input value={form.lanGateway} onChange={(e) => setF({ lanGateway: e.target.value })}
-                      placeholder="192.168.88.1"
-                      className="w-full bg-slate-800 border border-slate-600/50 rounded-lg px-3 py-2 text-sm text-slate-200 placeholder-slate-500 focus:outline-none focus:border-indigo-500/50 font-mono" />
-                  </div>
-                  <div>
-                    <label className="block text-xs font-medium text-slate-400 mb-1">Nombre bridge LAN</label>
-                    <input value={form.lanBridgeName} onChange={(e) => setF({ lanBridgeName: e.target.value })}
-                      placeholder="bridgeLAN"
-                      className="w-full bg-slate-800 border border-slate-600/50 rounded-lg px-3 py-2 text-sm text-slate-200 placeholder-slate-500 focus:outline-none focus:border-indigo-500/50 font-mono" />
-                  </div>
-                  <div>
-                    <label className="block text-xs font-medium text-slate-400 mb-1">Interfaz WAN</label>
-                    <input value={form.wanInterface} onChange={(e) => setF({ wanInterface: e.target.value })}
-                      placeholder="ether1"
-                      className="w-full bg-slate-800 border border-slate-600/50 rounded-lg px-3 py-2 text-sm text-slate-200 placeholder-slate-500 focus:outline-none focus:border-indigo-500/50 font-mono" />
-                  </div>
-                  <div>
-                    <label className="block text-xs font-medium text-slate-400 mb-1">DHCP inicio</label>
-                    <input value={form.dhcpStart} onChange={(e) => setF({ dhcpStart: e.target.value })}
-                      placeholder="192.168.88.10"
-                      className="w-full bg-slate-800 border border-slate-600/50 rounded-lg px-3 py-2 text-sm text-slate-200 placeholder-slate-500 focus:outline-none focus:border-indigo-500/50 font-mono" />
-                  </div>
-                  <div>
-                    <label className="block text-xs font-medium text-slate-400 mb-1">DHCP fin</label>
-                    <input value={form.dhcpEnd} onChange={(e) => setF({ dhcpEnd: e.target.value })}
-                      placeholder="192.168.88.254"
-                      className="w-full bg-slate-800 border border-slate-600/50 rounded-lg px-3 py-2 text-sm text-slate-200 placeholder-slate-500 focus:outline-none focus:border-indigo-500/50 font-mono" />
-                  </div>
-                  <div className="sm:col-span-2">
-                    <label className="block text-xs font-medium text-slate-400 mb-1">Interfaces LAN (separadas por coma)</label>
-                    <input value={form.lanInterfaces} onChange={(e) => setF({ lanInterfaces: e.target.value })}
-                      placeholder="ether2,ether3,ether4,ether5"
-                      className="w-full bg-slate-800 border border-slate-600/50 rounded-lg px-3 py-2 text-sm text-slate-200 placeholder-slate-500 focus:outline-none focus:border-indigo-500/50 font-mono" />
-                  </div>
+              {paramsLoading && (
+                <div className="flex items-center gap-2 text-slate-400 text-xs">
+                  <Loader2 size={12} className="animate-spin" /> Cargando parámetros…
                 </div>
               )}
 
-              {/* ── MODO AVANZADO ── */}
-              {form.configMode === 'advanced' && (
-                <div className="space-y-5 max-h-[52vh] overflow-y-auto pr-1">
+              {!paramsLoading && !paramSchema && (
+                <div className="p-3 bg-slate-800/60 border border-slate-700/50 rounded-lg text-slate-400 text-sm">
+                  Esta plantilla no requiere parámetros adicionales. NugaCore usará una
+                  configuración segura por defecto.
+                </div>
+              )}
 
-                  {/* Sección WAN (solo PCC) */}
-                  {isPccTemplate(form.templateId) && form.wanConfigs.length > 0 && (
-                    <section>
+              {!paramsLoading && paramSchema && (
+                <div className="space-y-5 max-h-[52vh] overflow-y-auto pr-1" data-testid="dynamic-params-form">
+                  {paramSchema.groups.map((group) => (
+                    <section key={group.id} data-testid={`param-group-${group.id}`}>
                       <p className="text-xs font-semibold text-slate-300 mb-2 flex items-center gap-1.5">
-                        <Network size={12} className="text-orange-400" /> Interfaces WAN
+                        <Network size={12} className="text-orange-400" /> {group.label}
                       </p>
-
-                      {/* Tabs WAN */}
-                      <div className="flex gap-1 mb-3">
-                        {form.wanConfigs.map((_, i) => (
-                          <button key={i} onClick={() => setActiveWanTab(i)}
-                            className={`px-3 py-1 text-xs font-medium rounded-lg transition-colors ${
-                              activeWanTab === i
-                                ? 'bg-orange-500/15 text-orange-300 border border-orange-500/25'
-                                : 'text-slate-500 hover:text-slate-300 border border-transparent'
-                            }`}>
-                            WAN {i + 1}
-                          </button>
-                        ))}
+                      <div className="grid grid-cols-2 gap-2.5 p-3 bg-slate-800/40 border border-slate-700/40 rounded-xl">
+                        {group.parameters.map((param) => renderField(group, param))}
                       </div>
-
-                      {/* Formulario WAN activa */}
-                      {form.wanConfigs[activeWanTab] && (() => {
-                        const wan = form.wanConfigs[activeWanTab];
-                        const upd = (p: Partial<WanConfig>) => updateWan(activeWanTab, p);
-                        const inp = "w-full bg-slate-800 border border-slate-600/50 rounded-lg px-3 py-2 text-xs text-slate-200 placeholder-slate-500 focus:outline-none focus:border-orange-500/40 font-mono";
-                        return (
-                          <div className="grid grid-cols-2 gap-2.5 p-3 bg-slate-800/40 border border-slate-700/40 rounded-xl">
-                            <div>
-                              <label className="block text-[10px] font-medium text-slate-400 mb-1">Interfaz física</label>
-                              <input value={wan.interfaceName} onChange={(e) => upd({ interfaceName: e.target.value })} placeholder="ether1" className={inp} />
-                            </div>
-                            <div>
-                              <label className="block text-[10px] font-medium text-slate-400 mb-1">Nuevo nombre</label>
-                              <input value={wan.newName} onChange={(e) => upd({ newName: e.target.value })} placeholder="WAN1" className={inp} />
-                            </div>
-                            <div className="col-span-2">
-                              <label className="block text-[10px] font-medium text-slate-400 mb-1">Tipo conexión</label>
-                              <div className="flex gap-1">
-                                {(['dhcp', 'static', 'pppoe'] as const).map((t) => (
-                                  <button key={t} onClick={() => upd({ connectionType: t })}
-                                    className={`px-3 py-1.5 text-xs font-medium rounded-lg transition-colors ${
-                                      wan.connectionType === t
-                                        ? 'bg-orange-500/15 text-orange-300 border border-orange-500/25'
-                                        : 'bg-slate-700/60 text-slate-400 hover:text-slate-200 border border-slate-600/40'
-                                    }`}>
-                                    {t.toUpperCase()}
-                                  </button>
-                                ))}
-                              </div>
-                            </div>
-                            {wan.connectionType === 'static' && (
-                              <>
-                                <div>
-                                  <label className="block text-[10px] font-medium text-slate-400 mb-1">IP local</label>
-                                  <input value={wan.staticIp} onChange={(e) => upd({ staticIp: e.target.value })} placeholder="200.1.1.2" className={inp} />
-                                </div>
-                                <div>
-                                  <label className="block text-[10px] font-medium text-slate-400 mb-1">CIDR</label>
-                                  <input value={wan.cidr} onChange={(e) => upd({ cidr: e.target.value })} placeholder="200.1.1.0/30" className={inp} />
-                                </div>
-                              </>
-                            )}
-                            {(wan.connectionType === 'static' || wan.connectionType === 'pppoe') && (
-                              <div>
-                                <label className="block text-[10px] font-medium text-slate-400 mb-1">Gateway</label>
-                                <input value={wan.gateway} onChange={(e) => upd({ gateway: e.target.value })} placeholder="200.1.1.1" className={inp} />
-                              </div>
-                            )}
-                            <div>
-                              <label className="block text-[10px] font-medium text-slate-400 mb-1">Vel. descarga (Mbps)</label>
-                              <input value={wan.downloadMbps} onChange={(e) => upd({ downloadMbps: e.target.value })} placeholder="100" className={inp} />
-                            </div>
-                            <div>
-                              <label className="block text-[10px] font-medium text-slate-400 mb-1">Host ping</label>
-                              <input value={wan.pingHost} onChange={(e) => upd({ pingHost: e.target.value })} placeholder="8.8.8.8" className={inp} />
-                            </div>
-                            <div>
-                              <label className="block text-[10px] font-medium text-slate-400 mb-1">Pruebas ping</label>
-                              <input value={wan.pingCount} onChange={(e) => upd({ pingCount: e.target.value })} placeholder="3" className={inp} />
-                            </div>
-                            <div>
-                              <label className="block text-[10px] font-medium text-slate-400 mb-1">Prioridad ruta</label>
-                              <input value={wan.routePriority} onChange={(e) => upd({ routePriority: e.target.value })} placeholder="1" className={inp} />
-                            </div>
-                            <div>
-                              <label className="block text-[10px] font-medium text-slate-400 mb-1">Tabla ruteo</label>
-                              <input value={wan.routingTable} onChange={(e) => upd({ routingTable: e.target.value })} placeholder="wan1" className={inp} />
-                            </div>
-                          </div>
-                        );
-                      })()}
                     </section>
-                  )}
-
-                  {/* Sección LAN avanzado */}
-                  <section>
-                    <p className="text-xs font-semibold text-slate-300 mb-2 flex items-center gap-1.5">
-                      <Network size={12} className="text-blue-400" /> LAN
-                    </p>
-                    <div className="grid grid-cols-2 gap-2.5 p-3 bg-slate-800/40 border border-slate-700/40 rounded-xl">
-                      {[
-                        ['Bridge / Interfaz', 'lanInterface', 'bridge-lan'],
-                        ['Nuevo nombre',      'lanNewName',   ''],
-                        ['CIDR LAN',          'lanCidr',      '192.168.88.0/24'],
-                        ['Gateway LAN',       'lanGateway',   '192.168.88.1'],
-                        ['DHCP inicio',       'dhcpStart',    '192.168.88.10'],
-                        ['DHCP fin',          'dhcpEnd',      '192.168.88.254'],
-                        ['DNS servers',       'dnsServers',   '8.8.8.8,8.8.4.4'],
-                      ].map(([label, key, ph]) => (
-                        <div key={key} className={key === 'dnsServers' ? 'col-span-2' : ''}>
-                          <label className="block text-[10px] font-medium text-slate-400 mb-1">{label}</label>
-                          <input
-                            value={String(form.lanAdvanced[key as keyof typeof form.lanAdvanced] ?? '')}
-                            onChange={(e) => setForm((f) => ({ ...f, lanAdvanced: { ...f.lanAdvanced, [key]: e.target.value } }))}
-                            placeholder={ph}
-                            className="w-full bg-slate-800 border border-slate-600/50 rounded-lg px-3 py-2 text-xs text-slate-200 placeholder-slate-500 focus:outline-none focus:border-blue-500/40 font-mono"
-                          />
-                        </div>
-                      ))}
-                      <div className="col-span-2 flex items-center gap-2">
-                        <input type="checkbox" id="enableDhcp" checked={form.lanAdvanced.enableDhcp}
-                          onChange={(e) => setForm((f) => ({ ...f, lanAdvanced: { ...f.lanAdvanced, enableDhcp: e.target.checked } }))}
-                          className="w-3.5 h-3.5 accent-indigo-500" />
-                        <label htmlFor="enableDhcp" className="text-xs text-slate-300 cursor-pointer">Habilitar DHCP Server</label>
-                      </div>
-                    </div>
-                  </section>
-
-                  {/* Sección Seguridad */}
-                  <section>
-                    <p className="text-xs font-semibold text-slate-300 mb-2 flex items-center gap-1.5">
-                      <Shield size={12} className="text-emerald-400" /> Seguridad y opciones
-                    </p>
-                    <div className="grid grid-cols-2 gap-y-2.5 p-3 bg-slate-800/40 border border-slate-700/40 rounded-xl">
-                      {([
-                        ['enableBasicFirewall',        'Firewall básico'],
-                        ['enableHotspotCompatibility', 'Compatibilidad Hotspot'],
-                        ['enableNotifications',        'Notificaciones de conectividad'],
-                        ['enablePbr',                  'Policy-Based Routing (PBR)'],
-                      ] as const).map(([key, label]) => (
-                        <div key={key} className="flex items-center gap-2">
-                          <input type="checkbox" id={key} checked={form.security[key]}
-                            onChange={(e) => setForm((f) => ({ ...f, security: { ...f.security, [key]: e.target.checked } }))}
-                            className="w-3.5 h-3.5 accent-indigo-500" />
-                          <label htmlFor={key} className="text-xs text-slate-300 cursor-pointer">{label}</label>
-                        </div>
-                      ))}
-                    </div>
-                  </section>
-
+                  ))}
                 </div>
               )}
 
@@ -789,7 +688,8 @@ export default function RouterOnboardingWizard({
                 </button>
                 <button
                   onClick={() => stepTo(5)}
-                  className="flex items-center gap-2 px-4 py-2 bg-indigo-600 hover:bg-indigo-500 text-white rounded-lg text-sm font-medium transition-colors"
+                  disabled={paramsLoading}
+                  className="flex items-center gap-2 px-4 py-2 bg-indigo-600 hover:bg-indigo-500 text-white rounded-lg text-sm font-medium transition-colors disabled:opacity-50"
                 >
                   Siguiente <ChevronRight size={15} />
                 </button>
@@ -813,12 +713,9 @@ export default function RouterOnboardingWizard({
                   ['Modelo', form.model],
                   ['RouterOS', `v${form.routerosVersion}`],
                   ['Plantilla', getTemplateLabel(form.templateId)],
-                  ['Modo config.', form.configMode === 'advanced' ? 'Avanzado' : 'Básico'],
-                  ['LAN', form.configMode === 'advanced' ? form.lanAdvanced.lanCidr : (form.lanCidr || '(default)')],
-                  ['Gateway', form.configMode === 'advanced' ? form.lanAdvanced.lanGateway : (form.lanGateway || '(default)')],
-                  ...(form.configMode === 'advanced' && isPccTemplate(form.templateId)
-                    ? [['WANs configuradas', `${form.wanConfigs.length} interfaces`]]
-                    : [['WAN', form.wanInterface || '(default)']]),
+                  ['Parámetros', paramSchema
+                    ? `${countConfiguredParameters(paramSchema, paramValues)} configurados`
+                    : 'Configuración por defecto'],
                 ].map(([label, value]) => (
                   <div key={label} className="flex justify-between text-xs">
                     <span className="text-slate-500">{label}</span>

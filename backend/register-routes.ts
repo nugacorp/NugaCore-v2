@@ -14,6 +14,7 @@ import plansRoutes from './domains/plans/routes';
 import reportsRoutes from './domains/reports/routes';
 import routerosResourcesRoutes from './domains/routeros-resources/routes';
 import routerosTemplatesRoutes from './domains/routeros-templates/routes';
+import routerTemplateParametersRoutes from './domains/router-template-parameters/routes';
 import routerEnrollmentRoutes from './domains/router-enrollment/routes';
 import securityRoutes from './domains/security/routes';
 import suspensionRoutes from './domains/suspension/routes';
@@ -35,6 +36,7 @@ export function registerRoutes(app: Express): void {
   app.use(wireguardRoutes);
   app.use(routerosResourcesRoutes);
   app.use(routerosTemplatesRoutes);
+  app.use(routerTemplateParametersRoutes);
   app.use(routerEnrollmentRoutes);
   app.use(ticketsRoutes);
   app.use(inventoryRoutes);

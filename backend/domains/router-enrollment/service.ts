@@ -22,6 +22,8 @@ import { isLiveWorkerEnabled } from '../mikrotik/worker/connector';
 import { getWireguardService } from '../wireguard/service';
 import { enrollmentRepository } from './repository';
 import { resolveTemplateParams, validateEnrollmentTemplateId, getTemplateMetadata } from './template-mapper';
+import { validateTemplateParameters, redactSecretValues, applyDefaults } from '../router-template-parameters/validators';
+import { mapParametersToLibraryParams } from '../router-template-parameters/mappers';
 import {
   CheckOnlineResult,
   EnrollmentStatus,
@@ -52,6 +54,10 @@ const toView = (rec: RouterEnrollmentRecord): RouterEnrollmentView => {
     templateId: rec.templateId,
     templateName,
     generatorVersion,
+    // Parámetros con secretos (passwords PPPoE) redactados antes de exponerlos.
+    templateParameters: rec.templateParameters
+      ? redactSecretValues(rec.templateId, rec.templateParameters)
+      : undefined,
     scriptHash: rec.scriptHash,
     scriptDownloadedAt: rec.scriptDownloadedAt,
     checkOnlineAttempts: rec.checkOnlineAttempts,
@@ -107,7 +113,13 @@ const buildScript = async (
   const effectiveTemplateId = input.templateId?.trim() || 'router_base_wireguard';
 
   const resolved = resolveTemplateParams(effectiveTemplateId, input, peerConfig);
-  const resource = generateFromTemplate(resolved.params);
+
+  // Fase 4.9.2: los parámetros dinámicos del Wizard sobrescriben los valores
+  // base (solo las claves presentes; no clobbean con undefined).
+  const dynamicParams = mapParametersToLibraryParams(effectiveTemplateId, input.templateParameters);
+  const generatorParams = { ...resolved.params, ...dynamicParams };
+
+  const resource = generateFromTemplate(generatorParams);
   const filename = buildTemplateFilename(input.routerName, resolved.libraryId);
 
   logger.info('Enrollment: script generado', {
@@ -152,6 +164,22 @@ export const enrollmentService = {
     const effectiveTemplateId = input.templateId?.trim() || 'router_base_wireguard';
     validateEnrollmentTemplateId(effectiveTemplateId);
 
+    // ── 2b. Validar parámetros dinámicos (Fase 4.9.2) ────────────────
+    // También antes de WireGuard: un parámetro inválido no debe dejar peer.
+    // Se completan con defaults del esquema (config parcial permitida) y
+    // se persiste el set completo para regenerar de forma determinista.
+    let effectiveParams = input.templateParameters;
+    if (input.templateParameters) {
+      effectiveParams = applyDefaults(effectiveTemplateId, input.templateParameters);
+      const paramCheck = validateTemplateParameters(effectiveTemplateId, effectiveParams);
+      if (!paramCheck.valid) {
+        throw new BadRequestError(
+          `Parámetros de plantilla inválidos: ${paramCheck.errors.join(' ')}`,
+          'TEMPLATE_PARAMETERS_INVALID',
+        );
+      }
+    }
+
     // ── 3-4. Resolver servidor WireGuard ─────────────────────────────
     const wgService = getWireguardService();
     let resolvedServerId: string;
@@ -177,9 +205,12 @@ export const enrollmentService = {
     // ── Generar router ID (sin push aún) ─────────────────────────────
     const routerId = store.getUniqueMikrotikRouterId();
 
+    // Input normalizado con parámetros completados (defaults aplicados).
+    const enrollInput: StartEnrollmentInput = { ...input, templateParameters: effectiveParams };
+
     let buildResult: Awaited<ReturnType<typeof buildScript>>;
     try {
-      buildResult = await buildScript(routerId, input, resolvedServerId, actorId);
+      buildResult = await buildScript(routerId, enrollInput, resolvedServerId, actorId);
     } catch (err) {
       // Best-effort: revocar peer WG si fue creado antes del fallo
       try {
@@ -232,6 +263,8 @@ export const enrollmentService = {
       status: 'script_generated',
       routerosVersion: input.routerosVersion,
       templateId: resolvedTemplateId,
+      // Persiste los parámetros completados (con secretos en claro) para regenerar en /download.
+      templateParameters: effectiveParams,
       scriptHash,
       checkOnlineAttempts: 0,
       createdAt: nowIso(),
@@ -311,6 +344,8 @@ export const enrollmentService = {
       routerosVersion: rec.routerosVersion,
       // Usa el templateId persistido en el record para regenerar el mismo script.
       templateId: rec.templateId,
+      // Fase 4.9.2: regenera con los parámetros persistidos (sin defaults).
+      templateParameters: rec.templateParameters,
       notes: router.notes,
     };
 
