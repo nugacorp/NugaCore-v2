@@ -178,3 +178,170 @@ export function buildEnrollmentPayload(form: OnboardingForm): Record<string, unk
     // wgServerId omitido → usa DEFAULT_WIREGUARD_SERVER
   };
 }
+
+// ====================================================================
+// Modo Avanzado — tipos y helpers (Fase 4.9.1)
+// ====================================================================
+
+// ── Tipos avanzados ────────────────────────────────────────────────────
+
+export type WanConnectionType = 'dhcp' | 'static' | 'pppoe';
+export type ConfigMode = 'basic' | 'advanced';
+
+export interface WanConfig {
+  interfaceName: string;
+  newName: string;
+  connectionType: WanConnectionType;
+  staticIp: string;
+  cidr: string;
+  gateway: string;
+  downloadMbps: string;
+  pingHost: string;
+  pingCount: string;
+  routePriority: string;
+  routingTable: string;
+}
+
+export interface LanAdvancedConfig {
+  lanInterface: string;
+  lanNewName: string;
+  lanCidr: string;
+  lanGateway: string;
+  enableDhcp: boolean;
+  dhcpStart: string;
+  dhcpEnd: string;
+  dnsServers: string;
+}
+
+export interface SecurityConfig {
+  enableBasicFirewall: boolean;
+  enableHotspotCompatibility: boolean;
+  enableNotifications: boolean;
+  enablePbr: boolean;
+}
+
+export interface AdvancedOnboardingForm extends OnboardingForm {
+  configMode: ConfigMode;
+  wanConfigs: WanConfig[];
+  lanAdvanced: LanAdvancedConfig;
+  security: SecurityConfig;
+}
+
+// ── Defaults avanzados ─────────────────────────────────────────────────
+
+export const DEFAULT_WAN_CONFIG: WanConfig = {
+  interfaceName: 'ether1',
+  newName:        'WAN1',
+  connectionType: 'dhcp',
+  staticIp:       '',
+  cidr:           '',
+  gateway:        '',
+  downloadMbps:   '100',
+  pingHost:       '8.8.8.8',
+  pingCount:      '3',
+  routePriority:  '1',
+  routingTable:   'wan1',
+};
+
+export const DEFAULT_LAN_ADVANCED: LanAdvancedConfig = {
+  lanInterface: 'bridge-lan',
+  lanNewName:   '',
+  lanCidr:      '192.168.88.0/24',
+  lanGateway:   '192.168.88.1',
+  enableDhcp:   true,
+  dhcpStart:    '192.168.88.10',
+  dhcpEnd:      '192.168.88.254',
+  dnsServers:   '8.8.8.8,8.8.4.4',
+};
+
+export const DEFAULT_SECURITY_CONFIG: SecurityConfig = {
+  enableBasicFirewall:       true,
+  enableHotspotCompatibility: false,
+  enableNotifications:       true,
+  enablePbr:                 true,
+};
+
+export const DEFAULT_ADVANCED_FORM: AdvancedOnboardingForm = {
+  ...DEFAULT_FORM,
+  configMode:  'basic',
+  wanConfigs:  [],
+  lanAdvanced: { ...DEFAULT_LAN_ADVANCED },
+  security:    { ...DEFAULT_SECURITY_CONFIG },
+};
+
+// ── Helpers avanzados ──────────────────────────────────────────────────
+
+/** Plantillas PCC con configuración multi-WAN. */
+const PCC_WAN_COUNT: Record<string, number> = {
+  pcc_2wan: 2,
+  pcc_3wan: 3,
+  pcc_4wan: 4,
+  pcc_5wan: 5,
+};
+
+/** ¿El templateId es una plantilla PCC (multi-WAN)? */
+export function isPccTemplate(templateId: string): boolean {
+  return templateId in PCC_WAN_COUNT;
+}
+
+/**
+ * Cantidad de WANs configurables para el template.
+ * Devuelve 0 para plantillas que no son PCC.
+ */
+export function getWanCountForTemplate(templateId: string): number {
+  return PCC_WAN_COUNT[templateId] ?? 0;
+}
+
+/**
+ * Construye N WanConfig con defaults ajustados por índice
+ * (interfaceName ether1…etherN, newName WAN1…WANN, routingTable wan1…wanN).
+ */
+export function buildDefaultWanConfigs(count: number): WanConfig[] {
+  return Array.from({ length: count }, (_, i) => ({
+    ...DEFAULT_WAN_CONFIG,
+    interfaceName: `ether${i + 1}`,
+    newName:       `WAN${i + 1}`,
+    routePriority: String(i + 1),
+    routingTable:  `wan${i + 1}`,
+  }));
+}
+
+/**
+ * Construye el payload para POST /api/router-enrollment/start en modo avanzado.
+ * En modo básico delega a buildEnrollmentPayload.
+ * Los campos extra (wanConfigs, lanAdvanced, security) son ignorados por el
+ * backend actual pero persisten en el payload para compatibilidad futura.
+ */
+export function buildAdvancedEnrollmentPayload(
+  form: AdvancedOnboardingForm,
+): Record<string, unknown> {
+  const isAdvanced = form.configMode === 'advanced';
+
+  // En modo avanzado, los campos top-level de LAN vienen de lanAdvanced
+  const effectiveLanCidr     = isAdvanced ? form.lanAdvanced.lanCidr     : form.lanCidr;
+  const effectiveLanGateway  = isAdvanced ? form.lanAdvanced.lanGateway  : form.lanGateway;
+  const effectiveLanBridge   = isAdvanced ? form.lanAdvanced.lanInterface : form.lanBridgeName;
+  const effectiveWanIf       = isAdvanced && isPccTemplate(form.templateId)
+    ? (form.wanConfigs[0]?.interfaceName || form.wanInterface)
+    : form.wanInterface;
+
+  const base = buildEnrollmentPayload({
+    ...form,
+    lanCidr:      effectiveLanCidr,
+    lanGateway:   effectiveLanGateway,
+    lanBridgeName: effectiveLanBridge,
+    wanInterface:  effectiveWanIf,
+  });
+
+  if (!isAdvanced) {
+    return { ...base, configMode: 'basic' };
+  }
+
+  return {
+    ...base,
+    configMode: 'advanced',
+    ...(isPccTemplate(form.templateId) && { wanConfigs: form.wanConfigs }),
+    lanAdvanced: form.lanAdvanced,
+    security:    form.security,
+  };
+}
