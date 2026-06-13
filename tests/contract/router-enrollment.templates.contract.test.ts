@@ -17,8 +17,14 @@ import { createApp } from '../../backend/app';
 import { enrollmentRepository } from '../../backend/domains/router-enrollment/repository';
 import { resetWireguardService } from '../../backend/domains/wireguard/service';
 import { ENROLLMENT_SUPPORTED_TEMPLATES } from '../../backend/domains/router-enrollment/template-mapper';
+import { store } from '../../backend/state/store';
 
 const ADMIN = { 'x-user-role': 'super admin', 'x-user-id': 'tpl-admin' };
+
+const countPeers = async (app: Express, serverId: string): Promise<number> => {
+  const res = await request(app).get(`/api/wireguard/peers?serverId=${serverId}`).set(ADMIN);
+  return Array.isArray(res.body) ? res.body.length : 0;
+};
 
 // ── Helpers ───────────────────────────────────────────────────────────────
 
@@ -156,6 +162,155 @@ describe('Template Engine — templateId inválido → HTTP 400', () => {
       .send({ routerName: 'Router SSTP', wgServerId: serverId, routerosVersion: '7', templateId: 'router_base_sstp' });
     expect(res.status).toBe(400);
     expect(res.body.code).toBe('TEMPLATE_NOT_FOUND');
+  });
+});
+
+// ── BLOCKER 1: templateId inválido NO crea peer/router/enrollment ─────────
+
+describe('Template Engine — templateId inválido NO deja recursos huérfanos (Blocker 1)', () => {
+  let app: Express;
+  let serverId: string;
+
+  beforeAll(async () => {
+    enrollmentRepository._reset();
+    resetWireguardService();
+    app = createApp();
+    const srv = await request(app)
+      .post('/api/wireguard/servers')
+      .set(ADMIN)
+      .send({ name: 'VPN Orphan Test', endpointHost: 'vpn.orphan.local', endpointPort: 13231 });
+    serverId = srv.body.server.id;
+  });
+
+  it('templateId inválido no incrementa el conteo de peers WireGuard', async () => {
+    const peersBefore = await countPeers(app, serverId);
+
+    const res = await request(app)
+      .post('/api/router-enrollment/start')
+      .set(ADMIN)
+      .send({ routerName: 'Router Orphan', wgServerId: serverId, routerosVersion: '7', templateId: 'no_existe' });
+    expect(res.status).toBe(400);
+    expect(res.body.code).toBe('TEMPLATE_NOT_FOUND');
+
+    const peersAfter = await countPeers(app, serverId);
+    expect(peersAfter).toBe(peersBefore);
+  });
+
+  it('templateId inválido no crea enrollment', async () => {
+    const before = enrollmentRepository.list().length;
+
+    await request(app)
+      .post('/api/router-enrollment/start')
+      .set(ADMIN)
+      .send({ routerName: 'Router Orphan 2', wgServerId: serverId, routerosVersion: '7', templateId: 'no_existe' });
+
+    expect(enrollmentRepository.list().length).toBe(before);
+  });
+
+  it('templateId inválido no agrega router al store', async () => {
+    const before = store.MIKROTIK_ROUTERS.length;
+
+    await request(app)
+      .post('/api/router-enrollment/start')
+      .set(ADMIN)
+      .send({ routerName: 'Router Orphan 3', wgServerId: serverId, routerosVersion: '7', templateId: 'no_existe' });
+
+    expect(store.MIKROTIK_ROUTERS.length).toBe(before);
+  });
+
+  it('conteos antes/después idénticos: peers, enrollments, routers', async () => {
+    const peersBefore = await countPeers(app, serverId);
+    const enrollBefore = enrollmentRepository.list().length;
+    const routersBefore = store.MIKROTIK_ROUTERS.length;
+
+    const res = await request(app)
+      .post('/api/router-enrollment/start')
+      .set(ADMIN)
+      .send({ routerName: 'Router Orphan 4', wgServerId: serverId, routerosVersion: '7', templateId: 'inexistente_xyz' });
+    expect(res.status).toBe(400);
+
+    expect(await countPeers(app, serverId)).toBe(peersBefore);
+    expect(enrollmentRepository.list().length).toBe(enrollBefore);
+    expect(store.MIKROTIK_ROUTERS.length).toBe(routersBefore);
+  });
+
+  it('un templateId VÁLIDO sí crea exactamente un peer (control positivo)', async () => {
+    const peersBefore = await countPeers(app, serverId);
+
+    const res = await request(app)
+      .post('/api/router-enrollment/start')
+      .set(ADMIN)
+      .send({ routerName: 'Router Valido', wgServerId: serverId, routerosVersion: '7', templateId: 'pcc_5wan' });
+    expect(res.status).toBe(201);
+
+    expect(await countPeers(app, serverId)).toBe(peersBefore + 1);
+  });
+});
+
+// ── BLOCKER 2: GET detail incluye templateName + generatorVersion ─────────
+
+describe('Template Engine — GET detail incluye templateName y generatorVersion (Blocker 2)', () => {
+  let app: Express;
+  let serverId: string;
+
+  beforeAll(async () => {
+    enrollmentRepository._reset();
+    resetWireguardService();
+    app = createApp();
+    const srv = await request(app)
+      .post('/api/wireguard/servers')
+      .set(ADMIN)
+      .send({ name: 'VPN Detail Test', endpointHost: 'vpn.detail.local', endpointPort: 13231 });
+    serverId = srv.body.server.id;
+  });
+
+  it('GET /:id incluye templateName', async () => {
+    const start = await startEnrollment(app, serverId, 'pcc_5wan');
+    const id = start.body.enrollment.id;
+    const get = await request(app).get(`/api/router-enrollment/${id}`).set(ADMIN);
+    expect(get.status).toBe(200);
+    expect(typeof get.body.templateName).toBe('string');
+    expect(get.body.templateName.length).toBeGreaterThan(0);
+    expect(get.body.templateName).toMatch(/PCC|5/i);
+  });
+
+  it('GET /:id incluye generatorVersion', async () => {
+    const start = await startEnrollment(app, serverId, 'noc_ready');
+    const id = start.body.enrollment.id;
+    const get = await request(app).get(`/api/router-enrollment/${id}`).set(ADMIN);
+    expect(get.status).toBe(200);
+    expect(typeof get.body.generatorVersion).toBe('string');
+    expect(get.body.generatorVersion.length).toBeGreaterThan(0);
+  });
+
+  it('GET /:id NO expone script ni claves', async () => {
+    const start = await startEnrollment(app, serverId, 'router_base_wireguard');
+    const id = start.body.enrollment.id;
+    const get = await request(app).get(`/api/router-enrollment/${id}`).set(ADMIN);
+    expect(get.body).not.toHaveProperty('script');
+    expect(get.body).not.toHaveProperty('privateKey');
+    expect(get.body).not.toHaveProperty('presharedKey');
+    expect(get.body).not.toHaveProperty('wgPrivateKey');
+  });
+
+  it('GET / (list) incluye templateName y generatorVersion en cada item', async () => {
+    await startEnrollment(app, serverId, 'pppoe_server');
+    const list = await request(app).get('/api/router-enrollment').set(ADMIN);
+    expect(list.status).toBe(200);
+    expect(list.body.length).toBeGreaterThan(0);
+    for (const enr of list.body) {
+      expect(enr.templateName, `${enr.id} sin templateName`).toBeTruthy();
+      expect(enr.generatorVersion, `${enr.id} sin generatorVersion`).toBeTruthy();
+      expect(enr).not.toHaveProperty('script');
+    }
+  });
+
+  it('templateName del detalle coincide con el de la respuesta de start', async () => {
+    const start = await startEnrollment(app, serverId, 'tower_wisp');
+    const id = start.body.enrollment.id;
+    const get = await request(app).get(`/api/router-enrollment/${id}`).set(ADMIN);
+    expect(get.body.templateName).toBe(start.body.templateName);
+    expect(get.body.generatorVersion).toBe(start.body.generatorVersion);
   });
 });
 

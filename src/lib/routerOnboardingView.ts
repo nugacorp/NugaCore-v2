@@ -131,6 +131,16 @@ export const DEFAULT_FORM: OnboardingForm = {
 // ── Helpers puros ───────────────────────────────────────────────────────
 
 /**
+ * Etiqueta legible de la plantilla seleccionada.
+ * Single source of truth: el resumen del wizard y cualquier UI deben usar esto
+ * para reflejar exactamente la plantilla en form.templateId (evita divergencias
+ * entre lo que se muestra y lo que se envía en el payload).
+ */
+export function getTemplateLabel(templateId: string): string {
+  return ONBOARDING_TEMPLATES.find((t) => t.id === templateId)?.label ?? templateId;
+}
+
+/**
  * ¿Requiere el template RouterOS v7 pero el formulario tiene v6?
  * Devuelve el texto de advertencia o null si no hay problema.
  */

@@ -21,7 +21,7 @@ import { readRouterSnapshot } from '../mikrotik/worker/worker';
 import { isLiveWorkerEnabled } from '../mikrotik/worker/connector';
 import { getWireguardService } from '../wireguard/service';
 import { enrollmentRepository } from './repository';
-import { resolveTemplateParams } from './template-mapper';
+import { resolveTemplateParams, validateEnrollmentTemplateId, getTemplateMetadata } from './template-mapper';
 import {
   CheckOnlineResult,
   EnrollmentStatus,
@@ -37,6 +37,8 @@ const MAX_CHECK_ATTEMPTS = 10;
 
 const toView = (rec: RouterEnrollmentRecord): RouterEnrollmentView => {
   const router = store.MIKROTIK_ROUTERS.find((r) => r.id === rec.routerId);
+  // templateName / generatorVersion se derivan del templateId (no se persisten).
+  const { templateName, generatorVersion } = getTemplateMetadata(rec.templateId);
   return {
     id: rec.id,
     routerId: rec.routerId,
@@ -48,6 +50,8 @@ const toView = (rec: RouterEnrollmentRecord): RouterEnrollmentView => {
     statusLabel: ENROLLMENT_STATUS_LABELS[rec.status],
     routerosVersion: rec.routerosVersion,
     templateId: rec.templateId,
+    templateName,
+    generatorVersion,
     scriptHash: rec.scriptHash,
     scriptDownloadedAt: rec.scriptDownloadedAt,
     checkOnlineAttempts: rec.checkOnlineAttempts,
@@ -138,10 +142,17 @@ export const enrollmentService = {
    * Si wgServerId se omite, usa el servidor WireGuard default del VPS.
    */
   async start(input: StartEnrollmentInput, actorId: string): Promise<StartEnrollmentResult> {
+    // ── 1. Validar input básico ──────────────────────────────────────
     if (!input.routerName?.trim()) throw new BadRequestError('routerName es obligatorio.');
     if (!input.routerosVersion) throw new BadRequestError('routerosVersion es obligatorio.');
 
-    // ── Resolver servidor WireGuard ───────────────────────────────────
+    // ── 2. Validar templateId ANTES de tocar WireGuard ───────────────
+    // Crítico: si el templateId es inválido debe fallar aquí, sin crear ni
+    // reutilizar un peer WireGuard (evita peers huérfanos en el servidor).
+    const effectiveTemplateId = input.templateId?.trim() || 'router_base_wireguard';
+    validateEnrollmentTemplateId(effectiveTemplateId);
+
+    // ── 3-4. Resolver servidor WireGuard ─────────────────────────────
     const wgService = getWireguardService();
     let resolvedServerId: string;
 

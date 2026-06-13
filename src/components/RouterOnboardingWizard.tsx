@@ -41,10 +41,19 @@ import {
   WanConfig,
   buildAdvancedEnrollmentPayload,
   getTemplateV7Warning,
+  getTemplateLabel,
   isPccTemplate,
   getWanCountForTemplate,
   buildDefaultWanConfigs,
 } from '../lib/routerOnboardingView';
+
+/** Clona el formulario por defecto con objetos anidados frescos (evita refs compartidas). */
+const freshDefaultForm = (): AdvancedOnboardingForm => ({
+  ...DEFAULT_ADVANCED_FORM,
+  wanConfigs: DEFAULT_ADVANCED_FORM.wanConfigs.map((w) => ({ ...w })),
+  lanAdvanced: { ...DEFAULT_ADVANCED_FORM.lanAdvanced },
+  security: { ...DEFAULT_ADVANCED_FORM.security },
+});
 
 // ── Tipos locales ──────────────────────────────────────────────────────
 
@@ -103,7 +112,7 @@ export default function RouterOnboardingWizard({
   getAuthHeaders,
 }: RouterOnboardingWizardProps) {
   const [step, setStep] = useState(1);
-  const [form, setForm] = useState<AdvancedOnboardingForm>({ ...DEFAULT_ADVANCED_FORM });
+  const [form, setForm] = useState<AdvancedOnboardingForm>(freshDefaultForm);
   const [activeWanTab, setActiveWanTab] = useState(0);
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState('');
@@ -214,7 +223,7 @@ export default function RouterOnboardingWizard({
 
   const handleClose = () => {
     setStep(1);
-    setForm({ ...DEFAULT_ADVANCED_FORM });
+    setForm(freshDefaultForm());
     setActiveWanTab(0);
     setStartResult(null);
     setCheckResult(null);
@@ -799,7 +808,7 @@ export default function RouterOnboardingWizard({
                   ['Tipo', ROUTER_TYPE_OPTIONS.find((o) => o.value === form.routerType)?.label],
                   ['Modelo', form.model],
                   ['RouterOS', `v${form.routerosVersion}`],
-                  ['Plantilla', ONBOARDING_TEMPLATES.find((t) => t.id === form.templateId)?.label],
+                  ['Plantilla', getTemplateLabel(form.templateId)],
                   ['Modo config.', form.configMode === 'advanced' ? 'Avanzado' : 'Básico'],
                   ['LAN', form.configMode === 'advanced' ? form.lanAdvanced.lanCidr : (form.lanCidr || '(default)')],
                   ['Gateway', form.configMode === 'advanced' ? form.lanAdvanced.lanGateway : (form.lanGateway || '(default)')],

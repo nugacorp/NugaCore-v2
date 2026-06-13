@@ -3,7 +3,9 @@ import {
   ENROLLMENT_SUPPORTED_TEMPLATES,
   validateEnrollmentTemplateId,
   resolveTemplateParams,
+  getTemplateMetadata,
 } from '../../backend/domains/router-enrollment/template-mapper';
+import { TEMPLATE_LIBRARY_VERSION } from '../../backend/domains/routeros-templates/types';
 import type { StartEnrollmentInput } from '../../backend/domains/router-enrollment/types';
 import type { PeerCreatedOnce } from '../../backend/domains/wireguard/types';
 
@@ -289,5 +291,42 @@ describe('resolveTemplateParams — generatorVersion', () => {
       const r = resolveTemplateParams(tpl, BASE_INPUT, MOCK_PEER);
       expect(r.templateName, `${tpl} sin templateName`).toBeTruthy();
     }
+  });
+});
+
+// ── getTemplateMetadata (Blocker 2) ──────────────────────────────────────
+
+describe('getTemplateMetadata', () => {
+  it('router_base_wireguard → templateName legible', () => {
+    const m = getTemplateMetadata('router_base_wireguard');
+    expect(m.templateName).toBeTruthy();
+    expect(m.templateName).not.toBe('router_base_wireguard'); // nombre legible, no el id
+  });
+
+  it('router_base_wireguard → generatorVersion presente', () => {
+    expect(getTemplateMetadata('router_base_wireguard').generatorVersion).toBeTruthy();
+  });
+
+  it('pcc_5wan → templateName menciona PCC o 5', () => {
+    const m = getTemplateMetadata('pcc_5wan');
+    expect(m.templateName).toMatch(/PCC|5/i);
+  });
+
+  it('noc_ready → templateName legible', () => {
+    expect(getTemplateMetadata('noc_ready').templateName).toBeTruthy();
+  });
+
+  it('cada template soportado deriva templateName y generatorVersion', () => {
+    for (const tpl of ENROLLMENT_SUPPORTED_TEMPLATES) {
+      const m = getTemplateMetadata(tpl);
+      expect(m.templateName, `${tpl} sin templateName`).toBeTruthy();
+      expect(m.generatorVersion, `${tpl} sin generatorVersion`).toBeTruthy();
+    }
+  });
+
+  it('templateId desconocido → templateName = el id, generatorVersion = versión por defecto', () => {
+    const m = getTemplateMetadata('no_existe');
+    expect(m.templateName).toBe('no_existe');
+    expect(m.generatorVersion).toBe(TEMPLATE_LIBRARY_VERSION);
   });
 });

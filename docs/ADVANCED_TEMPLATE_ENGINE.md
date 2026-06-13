@@ -52,10 +52,16 @@ Responsabilidades:
 templateId: string   // plantilla usada en la generación
 ```
 
-### RouterEnrollmentView (nuevo campo)
+### RouterEnrollmentView (campos nuevos)
 ```typescript
-templateId: string   // visible en GET /api/router-enrollment/:id
+templateId: string         // visible en GET /api/router-enrollment/:id
+templateName: string       // derivado de templateId (no persistido)
+generatorVersion: string   // derivado de templateId (no persistido)
 ```
+
+> `templateName` y `generatorVersion` se derivan al vuelo desde `templateId`
+> vía `getTemplateMetadata()`; no se duplica información en la base de datos.
+> Ver [ADVANCED_TEMPLATE_ENGINE_FIXES.md](ADVANCED_TEMPLATE_ENGINE_FIXES.md).
 
 ### StartEnrollmentInput (nuevo campo opcional)
 ```typescript

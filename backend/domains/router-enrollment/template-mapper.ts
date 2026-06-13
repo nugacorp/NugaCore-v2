@@ -72,6 +72,26 @@ export function validateEnrollmentTemplateId(templateId: string | undefined | nu
   }
 }
 
+// ── Metadata derivada (no persistida) ─────────────────────────────────
+
+export interface TemplateMetadata {
+  templateName: string;
+  generatorVersion: string;
+}
+
+/**
+ * Deriva templateName y generatorVersion desde el templateId.
+ * No persiste información duplicada: se calcula desde la biblioteca al vuelo.
+ * Si el templateId no existe en la biblioteca, devuelve el id como nombre.
+ */
+export function getTemplateMetadata(templateId: string): TemplateMetadata {
+  const descriptor = getTemplateById(templateId as TemplateLibraryId);
+  return {
+    templateName:     descriptor?.name ?? templateId,
+    generatorVersion: descriptor?.generatorVersion ?? TEMPLATE_LIBRARY_VERSION,
+  };
+}
+
 // ── Mapper principal ──────────────────────────────────────────────────
 
 /**

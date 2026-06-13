@@ -60,6 +60,10 @@ export interface RouterEnrollmentView {
   routerosVersion: '6' | '7';
   /** Plantilla real usada en la generación. */
   templateId: string;
+  /** Nombre legible de la plantilla (derivado de templateId, no persistido). */
+  templateName: string;
+  /** Versión del generador (derivada de templateId, no persistida). */
+  generatorVersion: string;
   scriptHash?: string;
   scriptDownloadedAt?: string;
   checkOnlineAttempts: number;
