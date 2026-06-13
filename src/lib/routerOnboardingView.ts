@@ -141,6 +141,17 @@ export function getTemplateLabel(templateId: string): string {
 }
 
 /**
+ * Aplica la selección de plantilla al formulario.
+ * Punto ÚNICO de mutación de form.templateId: el card del Paso 3 del wizard debe
+ * usar esto para garantizar que la selección visual actualiza la fuente de verdad
+ * que luego leen el resumen (getTemplateLabel) y el payload (buildEnrollmentPayload).
+ * Genérico para OnboardingForm y AdvancedOnboardingForm.
+ */
+export function setTemplateSelection<T extends OnboardingForm>(form: T, templateId: string): T {
+  return { ...form, templateId };
+}
+
+/**
  * ¿Requiere el template RouterOS v7 pero el formulario tiene v6?
  * Devuelve el texto de advertencia o null si no hay problema.
  */

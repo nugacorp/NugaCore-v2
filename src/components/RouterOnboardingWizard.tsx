@@ -42,6 +42,7 @@ import {
   buildAdvancedEnrollmentPayload,
   getTemplateV7Warning,
   getTemplateLabel,
+  setTemplateSelection,
   isPccTemplate,
   getWanCountForTemplate,
   buildDefaultWanConfigs,
@@ -487,7 +488,10 @@ export default function RouterOnboardingWizard({
                   return (
                     <button
                       key={tpl.id}
-                      onClick={() => setF({ templateId: tpl.id })}
+                      type="button"
+                      data-testid={`template-card-${tpl.id}`}
+                      aria-pressed={form.templateId === tpl.id}
+                      onClick={() => setForm((f) => setTemplateSelection(f, tpl.id))}
                       className={`w-full text-left p-3 rounded-xl border transition-colors ${
                         form.templateId === tpl.id
                           ? 'border-purple-500/50 bg-purple-500/5'

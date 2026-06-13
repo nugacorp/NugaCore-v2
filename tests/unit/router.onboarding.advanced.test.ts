@@ -5,6 +5,7 @@ import {
   buildDefaultWanConfigs,
   buildAdvancedEnrollmentPayload,
   getTemplateLabel,
+  setTemplateSelection,
   DEFAULT_ADVANCED_FORM,
   DEFAULT_WAN_CONFIG,
   DEFAULT_LAN_ADVANCED,
@@ -296,32 +297,78 @@ describe('getTemplateLabel', () => {
   });
 });
 
+// ── setTemplateSelection — mutación canónica (Blocker 3) ───────────────
+// Es EXACTAMENTE lo que ejecuta el onClick del card del Paso 3 del wizard:
+//   setForm((f) => setTemplateSelection(f, tpl.id))
+
+describe('setTemplateSelection', () => {
+  it('default form templateId = router_base_wireguard', () => {
+    expect(DEFAULT_ADVANCED_FORM.templateId).toBe('router_base_wireguard');
+  });
+
+  it('seleccionar pcc_5wan → form.templateId = pcc_5wan', () => {
+    const form = setTemplateSelection({ ...DEFAULT_ADVANCED_FORM }, 'pcc_5wan');
+    expect(form.templateId).toBe('pcc_5wan');
+  });
+
+  it('seleccionar noc_ready → form.templateId = noc_ready', () => {
+    const form = setTemplateSelection({ ...DEFAULT_ADVANCED_FORM }, 'noc_ready');
+    expect(form.templateId).toBe('noc_ready');
+  });
+
+  it('seleccionar pppoe_server → form.templateId = pppoe_server', () => {
+    const form = setTemplateSelection({ ...DEFAULT_ADVANCED_FORM }, 'pppoe_server');
+    expect(form.templateId).toBe('pppoe_server');
+  });
+
+  it('es inmutable: no muta el form original', () => {
+    const original = { ...DEFAULT_ADVANCED_FORM };
+    setTemplateSelection(original, 'pcc_5wan');
+    expect(original.templateId).toBe('router_base_wireguard');
+  });
+
+  it('preserva el resto de campos del form', () => {
+    const base = { ...DEFAULT_ADVANCED_FORM, routerName: 'Torre Z', lanCidr: '10.1.0.0/24' };
+    const form = setTemplateSelection(base, 'pcc_3wan');
+    expect(form.routerName).toBe('Torre Z');
+    expect(form.lanCidr).toBe('10.1.0.0/24');
+    expect(form.templateId).toBe('pcc_3wan');
+  });
+});
+
 // ── Flujo wizard: selección → resumen → payload (Blocker 3) ────────────
-// Simula el setF del wizard (spread inmutable del form con nuevo templateId).
+// Usa el helper REAL setTemplateSelection (el mismo que invoca el card).
 
 describe('Wizard — selección de plantilla se conserva en resumen y payload', () => {
-  const setTemplate = (form: AdvancedOnboardingForm, templateId: string): AdvancedOnboardingForm =>
-    ({ ...form, templateId }); // equivalente a setF({ templateId }) del componente
-
   it('seleccionar pcc_5wan: el label del resumen muestra PCC 5 WAN', () => {
-    const form = setTemplate({ ...DEFAULT_ADVANCED_FORM }, 'pcc_5wan');
+    const form = setTemplateSelection({ ...DEFAULT_ADVANCED_FORM }, 'pcc_5wan');
     expect(getTemplateLabel(form.templateId)).toBe('Balanceador PCC — 5 WAN');
   });
 
   it('seleccionar pcc_5wan: el payload contiene templateId=pcc_5wan', () => {
-    const form = setTemplate({ ...DEFAULT_ADVANCED_FORM, routerName: 'R' }, 'pcc_5wan');
+    const form = setTemplateSelection({ ...DEFAULT_ADVANCED_FORM, routerName: 'R' }, 'pcc_5wan');
     expect(buildAdvancedEnrollmentPayload(form).templateId).toBe('pcc_5wan');
   });
 
   it('seleccionar pcc_5wan NO revierte a router_base_wireguard', () => {
-    const form = setTemplate({ ...DEFAULT_ADVANCED_FORM, routerName: 'R' }, 'pcc_5wan');
+    const form = setTemplateSelection({ ...DEFAULT_ADVANCED_FORM, routerName: 'R' }, 'pcc_5wan');
     expect(buildAdvancedEnrollmentPayload(form).templateId).not.toBe('router_base_wireguard');
     expect(getTemplateLabel(form.templateId)).not.toBe('Router Base + WireGuard');
   });
 
+  it('seleccionar noc_ready: payload contiene templateId=noc_ready', () => {
+    const form = setTemplateSelection({ ...DEFAULT_ADVANCED_FORM, routerName: 'R' }, 'noc_ready');
+    expect(buildAdvancedEnrollmentPayload(form).templateId).toBe('noc_ready');
+  });
+
+  it('seleccionar pppoe_server: payload contiene templateId=pppoe_server', () => {
+    const form = setTemplateSelection({ ...DEFAULT_ADVANCED_FORM, routerName: 'R' }, 'pppoe_server');
+    expect(buildAdvancedEnrollmentPayload(form).templateId).toBe('pppoe_server');
+  });
+
   it('cambiar de pcc_5wan a noc_ready actualiza label y payload', () => {
-    let form = setTemplate({ ...DEFAULT_ADVANCED_FORM, routerName: 'R' }, 'pcc_5wan');
-    form = setTemplate(form, 'noc_ready');
+    let form = setTemplateSelection({ ...DEFAULT_ADVANCED_FORM, routerName: 'R' }, 'pcc_5wan');
+    form = setTemplateSelection(form, 'noc_ready');
     expect(getTemplateLabel(form.templateId)).toBe('NOC Ready');
     expect(buildAdvancedEnrollmentPayload(form).templateId).toBe('noc_ready');
   });
@@ -333,7 +380,7 @@ describe('Wizard — selección de plantilla se conserva en resumen y payload', 
   });
 
   it('selección en modo avanzado pcc_5wan también conserva templateId en payload', () => {
-    const base = setTemplate({ ...DEFAULT_ADVANCED_FORM, routerName: 'R' }, 'pcc_5wan');
+    const base = setTemplateSelection({ ...DEFAULT_ADVANCED_FORM, routerName: 'R' }, 'pcc_5wan');
     const form: AdvancedOnboardingForm = {
       ...base,
       configMode: 'advanced',
