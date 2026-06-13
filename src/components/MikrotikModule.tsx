@@ -1,17 +1,20 @@
 import React, { useState, useEffect, useRef } from 'react';
-import { 
-  Terminal, 
-  Send, 
-  Sparkles, 
-  RefreshCw, 
-  ShieldAlert, 
+import {
+  Terminal,
+  Send,
+  Sparkles,
+  RefreshCw,
+  ShieldAlert,
   ExternalLink,
   BookOpen,
   Cpu,
   Lock,
   MessageSquare,
-  Network
+  Network,
+  Plus,
 } from 'lucide-react';
+import RouterOnboardingWizard from './RouterOnboardingWizard';
+import { canStartRouterOnboarding } from '../lib/routerOnboardingRbac';
 
 export interface MikrotikRouter {
   id: string;
@@ -93,6 +96,8 @@ interface MikrotikModuleProps {
   onRunWorker: () => Promise<void>;
   onReadRouter: (id: string) => Promise<RouterSnapshot>;
   onRefreshWorkerRuns: () => Promise<void>;
+  // Onboarding Wizard (Fase 4.9)
+  getAuthHeaders?: () => Promise<Record<string, string>>;
 }
 
 export default function MikrotikModule({
@@ -110,7 +115,11 @@ export default function MikrotikModule({
   onRunWorker,
   onReadRouter,
   onRefreshWorkerRuns,
+  getAuthHeaders,
 }: MikrotikModuleProps) {
+  // Onboarding Wizard (Fase 4.9)
+  const [showOnboarding, setShowOnboarding] = useState(false);
+
   // Connected Router State
   const [activeRouter, setActiveRouter] = useState<MikrotikRouter>(MIKROTIK_ROUTERS[0]);
 
@@ -219,6 +228,17 @@ export default function MikrotikModule({
 
   return (
     <div className="space-y-6 text-slate-200 p-6 bg-slate-900 min-h-screen font-sans">
+      {/* Onboarding Wizard (Fase 4.9) */}
+      {showOnboarding && getAuthHeaders && (
+        <RouterOnboardingWizard
+          isOpen={showOnboarding}
+          onClose={() => setShowOnboarding(false)}
+          onCompleted={() => { setShowOnboarding(false); onRefreshRouters(); }}
+          userRole={userRole}
+          getAuthHeaders={getAuthHeaders}
+        />
+      )}
+
       {/* Header Bento block */}
       <div className="flex flex-col md:flex-row md:items-center justify-between gap-4 border-b border-slate-800 pb-5">
         <div>
@@ -231,6 +251,15 @@ export default function MikrotikModule({
           </p>
         </div>
         <div className="flex flex-col md:flex-row items-stretch md:items-center gap-3">
+          {/* Botón Agregar Router (Fase 4.9) */}
+          {getAuthHeaders && canStartRouterOnboarding(userRole) && (
+            <button
+              onClick={() => setShowOnboarding(true)}
+              className="flex items-center gap-1.5 px-3 py-2 text-xs font-medium bg-indigo-500/10 hover:bg-indigo-500/20 text-indigo-300 border border-indigo-500/20 rounded-xl transition-colors"
+            >
+              <Plus size={14} /> Agregar Router
+            </button>
+          )}
           {/* Dropdown Selector */}
           <div className="bg-slate-950 border border-slate-800 rounded-xl px-3 py-2 flex items-center space-x-2 font-mono text-xs">
             <Network className="w-4 h-4 text-indigo-400 animate-pulse shrink-0" />

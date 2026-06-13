@@ -838,6 +838,7 @@ export default function App() {
                 onRunWorker={handleRunWorker}
                 onReadRouter={handleReadRouter}
                 onRefreshWorkerRuns={loadWorkerRuns}
+                getAuthHeaders={getAuthHeaders}
               />
             )}
 
