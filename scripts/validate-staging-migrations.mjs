@@ -56,6 +56,12 @@ async function checkColumn(table, column) {
   return true;
 }
 
+// Informativo: NO afecta el contador (las legacy pueden o no existir según el entorno).
+async function columnExists(table, column) {
+  const { error } = await client.from(table).select(column).limit(0);
+  return !error;
+}
+
 async function countIn(table, ids) {
   const { count, error } = await client
     .from(table)
@@ -117,6 +123,30 @@ if (clients.error) {
   } else {
     ok('clientes mock completos (seed mock permitido y consistente)');
   }
+}
+
+console.log('\n4. mikrotik_command_audit — columnas nuevas (evolutivo, no destructivo):');
+const auditOk = await checkTable('mikrotik_command_audit');
+if (auditOk) {
+  for (const col of [
+    'action',
+    'dry_run',
+    'actor_id',
+    'request_payload',
+    'result_summary',
+    'error_message',
+  ]) {
+    await checkColumn('mikrotik_command_audit', col);
+  }
+  // Columnas legacy: informativo (no falla si no estaban en este entorno; tampoco
+  // falla si existen columnas legacy adicionales — solo se reporta su presencia).
+  const legacyPresent = [];
+  for (const col of ['command', 'mode', 'executed_by', 'message', 'router_name']) {
+    if (await columnExists('mikrotik_command_audit', col)) legacyPresent.push(col);
+  }
+  console.log(
+    `  · columnas legacy conservadas: ${legacyPresent.length ? legacyPresent.join(', ') : '(ninguna en este entorno)'}`,
+  );
 }
 
 console.log(`\n── Resultado: ${passed} OK · ${failed} fallidos ──\n`);

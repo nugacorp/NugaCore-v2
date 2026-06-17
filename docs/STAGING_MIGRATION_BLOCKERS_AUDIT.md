@@ -58,6 +58,53 @@ recomendado; son aditivas y sin uso). No hay pérdida de datos por dejarlas.
 
 ---
 
+## Bloqueador 1b — `mikrotik_command_audit` legacy schema
+
+### Síntoma
+```
+ERROR: 42703: column "action" does not exist
+```
+al ejecutar `CREATE INDEX ... ON mikrotik_command_audit(action)` (segundo intento
+de Hermes, ya con `mikrotik_routers` resuelto).
+
+### Causa raíz
+Idéntica a `mikrotik_routers`: en staging **ya existe** `mikrotik_command_audit`
+con un esquema **legacy** distinto al de la migración.
+
+| Columnas legacy (en staging) | Columnas nuevas esperadas (migración) |
+|---|---|
+| `id`, `router_id`, `router_name`, `command`, `mode`, `status`, `executed_by`, `message`, `created_at` | `id`, `router_id`, `status`, `action`, `dry_run`, `actor_id`, `request_payload`, `result_summary`, `error_message`, `updated_at`, `created_at` |
+
+Como la tabla ya existe, el `CREATE TABLE IF NOT EXISTS` con el esquema nuevo se
+**salta por completo**: `action`, `dry_run`, `actor_id`, `request_payload`,
+`result_summary`, `error_message`, `updated_at` nunca se crean. El `CREATE INDEX`
+sobre `action` falla porque la columna no existe.
+
+### Decisión
+Misma estrategia evolutiva: `CREATE TABLE IF NOT EXISTS` mínimo (fallback) +
+`ALTER TABLE ... ADD COLUMN IF NOT EXISTS` para las columnas nuevas, **conservando
+las legacy** (`command`, `mode`, `executed_by`, `message`, `router_name`). Backfill
+**seguro y opcional** desde las legacy (`action ← command`, `actor_id ←
+executed_by`, `result_summary ← jsonb_build_object('message', message)`), cada uno
+protegido por un guard `information_schema` para no fallar en una DB fresca.
+Índices (`action`, `router_id`, `status`, `created_at`, `dry_run`) al final.
+
+### Riesgos
+- **Datos legacy**: nulo. No se borran ni renombran columnas; no se dropea la
+  tabla. El backfill solo rellena columnas nuevas que estén `NULL`/vacías y nunca
+  sobreescribe datos existentes. `result_summary` se crea como `JSONB DEFAULT '{}'`.
+- **Tipos**: `action`/`actor_id` son TEXT (compatibles con `command`/`executed_by`
+  TEXT). `result_summary` JSONB se llena con `jsonb_build_object`, sin castear
+  texto crudo. El backfill está guardado por existencia de la columna legacy.
+- **status**: legacy lo tiene; al existir, `ADD COLUMN` lo omite y NO se le impone
+  el CHECK nuevo (evita romper valores legacy fuera del enum).
+
+### Rollback
+Columnas nuevas inertes mientras `USE_DB_MIKROTIK=false`. `DROP COLUMN IF EXISTS`
+si se quisiera revertir (no recomendado). Sin pérdida de datos legacy.
+
+---
+
 ## Bloqueador 2 — `20260604000001_billing_data_migration.sql`
 
 ### Síntoma

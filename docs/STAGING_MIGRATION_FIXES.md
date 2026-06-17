@@ -10,7 +10,7 @@ Detalle de causa raíz y decisiones: `docs/STAGING_MIGRATION_BLOCKERS_AUDIT.md`.
 
 | Archivo | Cambio |
 |---|---|
-| `supabase/migrations/20260605000000_mikrotik_provisioning_schema.sql` | Sección 1 reescrita: `mikrotik_routers` ahora se extiende con `ALTER TABLE ADD COLUMN IF NOT EXISTS` (status, connection_type, vpn_ip, api_port, api_ssl_port, management_ip, has_credentials, provisioning_status, last_seen_at, notes, updated_at, linked_tower_id). Índices y trigger después de garantizar columnas. Tablas auxiliares y RLS sin cambios. |
+| `supabase/migrations/20260605000000_mikrotik_provisioning_schema.sql` | **Sección 1** (`mikrotik_routers`) y **Sección 5** (`mikrotik_command_audit`) reescritas como evolutivas: `ALTER TABLE ADD COLUMN IF NOT EXISTS` sobre tablas que ya existen con esquema legacy. Routers: status, connection_type, vpn_ip, api_port, api_ssl_port, management_ip, has_credentials, provisioning_status, last_seen_at, notes, updated_at, linked_tower_id. Command audit: action, dry_run, actor_id, request_payload, result_summary, error_message, updated_at (+ backfill seguro desde command/executed_by/message). Índices y trigger después de garantizar columnas; columnas legacy conservadas; RLS sin cambios. |
 | `supabase/migrations/20260604000001_billing_data_migration.sql` | Guard del seed mock ahora exige `c-1..c-5` (antes solo `c-1`). Si faltan, omite con `RAISE NOTICE` + `RETURN`. Backfill y migración legacy intactos. |
 | `scripts/validate-staging-migrations.mjs` | Nuevo. Valida columnas/tablas de provisioning y ausencia de facturas mock huérfanas (REST, sin secretos). |
 | `tests/unit/staging.migrations.test.ts` | Nuevo. Scan de fuente: ADD COLUMN IF NOT EXISTS, índices, guard de 5 clientes, no-creación de clientes. |
@@ -36,12 +36,30 @@ NOTIFY pgrst, 'reload schema';
 
 ## Qué espera Hermes (resultado)
 
-- `mikrotik_provisioning_schema` aplica **sin** `ERROR: column "status" does not exist`.
+- `mikrotik_provisioning_schema` aplica **sin** `ERROR: column "status" does not exist`
+  **ni** `ERROR: column "action" does not exist`.
 - `mikrotik_routers` gana las columnas de provisioning sin perder las de monitoreo.
+- `mikrotik_command_audit` gana las columnas nuevas (`action`, `dry_run`, `actor_id`,
+  `request_payload`, `result_summary`, `error_message`, `updated_at`) **conservando**
+  las legacy (`command`, `mode`, `executed_by`, `message`, `router_name`); el backfill
+  rellena `action`/`actor_id`/`result_summary` desde las legacy sin sobreescribir.
 - Se crean `mikrotik_router_credentials`, `mikrotik_provisioning_tokens`,
-  `mikrotik_provisioning_scripts` (y `mikrotik_command_audit` si no existía).
+  `mikrotik_provisioning_scripts`.
 - `billing_data_migration` aplica **sin** FK violation. Con `c-2..c-5` ausentes,
   emite el NOTICE de seed omitido y termina OK. Backfill aplicado.
+
+### Cómo reintentar (Hermes)
+
+La migración es idempotente: re-ejecutarla es seguro aunque ya se hayan aplicado
+otras partes. En el SQL editor de staging:
+
+```sql
+\i supabase/migrations/20260605000000_mikrotik_provisioning_schema.sql
+NOTIFY pgrst, 'reload schema';
+```
+
+No requiere revertir nada del intento anterior (no dejó cambios: falló en el índice
+y la transacción revirtió).
 
 ## Cómo revalidar
 

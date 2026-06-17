@@ -118,3 +118,67 @@ describe('billing_data_migration — seed mock seguro', () => {
     expect(billingSql).toMatch(/ON CONFLICT \(id\) DO NOTHING/i);
   });
 });
+
+describe('mikrotik_command_audit — migración evolutiva sobre esquema legacy', () => {
+  const NEW_COLUMNS = [
+    'action',
+    'dry_run',
+    'actor_id',
+    'request_payload',
+    'result_summary',
+    'error_message',
+    'updated_at',
+  ];
+  const LEGACY_COLUMNS = ['command', 'mode', 'executed_by', 'message'];
+
+  it('añade las columnas nuevas con ADD COLUMN IF NOT EXISTS (incluida action)', () => {
+    for (const col of NEW_COLUMNS) {
+      expect(mikrotikSql, `falta ADD COLUMN IF NOT EXISTS ${col}`).toMatch(
+        new RegExp(`ADD COLUMN IF NOT EXISTS\\s+${col}\\b`, 'i'),
+      );
+    }
+  });
+
+  it('NO depende solo de CREATE TABLE para las columnas nuevas (CREATE TABLE es mínimo)', () => {
+    const createBlock = mikrotikSql.match(
+      /CREATE TABLE IF NOT EXISTS public\.mikrotik_command_audit\s*\(([\s\S]*?)\);/i,
+    );
+    expect(createBlock, 'no se encontró el CREATE TABLE de mikrotik_command_audit').not.toBeNull();
+    const body = createBlock![1];
+    for (const col of ['action', 'dry_run', 'request_payload', 'result_summary']) {
+      expect(body, `el CREATE TABLE no debe declarar ${col}`).not.toMatch(
+        new RegExp(`\\b${col}\\b`, 'i'),
+      );
+    }
+  });
+
+  it('crea el índice sobre action DESPUÉS de garantizar la columna', () => {
+    const addAction = mikrotikSql.indexOf('ADD COLUMN IF NOT EXISTS action');
+    const idxAction = mikrotikSql.search(/CREATE INDEX IF NOT EXISTS idx_mikrotik_audit_action/i);
+    expect(addAction).toBeGreaterThan(-1);
+    expect(idxAction).toBeGreaterThan(addAction);
+    expect(mikrotikSql).toMatch(
+      /CREATE INDEX IF NOT EXISTS idx_mikrotik_audit_action\s+ON public\.mikrotik_command_audit\(action\)/i,
+    );
+  });
+
+  it('NO contiene DROP TABLE ni DROP COLUMN (no destructivo)', () => {
+    expect(mikrotikSql).not.toMatch(/DROP TABLE/i);
+    expect(mikrotikSql).not.toMatch(/DROP COLUMN/i);
+  });
+
+  it('conserva las columnas legacy (referenciadas en el backfill, nunca eliminadas)', () => {
+    for (const col of LEGACY_COLUMNS) {
+      expect(mikrotikSql, `el SQL debe referenciar la columna legacy ${col}`).toMatch(
+        new RegExp(`\\b${col}\\b`, 'i'),
+      );
+    }
+  });
+
+  it('el backfill desde legacy está protegido por guards de information_schema', () => {
+    expect(mikrotikSql).toMatch(/information_schema\.columns/i);
+    expect(mikrotikSql).toMatch(/SET action = command/i);
+    expect(mikrotikSql).toMatch(/SET actor_id = executed_by/i);
+    expect(mikrotikSql).toMatch(/jsonb_build_object\('message', message\)/i);
+  });
+});

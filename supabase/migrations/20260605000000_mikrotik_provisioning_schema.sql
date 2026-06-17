@@ -144,26 +144,77 @@ CREATE INDEX IF NOT EXISTS idx_mikrotik_scripts_router ON public.mikrotik_provis
 
 
 -- ====================================================================
--- 5. mikrotik_command_audit
---    Auditoría de acciones/comandos. dry_run marca las simulaciones.
---    request_payload NO debe contener secretos (se enmascaran en backend).
+-- 5. mikrotik_command_audit — EVOLUTIVO (no destructivo)
+--
+--    En staging ya existe esta tabla con esquema LEGACY (id, router_id,
+--    router_name, command, mode, status, executed_by, message, created_at).
+--    Igual que `mikrotik_routers`, un `CREATE TABLE IF NOT EXISTS` con el
+--    esquema nuevo se salta cuando la tabla ya existe, y el índice sobre
+--    `action` falla ("column action does not exist").
+--
+--    Estrategia: fallback mínimo + ADD COLUMN IF NOT EXISTS para las columnas
+--    nuevas, conservando las legacy (command, mode, executed_by, message,
+--    router_name). Backfill seguro y opcional desde las legacy. Índices al
+--    final. request_payload NO debe contener secretos (se enmascaran en backend).
 -- ====================================================================
+
+-- Fallback defensivo: si la tabla no existe (DB fresca), crearla mínima.
+-- En staging ya existe (legacy) → este CREATE se omite sin tocar columnas.
 CREATE TABLE IF NOT EXISTS public.mikrotik_command_audit (
-  id TEXT PRIMARY KEY,                                  -- slug: 'mkta-<n>'
-  router_id TEXT REFERENCES public.mikrotik_routers(id) ON DELETE SET NULL,
-  action TEXT NOT NULL,                                 -- create | update | generate_script | rotate_credentials | test_connection | ...
-  dry_run BOOLEAN NOT NULL DEFAULT TRUE,
-  status TEXT NOT NULL DEFAULT 'allowed'                -- allowed | blocked | executed | error
-    CHECK (status IN ('allowed','blocked','executed','error')),
-  actor_id TEXT,
-  request_payload JSONB,                                -- SIN secretos
-  result_summary TEXT,
-  error_message TEXT,
-  created_at TIMESTAMPTZ DEFAULT NOW()
+  id         TEXT PRIMARY KEY,                           -- slug: 'mkta-<n>'
+  router_id  TEXT,
+  status     TEXT,
+  created_at TIMESTAMPTZ NOT NULL DEFAULT now()
 );
 
-CREATE INDEX IF NOT EXISTS idx_mikrotik_audit_router ON public.mikrotik_command_audit(router_id);
-CREATE INDEX IF NOT EXISTS idx_mikrotik_audit_action ON public.mikrotik_command_audit(action);
+-- Columnas nuevas (aditivas). Idempotente: si ya existen, se omiten sin error.
+-- NO se tocan las columnas legacy (command, mode, executed_by, message,
+-- router_name) ni se renombran/eliminan.
+ALTER TABLE public.mikrotik_command_audit
+  ADD COLUMN IF NOT EXISTS action          TEXT,
+  ADD COLUMN IF NOT EXISTS dry_run         BOOLEAN DEFAULT TRUE,
+  ADD COLUMN IF NOT EXISTS actor_id        TEXT,
+  ADD COLUMN IF NOT EXISTS request_payload JSONB DEFAULT '{}'::jsonb,
+  ADD COLUMN IF NOT EXISTS result_summary  JSONB DEFAULT '{}'::jsonb,
+  ADD COLUMN IF NOT EXISTS error_message   TEXT,
+  ADD COLUMN IF NOT EXISTS updated_at      TIMESTAMPTZ DEFAULT NOW();
+
+-- Backfill seguro desde columnas legacy → nuevas. Cada UPDATE se ejecuta SOLO
+-- si la columna legacy existe (guard por information_schema), de modo que no
+-- falla en una DB fresca sin esas columnas. No sobreescribe valores ya puestos.
+DO $$ BEGIN
+  IF EXISTS (SELECT 1 FROM information_schema.columns
+             WHERE table_schema='public' AND table_name='mikrotik_command_audit'
+               AND column_name='command') THEN
+    UPDATE public.mikrotik_command_audit
+      SET action = command
+      WHERE action IS NULL AND command IS NOT NULL;
+  END IF;
+
+  IF EXISTS (SELECT 1 FROM information_schema.columns
+             WHERE table_schema='public' AND table_name='mikrotik_command_audit'
+               AND column_name='executed_by') THEN
+    UPDATE public.mikrotik_command_audit
+      SET actor_id = executed_by
+      WHERE actor_id IS NULL AND executed_by IS NOT NULL;
+  END IF;
+
+  IF EXISTS (SELECT 1 FROM information_schema.columns
+             WHERE table_schema='public' AND table_name='mikrotik_command_audit'
+               AND column_name='message') THEN
+    UPDATE public.mikrotik_command_audit
+      SET result_summary = jsonb_build_object('message', message)
+      WHERE (result_summary IS NULL OR result_summary = '{}'::jsonb)
+        AND message IS NOT NULL;
+  END IF;
+END $$;
+
+-- Índices: SOLO después de garantizar las columnas (todas IF NOT EXISTS).
+CREATE INDEX IF NOT EXISTS idx_mikrotik_audit_action  ON public.mikrotik_command_audit(action);
+CREATE INDEX IF NOT EXISTS idx_mikrotik_audit_router  ON public.mikrotik_command_audit(router_id);
+CREATE INDEX IF NOT EXISTS idx_mikrotik_audit_status  ON public.mikrotik_command_audit(status);
+CREATE INDEX IF NOT EXISTS idx_mikrotik_audit_created ON public.mikrotik_command_audit(created_at);
+CREATE INDEX IF NOT EXISTS idx_mikrotik_audit_dry_run ON public.mikrotik_command_audit(dry_run);
 
 
 -- ====================================================================
