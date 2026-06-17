@@ -28,32 +28,55 @@
 
 
 -- ====================================================================
--- 1. mikrotik_routers
---    Registro de cada router gestionado.
+-- 1. mikrotik_routers — EVOLUTIVO (no destructivo)
+--
+--    `init_schema` (20260531000000) YA creó esta tabla con el esquema de
+--    MONITOREO (ip_address, is_online, cpu_usage_pct, …). Esta migración
+--    NO la redefine: garantiza su existencia (mínima, como fallback) y
+--    AÑADE las columnas de PROVISIONING con ADD COLUMN IF NOT EXISTS.
+--
+--    Por qué: un `CREATE TABLE IF NOT EXISTS` con el esquema completo de
+--    provisioning se salta cuando la tabla ya existe, y luego los índices
+--    sobre columnas nuevas (p.ej. `status`) fallan. El patrón evolutivo es
+--    idempotente y compatible con la tabla existente, con o sin datos, y
+--    NO duplica columnas equivalentes ya presentes (api_port,
+--    routeros_version, linked_tower_id se conservan intactas).
 -- ====================================================================
+
+-- Fallback defensivo: en el flujo normal init_schema ya creó la tabla.
+-- Esto solo evita un fallo si por algún motivo no existiera.
 CREATE TABLE IF NOT EXISTS public.mikrotik_routers (
-  id TEXT PRIMARY KEY,                                  -- slug: 'mkt-1'
-  name TEXT NOT NULL,
-  tower_id TEXT REFERENCES public.towers(id) ON DELETE SET NULL,
-  routeros_version TEXT NOT NULL DEFAULT '7.x',
-  connection_type TEXT NOT NULL DEFAULT 'sstp'          -- wireguard | sstp | direct | zerotier | tailscale
-    CHECK (connection_type IN ('wireguard','sstp','direct','zerotier','tailscale')),
-  management_ip TEXT,                                    -- IP de administración (LAN/WAN)
-  vpn_ip TEXT,                                           -- IP asignada dentro de la VPN
-  api_port INTEGER NOT NULL DEFAULT 8728
-    CHECK (api_port BETWEEN 1 AND 65535),
-  api_ssl_port INTEGER NOT NULL DEFAULT 8729
-    CHECK (api_ssl_port BETWEEN 1 AND 65535),
-  status TEXT NOT NULL DEFAULT 'pending'                 -- pending | provisioned | connected | error
-    CHECK (status IN ('pending','provisioned','connected','error')),
-  last_seen_at TIMESTAMPTZ,
-  notes TEXT,
-  created_at TIMESTAMPTZ DEFAULT NOW(),
-  updated_at TIMESTAMPTZ DEFAULT NOW()
+  id         TEXT PRIMARY KEY,                           -- slug: 'mkt-1'
+  name       TEXT NOT NULL,
+  created_at TIMESTAMPTZ NOT NULL DEFAULT now()
 );
 
-CREATE INDEX IF NOT EXISTS idx_mikrotik_routers_status ON public.mikrotik_routers(status);
-CREATE INDEX IF NOT EXISTS idx_mikrotik_routers_tower ON public.mikrotik_routers(tower_id);
+-- Columnas de provisioning (aditivas). Cada ADD COLUMN IF NOT EXISTS es
+-- idempotente: si la columna ya existe (por init_schema o una corrida
+-- previa), se omite SIN error. Defaults constantes → sin reescritura de
+-- tabla; los CHECK aplican sobre el default (todas las filas lo cumplen).
+ALTER TABLE public.mikrotik_routers ADD COLUMN IF NOT EXISTS linked_tower_id     TEXT;
+ALTER TABLE public.mikrotik_routers ADD COLUMN IF NOT EXISTS connection_type     TEXT NOT NULL DEFAULT 'sstp'
+  CHECK (connection_type IN ('wireguard','sstp','direct','zerotier','tailscale'));
+ALTER TABLE public.mikrotik_routers ADD COLUMN IF NOT EXISTS management_ip       TEXT;
+ALTER TABLE public.mikrotik_routers ADD COLUMN IF NOT EXISTS vpn_ip              TEXT;
+ALTER TABLE public.mikrotik_routers ADD COLUMN IF NOT EXISTS api_port            INTEGER NOT NULL DEFAULT 8728
+  CHECK (api_port BETWEEN 1 AND 65535);
+ALTER TABLE public.mikrotik_routers ADD COLUMN IF NOT EXISTS api_ssl_port        INTEGER NOT NULL DEFAULT 8729
+  CHECK (api_ssl_port BETWEEN 1 AND 65535);
+ALTER TABLE public.mikrotik_routers ADD COLUMN IF NOT EXISTS status              TEXT NOT NULL DEFAULT 'pending'
+  CHECK (status IN ('pending','provisioned','connected','error'));
+ALTER TABLE public.mikrotik_routers ADD COLUMN IF NOT EXISTS provisioning_status TEXT NOT NULL DEFAULT 'pending'
+  CHECK (provisioning_status IN ('pending','provisioned','connected','error'));
+ALTER TABLE public.mikrotik_routers ADD COLUMN IF NOT EXISTS has_credentials     BOOLEAN NOT NULL DEFAULT FALSE;
+ALTER TABLE public.mikrotik_routers ADD COLUMN IF NOT EXISTS last_seen_at        TIMESTAMPTZ;
+ALTER TABLE public.mikrotik_routers ADD COLUMN IF NOT EXISTS notes               TEXT;
+ALTER TABLE public.mikrotik_routers ADD COLUMN IF NOT EXISTS updated_at          TIMESTAMPTZ NOT NULL DEFAULT now();
+
+-- Índices: SOLO después de garantizar las columnas (todas IF NOT EXISTS).
+CREATE INDEX IF NOT EXISTS idx_mikrotik_routers_status      ON public.mikrotik_routers(status);
+CREATE INDEX IF NOT EXISTS idx_mikrotik_routers_prov_status ON public.mikrotik_routers(provisioning_status);
+CREATE INDEX IF NOT EXISTS idx_mikrotik_routers_tower       ON public.mikrotik_routers(linked_tower_id);
 
 DO $$ BEGIN
   IF NOT EXISTS (SELECT 1 FROM pg_trigger WHERE tgname = 'trg_mikrotik_routers_modtime') THEN

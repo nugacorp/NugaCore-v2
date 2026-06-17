@@ -95,11 +95,23 @@ AND NOT EXISTS (
 -- ====================================================================
 
 DO $$
+DECLARE
+  mock_clients INTEGER;
 BEGIN
-  -- Proxy: si c-1 no existe, los demás tampoco → omitir todo el seed.
-  IF NOT EXISTS (SELECT 1 FROM public.clients WHERE id = 'c-1') THEN
-    RAISE NOTICE 'Clientes mock no encontrados en DB → seed de facturas omitido. '
-                 'Activar USE_DB_CUSTOMERS=true y volver a correr esta migración.';
+  -- Guard estricto: el seed mock SOLO corre si existen TODOS los clientes
+  -- requeridos (c-1..c-5). Si falta alguno, se omite el bloque COMPLETO con
+  -- un NOTICE y SIN fallar (evita FK violation por facturas huérfanas, p.ej.
+  -- insertar fac-102 para c-2 cuando c-2 no existe). NO se crean clientes
+  -- mock automáticamente. El backfill (Partes 1-2) y las suscripciones
+  -- (Parte 4) ya se aplicaron antes/después de este bloque, sin depender de él.
+  SELECT COUNT(*) INTO mock_clients
+    FROM public.clients
+    WHERE id IN ('c-1', 'c-2', 'c-3', 'c-4', 'c-5');
+
+  IF mock_clients < 5 THEN
+    RAISE NOTICE 'Clientes mock incompletos (% de 5 presentes) → seed de facturas mock OMITIDO. '
+                 'Backfill y migración legacy sí se aplican. '
+                 'Para sembrar el demo: crear c-1..c-5 (USE_DB_CUSTOMERS=true) y re-ejecutar.', mock_clients;
     RETURN;
   END IF;
 
