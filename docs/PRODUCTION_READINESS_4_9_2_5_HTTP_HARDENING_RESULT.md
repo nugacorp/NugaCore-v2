@@ -96,3 +96,37 @@ Fase 4.9.2.5 global: 🟡 en progreso.
 
 Continuar 4.9.2.5 con healthchecks/alertas y backups+restore; luego revalidación
 Hermes en staging. **No** iniciar 4.9.3 (provisioning real) hasta cerrar 4.9.2.5.
+
+---
+
+## Adenda — Observabilidad (§14)
+
+Segunda sub-entrega de 4.9.2.5: base de observabilidad.
+
+| Ítem (checklist §14) | Antes | Ahora |
+|---|---|---|
+| Logs JSON estructurados | ✅ (logger ya lo hacía en prod) | ✅ |
+| Request ID / correlation ID | ❌ | ✅ `X-Request-Id` entrante (saneado) o generado; `req.log` con el id |
+| Healthchecks internos/externos | ✅ /health, /live, /ready | ✅ + métricas en /health |
+| Métricas de API (base) | ❌ | ✅ `requestsTotal`, `errors5xx` en `/api/health` |
+| Logs sin secretos | ✅ | ✅ (id saneado con allowlist; sin valores sensibles) |
+
+Cambios:
+
+- **Nuevo** `backend/common/request-context.ts` — `attachRequestId`: correlation
+  ID por petición, `req.log = logger.child({ requestId })`, cabecera de respuesta
+  `X-Request-Id`, y conteo de peticiones/5xx en el evento `finish`.
+- **Nuevo** `backend/common/metrics.ts` — contadores en memoria (`requestsTotal`,
+  `errors5xx`) con `snapshot()`/`reset()`.
+- `backend/types/express.d.ts` — `req.requestId` y `req.log` tipados.
+- `backend/app.ts` — `attachRequestId` tras el hardening; el log de petición usa `req.log`.
+- `backend/common/errors.ts` — logs 5xx incluyen `requestId` (usa `req.log`).
+- `backend/domains/health/routes.ts` — `/api/health` expone `metrics`.
+- **Nuevo** `tests/contract/observability.contract.test.ts` — 6 tests
+  (correlation ID generado/propagado/saneado, métricas en health, contadores).
+
+Verificación local: `npx tsc --noEmit` → PASS; `npx vitest run` (no-DB) → **1012/1012**.
+
+Pendiente aún en 4.9.2.5: alertas por 5xx/jobs (requiere canal Telegram/email +
+config), readiness con chequeo real de Supabase, backups+restore probado, runbooks,
+y revalidación Hermes.

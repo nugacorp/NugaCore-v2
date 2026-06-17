@@ -8,6 +8,7 @@
 //   al errorHandler (Express 4 no captura promesas rechazadas).
 //
 // Retro-compatible: se conservan AppError, notFoundHandler y errorHandler.
+// Los logs 5xx incluyen requestId (correlation) cuando está disponible.
 // ====================================================================
 
 import { NextFunction, Request, RequestHandler, Response } from 'express';
@@ -77,15 +78,28 @@ export const errorHandler = (
   res: Response,
   _next: NextFunction,
 ): void => {
+  const log = req.log ?? logger;
+
   if (err instanceof AppError) {
     if (err.statusCode >= 500) {
-      logger.error('AppError', { code: err.code, message: err.message, path: req.path });
+      log.error('AppError', {
+        code: err.code,
+        message: err.message,
+        path: req.path,
+        method: req.method,
+        requestId: req.requestId,
+      });
     }
     res.status(err.statusCode).json({ error: err.message, code: err.code });
     return;
   }
 
   const message = err instanceof Error ? err.message : 'Unexpected server error';
-  logger.error('Unhandled exception', { message, path: req.path, method: req.method });
+  log.error('Unhandled exception', {
+    message,
+    path: req.path,
+    method: req.method,
+    requestId: req.requestId,
+  });
   res.status(500).json({ error: 'Internal server error', code: 'INTERNAL_ERROR' });
 };

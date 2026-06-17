@@ -1,17 +1,19 @@
 // ====================================================================
 // Health checks (infraestructura).
 //
-// - GET /api/health       → estado general (versión, entorno, uptime, persistencia).
+// - GET /api/health       → estado general (versión, entorno, uptime, persistencia, métricas).
 // - GET /api/health/live  → liveness  (¿el proceso responde?).
 // - GET /api/health/ready → readiness (¿listo para recibir tráfico?).
 //
 // Usados por Docker HEALTHCHECK, Coolify y balanceadores. No exponen datos
-// de negocio ni requieren autenticación.
+// de negocio ni requieren autenticación. Las métricas son contadores en
+// memoria (checklist §14): requestsTotal y errors5xx.
 // ====================================================================
 
 import { Router } from 'express';
 import { env, isProduction } from '../../config/env';
 import { domainsOnDb } from '../../config/feature-flags';
+import { metrics } from '../../common/metrics';
 
 const router = Router();
 
@@ -28,6 +30,7 @@ router.get('/api/health', (_req, res) => {
     timestamp: new Date().toISOString(),
     persistence: onDb.length > 0 ? 'mixed' : 'in-memory',
     domainsOnDb: onDb,
+    metrics: metrics.snapshot(),
   });
 });
 
