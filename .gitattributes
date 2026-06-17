@@ -1,6 +1,22 @@
+# Normalización de fin de línea: LF en todo el repo (text=auto detecta
+# binarios y NO los toca). El proyecto se despliega en Linux/VPS (Hermes);
+# LF evita el churn CRLF↔LF entre Windows y el servidor.
+* text=auto eol=lf
+
 # Garantiza LF en scripts de shell (Hermes los ejecuta en Linux/VPS).
 # Un CRLF en el shebang rompería la ejecución con "bash\r: No such file".
 *.sh text eol=lf
 
 # Scripts Node y configs ejecutados en el servidor: LF también.
 *.mjs text eol=lf
+
+# Binarios explícitos (no normalizar EOL).
+*.png binary
+*.jpg binary
+*.jpeg binary
+*.gif binary
+*.ico binary
+*.webp binary
+*.woff binary
+*.woff2 binary
+*.pdf binary

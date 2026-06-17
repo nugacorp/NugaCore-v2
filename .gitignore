@@ -9,6 +9,11 @@ coverage/
 .tmp_claude_debug.log
 /latest
 
+# Artefactos temporales de herramientas (Vitest genera estos al correr;
+# tsconfig.verify.json lo crea el flujo de verificación on-the-fly).
+vitest.config.*.timestamp-*.mjs
+tsconfig.verify.json
+
 # Variables de entorno (se ignoran salvo los archivos de ejemplo)
 .env*
 !.env.example
