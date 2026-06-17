@@ -579,4 +579,8 @@ Construir la plataforma WISP más completa del mercado para:
 - Facturación.
 - Pagos.
 - MikroTik.
-- 
+- Monitoreo.
+- Automatización.
+- Inteligencia artificial.
+
+La meta no es solo tener funcionalidades, sino tener una operación segura, auditable y recuperable para un WISP real.
