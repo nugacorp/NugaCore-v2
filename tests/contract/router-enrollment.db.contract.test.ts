@@ -19,6 +19,7 @@ import { createClient } from '@supabase/supabase-js';
 import { createApp } from '../../backend/app';
 import { resetEnrollmentRepository } from '../../backend/domains/router-enrollment/repository';
 import { resetWireguardService } from '../../backend/domains/wireguard/service';
+import { store } from '../../backend/state/store';
 
 const optIn = process.env.RUN_DB_TESTS === 'true';
 const hasSupabase = Boolean(process.env.SUPABASE_URL && process.env.SUPABASE_SERVICE_ROLE_KEY);
@@ -172,5 +173,29 @@ describe.skipIf(!optIn || !hasSupabase)('Router Enrollment DB contract (Supabase
     const { data } = await supabase.from('router_enrollment').select('*').eq('id', id).single();
     expect(data).not.toHaveProperty('script');
     expect(data?.script_hash).toBeTruthy();
+  }, DB_TIMEOUT_MS);
+
+  it('10. router_snapshot persiste y download regenera tras restart sin store de routers', async () => {
+    const start = await startPcc();
+    const id = start.body.enrollment.id;
+
+    // router_snapshot persistido en DB y NO sensible.
+    const { data } = await supabase
+      .from('router_enrollment')
+      .select('router_snapshot')
+      .eq('id', id)
+      .single();
+    expect(data?.router_snapshot?.routerName).toBeTruthy();
+    expect(JSON.stringify(data?.router_snapshot || {})).not.toMatch(/password|private-key|preshared/i);
+
+    // Restart lógico real: el repo se reconstruye (lee de Supabase) y el store
+    // de routers (memoria) se vacía → download SOLO puede usar el snapshot.
+    resetEnrollmentRepository();
+    store.MIKROTIK_ROUTERS.length = 0;
+
+    const dl = await request(app).get(`/api/router-enrollment/${id}/download`).set(ADMIN);
+    expect(dl.status).toBe(200);
+    expect(dl.text).toContain('10.99.0.1'); // LAN persistida en templateParameters
+    expect(dl.text).not.toContain(SECRET);  // secreto nunca en el script
   }, DB_TIMEOUT_MS);
 });

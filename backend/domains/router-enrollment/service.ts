@@ -29,6 +29,7 @@ import {
   EnrollmentStatus,
   ENROLLMENT_STATUS_LABELS,
   RouterEnrollmentRecord,
+  RouterEnrollmentRouterSnapshot,
   RouterEnrollmentView,
   StartEnrollmentInput,
   StartEnrollmentResult,
@@ -58,6 +59,9 @@ const toView = (rec: RouterEnrollmentRecord): RouterEnrollmentView => {
     templateParameters: rec.templateParameters
       ? redactSecretValues(rec.templateId, rec.templateParameters)
       : undefined,
+    // Snapshot NO sensible del router (sin secretos por diseño): útil para la UI
+    // y para diagnosticar regeneraciones tras restart.
+    routerSnapshot: rec.routerSnapshot,
     scriptHash: rec.scriptHash,
     scriptDownloadedAt: rec.scriptDownloadedAt,
     checkOnlineAttempts: rec.checkOnlineAttempts,
@@ -253,6 +257,18 @@ export const enrollmentService = {
       notes: input.notes,
     });
 
+    // Snapshot NO sensible del router para regenerar el .rsc en /download tras
+    // un restart, sin depender de store.MIKROTIK_ROUTERS (volátil) ni de
+    // USE_DB_MIKROTIK. NUNCA incluye secretos (claves, passwords, tokens).
+    const routerSnapshot: RouterEnrollmentRouterSnapshot = {
+      routerName: input.routerName.trim(),
+      managementIp: input.ipAddress || undefined,
+      vpnIp: wgAssignedIp || undefined,
+      apiPort: input.apiPort ?? 8728,
+      linkedTowerId: input.linkedTowerId,
+      notes: input.notes,
+    };
+
     const repo = getEnrollmentRepository();
     const id = await repo.nextId();
     const rec: RouterEnrollmentRecord = {
@@ -266,6 +282,7 @@ export const enrollmentService = {
       templateId: resolvedTemplateId,
       // Persiste los parámetros completados (con secretos en claro) para regenerar en /download.
       templateParameters: effectiveParams,
+      routerSnapshot,
       scriptHash,
       checkOnlineAttempts: 0,
       createdAt: nowIso(),
@@ -337,20 +354,34 @@ export const enrollmentService = {
     if (rec.status === 'revoked') throw new BadRequestError('El enrollment ha sido revocado.');
     if (rec.status === 'online') throw new BadRequestError('El router ya está online; no se requiere re-descarga.');
 
+    // El router vive en store.MIKROTIK_ROUTERS (volátil). Tras un restart del
+    // contenedor el store se vacía pero el enrollment persiste en DB. Para
+    // regenerar el .rsc usamos el router del store si está, y si no el snapshot
+    // NO sensible persistido en el enrollment (sin depender de USE_DB_MIKROTIK).
     const router = store.MIKROTIK_ROUTERS.find((r) => r.id === rec.routerId);
-    if (!router) throw new NotFoundError('Router no encontrado.');
+    const snapshot = rec.routerSnapshot;
+
+    const routerName = router?.name ?? snapshot?.routerName;
+    if (!routerName) {
+      // Ni router en memoria ni snapshot suficiente para regenerar el script.
+      throw new NotFoundError(
+        'No se puede regenerar el script: no hay router en memoria ni snapshot ' +
+          'persistido para este enrollment. Vuelve a iniciar el enrollment.',
+        'ROUTER_SNAPSHOT_MISSING',
+      );
+    }
 
     const input: StartEnrollmentInput = {
-      routerName: router.name,
-      ipAddress: router.ipAddress,
-      apiPort: router.apiPort,
-      linkedTowerId: router.linkedTowerId,
+      routerName,
+      ipAddress: router?.ipAddress ?? snapshot?.managementIp,
+      apiPort: router?.apiPort ?? snapshot?.apiPort,
+      linkedTowerId: router?.linkedTowerId ?? snapshot?.linkedTowerId,
       routerosVersion: rec.routerosVersion,
       // Usa el templateId persistido en el record para regenerar el mismo script.
       templateId: rec.templateId,
       // Fase 4.9.2: regenera con los parámetros persistidos (sin defaults).
       templateParameters: rec.templateParameters,
-      notes: router.notes,
+      notes: router?.notes ?? snapshot?.notes,
     };
 
     const { script, scriptFilename } = await buildScript(rec.routerId, input, rec.wgServerId, actorId);

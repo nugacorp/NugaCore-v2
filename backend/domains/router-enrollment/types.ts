@@ -26,6 +26,25 @@ export const ENROLLMENT_STATUS_LABELS: Record<EnrollmentStatus, string> = {
   revoked: 'Revocado',
 };
 
+/**
+ * Snapshot NO sensible del router usado en la generación del script. Persiste
+ * dentro del enrollment para que download() pueda regenerar el .rsc tras un
+ * restart del contenedor sin depender de store.MIKROTIK_ROUTERS (volátil) ni
+ * activar USE_DB_MIKROTIK. NUNCA contiene secretos (passwords, claves, tokens).
+ */
+export interface RouterEnrollmentRouterSnapshot {
+  routerName?: string;
+  routerType?: string;
+  model?: string;
+  siteName?: string;
+  managementIp?: string;
+  vpnIp?: string;
+  apiPort?: number;
+  apiSslPort?: number;
+  linkedTowerId?: string;
+  notes?: string;
+}
+
 /** Forma interna persistida en el repositorio. */
 export interface RouterEnrollmentRecord {
   id: string;
@@ -44,6 +63,11 @@ export interface RouterEnrollmentRecord {
    * exponen en vista/logs/preview.
    */
   templateParameters?: TemplateParameterValues;
+  /**
+   * Snapshot NO sensible del router (Fase 4.9.2 hotfix). Permite regenerar el
+   * .rsc en /download tras un restart sin depender del store en memoria.
+   */
+  routerSnapshot?: RouterEnrollmentRouterSnapshot;
   scriptHash?: string;
   scriptDownloadedAt?: string;
   checkOnlineAttempts: number;
@@ -75,6 +99,8 @@ export interface RouterEnrollmentView {
   generatorVersion: string;
   /** Parámetros dinámicos usados (Fase 4.9.2), con secretos redactados. */
   templateParameters?: TemplateParameterValues;
+  /** Snapshot NO sensible del router (Fase 4.9.2 hotfix). No contiene secretos. */
+  routerSnapshot?: RouterEnrollmentRouterSnapshot;
   scriptHash?: string;
   scriptDownloadedAt?: string;
   checkOnlineAttempts: number;

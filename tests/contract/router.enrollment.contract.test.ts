@@ -817,3 +817,82 @@ describe('Enrollment — Administrador puede iniciar y revocar', () => {
     expect(rev.body.status).toBe('revoked');
   });
 });
+
+// ── FIX-3 (Fase 4.9.2 hotfix): download sobrevive restart vía routerSnapshot ──
+
+describe('Enrollment — download sobrevive restart vía routerSnapshot', () => {
+  let app: Express;
+  let serverId: string;
+
+  beforeAll(async () => {
+    enrollmentRepository._reset();
+    resetWireguardService();
+    app = createApp();
+    const srvRes = await request(app)
+      .post('/api/wireguard/servers')
+      .set(ADMIN)
+      .send({ name: 'VPN Snapshot Test', endpointHost: 'vpn.snap.local', endpointPort: 13231, isDefault: true });
+    serverId = srvRes.body.server.id;
+  });
+
+  const startEnrollment = async (routerName: string) => {
+    const res = await request(app)
+      .post('/api/router-enrollment/start')
+      .set(ADMIN)
+      .send({ routerName, wgServerId: serverId, routerosVersion: '7', notes: 'snap notes' });
+    expect(res.status).toBe(201);
+    return res.body;
+  };
+
+  it('GET /:id expone routerSnapshot NO sensible (routerName presente, sin secretos)', async () => {
+    const body = await startEnrollment('Router Snapshot A');
+    const id = body.enrollment.id;
+    const get = await request(app).get(`/api/router-enrollment/${id}`).set(ADMIN);
+    expect(get.status).toBe(200);
+    expect(get.body.routerSnapshot).toBeDefined();
+    expect(get.body.routerSnapshot.routerName).toBe('Router Snapshot A');
+    expect(get.body.routerSnapshot.vpnIp).toBeTruthy();
+    const snapStr = JSON.stringify(get.body.routerSnapshot);
+    expect(snapStr).not.toMatch(/private-?key/i);
+    expect(snapStr).not.toMatch(/preshared/i);
+    expect(snapStr).not.toMatch(/password/i);
+  });
+
+  it('download PRE-restart funciona (router presente en el store)', async () => {
+    const body = await startEnrollment('Router Snapshot B');
+    const dl = await request(app).get(`/api/router-enrollment/${body.enrollment.id}/download`).set(ADMIN);
+    expect(dl.status).toBe(200);
+    expect(dl.text.split('\n')[0]).toBe('# NugaCore');
+  });
+
+  it('download POST-restart usa el snapshot (store.MIKROTIK_ROUTERS vaciado)', async () => {
+    const body = await startEnrollment('Router Snapshot C');
+    const id = body.enrollment.id;
+
+    // Simular restart del contenedor: el store de routers se vacía; el enrollment
+    // y su snapshot sobreviven (en este modo viven en el repo store en memoria).
+    // WG NO se reinicia → el peer sigue disponible para regenerar.
+    store.MIKROTIK_ROUTERS.length = 0;
+
+    const dl = await request(app).get(`/api/router-enrollment/${id}/download`).set(ADMIN);
+    expect(dl.status).toBe(200);
+    expect(dl.text.split('\n')[0]).toBe('# NugaCore');
+    expect(dl.text).toContain('NugaCoreWG'); // regeneró el tunnel WG desde el snapshot
+  });
+
+  it('download sin router ni snapshot → 404 ROUTER_SNAPSHOT_MISSING (no "Router no encontrado")', async () => {
+    const body = await startEnrollment('Router Snapshot D');
+    const id = body.enrollment.id;
+
+    // Enrollment "legacy" sin snapshot + restart: se borra el snapshot y el store.
+    const rec = enrollmentRepository.getById(id);
+    expect(rec).toBeDefined();
+    rec!.routerSnapshot = undefined;
+    store.MIKROTIK_ROUTERS.length = 0;
+
+    const dl = await request(app).get(`/api/router-enrollment/${id}/download`).set(ADMIN);
+    expect(dl.status).toBe(404);
+    expect(dl.body.code).toBe('ROUTER_SNAPSHOT_MISSING');
+    expect(dl.body.error).not.toContain('Router no encontrado');
+  });
+});
