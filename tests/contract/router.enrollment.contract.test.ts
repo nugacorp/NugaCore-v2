@@ -896,3 +896,104 @@ describe('Enrollment — download sobrevive restart vía routerSnapshot', () => 
     expect(dl.body.error).not.toContain('Router no encontrado');
   });
 });
+
+// ── FIX-4 (Fase 4.9.2 hotfix): download sin depender del WireGuard store ──
+
+describe('Enrollment — download sin depender del WireGuard store', () => {
+  let app: Express;
+
+  beforeAll(() => {
+    enrollmentRepository._reset();
+    resetWireguardService();
+    app = createApp();
+  });
+
+  // Crea servidor default + enrollment, devuelve el body de /start.
+  const startWith = async (routerName: string, body: Record<string, unknown>) => {
+    const srv = await request(app)
+      .post('/api/wireguard/servers')
+      .set(ADMIN)
+      .send({ name: `VPN ${routerName}`, endpointHost: 'vpn.fix4.local', endpointPort: 13231, isDefault: true });
+    expect(srv.status).toBe(201);
+    const res = await request(app)
+      .post('/api/router-enrollment/start')
+      .set(ADMIN)
+      .send({ routerName, wgServerId: srv.body.server.id, routerosVersion: '7', ...body });
+    expect(res.status).toBe(201);
+    return res.body;
+  };
+
+  const PCC5_PARAMS = {
+    lanCidr: '10.50.0.1/24',
+    wan1: { mode: 'dhcp', interface: 'ether1' },
+    wan2: { mode: 'pppoe', interface: 'ether2', username: 'cli', password: 'pcc5secret' },
+  };
+
+  it('pcc_5wan: download POST-restart NO consulta el WireGuard store (regenera por templateParameters)', async () => {
+    const body = await startWith('PCC5 Restart', { templateId: 'pcc_5wan', templateParameters: PCC5_PARAMS });
+    const id = body.enrollment.id;
+
+    // Restart total: se pierden el router y TODO el WireGuard store (servidor + peer).
+    store.MIKROTIK_ROUTERS.length = 0;
+    resetWireguardService();
+
+    const dl = await request(app).get(`/api/router-enrollment/${id}/download`).set(ADMIN);
+    expect(dl.status).toBe(200);                 // NO falla por "Servidor WireGuard no encontrado"
+    expect(dl.text).toContain('10.50.0.1');      // LAN persistida en templateParameters
+    expect(dl.text).not.toContain('pcc5secret'); // secreto nunca en el script
+  });
+
+  it('template no-WG no falla aunque el WireGuard server ya no exista', async () => {
+    const body = await startWith('PCC5 NoWG', { templateId: 'pcc_5wan', templateParameters: PCC5_PARAMS });
+    const id = body.enrollment.id;
+    resetWireguardService(); // sin servidores
+    const dl = await request(app).get(`/api/router-enrollment/${id}/download`).set(ADMIN);
+    expect(dl.status).toBe(200);
+  });
+
+  it('router_base_wireguard: download POST-restart regenera vía snapshot WG cifrado', async () => {
+    const body = await startWith('WG Restart', { templateId: 'router_base_wireguard' });
+    const id = body.enrollment.id;
+
+    // Restart total: WG store vacío. El snapshot cifrado debe bastar.
+    store.MIKROTIK_ROUTERS.length = 0;
+    resetWireguardService();
+
+    const dl = await request(app).get(`/api/router-enrollment/${id}/download`).set(ADMIN);
+    expect(dl.status).toBe(200);
+    expect(dl.text).toContain('NugaCoreWG');   // tunnel WG regenerado
+    expect(dl.text).toMatch(/private-key=/i);  // script real lleva la private key del peer
+  });
+
+  it('plantilla WG sin snapshot ni store → 404 WIREGUARD_SNAPSHOT_MISSING', async () => {
+    const body = await startWith('WG SinSnap', { templateId: 'router_base_wireguard' });
+    const id = body.enrollment.id;
+
+    // Borrar el snapshot WG (enrollment legacy) + restart del WG store.
+    const rec = enrollmentRepository.getById(id);
+    rec!.wireguardSnapshot = undefined;
+    resetWireguardService();
+
+    const dl = await request(app).get(`/api/router-enrollment/${id}/download`).set(ADMIN);
+    expect(dl.status).toBe(404);
+    expect(dl.body.code).toBe('WIREGUARD_SNAPSHOT_MISSING');
+  });
+
+  it('GET /:id: wireguardSnapshot saneado (metadata pública, sin campos cifrados ni claves)', async () => {
+    const body = await startWith('WG View', { templateId: 'router_base_wireguard' });
+    const id = body.enrollment.id;
+
+    const get = await request(app).get(`/api/router-enrollment/${id}`).set(ADMIN);
+    expect(get.status).toBe(200);
+    const snap = get.body.wireguardSnapshot;
+    expect(snap).toBeDefined();
+    expect(snap.hasEncryptedSecrets).toBe(true);
+    expect(snap.serverPublicKey).toBeTruthy();
+    // NUNCA se exponen los campos cifrados ni secretos en claro.
+    expect(snap).not.toHaveProperty('encryptedPeerPrivateKey');
+    expect(snap).not.toHaveProperty('encryptedPresharedKey');
+    expect(snap).not.toHaveProperty('privateKey');
+    expect(snap).not.toHaveProperty('presharedKey');
+    expect(JSON.stringify(get.body)).not.toMatch(/encryptedPeerPrivateKey|encryptedPresharedKey/);
+  });
+});

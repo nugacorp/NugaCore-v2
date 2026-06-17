@@ -41,6 +41,17 @@ const WG_TEMPLATES = new Set<string>([
   'tower_wisp',
 ]);
 
+/**
+ * ¿El SCRIPT de esta plantilla incrusta credenciales WireGuard? Solo estas
+ * plantillas requieren datos del peer WG para regenerarse en /download. Las
+ * demás (pcc_*, pppoe_server, noc_ready, monitoring_agent) NO dependen de
+ * WireGuard para el script, por lo que download no debe consultar el WG store.
+ */
+export function enrollmentTemplateNeedsWireguard(templateId: string | undefined | null): boolean {
+  const id = (templateId || '').trim() || 'router_base_wireguard';
+  return WG_TEMPLATES.has(id);
+}
+
 // ── Resultado del mapper ──────────────────────────────────────────────
 
 export interface ResolvedTemplateResult {
@@ -104,7 +115,7 @@ export function getTemplateMetadata(templateId: string): TemplateMetadata {
 export function resolveTemplateParams(
   templateId: string,
   input: StartEnrollmentInput,
-  peerConfig: PeerCreatedOnce,
+  peerConfig: PeerCreatedOnce | null,
 ): ResolvedTemplateResult {
   validateEnrollmentTemplateId(templateId);
 
@@ -134,7 +145,9 @@ export function resolveTemplateParams(
   };
 
   // ── Parámetros WireGuard (solo si la plantilla los incrusta) ───────
-  const wgParams = needsWireGuard
+  // peerConfig puede ser null para plantillas no-WG (download no consulta el
+  // WG store en ese caso). El guard evita acceder a un peerConfig ausente.
+  const wgParams = needsWireGuard && peerConfig
     ? {
         wgServerPublicKey: peerConfig.serverPublicKey,
         wgEndpoint:        peerConfig.serverEndpoint,

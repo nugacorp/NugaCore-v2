@@ -10,7 +10,12 @@
 // template_parameters viaja como JSONB (objeto), no como string.
 // ====================================================================
 
-import type { RouterEnrollmentRecord, EnrollmentStatus, RouterEnrollmentRouterSnapshot } from './types';
+import type {
+  RouterEnrollmentRecord,
+  EnrollmentStatus,
+  RouterEnrollmentRouterSnapshot,
+  RouterEnrollmentWireGuardSnapshot,
+} from './types';
 import type { TemplateParameterValues } from '../router-template-parameters/types';
 
 export interface RouterEnrollmentRow {
@@ -24,6 +29,7 @@ export interface RouterEnrollmentRow {
   template_id: string;
   template_parameters: TemplateParameterValues | null;
   router_snapshot: RouterEnrollmentRouterSnapshot | null;
+  wireguard_snapshot: RouterEnrollmentWireGuardSnapshot | null;
   script_hash: string | null;
   script_downloaded_at: string | null;
   check_online_attempts: number;
@@ -48,6 +54,7 @@ export const rowToEnrollment = (r: RouterEnrollmentRow): RouterEnrollmentRecord 
   templateId: r.template_id,
   templateParameters: r.template_parameters ?? undefined,
   routerSnapshot: r.router_snapshot ?? undefined,
+  wireguardSnapshot: r.wireguard_snapshot ?? undefined,
   scriptHash: r.script_hash ?? undefined,
   scriptDownloadedAt: r.script_downloaded_at ?? undefined,
   checkOnlineAttempts: r.check_online_attempts ?? 0,
@@ -72,6 +79,7 @@ export const enrollmentToRow = (rec: RouterEnrollmentRecord): Record<string, unk
   template_id: rec.templateId,
   template_parameters: rec.templateParameters ?? null,
   router_snapshot: rec.routerSnapshot ?? {},
+  wireguard_snapshot: rec.wireguardSnapshot ?? {},
   script_hash: rec.scriptHash ?? null,
   script_downloaded_at: rec.scriptDownloadedAt ?? null,
   check_online_attempts: rec.checkOnlineAttempts ?? 0,
@@ -89,6 +97,7 @@ export const enrollmentPatchToRow = (patch: Partial<RouterEnrollmentRecord>): Re
   if (patch.templateId !== undefined) row.template_id = patch.templateId;
   if (patch.templateParameters !== undefined) row.template_parameters = patch.templateParameters ?? null;
   if (patch.routerSnapshot !== undefined) row.router_snapshot = patch.routerSnapshot ?? {};
+  if (patch.wireguardSnapshot !== undefined) row.wireguard_snapshot = patch.wireguardSnapshot ?? {};
   if (patch.scriptHash !== undefined) row.script_hash = patch.scriptHash ?? null;
   if (patch.scriptDownloadedAt !== undefined) row.script_downloaded_at = patch.scriptDownloadedAt ?? null;
   if (patch.checkOnlineAttempts !== undefined) row.check_online_attempts = patch.checkOnlineAttempts;

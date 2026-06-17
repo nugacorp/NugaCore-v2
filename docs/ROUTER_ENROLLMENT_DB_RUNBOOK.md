@@ -11,14 +11,17 @@ staging. Modo seguro: sin tocar routers reales, sin Worker live, sin commit mode
 \i supabase/migrations/20260613000000_router_enrollment_template_id.sql
 \i supabase/migrations/20260613120000_router_enrollment_template_parameters.sql
 \i supabase/migrations/20260617000000_router_enrollment_router_snapshot.sql
+\i supabase/migrations/20260617120000_router_enrollment_wireguard_snapshot.sql
 ```
 
 Las migraciones son idempotentes: pueden re-ejecutarse sin error. Crean la
 tabla `public.router_enrollment`, `template_id`, `template_parameters JSONB`,
 `router_snapshot JSONB` (Fase 4.9.2 hotfix: permite que `/download` regenere el
 script tras un restart sin depender del store en memoria — ver
-`docs/ROUTER_ENROLLMENT_ROUTER_SNAPSHOT.md`), índices, RLS deny-by-default y el
-trigger `updated_at`.
+`docs/ROUTER_ENROLLMENT_ROUTER_SNAPSHOT.md`), `wireguard_snapshot JSONB` (Fase
+4.9.2 hotfix: regenera plantillas WireGuard tras restart sin el WG store; secretos
+cifrados — ver `docs/ROUTER_ENROLLMENT_WIREGUARD_SNAPSHOT.md`), índices, RLS
+deny-by-default y el trigger `updated_at`.
 
 ## 2. Refrescar el schema cache de PostgREST
 

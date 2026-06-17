@@ -20,8 +20,15 @@ import { store } from '../../state/store';
 import { readRouterSnapshot } from '../mikrotik/worker/worker';
 import { isLiveWorkerEnabled } from '../mikrotik/worker/connector';
 import { getWireguardService } from '../wireguard/service';
+import type { PeerCreatedOnce, WireguardPeerView } from '../wireguard/types';
+import { encryptSecret, decryptSecret } from '../../services/crypto';
 import { getEnrollmentRepository } from './repository';
-import { resolveTemplateParams, validateEnrollmentTemplateId, getTemplateMetadata } from './template-mapper';
+import {
+  resolveTemplateParams,
+  validateEnrollmentTemplateId,
+  getTemplateMetadata,
+  enrollmentTemplateNeedsWireguard,
+} from './template-mapper';
 import { validateTemplateParameters, redactSecretValues, applyDefaults } from '../router-template-parameters/validators';
 import { mapParametersToLibraryParams } from '../router-template-parameters/mappers';
 import {
@@ -30,6 +37,8 @@ import {
   ENROLLMENT_STATUS_LABELS,
   RouterEnrollmentRecord,
   RouterEnrollmentRouterSnapshot,
+  RouterEnrollmentWireGuardSnapshot,
+  RouterEnrollmentWireGuardSnapshotView,
   RouterEnrollmentView,
   StartEnrollmentInput,
   StartEnrollmentResult,
@@ -62,6 +71,8 @@ const toView = (rec: RouterEnrollmentRecord): RouterEnrollmentView => {
     // Snapshot NO sensible del router (sin secretos por diseño): útil para la UI
     // y para diagnosticar regeneraciones tras restart.
     routerSnapshot: rec.routerSnapshot,
+    // Snapshot WireGuard SANEADO: se eliminan los campos cifrados antes de exponer.
+    wireguardSnapshot: sanitizeWgSnapshot(rec.wireguardSnapshot),
     scriptHash: rec.scriptHash,
     scriptDownloadedAt: rec.scriptDownloadedAt,
     checkOnlineAttempts: rec.checkOnlineAttempts,
@@ -91,12 +102,110 @@ const buildScriptPreview = (script: string): string =>
     .replace(/password="[^"]*"/gi, '<PASSWORD_OMITIDO>')
     .replace(/password=[^\s\\\n"]+/gi, '<PASSWORD_OMITIDO>');
 
-const buildScript = async (
+// ── WireGuard snapshot helpers (Fase 4.9.2 hotfix) ────────────────────
+
+/** Quita los campos cifrados antes de exponer el snapshot WG por API/View. */
+const sanitizeWgSnapshot = (
+  snap?: RouterEnrollmentWireGuardSnapshot,
+): RouterEnrollmentWireGuardSnapshotView | undefined => {
+  if (!snap) return undefined;
+  const { encryptedPeerPrivateKey: _p, encryptedPresharedKey: _k, ...safe } = snap;
+  return safe;
+};
+
+/**
+ * Construye el snapshot WireGuard a persistir desde la config del peer creada en
+ * start(). Datos públicos en claro; secretos CIFRADOS con encryptSecret (nunca
+ * en claro). Solo se usa para plantillas que incrustan WireGuard.
+ */
+const buildWireguardSnapshot = (
+  wgServerId: string,
+  pc: PeerCreatedOnce,
+): RouterEnrollmentWireGuardSnapshot => {
+  const idx = pc.serverEndpoint.lastIndexOf(':');
+  const endpointHost = idx >= 0 ? pc.serverEndpoint.slice(0, idx) : pc.serverEndpoint;
+  const portNum = idx >= 0 ? Number(pc.serverEndpoint.slice(idx + 1)) : NaN;
+  return {
+    wgServerId,
+    wgPeerId: pc.peer.id,
+    serverPublicKey: pc.serverPublicKey,
+    endpointHost,
+    endpointPort: Number.isFinite(portNum) ? portNum : undefined,
+    assignedIp: pc.assignedIp,
+    allowedCidr: pc.allowedCidr,
+    allowedIps: pc.allowedCidr ? [pc.allowedCidr] : undefined,
+    persistentKeepalive: 25,
+    hasEncryptedSecrets: Boolean(pc.privateKey),
+    encryptedPeerPrivateKey: pc.privateKey ? encryptSecret(pc.privateKey) : undefined,
+    encryptedPresharedKey: pc.presharedKey ? encryptSecret(pc.presharedKey) : undefined,
+  };
+};
+
+/**
+ * Reconstruye un PeerCreatedOnce desde el snapshot WG persistido (descifra los
+ * secretos). Devuelve null si el snapshot no tiene lo mínimo para regenerar un
+ * script WireGuard válido (servidor + IP + private key del peer).
+ */
+const reconstructPeerConfigFromSnapshot = (
+  snap?: RouterEnrollmentWireGuardSnapshot,
+): PeerCreatedOnce | null => {
+  if (!snap || !snap.serverPublicKey || !snap.assignedIp) return null;
+  const privateKey = snap.encryptedPeerPrivateKey ? decryptSecret(snap.encryptedPeerPrivateKey) : '';
+  if (!privateKey) return null; // sin la private key no se puede regenerar un script WG válido
+  const presharedKey = snap.encryptedPresharedKey ? decryptSecret(snap.encryptedPresharedKey) : '';
+  const serverEndpoint =
+    snap.endpointHost && snap.endpointPort
+      ? `${snap.endpointHost}:${snap.endpointPort}`
+      : snap.endpointHost ?? '';
+  const peer: WireguardPeerView = {
+    id: snap.wgPeerId ?? '',
+    serverId: snap.wgServerId ?? '',
+    name: '',
+    publicKey: '',
+    allocatedIp: snap.assignedIp.replace(/\/\d+$/, ''),
+    allowedCidr: snap.allowedCidr,
+    status: 'active',
+    hasSecrets: true,
+    createdAt: '',
+  };
+  return {
+    peer,
+    privateKey,
+    presharedKey,
+    serverPublicKey: snap.serverPublicKey,
+    serverEndpoint,
+    assignedIp: snap.assignedIp,
+    allowedCidr: snap.allowedCidr ?? '',
+  };
+};
+
+/**
+ * Resuelve la config WireGuard para regenerar el script en /download SIN
+ * depender del store en memoria: prioriza el snapshot cifrado (claves
+ * originales) y, si no hay, intenta el store (WG aún en memoria). Si tampoco,
+ * lanza WIREGUARD_SNAPSHOT_MISSING.
+ */
+const resolveWgForDownload = async (
   routerId: string,
-  input: StartEnrollmentInput,
   wgServerId: string,
   actorId: string,
-): Promise<{
+  wgSnapshot?: RouterEnrollmentWireGuardSnapshot,
+): Promise<PeerCreatedOnce> => {
+  const fromSnap = reconstructPeerConfigFromSnapshot(wgSnapshot);
+  if (fromSnap) return fromSnap;
+  try {
+    // Fallback: el WG store sigue en memoria y tiene el peer del router.
+    return await getWireguardService().getPeerConfigForRouter(routerId, wgServerId, actorId);
+  } catch {
+    throw new NotFoundError(
+      'No se puede regenerar el script WireGuard: el servidor/peer ya no está en ' +
+        'memoria y no hay snapshot WireGuard suficiente. Vuelve a iniciar el enrollment.',
+      'WIREGUARD_SNAPSHOT_MISSING',
+    );
+  }
+};
+
+interface BuildScriptResult {
   script: string;
   scriptFilename: string;
   scriptHash: string;
@@ -106,15 +215,39 @@ const buildScript = async (
   wgPeerId: string;
   wgAssignedIp: string;
   wgServerPublicKey: string;
-}> => {
-  const wgService = getWireguardService();
+  peerConfig: PeerCreatedOnce | null;
+}
 
-  // Siempre se crea/reutiliza el peer WG para management NugaCore.
-  const peerConfig = await wgService.getPeerConfigForRouter(routerId, wgServerId, actorId);
-  const routerIpWithoutMask = peerConfig.assignedIp.replace(/\/\d+$/, '');
-
+/**
+ * Genera el script .rsc.
+ *
+ * Resolución de WireGuard según `mode`:
+ *  - 'create' (start): SIEMPRE crea/reutiliza el peer de management NugaCore
+ *    (todas las plantillas), conservando el comportamiento previo.
+ *  - 'download': SOLO resuelve WireGuard si la plantilla incrusta WG en el
+ *    script. Para plantillas no-WG (pcc_*, pppoe…) NO consulta el WG store, de
+ *    modo que /download funciona tras un restart sin servidor/peer en memoria.
+ *    Para plantillas WG usa el snapshot cifrado (o el store como fallback).
+ */
+const buildScript = async (
+  routerId: string,
+  input: StartEnrollmentInput,
+  wgServerId: string,
+  actorId: string,
+  opts: { mode: 'create' | 'download'; wgSnapshot?: RouterEnrollmentWireGuardSnapshot } = { mode: 'create' },
+): Promise<BuildScriptResult> => {
   // Resuelve templateId con fallback a router_base_wireguard (backward compat).
   const effectiveTemplateId = input.templateId?.trim() || 'router_base_wireguard';
+  const needsWg = enrollmentTemplateNeedsWireguard(effectiveTemplateId);
+
+  let peerConfig: PeerCreatedOnce | null = null;
+  if (opts.mode === 'create') {
+    // start: siempre crea/reutiliza el peer WG de management (todas las plantillas).
+    peerConfig = await getWireguardService().getPeerConfigForRouter(routerId, wgServerId, actorId);
+  } else if (needsWg) {
+    // download: solo resolver WG si el script lo incrusta (no-WG → sin lookup).
+    peerConfig = await resolveWgForDownload(routerId, wgServerId, actorId, opts.wgSnapshot);
+  }
 
   const resolved = resolveTemplateParams(effectiveTemplateId, input, peerConfig);
 
@@ -128,7 +261,7 @@ const buildScript = async (
 
   logger.info('Enrollment: script generado', {
     routerId,
-    peerId: peerConfig.peer.id,
+    peerId: peerConfig?.peer.id,
     templateId: resolved.libraryId,
     templateName: resolved.templateName,
     scriptHash: resource.scriptHash,
@@ -143,9 +276,10 @@ const buildScript = async (
     templateId: resolved.libraryId,
     templateName: resolved.templateName,
     generatorVersion: resolved.generatorVersion,
-    wgPeerId: peerConfig.peer.id,
-    wgAssignedIp: routerIpWithoutMask,
-    wgServerPublicKey: peerConfig.serverPublicKey,
+    wgPeerId: peerConfig?.peer.id ?? '',
+    wgAssignedIp: peerConfig ? peerConfig.assignedIp.replace(/\/\d+$/, '') : '',
+    wgServerPublicKey: peerConfig?.serverPublicKey ?? '',
+    peerConfig,
   };
 };
 
@@ -235,7 +369,7 @@ export const enrollmentService = {
       throw err;
     }
 
-    const { script, scriptFilename, scriptHash, templateId: resolvedTemplateId, templateName, generatorVersion, wgPeerId, wgAssignedIp, wgServerPublicKey } = buildResult;
+    const { script, scriptFilename, scriptHash, templateId: resolvedTemplateId, templateName, generatorVersion, wgPeerId, wgAssignedIp, wgServerPublicKey, peerConfig } = buildResult;
 
     // Push al store SOLO tras buildScript exitoso → no hay router huérfano
     store.MIKROTIK_ROUTERS.push({
@@ -269,6 +403,12 @@ export const enrollmentService = {
       notes: input.notes,
     };
 
+    // Snapshot WireGuard (secretos cifrados) para regenerar el .rsc de plantillas
+    // WG en /download tras un restart, sin depender del WG store en memoria.
+    const wireguardSnapshot: RouterEnrollmentWireGuardSnapshot = peerConfig
+      ? buildWireguardSnapshot(resolvedServerId, peerConfig)
+      : {};
+
     const repo = getEnrollmentRepository();
     const id = await repo.nextId();
     const rec: RouterEnrollmentRecord = {
@@ -283,6 +423,7 @@ export const enrollmentService = {
       // Persiste los parámetros completados (con secretos en claro) para regenerar en /download.
       templateParameters: effectiveParams,
       routerSnapshot,
+      wireguardSnapshot,
       scriptHash,
       checkOnlineAttempts: 0,
       createdAt: nowIso(),
@@ -384,7 +525,12 @@ export const enrollmentService = {
       notes: router?.notes ?? snapshot?.notes,
     };
 
-    const { script, scriptFilename } = await buildScript(rec.routerId, input, rec.wgServerId, actorId);
+    // mode 'download': para plantillas no-WG NO se consulta el WG store; para
+    // plantillas WG se usa el snapshot cifrado (o el store como fallback).
+    const { script, scriptFilename } = await buildScript(rec.routerId, input, rec.wgServerId, actorId, {
+      mode: 'download',
+      wgSnapshot: rec.wireguardSnapshot,
+    });
 
     const updated = await repo.update(id, {
       scriptDownloadedAt: nowIso(),

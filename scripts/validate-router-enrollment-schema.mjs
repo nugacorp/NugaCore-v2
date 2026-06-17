@@ -75,6 +75,7 @@ if (tableOk) {
   await checkColumn(TABLE, 'template_id');
   await checkColumn(TABLE, 'template_parameters');   // JSONB (Fase 4.9.2)
   await checkColumn(TABLE, 'router_snapshot');       // JSONB (Fase 4.9.2 hotfix)
+  await checkColumn(TABLE, 'wireguard_snapshot');    // JSONB (Fase 4.9.2 hotfix)
   await checkColumn(TABLE, 'script_hash');
   await checkColumn(TABLE, 'script_downloaded_at');
   await checkColumn(TABLE, 'check_online_attempts');

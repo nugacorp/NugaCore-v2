@@ -45,6 +45,39 @@ export interface RouterEnrollmentRouterSnapshot {
   notes?: string;
 }
 
+/**
+ * Snapshot de WireGuard persistido en el enrollment (Fase 4.9.2 hotfix).
+ * Permite que download() regenere el .rsc de plantillas que incrustan WireGuard
+ * tras un restart, sin depender de WireGuard Manager en memoria.
+ *
+ * Los datos públicos van en claro. Los secretos (peer private key, preshared
+ * key) se guardan CIFRADOS con el mecanismo existente (encryptSecret) y NUNCA
+ * se exponen por API/View/logs ni se guardan en claro.
+ */
+export interface RouterEnrollmentWireGuardSnapshot {
+  wgServerId?: string;
+  wgPeerId?: string;
+  serverPublicKey?: string;
+  endpointHost?: string;
+  endpointPort?: number;
+  assignedIp?: string;
+  allowedCidr?: string;
+  allowedIps?: string[];
+  dnsServers?: string[];
+  persistentKeepalive?: number;
+  hasEncryptedSecrets?: boolean;
+  /** CIFRADO (encryptSecret). NUNCA exponer en View/API/logs. */
+  encryptedPeerPrivateKey?: string;
+  /** CIFRADO (encryptSecret). NUNCA exponer en View/API/logs. */
+  encryptedPresharedKey?: string;
+}
+
+/** Vista saneada del snapshot WG: sin los campos cifrados (garantía de tipo). */
+export type RouterEnrollmentWireGuardSnapshotView = Omit<
+  RouterEnrollmentWireGuardSnapshot,
+  'encryptedPeerPrivateKey' | 'encryptedPresharedKey'
+>;
+
 /** Forma interna persistida en el repositorio. */
 export interface RouterEnrollmentRecord {
   id: string;
@@ -68,6 +101,12 @@ export interface RouterEnrollmentRecord {
    * .rsc en /download tras un restart sin depender del store en memoria.
    */
   routerSnapshot?: RouterEnrollmentRouterSnapshot;
+  /**
+   * Snapshot de WireGuard (Fase 4.9.2 hotfix). Permite regenerar el .rsc de
+   * plantillas WireGuard tras un restart sin depender del WG store. Los
+   * secretos viajan CIFRADOS; nunca se exponen por API.
+   */
+  wireguardSnapshot?: RouterEnrollmentWireGuardSnapshot;
   scriptHash?: string;
   scriptDownloadedAt?: string;
   checkOnlineAttempts: number;
@@ -101,6 +140,8 @@ export interface RouterEnrollmentView {
   templateParameters?: TemplateParameterValues;
   /** Snapshot NO sensible del router (Fase 4.9.2 hotfix). No contiene secretos. */
   routerSnapshot?: RouterEnrollmentRouterSnapshot;
+  /** Snapshot WireGuard saneado (sin campos cifrados). Solo metadata pública. */
+  wireguardSnapshot?: RouterEnrollmentWireGuardSnapshotView;
   scriptHash?: string;
   scriptDownloadedAt?: string;
   checkOnlineAttempts: number;

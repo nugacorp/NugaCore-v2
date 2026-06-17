@@ -198,4 +198,75 @@ describe.skipIf(!optIn || !hasSupabase)('Router Enrollment DB contract (Supabase
     expect(dl.text).toContain('10.99.0.1'); // LAN persistida en templateParameters
     expect(dl.text).not.toContain(SECRET);  // secreto nunca en el script
   }, DB_TIMEOUT_MS);
+
+  // Crea su PROPIO servidor WG (para poder resetear el WG store sin afectar a
+  // los demás casos) y arranca un enrollment con la plantilla indicada.
+  const startFresh = async (templateId: string, templateParameters?: Record<string, unknown>) => {
+    const srv = await request(app)
+      .post('/api/wireguard/servers')
+      .set(ADMIN)
+      .send({ name: `VPN ${templateId} ${Date.now()}`, endpointHost: 'vpn.dbfix.local', endpointPort: 13231, isDefault: true });
+    expect(srv.status).toBe(201);
+    const res = await request(app)
+      .post('/api/router-enrollment/start')
+      .set(ADMIN)
+      .send({ routerName: `DB ${templateId} ${Date.now()}`, wgServerId: srv.body.server.id, routerosVersion: '7', templateId, templateParameters });
+    if (res.status === 201) createdIds.push(res.body.enrollment.id);
+    return res;
+  };
+
+  it('11. pcc_5wan: download tras restart total NO depende del WireGuard store', async () => {
+    const start = await startFresh('pcc_5wan', {
+      lanCidr: '10.50.0.1/24',
+      wan1: { mode: 'dhcp', interface: 'ether1' },
+      wan2: { mode: 'pppoe', interface: 'ether2', username: 'cli', password: SECRET },
+    });
+    expect(start.status).toBe(201);
+    const id = start.body.enrollment.id;
+
+    // Restart total: repo desde DB, router store vacío, WG store vacío.
+    resetEnrollmentRepository();
+    store.MIKROTIK_ROUTERS.length = 0;
+    resetWireguardService();
+
+    const dl = await request(app).get(`/api/router-enrollment/${id}/download`).set(ADMIN);
+    expect(dl.status).toBe(200);                // NO "Servidor WireGuard no encontrado"
+    expect(dl.text).toContain('10.50.0.1');     // LAN persistida
+    expect(dl.text).not.toContain(SECRET);
+  }, DB_TIMEOUT_MS);
+
+  it('12. router_base_wireguard: download tras restart regenera vía snapshot WG cifrado', async () => {
+    const start = await startFresh('router_base_wireguard');
+    expect(start.status).toBe(201);
+    const id = start.body.enrollment.id;
+
+    resetEnrollmentRepository();
+    store.MIKROTIK_ROUTERS.length = 0;
+    resetWireguardService();
+
+    const dl = await request(app).get(`/api/router-enrollment/${id}/download`).set(ADMIN);
+    expect(dl.status).toBe(200);
+    expect(dl.text).toContain('NugaCoreWG');    // tunnel WG regenerado desde el snapshot
+  }, DB_TIMEOUT_MS);
+
+  it('13. wireguard_snapshot: secretos CIFRADOS en DB, redactados en la view', async () => {
+    const start = await startFresh('router_base_wireguard');
+    const id = start.body.enrollment.id;
+
+    // DB: secretos cifrados (formato iv.tag.ct), nunca en claro.
+    const { data } = await supabase
+      .from('router_enrollment')
+      .select('wireguard_snapshot')
+      .eq('id', id)
+      .single();
+    expect(data?.wireguard_snapshot?.hasEncryptedSecrets).toBe(true);
+    expect(data?.wireguard_snapshot?.encryptedPeerPrivateKey).toBeTruthy();
+
+    // View: sin campos cifrados ni claves.
+    const get = await request(app).get(`/api/router-enrollment/${id}`).set(ADMIN);
+    expect(get.body.wireguardSnapshot).toBeDefined();
+    expect(get.body.wireguardSnapshot).not.toHaveProperty('encryptedPeerPrivateKey');
+    expect(get.body.wireguardSnapshot).not.toHaveProperty('encryptedPresharedKey');
+    expect(JSON.stringify(get.body)).not.toMatch(/encryptedPeerPrivateKey|encryptedPresharedKey/);
+  }, DB_TIMEOUT_MS);
 });
