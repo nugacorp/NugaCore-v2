@@ -26,29 +26,46 @@ export const env = {
 export const isProduction = env.NODE_ENV === 'production';
 
 // ====================================================================
-// Validación de entorno (fail-fast suave).
-// En Fase 0 solo ADVIERTE (no lanza): Supabase aún no se conecta.
-// Marca configuraciones peligrosas para producción.
+// Validación de entorno.
+//
+// Fase 4.9.2.5 (Production Readiness): en producción hace FAIL-FAST ante
+// configuración crítica de seguridad — el proceso NO debe arrancar con un
+// agujero conocido. Fuera de producción solo advierte.
+//
+// Crítico en producción (lanza):
+//   - AUTH_TRUST_HEADERS=true  -> permitiría declarar el rol desde el cliente.
+//   - MIKROTIK_CREDENTIALS_KEY ausente -> secretos sin cifrado robusto.
+//   - SUPABASE_URL / SUPABASE_SERVICE_ROLE_KEY ausentes -> no hay auth verificable.
 // ====================================================================
 export function validateEnvironment(): void {
   if (!isProduction) return;
 
+  const fatal: string[] = [];
+
   if (env.AUTH_TRUST_HEADERS) {
-    logger.warn(
-      'AUTH_TRUST_HEADERS está activo en producción: los clientes pueden declarar su propio rol. ' +
-        'Ponlo en "false" y usa autenticación verificada (ver SECURITY_AUDIT.md S-01).',
+    fatal.push(
+      'AUTH_TRUST_HEADERS=true en producción: los clientes podrían declarar su propio rol. ' +
+        'Ponlo en "false" (identidad por JWT Supabase verificado). Ver SECURITY_AUDIT.md S-01.',
     );
   }
 
   if (!env.MIKROTIK_CREDENTIALS_KEY) {
-    logger.warn(
-      'MIKROTIK_CREDENTIALS_KEY no está definida. El cifrado de credenciales MikroTik ' +
-        'fallará al usarse en producción (ver backend/services/crypto.ts).',
+    fatal.push(
+      'MIKROTIK_CREDENTIALS_KEY ausente en producción: el cifrado de credenciales/secretos ' +
+        '(WireGuard, MikroTik) no estaría protegido de forma robusta. Ver backend/services/crypto.ts.',
     );
   }
 
-  // Aviso informativo: la persistencia real llega en Fase 1.
-  if (!env.SUPABASE_URL) {
-    logger.info('Supabase no configurado: NugaCore opera con el store en memoria (Fase 0).');
+  if (!env.SUPABASE_URL || !env.SUPABASE_SERVICE_ROLE_KEY) {
+    fatal.push(
+      'Supabase no configurado en producción (SUPABASE_URL / SUPABASE_SERVICE_ROLE_KEY): ' +
+        'sin esto no hay autenticación ni RBAC verificables desde DB.',
+    );
+  }
+
+  if (fatal.length > 0) {
+    const detail = fatal.map((m, i) => `  ${i + 1}. ${m}`).join('\n');
+    logger.error(`Configuración de producción inválida (fail-fast):\n${detail}`);
+    throw new Error(`Configuración de producción inválida:\n${detail}`);
   }
 }

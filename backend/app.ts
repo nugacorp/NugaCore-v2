@@ -1,12 +1,17 @@
 import express from 'express';
 import { attachAuthContext } from './common/auth-context';
 import { errorHandler, notFoundHandler } from './common/errors';
+import { applyHttpSecurity } from './common/http-security';
 import { logger } from './common/logger';
 import { attachSecurityAudit } from './common/security-audit';
 import { registerRoutes } from './register-routes';
 
 export function createApp() {
   const app = express();
+
+  // Hardening HTTP (Fase 4.9.2.5): helmet + CORS allowlist + rate-limit.
+  // Va primero, antes de parsear el body y registrar rutas.
+  applyHttpSecurity(app);
 
   app.use(express.json());
   app.use((req, _res, next) => {

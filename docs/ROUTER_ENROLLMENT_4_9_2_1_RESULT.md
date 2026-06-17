@@ -15,19 +15,23 @@ Cerrar la brecha entre persistencia del enrollment y re-descarga real del `.rsc`
 
 ## Estado actual
 
-**NO APROBADA todavía** — código completo y verificado en local; **pendiente la
-validación DB + restart real en staging** (sección "Pendiente para aprobar").
+**✅ APROBADA por Hermes (2026-06-16, commit `a0c9b55`).** El bloqueador queda
+resuelto: `GET /download` tras restart devuelve 200 para `pcc_5wan` y
+`router_base_wireguard`, sin activar `USE_DB_WIREGUARD`, `USE_DB_MIKROTIK` ni Worker
+live, y sin tocar routers reales.
 
 | Gate | Estado |
 |---|---|
 | Código implementado | ✅ |
 | Typecheck | ✅ |
 | Tests unit/contract (no-DB) | ✅ 1000/1000 |
-| Higiene de secretos/logs | ✅ |
-| Migración idempotente | ✅ (revisión estática) |
-| Test DB con restart real | ⏳ pendiente staging |
-| Validación funcional Hermes | ⏳ pendiente staging |
-| Documento de aprobación | 🟡 este doc, a marcar APROBADA tras staging |
+| Higiene de secretos/logs | ✅ (Hermes: 0 matches de tokens/keys/scripts) |
+| Migración idempotente | ✅ aplicada en staging + `NOTIFY pgrst` |
+| Validación de esquema | ✅ 20 OK / 0 fallidos |
+| Test DB con restart real | ✅ 5 archivos / 33 tests (casos 11/12/13) |
+| Validación funcional Hermes | ✅ restart real PASS (Caso A y B) |
+| Cleanup | ✅ `hermes_492_rows = 0` |
+| Documento de aprobación | ✅ este doc |
 
 ## Commit validado
 
@@ -77,7 +81,31 @@ RLS sin cambios (deny-by-default). La columna no se expone por la vista de API.
 - El script completo **no** se persiste (solo `script_hash`).
 - Errores controlados: `WIREGUARD_SNAPSHOT_MISSING` / `ROUTER_SNAPSHOT_MISSING` en lugar de 500.
 
-## Pendiente para aprobar (runbook de validación en staging)
+## Validación Hermes en staging (PASS — 2026-06-16)
+
+Revalidación del commit `a0c9b55` con restart real de contenedor:
+
+1. **Migración**: aplicada en staging + `NOTIFY pgrst, 'reload schema';` → OK.
+2. **Esquema**: `validate-router-enrollment-schema.mjs` → **20 OK / 0 fallidos**
+   (confirma `template_parameters`, `router_snapshot`, `wireguard_snapshot`, `script_hash`).
+3. **Deploy + healthchecks**: `/api/health`, `/live`, `/ready` → ok/ready.
+   Flags en contenedor: `USE_DB_ROUTER_ENROLLMENT=true`, `USE_DB_WIREGUARD` ausente,
+   `USE_DB_MIKROTIK` ausente, `MIKROTIK_WORKER_LIVE=false`.
+4. **DB contract tests**: `RUN_DB_TESTS=true … npm run test:db` → **5 archivos / 33 tests PASS**
+   (incluye casos 11, 12, 13).
+5. **Restart real**:
+   - **Caso A — `pcc_5wan`**: start → restart → `/download` → **HTTP 200**;
+     LAN `10.77.0.1`, interfaz `sfp1`, gateway `200.1.1.1` presentes; sin
+     "Servidor WireGuard no encontrado" ni "Router no encontrado".
+   - **Caso B — `router_base_wireguard`**: start → restart → `/download` → **HTTP 200**;
+     regeneró desde snapshot WG cifrado; `GET /:id` con `hasEncryptedSecrets=true`
+     y **sin** exponer `encryptedPeerPrivateKey`/`encryptedPresharedKey`/`privateKey`/
+     `presharedKey`/`serverPrivateKey`/`script`.
+6. **Logs**: 0 matches de jwt / service role / credential key / private key /
+   preshared key / script header / pppoe password.
+7. **Cleanup**: enrollments de prueba eliminados; `hermes_492_rows = 0`.
+
+## Runbook de validación (referencia para futuras revalidaciones)
 
 Ejecutar en el host de staging. **No** pegar la salida completa si contiene
 secretos o scripts; resumir PASS/FAIL y códigos HTTP.
@@ -178,8 +206,8 @@ Tras la validación, eliminar solo los artefactos test creados:
 
 ## Resultado final
 
-- [ ] **APROBADA** — marcar aquí tras completar el runbook con evidencia (códigos HTTP, PASS/FAIL).
-- Responsable de validación: __________  Fecha: __________  Commit: `a0c9b55`.
+- [x] **APROBADA**.
+- Responsable de validación: **Hermes**.  Fecha: **2026-06-16**.  Commit: `a0c9b55`.
 
 ## Próximo paso recomendado
 

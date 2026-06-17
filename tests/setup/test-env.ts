@@ -82,4 +82,10 @@ if (!runDb && !runAuth) {
 }
 // runDb: entorno intacto; el .env manda (Supabase real, repositorio directo).
 
+// Rate-limit OFF por defecto en TODOS los modos de test: los contratos hacen
+// muchas peticiones. El test dedicado de hardening lo activa por caso
+// (process.env.RATE_LIMIT_ENABLED = 'true') y lo restaura. Esto cubre también
+// el modo auth (NODE_ENV=production), donde el rate-limit estaría activo.
+process.env.RATE_LIMIT_ENABLED = 'false';
+
 export {};
