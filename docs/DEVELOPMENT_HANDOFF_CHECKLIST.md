@@ -26,15 +26,12 @@ Estas fases están implementadas y mergeadas en `main`. **No retomarlas salvo qu
 - HTTP Security (helmet + CORS allowlist + rate-limit).
 - Observability básica (correlation ID, métricas in-memory, access log).
 
-> ⚠️ Matiz de aprobación staging (4.9.2 / 4.9.2.1): el código está en `main`, pero el
-> último documento de validación staging,
-> `docs/DYNAMIC_TEMPLATE_PARAMETERS_STAGING_RESULT.md`, quedó **NO APROBADA** porque
-> `public.router_enrollment` no estaba expuesta en PostgREST. Ese bloqueador fue
-> reconciliado a nivel DB el 2026-06-18 (migraciones de `router_enrollment` + snapshots
-> aplicadas/registradas y `NOTIFY pgrst`; ver `docs/SUPABASE_MIGRATIONS_SYNC.md`).
-> **Falta la revalidación funcional de Hermes (restart + download)** para emitir
-> `docs/DYNAMIC_TEMPLATE_PARAMETERS_DB_APPROVAL.md`. No marcar 4.9.2 como APROBADA hasta
-> que ese documento exista con evidencia.
+> ✅ Aprobación staging (4.9.2 / 4.9.2.1): **APROBADA por Hermes** sobre el commit
+> `a0c9b55`. Persistencia real Supabase con restart demostrada para `pcc_5wan` y
+> `router_base_wireguard` (download post-restart = 200; `wireguardSnapshot` saneado).
+> Evidencia formal en `docs/DYNAMIC_TEMPLATE_PARAMETERS_DB_APPROVAL.md`. El veredicto
+> NO APROBADA previo en `docs/DYNAMIC_TEMPLATE_PARAMETERS_STAGING_RESULT.md` quedó
+> superado. No retomar salvo regresión nueva documentada.
 
 ### B. Regla de contradicciones
 
@@ -250,17 +247,17 @@ curl -fsS https://nugacore-staging.5.180.151.109.sslip.io/api/health/ready
 
 ## 8. Checklist específico: Fase 4.9.2 Dynamic Parameters
 
-> No es la prioridad actual (ver §0.C: la prioridad es DB-1). Las piezas de código
-> están mergeadas en `main`; el cierre formal depende de la revalidación de Hermes
-> (ver el matiz de aprobación en §0.A).
+> ✅ **Fase 4.9.2 APROBADA** por Hermes sobre `a0c9b55` (ver
+> `docs/DYNAMIC_TEMPLATE_PARAMETERS_DB_APPROVAL.md`). No retomar salvo regresión nueva.
+> La prioridad actual es DB-1 (§0.C). El checklist de abajo queda como histórico de cierre.
 
-Contexto actual:
+Contexto (cerrado):
 
-- `router_snapshot` y `wireguard_snapshot` ya fueron agregados (commits `bf438ed`, `a0c9b55`).
-- Las migraciones de `router_enrollment` + snapshots están aplicadas/registradas en staging y se hizo `NOTIFY pgrst` (2026-06-18; ver `docs/SUPABASE_MIGRATIONS_SYNC.md`).
-- Bloqueo restante: revalidación funcional de Hermes (restart + download) y emisión de `docs/DYNAMIC_TEMPLATE_PARAMETERS_DB_APPROVAL.md`.
+- `router_snapshot` y `wireguard_snapshot` agregados (commits `bf438ed`, `a0c9b55`).
+- Migraciones de `router_enrollment` + snapshots aplicadas/registradas en staging + `NOTIFY pgrst` (ver `docs/SUPABASE_MIGRATIONS_SYNC.md`).
+- Validación de Hermes: restart + download = 200 para `pcc_5wan` y `router_base_wireguard`.
 
-Para cerrar 4.9.2 (cuando Hermes lo retome) falta:
+Checklist histórico de cierre (cumplido):
 
 - [ ] Implementar `wireguard_snapshot` no sensible o activar/validar `USE_DB_WIREGUARD=true`.
 - [ ] Aplicar migración correspondiente.
@@ -388,9 +385,8 @@ no avanzar a un punto sin cerrar el anterior:
 4. PROD-1 Manual Safe Mode.
 5. Safe Command Queue dry-run.
 
-Pendiente de **Hermes** (no de la tarea automática): revalidar 4.9.2 / 4.9.2.1 en
-staging tras la reconciliación de migraciones del 2026-06-18 y emitir
-`docs/DYNAMIC_TEMPLATE_PARAMETERS_DB_APPROVAL.md` (ver §0.A).
+4.9.2 / 4.9.2.1: ✅ **APROBADA** por Hermes sobre `a0c9b55` (ver
+`docs/DYNAMIC_TEMPLATE_PARAMETERS_DB_APPROVAL.md`). No retomar salvo regresión nueva.
 
 No avanzar a 4.9.3 Real Provisioning, Worker live ni commit mode hasta cerrar DB-1 y
 el modo manual seguro.

@@ -27,18 +27,17 @@ No retomar salvo regresión documentada (ver handoff §0.A):
 - HTTP Security (helmet + CORS allowlist + rate-limit).
 - Observability básica (correlation ID, métricas in-memory, access log).
 
-## Fases NO aprobadas formalmente (pendiente de evidencia)
+## Aprobaciones formales de Hermes
 
-- **4.9.2 / 4.9.2.1 (validación staging):** el último documento formal,
-  `docs/DYNAMIC_TEMPLATE_PARAMETERS_STAGING_RESULT.md` (commit `2ac6a1f`,
-  2026-06-17), quedó **NO APROBADA**. El bloqueador era que
-  `public.router_enrollment` no estaba expuesta en PostgREST.
-- Ese bloqueador fue reconciliado a nivel DB el 2026-06-18 (migraciones de
-  `router_enrollment` + snapshots aplicadas/registradas en staging y `NOTIFY pgrst`;
-  ver `docs/SUPABASE_MIGRATIONS_SYNC.md`).
-- **Falta** la revalidación funcional de Hermes (restart + download) y la emisión de
-  `docs/DYNAMIC_TEMPLATE_PARAMETERS_DB_APPROVAL.md`. Hasta entonces, no marcar como
-  APROBADA.
+- **4.9.2 / 4.9.2.1:** ✅ **APROBADA** sobre el commit `a0c9b55`. Persistencia real
+  Supabase con restart demostrada para `pcc_5wan` y `router_base_wireguard`
+  (download post-restart = 200; `wireguardSnapshot` saneado). Evidencia formal:
+  `docs/DYNAMIC_TEMPLATE_PARAMETERS_DB_APPROVAL.md`.
+- El veredicto **NO APROBADA** previo en
+  `docs/DYNAMIC_TEMPLATE_PARAMETERS_STAGING_RESULT.md` (commit `2ac6a1f`) quedó
+  **superado**: el bloqueador era que `public.router_enrollment` no estaba expuesta en
+  PostgREST, y ya fue resuelto/reconciliado (ver `docs/SUPABASE_MIGRATIONS_SYNC.md`).
+- No retomar 4.9.2 salvo regresión nueva documentada.
 
 ## Bloqueador / prioridad inmediata
 

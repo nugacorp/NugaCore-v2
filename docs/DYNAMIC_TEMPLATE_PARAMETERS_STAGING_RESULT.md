@@ -1,5 +1,11 @@
 # Validación Staging — Fase 4.9.2 + 4.9.2.1
 
+> ⚠️ **OBSOLETO / SUPERADO.** Este documento refleja una validación anterior fallida
+> (bloqueador de schema: `public.router_enrollment` no expuesta en PostgREST). Ese
+> bloqueador fue resuelto y el estado final **aprobado** está en
+> [`docs/DYNAMIC_TEMPLATE_PARAMETERS_DB_APPROVAL.md`](./DYNAMIC_TEMPLATE_PARAMETERS_DB_APPROVAL.md).
+> Se conserva como historial; no usar su veredicto.
+
 Fecha UTC: 2026-06-17T01:09:20Z
 Entorno: staging Coolify
 Commit funcional validado/desplegado: `2ac6a1fec93d0cf09284bf03b6eca1efa258d6a9`

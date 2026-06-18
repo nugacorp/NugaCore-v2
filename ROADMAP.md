@@ -230,8 +230,8 @@ Gate producción:
 
 ### FASE 4.9.2 — Dynamic Template Parameters
 
-Estado funcional: 🟡 En progreso
-Estado producción: 🔴 Bloqueada
+Estado: ✅ APROBADA por Hermes (commit `a0c9b55`). Ver
+[`docs/DYNAMIC_TEMPLATE_PARAMETERS_DB_APPROVAL.md`](./docs/DYNAMIC_TEMPLATE_PARAMETERS_DB_APPROVAL.md).
 
 Objetivo:
 
@@ -245,18 +245,12 @@ Permitir que cada plantilla reciba parámetros dinámicos desde el Wizard:
 - Interfaces.
 - Balanceadores PCC.
 
-Bloqueador actual:
+Resuelto (validado por Hermes sobre `a0c9b55`):
 
-- Persistencia completa después de reinicio.
-- `router_snapshot` ya existe, pero todavía falta resolver el estado WireGuard post-restart.
-- El re-download de scripts post-restart no debe depender de stores en memoria.
-
-Pendiente inmediato:
-
-- `wireguard_snapshot` o `USE_DB_WIREGUARD=true` validado.
-- Re-download después de restart real con HTTP 200.
+- `wireguard_snapshot` cifrado: re-download post-restart real = HTTP 200 para `pcc_5wan` y `router_base_wireguard`.
 - Independencia total de `store.MIKROTIK_ROUTERS` y del WireGuard store en memoria.
-- Documentación de aprobación solo cuando pase.
+- `USE_DB_ROUTER_ENROLLMENT=true`; `USE_DB_WIREGUARD=false`.
+- Documentación de aprobación creada (`docs/DYNAMIC_TEMPLATE_PARAMETERS_DB_APPROVAL.md`).
 
 ### FASE 4.9.2.1 — Router/WireGuard Snapshot Persistence
 
