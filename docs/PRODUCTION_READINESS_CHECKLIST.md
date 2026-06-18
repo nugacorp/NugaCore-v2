@@ -247,6 +247,12 @@ Debe sobrevivir a restart y permitir download con esos valores.
 
 No producción hasta que esta sección esté completa.
 
+Prerequisito de schema (DB-1) antes de usar MikroTik DB:
+
+- [ ] Reconciliar `mikrotik_routers` antes de usar MikroTik DB en producción (drift monitoreo vs provisioning; ver `docs/SUPABASE_MIGRATIONS_SYNC.md` y `docs/DEVELOPMENT_HANDOFF_CHECKLIST.md` §0.D).
+- [ ] Validar la migración evolutiva en staging.
+- [ ] Mantener `USE_DB_MIKROTIK=false` hasta validación Hermes.
+
 - [ ] Worker separado del proceso web.
 - [ ] Conector RouterOS probado primero en CHR/lab.
 - [ ] API TLS preferida (`8729`) o decisión explícita si lab usa `8728`.

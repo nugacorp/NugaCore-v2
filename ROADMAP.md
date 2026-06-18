@@ -357,18 +357,36 @@ Gate producción:
 - Rollback cuando aplique.
 - Permisos por rol.
 
+### DB-1 — MikroTik Routers Schema Reconciliation
+
+Estado: 🔄 Pendiente · **Prioridad inmediata**
+
+Prerequisito para NOC Read-Only e Inventory Read-Only. Resuelve el drift del repo entre
+las dos definiciones de `public.mikrotik_routers` (modelo de monitoreo en `init_schema`
+vs modelo de provisioning en `mikrotik_provisioning_schema`).
+
+Alcance (solo preparación de DB y validadores):
+
+1. Reconciliar el schema de `mikrotik_routers` (ver `docs/SUPABASE_MIGRATIONS_SYNC.md`).
+2. Crear una migración evolutiva nueva (`ALTER TABLE ... ADD COLUMN IF NOT EXISTS`), no el `CREATE TABLE` conflictivo de `20260605000000_mikrotik_provisioning_schema.sql`.
+3. Validar que `USE_DB_MIKROTIK=false` sigue intacto (dominio en memoria).
+4. Actualizar validadores (`scripts/validate-staging-migrations.mjs`) y tests.
+
+Gate:
+
+- No activa `USE_DB_MIKROTIK`.
+- No toca routers reales.
+- No aplica la migración en Supabase desde Claude; la validación staging la hace Hermes.
+- Solo después de DB-1 se prepara NOC e Inventory read-only.
+
 ### FASE 4.11 — NOC Read-Only
 
 Estado: 🔄 Pendiente
 
 Recomendación: adelantar esta fase antes de acciones live.
 
-Prerrequisito de datos (antes de NOC read-only sobre DB real):
-
-1. Reconciliar el schema de `mikrotik_routers` (drift monitoreo vs provisioning; ver `docs/SUPABASE_MIGRATIONS_SYNC.md`).
-2. Crear una migración evolutiva nueva (`ALTER TABLE ... ADD COLUMN IF NOT EXISTS`), no el `CREATE TABLE` conflictivo de `20260605000000_mikrotik_provisioning_schema.sql`.
-3. Validar que `USE_DB_MIKROTIK=false` sigue intacto (dominio en memoria; no activar el flag).
-4. Solo después preparar el Inventory read-only.
+Prerrequisito: **cerrar DB-1** (reconciliación de `mikrotik_routers`) antes de NOC
+read-only sobre DB real.
 
 Dashboard:
 

@@ -4,6 +4,78 @@
 >
 > Objetivo: que nadie avance a ciegas, no se salte pruebas, no active flags peligrosos y mantenga la ruta hacia producción definida en `ROADMAP.md` y `docs/PRODUCTION_READINESS_CHECKLIST.md`.
 
+## 0. Estado actual y siguiente tarea (LEER PRIMERO)
+
+> Esta sección es la fuente de verdad para un agente que arranca en frío.
+> Si está vacía o desactualizada, reconstruirla desde `ROADMAP.md`,
+> `docs/PRODUCTION_READINESS_CHECKLIST.md` y los documentos de resultado en `docs/`.
+
+### A. Fases cerradas / no retomar salvo regresión
+
+Estas fases están implementadas y mergeadas en `main`. **No retomarlas salvo que exista una regresión nueva documentada.**
+
+- WireGuard Auto Enrollment.
+- Router Onboarding Wizard.
+- Advanced Template Engine.
+- Dynamic Template Parameters.
+- Router Enrollment DB Persistence.
+- `router_snapshot` persistence.
+- `wireguard_snapshot` persistence.
+- Payment Engine.
+- Suspension Engine (lógico, sin tocar routers reales).
+- HTTP Security (helmet + CORS allowlist + rate-limit).
+- Observability básica (correlation ID, métricas in-memory, access log).
+
+> ⚠️ Matiz de aprobación staging (4.9.2 / 4.9.2.1): el código está en `main`, pero el
+> último documento de validación staging,
+> `docs/DYNAMIC_TEMPLATE_PARAMETERS_STAGING_RESULT.md`, quedó **NO APROBADA** porque
+> `public.router_enrollment` no estaba expuesta en PostgREST. Ese bloqueador fue
+> reconciliado a nivel DB el 2026-06-18 (migraciones de `router_enrollment` + snapshots
+> aplicadas/registradas y `NOTIFY pgrst`; ver `docs/SUPABASE_MIGRATIONS_SYNC.md`).
+> **Falta la revalidación funcional de Hermes (restart + download)** para emitir
+> `docs/DYNAMIC_TEMPLATE_PARAMETERS_DB_APPROVAL.md`. No marcar 4.9.2 como APROBADA hasta
+> que ese documento exista con evidencia.
+
+### B. Regla de contradicciones
+
+Si este checklist contradice un documento de aprobación más reciente en `docs/`,
+**actualizar el checklist antes de avanzar**. El documento de aprobación con evidencia
+manda sobre la memoria, el roadmap y este checklist.
+
+### C. Prioridad inmediata (absoluta)
+
+**DB-1 — Reconciliar el schema de `mikrotik_routers` antes de activar `USE_DB_MIKROTIK`.**
+
+Es la única tarea de mayor prioridad accionable y segura. Trabajo local: análisis,
+diseño de modelo canónico, migración evolutiva nueva y validadores. **No** aplica
+migraciones en Supabase ni activa flags.
+
+### D. DB-1 — Reconciliación de `mikrotik_routers`
+
+Pendientes:
+
+- [ ] Auditar las dos definiciones actuales de `mikrotik_routers`:
+  - init_schema (modelo de monitoreo).
+  - mikrotik_provisioning_schema (modelo de provisioning).
+- [ ] Crear documento `docs/MIKROTIK_ROUTERS_SCHEMA_RECONCILIATION.md`.
+- [ ] Diseñar modelo canónico combinado monitoring + provisioning.
+- [ ] Crear nueva migración evolutiva con timestamp posterior.
+- [ ] La migración debe usar `ALTER TABLE ... ADD COLUMN IF NOT EXISTS`.
+- [ ] No modificar ni aplicar directamente `20260605000000_mikrotik_provisioning_schema.sql`.
+- [ ] No activar `USE_DB_MIKROTIK`.
+- [ ] Actualizar `scripts/validate-staging-migrations.mjs`.
+- [ ] Agregar tests unitarios de la migración.
+- [ ] Validar que `npm run typecheck`, `npm test`, `npm run build` pasen.
+- [ ] Documentar runbook para Hermes.
+- [ ] Dejar listo para validación staging, pero sin aplicar manualmente desde Claude.
+
+### E. Qué NO hacer
+
+**No avanzar a NOC Read-Only, Inventory Read-Only, Real Provisioning, Worker Live ni
+Commit Mode hasta cerrar DB-1.** No activar `USE_DB_MIKROTIK`, `USE_DB_WIREGUARD`,
+`MIKROTIK_WORKER_LIVE` ni commit mode. No aplicar migraciones en Supabase ni tocar
+routers/datos reales desde esta tarea automática.
+
 ## 1. Antes de tocar código
 
 - [ ] Leer `ROADMAP.md`.
@@ -178,12 +250,17 @@ curl -fsS https://nugacore-staging.5.180.151.109.sslip.io/api/health/ready
 
 ## 8. Checklist específico: Fase 4.9.2 Dynamic Parameters
 
+> No es la prioridad actual (ver §0.C: la prioridad es DB-1). Las piezas de código
+> están mergeadas en `main`; el cierre formal depende de la revalidación de Hermes
+> (ver el matiz de aprobación en §0.A).
+
 Contexto actual:
 
-- `router_snapshot` ya fue agregado.
-- El bloqueo más reciente fue post-restart: download ya no fallaba por router, pero sí por WireGuard server en memoria.
+- `router_snapshot` y `wireguard_snapshot` ya fueron agregados (commits `bf438ed`, `a0c9b55`).
+- Las migraciones de `router_enrollment` + snapshots están aplicadas/registradas en staging y se hizo `NOTIFY pgrst` (2026-06-18; ver `docs/SUPABASE_MIGRATIONS_SYNC.md`).
+- Bloqueo restante: revalidación funcional de Hermes (restart + download) y emisión de `docs/DYNAMIC_TEMPLATE_PARAMETERS_DB_APPROVAL.md`.
 
-Para cerrar 4.9.2 falta:
+Para cerrar 4.9.2 (cuando Hermes lo retome) falta:
 
 - [ ] Implementar `wireguard_snapshot` no sensible o activar/validar `USE_DB_WIREGUARD=true`.
 - [ ] Aplicar migración correspondiente.
@@ -302,12 +379,18 @@ Siguiente paso:
 
 ## 13. Prioridad inmediata del proyecto
 
-Prioridad actual recomendada:
+Prioridad absoluta para la tarea automática (ver §0.C y §0.D). El orden es estricto;
+no avanzar a un punto sin cerrar el anterior:
 
-1. Cerrar Fase 4.9.2 con WireGuard post-restart.
-2. Crear aprobación documental de 4.9.2 solo cuando pase.
-3. Preparar `PROD-1 Manual Safe Mode`.
-4. Construir NOC read-only.
-5. Después evaluar MikroTik Worker live en CHR/lab.
+1. **DB-1 — Reconciliar el schema de `mikrotik_routers`** antes de activar `USE_DB_MIKROTIK`.
+2. NOC Read-Only.
+3. MikroTik Inventory Read-Only.
+4. PROD-1 Manual Safe Mode.
+5. Safe Command Queue dry-run.
 
-No avanzar a 4.9.3 Real Provisioning hasta que 4.9.2 y el modo manual seguro estén cerrados.
+Pendiente de **Hermes** (no de la tarea automática): revalidar 4.9.2 / 4.9.2.1 en
+staging tras la reconciliación de migraciones del 2026-06-18 y emitir
+`docs/DYNAMIC_TEMPLATE_PARAMETERS_DB_APPROVAL.md` (ver §0.A).
+
+No avanzar a 4.9.3 Real Provisioning, Worker live ni commit mode hasta cerrar DB-1 y
+el modo manual seguro.
