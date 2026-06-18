@@ -1,6 +1,7 @@
 # Estado de sincronización de migraciones · GitHub ↔ Supabase
 
-Proyecto Supabase: `elshnzkceutvjzxvzqad` · Sincronizado el 2026-06-17.
+Proyecto Supabase: `elshnzkceutvjzxvzqad` (nugacore-staging) · Sincronizado el
+2026-06-17 · Reconciliado de nuevo el 2026-06-18 (snapshots 4.9.2.1).
 
 Resumen: el historial `supabase_migrations.schema_migrations` registraba solo las
 2 migraciones base, mientras que el schema remoto ya tenía aplicada (vía SQL
@@ -9,7 +10,7 @@ migraciones pendientes que eran seguras e idempotentes y registrándolas en el
 historial. Conexión vía `psql` por el pooler (el REST HTTPS está bloqueado desde
 el entorno local; ver memoria del proyecto).
 
-## Estado por migración (12 archivos en `supabase/migrations/`)
+## Estado por migración (14 archivos en `supabase/migrations/`)
 
 | Versión | Migración | Estado | Nota |
 |---|---|---|---|
@@ -25,8 +26,10 @@ el entorno local; ver memoria del proyecto).
 | 20260612120000 | payment_engine | ✅ aplicada | creó payment_orders, payment_events, mikrotik_actions |
 | 20260613000000 | router_enrollment_template_id | ✅ aplicada | Fase 4.9.1 |
 | 20260613120000 | router_enrollment_template_parameters | ✅ aplicada | Fase 4.9.2 |
+| 20260617000000 | router_enrollment_router_snapshot | ✅ aplicada | Fase 4.9.2.1; columna+índice GIN ya en schema, **registrada en historial el 2026-06-18** (SQL idempotente, no-op) |
+| 20260617120000 | router_enrollment_wireguard_snapshot | ✅ aplicada | Fase 4.9.2.1; ídem, **registrada el 2026-06-18** |
 
-**11 de 12 aplicadas y registradas.** Pendiente: `mikrotik_provisioning_schema`.
+**13 de 14 aplicadas y registradas.** Pendiente: `mikrotik_provisioning_schema`.
 
 ## Conflicto pendiente: `mikrotik_routers` (drift del repo)
 
