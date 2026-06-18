@@ -4,11 +4,11 @@ import { createApp } from '../../backend/app';
 import { metrics } from '../../backend/common/metrics';
 
 // ====================================================================
-// Fase 4.9.2.5 — Observabilidad (§14): correlation ID + métricas.
+// Fase 4.9.2.5 - Observabilidad (14): correlation ID + metricas.
 // ====================================================================
 
-describe('Observabilidad — correlation ID (X-Request-Id)', () => {
-  it('genera un X-Request-Id cuando no viene en la petición', async () => {
+describe('Observabilidad - correlation ID (X-Request-Id)', () => {
+  it('genera un X-Request-Id cuando no viene en la peticion', async () => {
     const app = createApp();
     const res = await request(app).get('/api/health');
     expect(res.status).toBe(200);
@@ -35,13 +35,16 @@ describe('Observabilidad — correlation ID (X-Request-Id)', () => {
   });
 });
 
-describe('Observabilidad — métricas', () => {
-  it('GET /api/health expone métricas numéricas', async () => {
+describe('Observabilidad - metricas', () => {
+  it('GET /api/health expone metricas numericas', async () => {
     const app = createApp();
     const res = await request(app).get('/api/health');
     expect(res.body.metrics).toBeDefined();
     expect(typeof res.body.metrics.requestsTotal).toBe('number');
+    expect(typeof res.body.metrics.errors4xx).toBe('number');
     expect(typeof res.body.metrics.errors5xx).toBe('number');
+    expect(typeof res.body.metrics.avgLatencyMs).toBe('number');
+    expect(typeof res.body.metrics.maxLatencyMs).toBe('number');
   });
 
   it('count5xx incrementa el contador de 5xx', () => {
@@ -50,9 +53,41 @@ describe('Observabilidad — métricas', () => {
     expect(metrics.snapshot().errors5xx).toBe(before + 1);
   });
 
+  it('count4xx incrementa el contador de 4xx', () => {
+    const before = metrics.snapshot().errors4xx;
+    metrics.count4xx();
+    expect(metrics.snapshot().errors4xx).toBe(before + 1);
+  });
+
   it('countRequest incrementa el total de peticiones', () => {
     const before = metrics.snapshot().requestsTotal;
     metrics.countRequest();
     expect(metrics.snapshot().requestsTotal).toBe(before + 1);
+  });
+
+  it('observeLatency calcula media y maximo; ignora valores invalidos', () => {
+    metrics.reset();
+    metrics.observeLatency(10);
+    metrics.observeLatency(30);
+    metrics.observeLatency(-5); // ignorado
+    metrics.observeLatency(Number.NaN); // ignorado
+    const snap = metrics.snapshot();
+    expect(snap.avgLatencyMs).toBe(20);
+    expect(snap.maxLatencyMs).toBe(30);
+    metrics.reset();
+    expect(metrics.snapshot().avgLatencyMs).toBe(0);
+    expect(metrics.snapshot().maxLatencyMs).toBe(0);
+  });
+
+  it('una peticion 4xx (ruta inexistente) incrementa errors4xx', async () => {
+    const app = createApp();
+    metrics.reset();
+    const res = await request(app).get('/api/__ruta_inexistente__');
+    expect(res.status).toBeGreaterThanOrEqual(400);
+    expect(res.status).toBeLessThan(500);
+    // El evento 'finish' del servidor puede emitirse justo tras resolver supertest.
+    await new Promise((resolve) => setTimeout(resolve, 10));
+    expect(metrics.snapshot().errors4xx).toBeGreaterThanOrEqual(1);
+    expect(metrics.snapshot().errors5xx).toBe(0);
   });
 });

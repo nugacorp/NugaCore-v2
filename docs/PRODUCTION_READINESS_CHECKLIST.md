@@ -324,7 +324,7 @@ Portal Cliente:
 
 - [ ] Logs JSON estructurados.
 - [ ] Request ID/correlation ID.
-- [ ] Métricas de API.
+- [~] Métricas de API (base in-memory: `requestsTotal`, `errors4xx`, `errors5xx`, `avgLatencyMs`, `maxLatencyMs` en `/api/health`; falta backend de métricas real).
 - [ ] Métricas de DB.
 - [ ] Métricas de workers.
 - [ ] Healthchecks internos y externos.

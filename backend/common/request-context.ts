@@ -4,8 +4,8 @@
 // - Lee X-Request-Id entrante (saneado) o genera un UUID.
 // - Lo expone en req.requestId, en un child logger (req.log) y en la
 //   cabecera de respuesta X-Request-Id para correlacionar extremo a extremo.
-// - Cuenta peticiones y 5xx en el evento 'finish' (captura TODO 5xx, venga
-//   o no del errorHandler).
+// - Cuenta peticiones, 4xx, 5xx y latencia en el evento 'finish' (captura
+//   TODO error de estado, venga o no del errorHandler).
 //
 // El valor entrante se sanea (allowlist de caracteres) para evitar inyección
 // en logs/cabeceras.
@@ -28,9 +28,13 @@ export const attachRequestId = (req: Request, res: Response, next: NextFunction)
   req.log = logger.child({ requestId });
   res.setHeader('X-Request-Id', requestId);
 
+  const startedAt = process.hrtime.bigint();
   res.on('finish', () => {
+    const durationMs = Number(process.hrtime.bigint() - startedAt) / 1e6;
     metrics.countRequest();
+    metrics.observeLatency(durationMs);
     if (res.statusCode >= 500) metrics.count5xx();
+    else if (res.statusCode >= 400) metrics.count4xx();
   });
 
   next();

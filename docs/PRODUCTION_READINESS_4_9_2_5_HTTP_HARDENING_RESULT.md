@@ -130,3 +130,37 @@ Verificación local: `npx tsc --noEmit` → PASS; `npx vitest run` (no-DB) → *
 Pendiente aún en 4.9.2.5: alertas por 5xx/jobs (requiere canal Telegram/email +
 config), readiness con chequeo real de Supabase, backups+restore probado, runbooks,
 y revalidación Hermes.
+
+---
+
+## Adenda 2 — Métricas extendidas (§14)
+
+Tercera sub-entrega de 4.9.2.5: se amplían las métricas en memoria más allá de
+`requestsTotal`/`errors5xx`.
+
+| Métrica (`/api/health` → `metrics`) | Antes | Ahora |
+|---|---|---|
+| `requestsTotal` | ✅ | ✅ |
+| `errors5xx` | ✅ | ✅ |
+| `errors4xx` | ❌ | ✅ conteo de respuestas 4xx |
+| `avgLatencyMs` | ❌ | ✅ latencia media por petición (ms) |
+| `maxLatencyMs` | ❌ | ✅ latencia máxima observada (ms) |
+
+Cambios:
+
+- `backend/common/metrics.ts` — nuevos contadores `errors4xx` y acumuladores de
+  latencia (`observeLatency`), con `avgLatencyMs`/`maxLatencyMs` derivados en
+  `snapshot()`; `reset()` cubre los nuevos campos.
+- `backend/common/request-context.ts` — el handler `finish` mide la duración con
+  `process.hrtime.bigint()`, registra latencia y clasifica 4xx vs 5xx.
+- `tests/contract/observability.contract.test.ts` — de 6 a 9 tests (conteo 4xx,
+  cálculo media/máximo con descarte de valores inválidos, petición 4xx real).
+
+Verificación local: `npm run typecheck` → PASS; `npm test` → **1015/1015** (no-DB,
+46 skipped); `vite build` + `esbuild` en directorio escribible → PASS. El
+`npm run build` estándar sigue bloqueado solo por el borrado de `dist` en el
+filesystem montado del entorno (no es defecto de código).
+
+Sigue pendiente en 4.9.2.5: alertas por 5xx/jobs (requiere canal Telegram/email),
+readiness con chequeo real de Supabase, backups+restore probado, runbooks, y
+revalidación Hermes en staging.
