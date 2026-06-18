@@ -322,8 +322,8 @@ Portal Cliente:
 
 ## 14. Observabilidad
 
-- [ ] Logs JSON estructurados.
-- [ ] Request ID/correlation ID.
+- [x] Logs JSON estructurados (logger emite JSON en prod; access log de finalización `request completed` con method/path/status/durationMs).
+- [x] Request ID/correlation ID (`X-Request-Id` entrante saneado o UUID; `req.log` child + cabecera de respuesta; cubierto por `tests/contract/observability.contract.test.ts`).
 - [~] Métricas de API (base in-memory: `requestsTotal`, `errors4xx`, `errors5xx`, `avgLatencyMs`, `maxLatencyMs` en `/api/health`; falta backend de métricas real).
 - [ ] Métricas de DB.
 - [ ] Métricas de workers.

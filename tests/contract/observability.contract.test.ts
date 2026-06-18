@@ -1,4 +1,4 @@
-import { describe, it, expect } from 'vitest';
+import { describe, it, expect, vi, afterEach } from 'vitest';
 import request from 'supertest';
 import { createApp } from '../../backend/app';
 import { metrics } from '../../backend/common/metrics';
@@ -89,5 +89,34 @@ describe('Observabilidad - metricas', () => {
     await new Promise((resolve) => setTimeout(resolve, 10));
     expect(metrics.snapshot().errors4xx).toBeGreaterThanOrEqual(1);
     expect(metrics.snapshot().errors5xx).toBe(0);
+  });
+});
+
+describe('Observabilidad - access log de finalizacion', () => {
+  afterEach(() => {
+    vi.restoreAllMocks();
+  });
+
+  const findCompletionLine = (spy: ReturnType<typeof vi.spyOn>): string | undefined => {
+    for (const call of spy.mock.calls) {
+      const line = call.map((arg) => (typeof arg === 'string' ? arg : JSON.stringify(arg))).join(' ');
+      if (line.includes('request completed')) return line;
+    }
+    return undefined;
+  };
+
+  it('emite "request completed" con status y duracion al finalizar la peticion', async () => {
+    const logSpy = vi.spyOn(console, 'log').mockImplementation(() => {});
+    const app = createApp();
+    const res = await request(app).get('/api/health');
+    expect(res.status).toBe(200);
+    // El evento 'finish' puede emitirse justo tras resolver supertest.
+    await new Promise((resolve) => setTimeout(resolve, 10));
+
+    const line = findCompletionLine(logSpy);
+    expect(line).toBeDefined();
+    expect(line).toContain('"status":200');
+    expect(line).toContain('"path":"/api/health"');
+    expect(line).toContain('"durationMs"');
   });
 });

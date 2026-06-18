@@ -6,6 +6,9 @@
 //   cabecera de respuesta X-Request-Id para correlacionar extremo a extremo.
 // - Cuenta peticiones, 4xx, 5xx y latencia en el evento 'finish' (captura
 //   TODO error de estado, venga o no del errorHandler).
+// - Emite un access log estructurado de finalización ('request completed')
+//   con method/path/status/durationMs, correlacionado por requestId. No
+//   incluye query string ni body para no filtrar datos sensibles.
 //
 // El valor entrante se sanea (allowlist de caracteres) para evitar inyección
 // en logs/cabeceras.
@@ -35,6 +38,13 @@ export const attachRequestId = (req: Request, res: Response, next: NextFunction)
     metrics.observeLatency(durationMs);
     if (res.statusCode >= 500) metrics.count5xx();
     else if (res.statusCode >= 400) metrics.count4xx();
+
+    req.log.info('request completed', {
+      method: req.method,
+      path: req.path,
+      status: res.statusCode,
+      durationMs: Math.round(durationMs * 100) / 100,
+    });
   });
 
   next();
