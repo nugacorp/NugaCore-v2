@@ -233,6 +233,10 @@ Si se implementa `wireguard_snapshot`:
 
 No iniciar hasta aprobar modo manual/read-only.
 
+Prerrequisito de datos (bloqueante):
+
+- [ ] Reconciliar `mikrotik_routers` schema antes de activar `USE_DB_MIKROTIK` (drift monitoreo vs provisioning; ver `docs/SUPABASE_MIGRATIONS_SYNC.md`). La migración `20260605000000_mikrotik_provisioning_schema.sql` NO debe aplicarse tal cual; requiere una migración evolutiva nueva (`ALTER TABLE ... ADD COLUMN IF NOT EXISTS`).
+
 Antes de RouterOS real:
 
 - [ ] CHR/lab configurado.

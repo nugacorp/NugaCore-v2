@@ -363,6 +363,13 @@ Estado: 🔄 Pendiente
 
 Recomendación: adelantar esta fase antes de acciones live.
 
+Prerrequisito de datos (antes de NOC read-only sobre DB real):
+
+1. Reconciliar el schema de `mikrotik_routers` (drift monitoreo vs provisioning; ver `docs/SUPABASE_MIGRATIONS_SYNC.md`).
+2. Crear una migración evolutiva nueva (`ALTER TABLE ... ADD COLUMN IF NOT EXISTS`), no el `CREATE TABLE` conflictivo de `20260605000000_mikrotik_provisioning_schema.sql`.
+3. Validar que `USE_DB_MIKROTIK=false` sigue intacto (dominio en memoria; no activar el flag).
+4. Solo después preparar el Inventory read-only.
+
 Dashboard:
 
 - Torres.
