@@ -49,22 +49,31 @@ migraciones en Supabase ni activa flags.
 
 ### D. DB-1 — Reconciliación de `mikrotik_routers`
 
-Pendientes:
+**Diseño COMPLETO** en [`docs/MIKROTIK_ROUTERS_SCHEMA_RECONCILIATION.md`](./MIKROTIK_ROUTERS_SCHEMA_RECONCILIATION.md)
+(estado actual, modelo canónico columna por columna, compatibilidad, impacto, estrategia
+de migración y riesgos). **Hallazgo clave:** la migración `20260605000000` ya es evolutiva
+(`ADD COLUMN IF NOT EXISTS`); el conflicto histórico fue corregido en `b4d19c4`/`7264e59`.
+El modelo TS (`MikrotikRouterRegistryItem`, `ProvisionedRouterView`) ya está unificado.
 
-- [ ] Auditar las dos definiciones actuales de `mikrotik_routers`:
-  - init_schema (modelo de monitoreo).
-  - mikrotik_provisioning_schema (modelo de provisioning).
-- [ ] Crear documento `docs/MIKROTIK_ROUTERS_SCHEMA_RECONCILIATION.md`.
-- [ ] Diseñar modelo canónico combinado monitoring + provisioning.
-- [ ] Crear nueva migración evolutiva con timestamp posterior.
-- [ ] La migración debe usar `ALTER TABLE ... ADD COLUMN IF NOT EXISTS`.
+Hecho (diseño, esta sesión):
+
+- [x] Auditar las dos definiciones de `mikrotik_routers` (monitoreo vs provisioning) + modelos TS, stores y tests.
+- [x] Crear `docs/MIKROTIK_ROUTERS_SCHEMA_RECONCILIATION.md`.
+- [x] Diseñar el modelo canónico combinado monitoring + provisioning.
+
+Pendiente (implementación; lo retoma la siguiente tarea automática):
+
+- [ ] (Opcional) Migración de sellado con timestamp posterior: solo `ALTER TABLE ... ADD COLUMN IF NOT EXISTS` + backfill guardado de espejos (`management_ip`/`provisioning_status`). Nunca `DROP`.
 - [ ] No modificar ni aplicar directamente `20260605000000_mikrotik_provisioning_schema.sql`.
-- [ ] No activar `USE_DB_MIKROTIK`.
-- [ ] Actualizar `scripts/validate-staging-migrations.mjs`.
-- [ ] Agregar tests unitarios de la migración.
+- [ ] No activar `USE_DB_MIKROTIK` (todavía no existe repository DB de MikroTik; el dominio corre en memoria).
+- [ ] Actualizar `scripts/validate-staging-migrations.mjs` (conjunto canónico de columnas + espejos).
+- [ ] Agregar tests unitarios de estructura/idempotencia de la migración.
 - [ ] Validar que `npm run typecheck`, `npm test`, `npm run build` pasen.
-- [ ] Documentar runbook para Hermes.
-- [ ] Dejar listo para validación staging, pero sin aplicar manualmente desde Claude.
+- [ ] Documentar runbook para Hermes (registrar `20260605000000` en `schema_migrations` + `NOTIFY pgrst`).
+- [ ] Dejar listo para validación staging, sin aplicar manualmente desde Claude.
+
+Después de DB-1: **Inventory Read-Only → NOC Read-Only** — diseño en
+[`docs/NOC_READ_ONLY_ARCHITECTURE.md`](./NOC_READ_ONLY_ARCHITECTURE.md).
 
 ### E. Qué NO hacer
 

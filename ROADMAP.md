@@ -359,19 +359,50 @@ Prerequisito para NOC Read-Only e Inventory Read-Only. Resuelve el drift del rep
 las dos definiciones de `public.mikrotik_routers` (modelo de monitoreo en `init_schema`
 vs modelo de provisioning en `mikrotik_provisioning_schema`).
 
+Diseño completo: [`docs/MIKROTIK_ROUTERS_SCHEMA_RECONCILIATION.md`](./docs/MIKROTIK_ROUTERS_SCHEMA_RECONCILIATION.md).
+
+Nota: la migración `20260605000000` **ya es evolutiva** (`ADD COLUMN IF NOT EXISTS`); el
+conflicto descrito en versiones antiguas de la doc ya fue corregido (`b4d19c4`/`7264e59`).
+
 Alcance (solo preparación de DB y validadores):
 
-1. Reconciliar el schema de `mikrotik_routers` (ver `docs/SUPABASE_MIGRATIONS_SYNC.md`).
-2. Crear una migración evolutiva nueva (`ALTER TABLE ... ADD COLUMN IF NOT EXISTS`), no el `CREATE TABLE` conflictivo de `20260605000000_mikrotik_provisioning_schema.sql`.
-3. Validar que `USE_DB_MIKROTIK=false` sigue intacto (dominio en memoria).
-4. Actualizar validadores (`scripts/validate-staging-migrations.mjs`) y tests.
+1. Sellar el modelo canónico (unión monitoreo + provisioning) resolviendo redundancias (`status` vs `provisioning_status`, `ip_address` vs `management_ip`).
+2. Reconciliar el historial (`schema_migrations`) — lo aplica/valida Hermes en staging.
+3. Validar que `USE_DB_MIKROTIK=false` sigue intacto (dominio en memoria; no existe aún repository DB de MikroTik).
+4. Actualizar validadores (`scripts/validate-staging-migrations.mjs`) y tests, solo con `ALTER TABLE ... ADD COLUMN IF NOT EXISTS` (nunca DROP).
 
 Gate:
 
 - No activa `USE_DB_MIKROTIK`.
 - No toca routers reales.
 - No aplica la migración en Supabase desde Claude; la validación staging la hace Hermes.
-- Solo después de DB-1 se prepara NOC e Inventory read-only.
+- Solo después de DB-1 se prepara Inventory y NOC read-only.
+
+### Secuencia de ejecución (orden estricto)
+
+No avanzar a un punto sin cerrar el anterior:
+
+```text
+DB-1 (reconciliación mikrotik_routers)
+  ↓
+Inventory Read-Only
+  ↓
+NOC Read-Only
+  ↓
+PROD-1 Manual Safe Mode
+  ↓
+Safe Command Queue (dry-run)
+  ↓
+4.9.3 Real Provisioning
+```
+
+### Inventory Read-Only
+
+Estado: 🔄 Pendiente · Después de DB-1.
+
+Vista consolidada de routers/torres/peers leyendo el modelo canónico de
+`mikrotik_routers`. Solo lectura: filtrar, ver detalle, exportar saneado; sin escritura
+sobre routers. Diseño en [`docs/NOC_READ_ONLY_ARCHITECTURE.md`](./docs/NOC_READ_ONLY_ARCHITECTURE.md) §1.
 
 ### FASE 4.11 — NOC Read-Only
 
@@ -381,6 +412,8 @@ Recomendación: adelantar esta fase antes de acciones live.
 
 Prerrequisito: **cerrar DB-1** (reconciliación de `mikrotik_routers`) antes de NOC
 read-only sobre DB real.
+
+Diseño completo: [`docs/NOC_READ_ONLY_ARCHITECTURE.md`](./docs/NOC_READ_ONLY_ARCHITECTURE.md).
 
 Dashboard:
 
