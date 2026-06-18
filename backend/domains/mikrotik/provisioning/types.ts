@@ -112,7 +112,13 @@ export interface ScriptGenerationResult {
   warnings: string[];
 }
 
-/** Router en el registro de provisioning (forma saneada para la API/UI). */
+/**
+ * Router en el registro de provisioning (forma saneada para la API/UI).
+ *
+ * `status` se deriva de la columna canónica `provisioning_status`
+ * (ver DB-1, `CANONICAL_MIKROTIK_ROUTER_COLUMNS`). `managementIp` se prefiere
+ * sobre el espejo legacy `ip_address`.
+ */
 export interface ProvisionedRouterView {
   id: string;
   name: string;
@@ -130,3 +136,44 @@ export interface ProvisionedRouterView {
   notes?: string;
   lastHealthCheckAt: string;
 }
+
+// ====================================================================
+// DB-1 · Modelo canónico de `public.mikrotik_routers`
+//
+// Fuente de verdad COMPARTIDA (tests/validadores) del esquema reconciliado.
+// Refleja exactamente la unión monitoreo + provisioning descrita en
+// docs/MIKROTIK_ROUTERS_SCHEMA_RECONCILIATION.md. NO activa USE_DB_MIKROTIK.
+// ====================================================================
+
+/** Todas las columnas del modelo canónico (snake_case, como en la DB). */
+export const CANONICAL_MIKROTIK_ROUTER_COLUMNS = [
+  // Identidad y ciclo de vida
+  'id', 'name', 'created_at', 'updated_at',
+  // Conectividad y acceso API
+  'connection_type', 'management_ip', 'ip_address', 'vpn_ip',
+  'api_port', 'api_ssl_port', 'username', 'encrypted_password', 'has_credentials',
+  // Estado
+  'provisioning_status', 'status', 'is_online',
+  // Monitoreo / health
+  'cpu_usage_pct', 'memory_usage_pct', 'routeros_version',
+  'last_health_check_at', 'last_seen_at',
+  // Relaciones y metadatos
+  'linked_tower_id', 'notes',
+] as const;
+
+export type CanonicalMikrotikRouterColumn = (typeof CANONICAL_MIKROTIK_ROUTER_COLUMNS)[number];
+
+/**
+ * Columnas que la migración de reconciliación (20260618000000) garantiza con
+ * `ADD COLUMN IF NOT EXISTS` (las de provisioning). Idempotente con 20260605000000.
+ */
+export const RECONCILIATION_PROVISIONING_COLUMNS = [
+  'connection_type', 'management_ip', 'vpn_ip', 'api_ssl_port',
+  'status', 'provisioning_status', 'has_credentials', 'last_seen_at', 'notes', 'updated_at',
+] as const;
+
+/**
+ * Columnas DEPRECATED (espejo): se conservan y nunca se eliminan.
+ * `status` → usar `provisioning_status`; `ip_address` → preferir `management_ip`.
+ */
+export const DEPRECATED_MIKROTIK_ROUTER_COLUMNS = ['status', 'ip_address'] as const;

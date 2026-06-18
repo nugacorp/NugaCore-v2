@@ -61,19 +61,26 @@ Hecho (diseño, esta sesión):
 - [x] Crear `docs/MIKROTIK_ROUTERS_SCHEMA_RECONCILIATION.md`.
 - [x] Diseñar el modelo canónico combinado monitoring + provisioning.
 
-Pendiente (implementación; lo retoma la siguiente tarea automática):
+Implementación (DB-1, completada — ver [`docs/MIKROTIK_SCHEMA_IMPLEMENTATION_RESULT.md`](./MIKROTIK_SCHEMA_IMPLEMENTATION_RESULT.md)):
 
-- [ ] (Opcional) Migración de sellado con timestamp posterior: solo `ALTER TABLE ... ADD COLUMN IF NOT EXISTS` + backfill guardado de espejos (`management_ip`/`provisioning_status`). Nunca `DROP`.
-- [ ] No modificar ni aplicar directamente `20260605000000_mikrotik_provisioning_schema.sql`.
-- [ ] No activar `USE_DB_MIKROTIK` (todavía no existe repository DB de MikroTik; el dominio corre en memoria).
-- [ ] Actualizar `scripts/validate-staging-migrations.mjs` (conjunto canónico de columnas + espejos).
-- [ ] Agregar tests unitarios de estructura/idempotencia de la migración.
-- [ ] Validar que `npm run typecheck`, `npm test`, `npm run build` pasen.
-- [ ] Documentar runbook para Hermes (registrar `20260605000000` en `schema_migrations` + `NOTIFY pgrst`).
-- [ ] Dejar listo para validación staging, sin aplicar manualmente desde Claude.
+- [x] Migración de sellado `20260618000000_mikrotik_routers_reconciliation.sql` (solo `ADD COLUMN`/`CREATE INDEX IF NOT EXISTS`; sin DROP/DELETE/UPDATE de datos).
+- [x] No modificar ni aplicar directamente `20260605000000_mikrotik_provisioning_schema.sql` (no se tocó).
+- [x] `USE_DB_MIKROTIK` NO activado (no existe repository DB de MikroTik aún).
+- [x] Validador de schema `scripts/validate-mikrotik-schema.mjs` (opt-in `RUN_DB_TESTS`, sin secretos).
+- [x] Tipos alineados al modelo canónico (`CANONICAL_MIKROTIK_ROUTER_COLUMNS`, `MikrotikRouterRegistryItem`).
+- [x] Tests de estructura/idempotencia/consistencia (`tests/unit/mikrotik.schema-reconciliation.test.ts`, 12 tests).
+- [x] `npm run typecheck`, `npm test` (1028 passed), `npm run build` → PASS.
+- [x] Runbook para Hermes documentado.
+- [x] Listo para validación staging, sin aplicar desde Claude.
 
-Después de DB-1: **Inventory Read-Only → NOC Read-Only** — diseño en
-[`docs/NOC_READ_ONLY_ARCHITECTURE.md`](./NOC_READ_ONLY_ARCHITECTURE.md).
+Pendiente (NO en esta sesión):
+
+- [ ] Aplicación + validación staging por **Hermes** (runbook en el doc de resultado); registrar migraciones en `schema_migrations` + `NOTIFY pgrst`.
+- [ ] (Opcional, futuro) Migración de backfill de espejos (`management_ip`/`provisioning_status`) con `UPDATE` guardado — fuera de DB-1.
+- [ ] Repository DB de MikroTik para `USE_DB_MIKROTIK=true` (fase posterior).
+
+Después de DB-1 (validado en staging): **Inventory Read-Only → NOC Read-Only** — diseño en
+[`docs/NOC_READ_ONLY_ARCHITECTURE.md`](./NOC_READ_ONLY_ARCHITECTURE.md). **No iniciar aún.**
 
 ### E. Qué NO hacer
 

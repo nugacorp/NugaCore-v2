@@ -50,6 +50,14 @@ export interface MikrotikRouterRegistryItem {
   lastSeenAt?: string;
   encryptionVersion?: string;
   credentialRotatedAt?: string;
+  // ── DB-1 · alineación con el modelo canónico de mikrotik_routers ──
+  // `status` es el espejo DEPRECATED de `provisioningStatus` (columna canónica).
+  // `hasCredentials` se deriva normalmente de `encryptedPassword`.
+  // `createdAt`/`updatedAt` reflejan el ciclo de vida de la fila DB.
+  status?: 'pending' | 'provisioned' | 'connected' | 'error';
+  hasCredentials?: boolean;
+  createdAt?: string;
+  updatedAt?: string;
 }
 
 export interface MikrotikCommandAudit {
