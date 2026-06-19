@@ -7,6 +7,7 @@ import NetworkModule from './components/NetworkModule';
 import MikrotikModule from './components/MikrotikModule';
 import SupportModule from './components/SupportModule';
 import InventoryModule from './components/InventoryModule';
+import InventoryRoutersModule from './components/InventoryRoutersModule';
 import GisModule from './components/GisModule';
 import FinanceOwnerModule from './components/FinanceOwnerModule';
 import SuspensionModule from './components/SuspensionModule';
@@ -875,11 +876,15 @@ export default function App() {
             )}
 
             {activeTab === 'inventory' && (
-              <InventoryModule 
-                inventory={inventory} 
+              <InventoryModule
+                inventory={inventory}
                 onMovement={handleInventoryMovement}
                 onAddItem={handleAddInventoryItem}
               />
+            )}
+
+            {activeTab === 'inventory-routers' && (
+              <InventoryRoutersModule getAuthHeaders={getAuthHeaders} />
             )}
 
             {activeTab === 'gis' && (

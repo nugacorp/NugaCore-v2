@@ -15,6 +15,7 @@ export type AppTab =
   | 'payments'
   | 'support'
   | 'inventory'
+  | 'inventory-routers'
   | 'gis'
   | 'owner';
 
@@ -25,12 +26,12 @@ export type AppTab =
 // la VISIBILIDAD del módulo.
 // ====================================================================
 const roleTabs: Record<UserRole, AppTab[]> = {
-  'Super Admin':  ['dashboard', 'crm', 'billing', 'finance', 'suspension', 'payments', 'network', 'mikrotik', 'wireguard', 'routeros-resources', 'routeros-templates', 'router-enrollment', 'support', 'inventory', 'gis', 'owner'],
-  'Administrador':['dashboard', 'crm', 'billing', 'suspension', 'payments', 'network', 'wireguard', 'routeros-resources', 'routeros-templates', 'router-enrollment', 'support', 'inventory', 'gis'],
+  'Super Admin':  ['dashboard', 'crm', 'billing', 'finance', 'suspension', 'payments', 'network', 'mikrotik', 'wireguard', 'routeros-resources', 'routeros-templates', 'router-enrollment', 'support', 'inventory', 'inventory-routers', 'gis', 'owner'],
+  'Administrador':['dashboard', 'crm', 'billing', 'suspension', 'payments', 'network', 'wireguard', 'routeros-resources', 'routeros-templates', 'router-enrollment', 'support', 'inventory', 'inventory-routers', 'gis'],
   'Cobranza':     ['dashboard', 'crm', 'billing', 'finance', 'suspension', 'payments'],
-  'Técnico':      ['dashboard', 'suspension', 'network', 'mikrotik', 'routeros-resources', 'routeros-templates', 'router-enrollment', 'support', 'inventory', 'gis'],
-  'Soporte':      ['dashboard', 'crm', 'support', 'gis'],
-  'Solo lectura': ['dashboard', 'crm', 'billing', 'suspension', 'network', 'gis'],
+  'Técnico':      ['dashboard', 'suspension', 'network', 'mikrotik', 'routeros-resources', 'routeros-templates', 'router-enrollment', 'support', 'inventory', 'inventory-routers', 'gis'],
+  'Soporte':      ['dashboard', 'crm', 'support', 'inventory-routers', 'gis'],
+  'Solo lectura': ['dashboard', 'crm', 'billing', 'suspension', 'network', 'inventory-routers', 'gis'],
 };
 
 // Fallback seguro para roles desconocidos / sin rol.
@@ -66,6 +67,7 @@ export const MODULE_LABELS: Record<AppTab, string> = {
   payments: 'Portal Pagos & Reactivación',
   support: 'Soporte & OT',
   inventory: 'Inventario / ERP',
+  'inventory-routers': 'Inventario Routers (RO)',
   gis: 'GIS & Cobertura',
   owner: 'Owner & Automatizaciones',
 };

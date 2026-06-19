@@ -398,11 +398,13 @@ Safe Command Queue (dry-run)
 
 ### Inventory Read-Only
 
-Estado: 🔄 Pendiente · Después de DB-1.
+Estado: 🟡 **4.11.1 Foundation implementada localmente** (pendiente validación Hermes).
 
-Vista consolidada de routers/torres/peers leyendo el modelo canónico de
-`mikrotik_routers`. Solo lectura: filtrar, ver detalle, exportar saneado; sin escritura
-sobre routers. Diseño en [`docs/NOC_READ_ONLY_ARCHITECTURE.md`](./docs/NOC_READ_ONLY_ARCHITECTURE.md) §1.
+Vista consolidada de routers leyendo el modelo canónico de `mikrotik_routers`. Solo
+lectura: resumen + tabla; sin escritura sobre routers, sin RouterOS, sin comandos.
+Endpoints `/api/inventory/routers`, `/api/inventory/routers/:id`, `/api/inventory/summary`.
+Resultado: [`docs/INVENTORY_READ_ONLY_RESULT.md`](./docs/INVENTORY_READ_ONLY_RESULT.md).
+Diseño en [`docs/NOC_READ_ONLY_ARCHITECTURE.md`](./docs/NOC_READ_ONLY_ARCHITECTURE.md) §1.
 
 ### FASE 4.11 — NOC Read-Only
 

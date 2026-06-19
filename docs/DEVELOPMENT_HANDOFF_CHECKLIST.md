@@ -80,13 +80,20 @@ Pendiente (NO en esta sesión):
 - [ ] Repository DB de MikroTik para `USE_DB_MIKROTIK=true` (fase posterior).
 
 Después de DB-1 (validado en staging): **Inventory Read-Only → NOC Read-Only** — diseño en
-[`docs/NOC_READ_ONLY_ARCHITECTURE.md`](./NOC_READ_ONLY_ARCHITECTURE.md). **No iniciar aún.**
+[`docs/NOC_READ_ONLY_ARCHITECTURE.md`](./NOC_READ_ONLY_ARCHITECTURE.md).
+
+**4.11.1 Inventory Read-Only Foundation: implementada localmente** (pendiente validación
+Hermes) — ver [`docs/INVENTORY_READ_ONLY_RESULT.md`](./INVENTORY_READ_ONLY_RESULT.md).
+Backend + UI **read-only** sobre `mikrotik_routers` (store en memoria), sin activar
+`USE_DB_MIKROTIK`. **NOC Read-Only y la activación DB siguen sin iniciar.**
 
 ### E. Qué NO hacer
 
-**No avanzar a NOC Read-Only, Inventory Read-Only, Real Provisioning, Worker Live ni
-Commit Mode hasta cerrar DB-1.** No activar `USE_DB_MIKROTIK`, `USE_DB_WIREGUARD`,
-`MIKROTIK_WORKER_LIVE` ni commit mode. No aplicar migraciones en Supabase ni tocar
+**No avanzar a NOC Read-Only, Real Provisioning, Worker Live ni Commit Mode hasta cerrar
+DB-1 en staging.** (La *foundation* read-only de Inventory 4.11.1 ya está implementada en
+local sin activar flags; ver `docs/INVENTORY_READ_ONLY_RESULT.md`.) No activar
+`USE_DB_MIKROTIK`, `USE_DB_WIREGUARD`, `MIKROTIK_WORKER_LIVE` ni commit mode. No aplicar
+migraciones en Supabase ni tocar
 routers/datos reales desde esta tarea automática.
 
 ## 1. Antes de tocar código
@@ -396,8 +403,8 @@ Prioridad absoluta para la tarea automática (ver §0.C y §0.D). El orden es es
 no avanzar a un punto sin cerrar el anterior:
 
 1. **DB-1 — Reconciliar el schema de `mikrotik_routers`** antes de activar `USE_DB_MIKROTIK`.
-2. NOC Read-Only.
-3. MikroTik Inventory Read-Only.
+2. Inventory Read-Only (**4.11.1 foundation implementada localmente**; pendiente validación Hermes).
+3. NOC Read-Only.
 4. PROD-1 Manual Safe Mode.
 5. Safe Command Queue dry-run.
 

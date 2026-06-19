@@ -2,6 +2,7 @@ import { Router } from 'express';
 import { WarehouseItem } from '../../../src/types';
 import { store } from '../../../backend/state/store';
 import { READ_ROLES, requireRoles } from '../../common/rbac';
+import { inventoryRoutersService } from './routers/service';
 
 const router = Router();
 
@@ -341,6 +342,33 @@ router.post('/api/inventory/add', requireRoles(['super admin', 'administrador', 
   });
 
   res.status(201).json(withState(newItem));
+});
+
+// ====================================================================
+// Inventory Read-Only de routers MikroTik (Fase 4.11.1).
+//
+// READ-ONLY: lee `mikrotik_routers` desde el store en memoria
+// (`USE_DB_MIKROTIK` apagado). Sin escritura, sin conexión RouterOS, sin
+// comandos. No expone secretos. RBAC de lectura de operación; Cobranza queda
+// excluido (no opera infraestructura de red), igual que el provisioning.
+// ====================================================================
+const INVENTORY_ROUTERS_READ_ROLES = ['super admin', 'administrador', 'tecnico', 'soporte', 'solo lectura'] as const;
+
+router.get('/api/inventory/routers', requireRoles([...INVENTORY_ROUTERS_READ_ROLES]), (_req, res) => {
+  res.json(inventoryRoutersService.listRouters());
+});
+
+router.get('/api/inventory/summary', requireRoles([...INVENTORY_ROUTERS_READ_ROLES]), (_req, res) => {
+  res.json(inventoryRoutersService.getSummary());
+});
+
+router.get('/api/inventory/routers/:id', requireRoles([...INVENTORY_ROUTERS_READ_ROLES]), (req, res) => {
+  const view = inventoryRoutersService.getRouter(req.params.id);
+  if (!view) {
+    res.status(404).json({ error: 'Router not found in inventory' });
+    return;
+  }
+  res.json(view);
 });
 
 export default router;

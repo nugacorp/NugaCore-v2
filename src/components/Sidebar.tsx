@@ -57,6 +57,7 @@ export default function Sidebar({
     { id: 'payments', name: 'Portal Pagos & Reactivación', icon: Banknote },
     { id: 'support', name: 'Remesa Soporte & OT', icon: Wrench },
     { id: 'inventory', name: 'Inventarios / ERP', icon: Box },
+    { id: 'inventory-routers', name: 'Inventario Routers (Read-Only)', icon: Cpu },
     { id: 'gis', name: 'GIS & Cobertura Co-Map', icon: Map },
     { id: 'owner', name: 'Owner & Automatizaciones', icon: Shield },
   ];

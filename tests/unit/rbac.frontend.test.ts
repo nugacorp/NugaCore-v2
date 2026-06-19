@@ -6,10 +6,10 @@ import type { UserRole } from '../../src/lib/supabase';
 const ALL_ROLES: UserRole[] = ['Super Admin', 'Administrador', 'Cobranza', 'Técnico', 'Soporte', 'Solo lectura'];
 
 describe('RBAC visual por rol (frontend)', () => {
-  it('Super Admin ve todos los módulos (16)', () => {
+  it('Super Admin ve todos los módulos (17)', () => {
     const t = getAllowedTabsByRole('Super Admin');
-    expect(t.length).toBe(16);
-    expect(t).toEqual(expect.arrayContaining(['mikrotik', 'wireguard', 'routeros-resources', 'routeros-templates', 'router-enrollment', 'payments', 'owner', 'finance', 'billing', 'inventory', 'suspension']));
+    expect(t.length).toBe(17);
+    expect(t).toEqual(expect.arrayContaining(['mikrotik', 'wireguard', 'routeros-resources', 'routeros-templates', 'router-enrollment', 'payments', 'owner', 'finance', 'billing', 'inventory', 'inventory-routers', 'suspension']));
   });
 
   it('Administrador NO ve mikrotik / finance / owner', () => {
@@ -20,10 +20,11 @@ describe('RBAC visual por rol (frontend)', () => {
     expect(t).not.toContain('owner');
   });
 
-  it('Cobranza ve billing/finance/payments; no mikrotik ni red', () => {
+  it('Cobranza ve billing/finance/payments; no mikrotik, red ni inventory-routers', () => {
     expect(getAllowedTabsByRole('Cobranza')).toEqual(['dashboard', 'crm', 'billing', 'finance', 'suspension', 'payments']);
     expect(canAccessTab('Cobranza', 'mikrotik')).toBe(false);
     expect(canAccessTab('Cobranza', 'network')).toBe(false);
+    expect(canAccessTab('Cobranza', 'inventory-routers')).toBe(false);
   });
 
   it('Técnico ve red/mikrotik/soporte; no finanzas ni billing', () => {
@@ -33,17 +34,19 @@ describe('RBAC visual por rol (frontend)', () => {
     expect(t).not.toContain('billing');
   });
 
-  it('Soporte: dashboard/crm/support/gis; no billing ni mikrotik', () => {
-    expect(getAllowedTabsByRole('Soporte')).toEqual(['dashboard', 'crm', 'support', 'gis']);
+  it('Soporte: dashboard/crm/support/inventory-routers/gis; no billing ni mikrotik', () => {
+    expect(getAllowedTabsByRole('Soporte')).toEqual(['dashboard', 'crm', 'support', 'inventory-routers', 'gis']);
     expect(canAccessTab('Soporte', 'billing')).toBe(false);
     expect(canAccessTab('Soporte', 'mikrotik')).toBe(false);
+    expect(canAccessTab('Soporte', 'inventory-routers')).toBe(true);
   });
 
-  it('Solo lectura: solo lectura; sin mikrotik/support/inventory/owner', () => {
-    expect(getAllowedTabsByRole('Solo lectura')).toEqual(['dashboard', 'crm', 'billing', 'suspension', 'network', 'gis']);
+  it('Solo lectura: lectura básica + inventory-routers; sin mikrotik/support/owner', () => {
+    expect(getAllowedTabsByRole('Solo lectura')).toEqual(['dashboard', 'crm', 'billing', 'suspension', 'network', 'inventory-routers', 'gis']);
     expect(canAccessTab('Solo lectura', 'mikrotik')).toBe(false);
     expect(canAccessTab('Solo lectura', 'owner')).toBe(false);
     expect(canAccessTab('Solo lectura', 'support')).toBe(false);
+    expect(canAccessTab('Solo lectura', 'inventory-routers')).toBe(true);
   });
 
   it('rol desconocido / sin rol -> fallback Solo lectura', () => {
