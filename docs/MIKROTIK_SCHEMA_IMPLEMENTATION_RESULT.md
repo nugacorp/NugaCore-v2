@@ -99,21 +99,38 @@ contract»). No hay backfill de datos (el sellado de espejos `management_ip`/
 - `RUN_DB_TESTS=true npm run test:db` → **no ejecutado localmente** (requiere credenciales
   Supabase; no se toca staging desde Claude). Lo corre Hermes en staging.
 
-## Runbook para Hermes (aplicación en staging, fuera de esta sesión)
+## Runbook Hermes DB-1
 
-1. Aplicar en orden (idempotente):
-   - `supabase/migrations/20260605000000_mikrotik_provisioning_schema.sql` (si no estaba registrada).
-   - `supabase/migrations/20260618000000_mikrotik_routers_reconciliation.sql`.
-2. `NOTIFY pgrst, 'reload schema';`.
-3. Validar: `RUN_DB_TESTS=true node scripts/validate-mikrotik-schema.mjs`.
-4. Registrar ambas versiones en `supabase_migrations.schema_migrations` (ver
-   `docs/SUPABASE_MIGRATIONS_SYNC.md`).
-5. Mantener `USE_DB_MIKROTIK=false`.
+Pasos para Hermes (aplicación + validación en staging; fuera de esta sesión de Claude):
+
+1. **Pull del commit nuevo** del hotfix (rama `main`); confirmar el hash esperado en `git log`.
+2. **Revisar la migración** `supabase/migrations/20260618000000_mikrotik_routers_reconciliation.sql`:
+   debe contener **solo** `ALTER TABLE ... ADD COLUMN IF NOT EXISTS` y `CREATE INDEX IF NOT
+   EXISTS`. No debe contener `DO $$`, `CREATE TRIGGER`, `BEFORE UPDATE`, `ENABLE ROW LEVEL
+   SECURITY`, `COMMENT ON`, ni `DROP/DELETE/TRUNCATE/UPDATE/INSERT`.
+   > Nota: la única aparición de la subcadena "update" es la **columna** `updated_at`
+   > (añadida con `ADD COLUMN IF NOT EXISTS`, statement permitido), no un statement DML.
+3. **Aplicar la migración en staging** (idempotente). Si `20260605000000_mikrotik_provisioning_schema.sql`
+   no estaba registrada, aplicarla antes (también idempotente).
+4. **`NOTIFY pgrst, 'reload schema';`** para refrescar el schema cache de PostgREST.
+5. **Validar el esquema:** `RUN_DB_TESTS=true node scripts/validate-mikrotik-schema.mjs`.
+6. **Correr checks:**
+   - `RUN_DB_TESTS=true npm run test:db`
+   - `npm run typecheck`
+   - `npm test`
+   - `npm run build`
+7. **Confirmar flags seguros:** `USE_DB_MIKROTIK` apagado, `MIKROTIK_WORKER_LIVE=false`,
+   commit mode apagado.
+8. **Crear documento staging result SOLO si todo pasa**; registrar las versiones aplicadas en
+   `supabase_migrations.schema_migrations` (ver `docs/SUPABASE_MIGRATIONS_SYNC.md`).
+
+Si algún paso falla, detenerse, NO continuar y reportar el bloqueador exacto (tabla/columna/error).
 
 ## Riesgos
 
 - **R1 (Media):** redundancia `status`/`provisioning_status`. Mitigado: `provisioning_status`
-  canónico; `status` espejo deprecated documentado por `COMMENT`.
+  canónico; `status` espejo deprecated (documentado en este doc y en el diseño; el `COMMENT ON`
+  se difiere a DB-1.2).
 - **R2 (Baja):** `ip_address` NOT NULL coexiste con `management_ip`. Mitigado: espejo, no se elimina.
 - **R3 (Media):** drift historial (`20260605000000` sin registrar). Mitigado: la nueva
   migración es auto-suficiente (re-garantiza columnas); el runbook reconcilia el historial.
