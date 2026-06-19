@@ -101,6 +101,21 @@ describe('RBAC visual por rol (frontend)', () => {
     const app = readFileSync('src/App.tsx', 'utf8');
 
     expect(app).toContain('if (!sessionBootstrapped || !userSession)');
-    expect(app).toContain('}, [sessionBootstrapped, userSession?.id]);');
+    expect(app).toContain('[sessionBootstrapped, userSession?.id');
+  });
+
+  it('App pausa polling cuando la pestaña no está visible y limpia listeners', () => {
+    const app = readFileSync('src/App.tsx', 'utf8');
+
+    expect(app).toContain("document.visibilityState !== 'visible'");
+    expect(app).toContain("document.addEventListener('visibilitychange'");
+    expect(app).toContain("document.removeEventListener('visibilitychange'");
+  });
+
+  it('App respeta cooldown de 429 para evitar loops de polling agresivo', () => {
+    const app = readFileSync('src/App.tsx', 'utf8');
+
+    expect(app).toContain('rateLimitUntilMs');
+    expect(app).toContain('Date.now() < rateLimitUntilMs');
   });
 });

@@ -1,4 +1,4 @@
-import React, { useState, useEffect } from 'react';
+import React, { useState, useEffect, useCallback } from 'react';
 import Sidebar from './components/Sidebar';
 import Dashboard from './components/Dashboard';
 import CrmModule from './components/CrmModule';
@@ -23,6 +23,7 @@ import UserMenu from './components/UserMenu';
 import { authSession, restoreSessionProfileFromSupabase } from './lib/authSession';
 import { UserSessionProfile, isSupabaseConfigured, supabase } from './lib/supabase';
 import { canAccessTab, getDefaultTabByRole } from './lib/rbac';
+import { fetchWithRateLimitBackoff, isApiRateLimitError } from './lib/apiBackoff';
 
 import { 
   Client, 
@@ -69,6 +70,8 @@ export default function App() {
   const [loading, setLoading] = useState<boolean>(true);
   const [errorStr, setErrorStr] = useState<string>('');
   const [notice, setNotice] = useState<string>('');
+  const [rateLimitNotice, setRateLimitNotice] = useState<string>('');
+  const [rateLimitUntilMs, setRateLimitUntilMs] = useState<number>(0);
 
   const handleLoginSuccess = (profile: UserSessionProfile, accessToken?: string) => {
     setUserSession(profile);
@@ -162,7 +165,7 @@ export default function App() {
   const [wgServers, setWgServers] = useState<WireguardServerView[]>([]);
   const [wgPeers, setWgPeers] = useState<WireguardPeerView[]>([]);
 
-  const getAuthHeaders = async (): Promise<Record<string, string>> => {
+  const getAuthHeaders = useCallback(async (): Promise<Record<string, string>> => {
     const headers: Record<string, string> = {};
 
     // Prefer the freshest Supabase access token (auto-refreshed by supabase-js)
@@ -185,16 +188,18 @@ export default function App() {
     }
 
     return headers;
-  };
+  }, [userSession]);
 
-  const fetchJson = async (url: string, init?: RequestInit) => {
+  const fetchJson = useCallback(async (url: string, init?: RequestInit) => {
     const authHeaders = await getAuthHeaders();
-    const response = await fetch(url, {
+    const response = await fetchWithRateLimitBackoff(url, {
       ...init,
       headers: {
         ...authHeaders,
         ...(init?.headers || {}),
       },
+    }, {
+      key: `${(init?.method || 'GET').toUpperCase()} ${url}`,
     });
 
     if (!response.ok) {
@@ -203,82 +208,176 @@ export default function App() {
     }
 
     return response.json();
-  };
+  }, [getAuthHeaders]);
+
+  const setRateLimitMessage = useCallback((retryAfterMs: number) => {
+    const seconds = Math.max(1, Math.ceil(retryAfterMs / 1000));
+    setRateLimitNotice(`Demasiadas solicitudes, reintentando en unos segundos (${seconds}s).`);
+    setRateLimitUntilMs(Date.now() + retryAfterMs);
+  }, []);
+
+  const shouldPollCoreDataset = useCallback((tab: string): boolean => {
+    return [
+      'dashboard',
+      'crm',
+      'billing',
+      'network',
+      'support',
+      'inventory',
+      'gis',
+      'finance',
+      'owner',
+    ].includes(tab);
+  }, []);
 
   // Fetch initial system database.
   // Debe ejecutarse solo cuando ya existe una sesión validada: los endpoints
   // protegidos rechazan correctamente cualquier request sin Bearer JWT.
-  const fetchData = async () => {
+  const fetchData = useCallback(async () => {
     if (!sessionBootstrapped || !userSession) {
+      setLoading(false);
+      return;
+    }
+
+    if (typeof document !== 'undefined' && document.visibilityState !== 'visible') {
+      setLoading(false);
+      return;
+    }
+
+    if (Date.now() < rateLimitUntilMs) {
       setLoading(false);
       return;
     }
 
     try {
       setLoading(true);
-      const [
-        resStats,
-        resClients,
-        resPlans,
-        resInvoices,
-        resTowers,
-        resOlts,
-        resOnus,
-        resTickets,
-        resWorkOrders,
-        resInventory,
-        resAlerts,
-        resMktLogs,
-        resNaps,
-        resBillingSummary,
-        resRevenueReport
-      ] = await Promise.all([
-        fetchJson('/api/dashboard-stats'),
-        fetchJson('/api/clients'),
-        fetchJson('/api/plans'),
-        fetchJson('/api/billing/invoices'),
-        fetchJson('/api/network-towers'),
-        fetchJson('/api/olt'),
-        fetchJson('/api/onu'),
-        fetchJson('/api/tickets'),
-        fetchJson('/api/workorders'),
-        fetchJson('/api/inventory'),
-        fetchJson('/api/alerts'),
-        fetchJson('/api/mikrotik/logs'),
-        fetchJson('/api/naps'),
-        fetchJson('/api/billing/account-summary'),
-        fetchJson('/api/billing/revenue-report')
-      ]);
+      const shouldLoadCoreDataset = shouldPollCoreDataset(activeTab);
 
-      setStats(resStats);
-      setClients(resClients);
-      setPlans(resPlans);
-      setInvoices(resInvoices);
-      setBillingSummary(resBillingSummary);
-      setRevenueReport(resRevenueReport);
-      setTowers(resTowers);
-      setOlts(resOlts);
-      setOnus(resOnus);
-      setTickets(resTickets);
-      setWorkOrders(resWorkOrders);
-      setInventory(resInventory);
-      setAlerts(resAlerts);
-      setMikrotikLogs(resMktLogs);
-      setNaps(resNaps);
+      if (shouldLoadCoreDataset) {
+        const [
+          resStats,
+          resClients,
+          resPlans,
+          resInvoices,
+          resTowers,
+          resOlts,
+          resOnus,
+          resTickets,
+          resWorkOrders,
+          resInventory,
+          resAlerts,
+          resMktLogs,
+          resNaps,
+          resBillingSummary,
+          resRevenueReport,
+        ] = await Promise.all([
+          fetchJson('/api/dashboard-stats'),
+          fetchJson('/api/clients'),
+          fetchJson('/api/plans'),
+          fetchJson('/api/billing/invoices'),
+          fetchJson('/api/network-towers'),
+          fetchJson('/api/olt'),
+          fetchJson('/api/onu'),
+          fetchJson('/api/tickets'),
+          fetchJson('/api/workorders'),
+          fetchJson('/api/inventory'),
+          fetchJson('/api/alerts'),
+          fetchJson('/api/mikrotik/logs'),
+          fetchJson('/api/naps'),
+          fetchJson('/api/billing/account-summary'),
+          fetchJson('/api/billing/revenue-report'),
+        ]);
+
+        setStats(resStats);
+        setClients(resClients);
+        setPlans(resPlans);
+        setInvoices(resInvoices);
+        setBillingSummary(resBillingSummary);
+        setRevenueReport(resRevenueReport);
+        setTowers(resTowers);
+        setOlts(resOlts);
+        setOnus(resOnus);
+        setTickets(resTickets);
+        setWorkOrders(resWorkOrders);
+        setInventory(resInventory);
+        setAlerts(resAlerts);
+        setMikrotikLogs(resMktLogs);
+        setNaps(resNaps);
+      } else {
+        const [resStats, resAlerts] = await Promise.all([
+          fetchJson('/api/dashboard-stats'),
+          fetchJson('/api/alerts'),
+        ]);
+        setStats(resStats);
+        setAlerts(resAlerts);
+      }
       setErrorStr('');
+      setRateLimitNotice('');
       // Cargas aisladas (no participan del Promise.all para no romper a roles
       // sin acceso a esos módulos).
-      await loadProvisionedRouters();
-      await loadSuspension();
-      await loadWorkerRuns();
-      await loadWireguard();
+      if (activeTab === 'mikrotik' || activeTab === 'router-enrollment') {
+        try {
+          setProvisionedRouters(await fetchJson('/api/mikrotik/routers'));
+        } catch {
+          setProvisionedRouters([]);
+        }
+        try {
+          setWorkerRuns(await fetchJson('/api/mikrotik/worker/runs'));
+        } catch {
+          setWorkerRuns([]);
+        }
+      }
+      if (activeTab === 'suspension') {
+        try {
+          const [customers, orders, events, policy] = await Promise.all([
+            fetchJson('/api/suspension/customers'),
+            fetchJson('/api/suspension/orders'),
+            fetchJson('/api/suspension/events'),
+            fetchJson('/api/suspension/policies'),
+          ]);
+          setSuspensionCustomers(customers);
+          setSuspensionOrders(orders);
+          setSuspensionEvents(events);
+          setSuspensionPolicy(policy);
+        } catch {
+          setSuspensionCustomers([]);
+          setSuspensionOrders([]);
+          setSuspensionEvents([]);
+          setSuspensionPolicy(null);
+        }
+      }
+      if (activeTab === 'wireguard') {
+        try {
+          const [servers, peers] = await Promise.all([
+            fetchJson('/api/wireguard/servers'),
+            fetchJson('/api/wireguard/peers'),
+          ]);
+          setWgServers(servers);
+          setWgPeers(peers);
+        } catch {
+          setWgServers([]);
+          setWgPeers([]);
+        }
+      }
     } catch (err: any) {
-      console.error(err);
-      setErrorStr('Error contacting full-stack back-end server REST API.');
+      if (isApiRateLimitError(err)) {
+        setRateLimitMessage(err.retryAfterMs);
+      } else {
+        console.error(err);
+        setErrorStr('Error contacting full-stack back-end server REST API.');
+      }
     } finally {
       setLoading(false);
     }
-  };
+  }, [
+    sessionBootstrapped,
+    userSession,
+    activeTab,
+    fetchJson,
+    setRateLimitMessage,
+    shouldPollCoreDataset,
+    rateLimitUntilMs,
+  ]);
 
   useEffect(() => {
     if (!sessionBootstrapped || !userSession) {
@@ -286,13 +385,47 @@ export default function App() {
       return;
     }
 
-    fetchData();
-    // Auto polling for live real-time NOC metrics & alarms, only after auth.
+    if (!rateLimitNotice && Date.now() >= rateLimitUntilMs) {
+      void fetchData();
+    }
+
     const timer = setInterval(() => {
-      fetchData();
-    }, 60000);
-    return () => clearInterval(timer);
-  }, [sessionBootstrapped, userSession?.id]);
+      if (typeof document !== 'undefined' && document.visibilityState !== 'visible') {
+        return;
+      }
+      if (rateLimitNotice) {
+        return;
+      }
+      if (Date.now() < rateLimitUntilMs) {
+        return;
+      }
+      void fetchData();
+    }, 120000);
+
+    const onVisibilityChange = () => {
+      if (document.visibilityState === 'visible' && !rateLimitNotice && Date.now() >= rateLimitUntilMs) {
+        void fetchData();
+      }
+    };
+
+    if (typeof document !== 'undefined') {
+      document.addEventListener('visibilitychange', onVisibilityChange);
+    }
+
+    return () => {
+      clearInterval(timer);
+      if (typeof document !== 'undefined') {
+        document.removeEventListener('visibilitychange', onVisibilityChange);
+      }
+    };
+  }, [sessionBootstrapped, userSession?.id, fetchData, rateLimitNotice, rateLimitUntilMs]);
+
+  useEffect(() => {
+    if (!rateLimitNotice) return;
+    const remainingMs = Math.max(1000, rateLimitUntilMs - Date.now());
+    const t = setTimeout(() => setRateLimitNotice(''), remainingMs);
+    return () => clearTimeout(t);
+  }, [rateLimitNotice, rateLimitUntilMs]);
 
   const handleRefresh = async () => {
     await fetchData();
@@ -369,14 +502,14 @@ export default function App() {
   // ── MikroTik provisioning (Fase 4.4) ─────────────────────────────────
   // Carga aislada con su propio try/catch: el endpoint excluye a Cobranza,
   // así que un 403 NO debe romper la carga global de datos.
-  const loadProvisionedRouters = async () => {
+  async function loadProvisionedRouters() {
     try {
       const data = await fetchJson('/api/mikrotik/routers');
       setProvisionedRouters(data);
     } catch {
       setProvisionedRouters([]);
     }
-  };
+  }
 
   const handleCreateRouter = async (payload: Record<string, unknown>) => {
     await fetchJson('/api/mikrotik/routers', {
@@ -420,13 +553,13 @@ export default function App() {
   };
 
   // ── Worker MikroTik (Fase 4.6 — Read Only + Dry Run) ─────────────────
-  const loadWorkerRuns = async () => {
+  async function loadWorkerRuns() {
     try {
       setWorkerRuns(await fetchJson('/api/mikrotik/worker/runs'));
     } catch {
       setWorkerRuns([]);
     }
-  };
+  }
 
   const handleRunWorker = async () => {
     await fetchJson('/api/mikrotik/worker/run', {
@@ -443,7 +576,7 @@ export default function App() {
 
   // ── WireGuard Manager (Fase 4.6.1) ───────────────────────────────────
   // Carga aislada: endpoints solo SA/Admin → un 403 NO rompe la carga global.
-  const loadWireguard = async () => {
+  async function loadWireguard() {
     try {
       const [servers, peers] = await Promise.all([
         fetchJson('/api/wireguard/servers'),
@@ -455,7 +588,7 @@ export default function App() {
       setWgServers([]);
       setWgPeers([]);
     }
-  };
+  }
 
   const handleCreateWgServer = async (payload: Record<string, unknown>): Promise<WireguardServerCreated> => {
     return fetchJson('/api/wireguard/servers', {
@@ -479,7 +612,7 @@ export default function App() {
   // ── Motor de Suspensiones (Fase 4.5) ─────────────────────────────────
   // Carga aislada: el endpoint excluye a Soporte, así que un 403 NO debe
   // romper la carga global de datos.
-  const loadSuspension = async () => {
+  async function loadSuspension() {
     try {
       const [customers, orders, events, policy] = await Promise.all([
         fetchJson('/api/suspension/customers'),
@@ -497,7 +630,7 @@ export default function App() {
       setSuspensionEvents([]);
       setSuspensionPolicy(null);
     }
-  };
+  }
 
   const handleEvaluateAllSuspension = async () => {
     await fetchJson('/api/suspension/evaluate-all', {
@@ -738,6 +871,12 @@ export default function App() {
           <div className="bg-amber-950/40 border-b border-amber-900/40 py-2 px-6 text-[11px] text-amber-300 font-mono flex items-center space-x-2">
             <AlertTriangle className="w-3.5 h-3.5 shrink-0" />
             <span>{notice}</span>
+          </div>
+        )}
+        {rateLimitNotice && (
+          <div className="bg-amber-950/35 border-b border-amber-900/40 py-2 px-6 text-[11px] text-amber-300 font-mono flex items-center space-x-2">
+            <AlertTriangle className="w-3.5 h-3.5 shrink-0" />
+            <span>{rateLimitNotice}</span>
           </div>
         )}
         {/* Urgent Live Top Notification Slider */}

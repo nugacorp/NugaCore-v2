@@ -1,4 +1,4 @@
-import React, { useState, useEffect } from 'react';
+import React, { useState, useEffect, useCallback } from 'react';
 import { 
   TrendingUp, 
   Users, 
@@ -22,6 +22,7 @@ import {
   MessageSquare
 } from 'lucide-react';
 import { NocAlert } from '../types';
+import { fetchWithRateLimitBackoff, isApiRateLimitError } from '../lib/apiBackoff';
 
 interface DashboardProps {
   stats: any;
@@ -48,6 +49,7 @@ export default function Dashboard({ stats, alerts, onAcknowledgeAlerts, onRefres
   const [fetchingSettings, setFetchingSettings] = useState(true);
   const [savingSettings, setSavingSettings] = useState(false);
   const [notificationPermission, setNotificationPermission] = useState<string>('default');
+  const [settingsRateLimited, setSettingsRateLimited] = useState<string>('');
 
   // Simulation parameters states
   const [simEventType, setSimEventType] = useState<'latency' | 'fibercut'>('latency');
@@ -59,44 +61,68 @@ export default function Dashboard({ stats, alerts, onAcknowledgeAlerts, onRefres
   // In-App floating toasts
   const [inAppToasts, setInAppToasts] = useState<any[]>([]);
 
-  useEffect(() => {
-    // Initial fetch of notification settings
-    getAuthHeaders()
-      .then(headers => fetch('/api/notifications/settings', { headers }))
-      .then(r => {
-        if (!r.ok) throw new Error("status code " + r.status);
-        return r.json();
-      })
-      .then(data => {
-        setPushSettings(data);
-        setFetchingSettings(false);
-      })
-      .catch(err => {
-        console.error("Error loading notification settings", err);
-        setFetchingSettings(false);
+  const loadNotificationSettings = useCallback(async () => {
+    try {
+      setFetchingSettings(true);
+      const headers = await getAuthHeaders();
+      const response = await fetchWithRateLimitBackoff('/api/notifications/settings', {
+        headers,
+      }, {
+        key: 'GET /api/notifications/settings',
+        minBackoffMs: 8000,
       });
+
+      if (!response.ok) {
+        throw new Error(`status code ${response.status}`);
+      }
+
+      const data = await response.json();
+      setPushSettings(data);
+      setSettingsRateLimited('');
+    } catch (err) {
+      if (isApiRateLimitError(err)) {
+        const seconds = Math.max(1, Math.ceil(err.retryAfterMs / 1000));
+        setSettingsRateLimited(`Demasiadas solicitudes, reintentando en ${seconds}s.`);
+      } else {
+        console.error('Error loading notification settings', err);
+      }
+    } finally {
+      setFetchingSettings(false);
+    }
+  }, [getAuthHeaders]);
+
+  useEffect(() => {
+    void loadNotificationSettings();
 
     // Check browser permission status if supported
     if (typeof window !== 'undefined' && 'Notification' in window) {
       setNotificationPermission(Notification.permission);
     }
-  }, [getAuthHeaders]);
+  }, [loadNotificationSettings]);
 
   const saveSettings = async (updated: typeof pushSettings) => {
     setSavingSettings(true);
     try {
-      const res = await fetch('/api/notifications/settings', {
+      const res = await fetchWithRateLimitBackoff('/api/notifications/settings', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json', ...(await getAuthHeaders()) },
         body: JSON.stringify(updated)
+      }, {
+        key: 'POST /api/notifications/settings',
       });
       if (res.ok) {
         const data = await res.json();
         setPushSettings(data);
+        setSettingsRateLimited('');
         triggerInAppToast("✔️ Configuración Guardada", "Los umbrales y canales push se guardaron correctamente en la base de datos de control.", "info");
       }
     } catch (err) {
-      console.error("Error saving settings", err);
+      if (isApiRateLimitError(err)) {
+        const seconds = Math.max(1, Math.ceil(err.retryAfterMs / 1000));
+        setSettingsRateLimited(`Demasiadas solicitudes, reintentando en ${seconds}s.`);
+      } else {
+        console.error("Error saving settings", err);
+      }
     } finally {
       setSavingSettings(false);
     }
@@ -546,6 +572,12 @@ export default function Dashboard({ stats, alerts, onAcknowledgeAlerts, onRefres
             <p className="text-xs text-slate-400 leading-relaxed">
               Configura límites personalizados para que NugaCore dispare notificaciones Push inmediatas al NOC, personal de campo y directores ejecutivos ante degradaciones de red.
             </p>
+
+            {settingsRateLimited && (
+              <div className="text-[11px] font-mono text-amber-300 bg-amber-950/30 border border-amber-900/40 rounded-lg px-3 py-2">
+                {settingsRateLimited}
+              </div>
+            )}
 
             {fetchingSettings ? (
               <div className="py-6 text-center text-slate-500 font-mono text-xs">

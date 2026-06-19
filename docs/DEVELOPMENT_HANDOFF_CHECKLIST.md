@@ -48,6 +48,21 @@ Inventory Read-Only 4.11.1 ya fue aprobado en staging (`docs/INVENTORY_READ_ONLY
 La implementación local ya está completada; la prioridad actual es validar en staging
 sin activar flags peligrosos.
 
+### C.1 Hotfix paralelo activo (frontend)
+
+**NugaCore — Hotfix Frontend Polling / Rate Limit Hygiene**
+
+Estado actual:
+
+- Implementado localmente en frontend.
+- Validaciones locales completadas: `npm run typecheck`, `npm test`, `npm run build`.
+- Pendiente: observación final en staging (frecuencia de 429 y comportamiento de cooldown).
+
+Documentos fuente:
+
+- `docs/FRONTEND_POLLING_RATE_LIMIT_AUDIT.md`
+- `docs/FRONTEND_POLLING_RATE_LIMIT_RESULT.md`
+
 ### D. DB-1 — Reconciliación de `mikrotik_routers` (cerrada en staging)
 
 **Diseño COMPLETO** en [`docs/MIKROTIK_ROUTERS_SCHEMA_RECONCILIATION.md`](./MIKROTIK_ROUTERS_SCHEMA_RECONCILIATION.md)
