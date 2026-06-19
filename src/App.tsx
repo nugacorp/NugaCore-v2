@@ -8,6 +8,7 @@ import MikrotikModule from './components/MikrotikModule';
 import SupportModule from './components/SupportModule';
 import InventoryModule from './components/InventoryModule';
 import InventoryRoutersModule from './components/InventoryRoutersModule';
+import NocReadOnlyModule from './components/NocReadOnlyModule';
 import GisModule from './components/GisModule';
 import FinanceOwnerModule from './components/FinanceOwnerModule';
 import SuspensionModule from './components/SuspensionModule';
@@ -785,6 +786,10 @@ export default function App() {
                 onPostAlert={handlePostAlert}
                 getAuthHeaders={getAuthHeaders}
               />
+            )}
+
+            {activeTab === 'noc' && (
+              <NocReadOnlyModule getAuthHeaders={getAuthHeaders} />
             )}
 
             {activeTab === 'crm' && (

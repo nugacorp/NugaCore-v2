@@ -41,13 +41,14 @@ manda sobre la memoria, el roadmap y este checklist.
 
 ### C. Prioridad inmediata (absoluta)
 
-**DB-1 — Reconciliar el schema de `mikrotik_routers` antes de activar `USE_DB_MIKROTIK`.**
+**4.11.2 — NOC Read-Only Foundation (validación staging por Hermes).**
 
-Es la única tarea de mayor prioridad accionable y segura. Trabajo local: análisis,
-diseño de modelo canónico, migración evolutiva nueva y validadores. **No** aplica
-migraciones en Supabase ni activa flags.
+DB-1 ya fue validada en staging por Hermes (`docs/MIKROTIK_SCHEMA_RECONCILIATION_STAGING_RESULT.md`) e
+Inventory Read-Only 4.11.1 ya fue aprobado en staging (`docs/INVENTORY_READ_ONLY_STAGING_RESULT.md`).
+La implementación local ya está completada; la prioridad actual es validar en staging
+sin activar flags peligrosos.
 
-### D. DB-1 — Reconciliación de `mikrotik_routers`
+### D. DB-1 — Reconciliación de `mikrotik_routers` (cerrada en staging)
 
 **Diseño COMPLETO** en [`docs/MIKROTIK_ROUTERS_SCHEMA_RECONCILIATION.md`](./MIKROTIK_ROUTERS_SCHEMA_RECONCILIATION.md)
 (estado actual, modelo canónico columna por columna, compatibilidad, impacto, estrategia
@@ -75,26 +76,28 @@ Implementación (DB-1, completada — ver [`docs/MIKROTIK_SCHEMA_IMPLEMENTATION_
 
 Pendiente (NO en esta sesión):
 
-- [ ] Aplicación + validación staging por **Hermes** (runbook en el doc de resultado); registrar migraciones en `schema_migrations` + `NOTIFY pgrst`.
+- [x] Aplicación + validación staging por **Hermes** (runbook en el doc de resultado); registrar migraciones en `schema_migrations` + `NOTIFY pgrst`.
 - [ ] (Opcional, futuro) Migración de backfill de espejos (`management_ip`/`provisioning_status`) con `UPDATE` guardado — fuera de DB-1.
 - [ ] Repository DB de MikroTik para `USE_DB_MIKROTIK=true` (fase posterior).
 
 Después de DB-1 (validado en staging): **Inventory Read-Only → NOC Read-Only** — diseño en
 [`docs/NOC_READ_ONLY_ARCHITECTURE.md`](./NOC_READ_ONLY_ARCHITECTURE.md).
 
-**4.11.1 Inventory Read-Only Foundation: implementada localmente** (pendiente validación
-Hermes) — ver [`docs/INVENTORY_READ_ONLY_RESULT.md`](./INVENTORY_READ_ONLY_RESULT.md).
+**4.11.1 Inventory Read-Only Foundation: aprobada en staging** — ver
+[`docs/INVENTORY_READ_ONLY_STAGING_RESULT.md`](./INVENTORY_READ_ONLY_STAGING_RESULT.md).
 Backend + UI **read-only** sobre `mikrotik_routers` (store en memoria), sin activar
-`USE_DB_MIKROTIK`. **NOC Read-Only y la activación DB siguen sin iniciar.**
+`USE_DB_MIKROTIK`.
+
+**4.11.2 NOC Read-Only Foundation: implementada localmente** (pendiente validación
+Hermes en staging).
 
 ### E. Qué NO hacer
 
-**No avanzar a NOC Read-Only, Real Provisioning, Worker Live ni Commit Mode hasta cerrar
-DB-1 en staging.** (La *foundation* read-only de Inventory 4.11.1 ya está implementada en
-local sin activar flags; ver `docs/INVENTORY_READ_ONLY_RESULT.md`.) No activar
-`USE_DB_MIKROTIK`, `USE_DB_WIREGUARD`, `MIKROTIK_WORKER_LIVE` ni commit mode. No aplicar
-migraciones en Supabase ni tocar
-routers/datos reales desde esta tarea automática.
+**No avanzar a Worker Live, Real Provisioning ni Commit Mode.** DB-1 e Inventory 4.11.1
+ya están validadas en staging, pero NOC sigue en modo foundation read-only.
+No activar `USE_DB_MIKROTIK`, `USE_DB_WIREGUARD`, `MIKROTIK_WORKER_LIVE` ni commit mode.
+No aplicar migraciones en Supabase ni tocar routers/datos reales desde esta tarea
+automática.
 
 ## 1. Antes de tocar código
 

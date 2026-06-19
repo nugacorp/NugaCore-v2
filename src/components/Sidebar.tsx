@@ -1,6 +1,7 @@
 import React from 'react';
 import {
   Activity,
+  ShieldAlert,
   Users,
   CreditCard,
   Network,
@@ -44,6 +45,7 @@ export default function Sidebar({
 }: SidebarProps) {
   const menuItems = [
     { id: 'dashboard', name: 'Dashboard Ejecutivo', icon: Activity },
+    { id: 'noc', name: 'NOC Read-Only', icon: ShieldAlert },
     { id: 'crm', name: 'CRM Clientes & Leads', icon: Users },
     { id: 'billing', name: 'Facturación & Cobros', icon: CreditCard },
     { id: 'finance', name: 'Finanzas & EBITDA', icon: DollarSign },

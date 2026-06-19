@@ -353,7 +353,7 @@ Gate producción:
 
 ### DB-1 — MikroTik Routers Schema Reconciliation
 
-Estado: 🔄 Pendiente · **Prioridad inmediata**
+Estado: ✅ Aprobada por Hermes en staging
 
 Prerequisito para NOC Read-Only e Inventory Read-Only. Resuelve el drift del repo entre
 las dos definiciones de `public.mikrotik_routers` (modelo de monitoreo en `init_schema`
@@ -371,12 +371,10 @@ Alcance (solo preparación de DB y validadores):
 3. Validar que `USE_DB_MIKROTIK=false` sigue intacto (dominio en memoria; no existe aún repository DB de MikroTik).
 4. Actualizar validadores (`scripts/validate-staging-migrations.mjs`) y tests, solo con `ALTER TABLE ... ADD COLUMN IF NOT EXISTS` (nunca DROP).
 
-Gate:
+Resultado registrado:
 
-- No activa `USE_DB_MIKROTIK`.
-- No toca routers reales.
-- No aplica la migración en Supabase desde Claude; la validación staging la hace Hermes.
-- Solo después de DB-1 se prepara Inventory y NOC read-only.
+- `docs/MIKROTIK_SCHEMA_RECONCILIATION_STAGING_RESULT.md`
+- Commit documental: `e65cbf6 docs(mikrotik): validate schema reconciliation staging`
 
 ### Secuencia de ejecución (orden estricto)
 
@@ -398,19 +396,27 @@ Safe Command Queue (dry-run)
 
 ### Inventory Read-Only
 
-Estado: 🟡 **4.11.1 Foundation implementada localmente** (pendiente validación Hermes).
+Estado: ✅ **4.11.1 Foundation aprobada en staging**.
 
 Vista consolidada de routers leyendo el modelo canónico de `mikrotik_routers`. Solo
 lectura: resumen + tabla; sin escritura sobre routers, sin RouterOS, sin comandos.
 Endpoints `/api/inventory/routers`, `/api/inventory/routers/:id`, `/api/inventory/summary`.
 Resultado: [`docs/INVENTORY_READ_ONLY_RESULT.md`](./docs/INVENTORY_READ_ONLY_RESULT.md).
+Validación staging: [`docs/INVENTORY_READ_ONLY_STAGING_RESULT.md`](./docs/INVENTORY_READ_ONLY_STAGING_RESULT.md).
 Diseño en [`docs/NOC_READ_ONLY_ARCHITECTURE.md`](./docs/NOC_READ_ONLY_ARCHITECTURE.md) §1.
 
 ### FASE 4.11 — NOC Read-Only
 
-Estado: 🔄 Pendiente
+Estado: 🟡 4.11.2 Foundation implementada localmente (pendiente validación Hermes)
 
-Recomendación: adelantar esta fase antes de acciones live.
+Subfase actual (4.11.2 Foundation):
+
+- Backend read-only: `GET /api/noc/summary`, `GET /api/noc/routers`, `GET /api/noc/alerts`.
+- UI base NOC read-only (resumen, tabla de routers, alertas derivadas, empty state).
+- RBAC: Super Admin, Administrador, Técnico, Soporte, Solo lectura. Cobranza bloqueado.
+- Sin RouterOS real, sin worker live, sin acciones write.
+
+Recomendación: validar esta foundation en staging antes de avanzar a NOC completo.
 
 Prerrequisito: **cerrar DB-1** (reconciliación de `mikrotik_routers`) antes de NOC
 read-only sobre DB real.

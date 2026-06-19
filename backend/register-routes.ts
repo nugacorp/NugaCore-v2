@@ -10,6 +10,7 @@ import gisRoutes from './domains/gis/routes';
 import inventoryRoutes from './domains/inventory/routes';
 import mikrotikRoutes from './domains/mikrotik/routes';
 import networkRoutes from './domains/network/routes';
+import nocRoutes from './domains/noc/routes';
 import plansRoutes from './domains/plans/routes';
 import reportsRoutes from './domains/reports/routes';
 import routerosResourcesRoutes from './domains/routeros-resources/routes';
@@ -40,6 +41,7 @@ export function registerRoutes(app: Express): void {
   app.use(routerEnrollmentRoutes);
   app.use(ticketsRoutes);
   app.use(inventoryRoutes);
+  app.use(nocRoutes);
   app.use(gisRoutes);
   app.use(dashboardRoutes);
   app.use(paymentsRoutes);

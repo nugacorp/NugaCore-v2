@@ -2,6 +2,7 @@ import { UserRole } from './supabase';
 
 export type AppTab =
   | 'dashboard'
+  | 'noc'
   | 'crm'
   | 'billing'
   | 'finance'
@@ -26,12 +27,12 @@ export type AppTab =
 // la VISIBILIDAD del módulo.
 // ====================================================================
 const roleTabs: Record<UserRole, AppTab[]> = {
-  'Super Admin':  ['dashboard', 'crm', 'billing', 'finance', 'suspension', 'payments', 'network', 'mikrotik', 'wireguard', 'routeros-resources', 'routeros-templates', 'router-enrollment', 'support', 'inventory', 'inventory-routers', 'gis', 'owner'],
-  'Administrador':['dashboard', 'crm', 'billing', 'suspension', 'payments', 'network', 'wireguard', 'routeros-resources', 'routeros-templates', 'router-enrollment', 'support', 'inventory', 'inventory-routers', 'gis'],
+  'Super Admin':  ['dashboard', 'noc', 'crm', 'billing', 'finance', 'suspension', 'payments', 'network', 'mikrotik', 'wireguard', 'routeros-resources', 'routeros-templates', 'router-enrollment', 'support', 'inventory', 'inventory-routers', 'gis', 'owner'],
+  'Administrador':['dashboard', 'noc', 'crm', 'billing', 'suspension', 'payments', 'network', 'wireguard', 'routeros-resources', 'routeros-templates', 'router-enrollment', 'support', 'inventory', 'inventory-routers', 'gis'],
   'Cobranza':     ['dashboard', 'crm', 'billing', 'finance', 'suspension', 'payments'],
-  'Técnico':      ['dashboard', 'suspension', 'network', 'mikrotik', 'routeros-resources', 'routeros-templates', 'router-enrollment', 'support', 'inventory', 'inventory-routers', 'gis'],
-  'Soporte':      ['dashboard', 'crm', 'support', 'inventory-routers', 'gis'],
-  'Solo lectura': ['dashboard', 'crm', 'billing', 'suspension', 'network', 'inventory-routers', 'gis'],
+  'Técnico':      ['dashboard', 'noc', 'suspension', 'network', 'mikrotik', 'routeros-resources', 'routeros-templates', 'router-enrollment', 'support', 'inventory', 'inventory-routers', 'gis'],
+  'Soporte':      ['dashboard', 'noc', 'crm', 'support', 'inventory-routers', 'gis'],
+  'Solo lectura': ['dashboard', 'noc', 'crm', 'billing', 'suspension', 'network', 'inventory-routers', 'gis'],
 };
 
 // Fallback seguro para roles desconocidos / sin rol.
@@ -54,6 +55,7 @@ export function getDefaultTabByRole(role: UserRole): AppTab {
 // Etiquetas legibles por módulo (para el panel de perfil).
 export const MODULE_LABELS: Record<AppTab, string> = {
   dashboard: 'Dashboard',
+  noc: 'NOC Read-Only',
   crm: 'CRM Clientes & Leads',
   billing: 'Facturación & Cobros',
   finance: 'Finanzas & EBITDA',

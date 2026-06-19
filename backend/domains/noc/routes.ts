@@ -1,0 +1,28 @@
+import { Router } from 'express';
+import { AppRole, requireRoles } from '../../common/rbac';
+import { nocReadOnlyService } from './service';
+
+// ====================================================================
+// NOC Read-Only Foundation (Fase 4.11.2)
+//
+// Endpoints solo lectura para operación NOC. Cobranza queda excluido.
+// No existen endpoints de escritura en este dominio.
+// ====================================================================
+
+const NOC_READ_ROLES: AppRole[] = ['super admin', 'administrador', 'tecnico', 'soporte', 'solo lectura'];
+
+const router = Router();
+
+router.get('/api/noc/summary', requireRoles(NOC_READ_ROLES), (_req, res) => {
+  res.json(nocReadOnlyService.getSummary());
+});
+
+router.get('/api/noc/routers', requireRoles(NOC_READ_ROLES), (_req, res) => {
+  res.json(nocReadOnlyService.listRouters());
+});
+
+router.get('/api/noc/alerts', requireRoles(NOC_READ_ROLES), (_req, res) => {
+  res.json(nocReadOnlyService.listAlerts());
+});
+
+export default router;
