@@ -10,6 +10,27 @@
 ✅ **DB-1 implementado a nivel de repositorio** (migración, modelo canónico, tipos,
 validador y tests). Pendiente: aplicación/validación en staging por Hermes (no desde Claude).
 
+## Hotfix strict migration contract (2026-06-18)
+
+Hermes revalidó DB-1 sobre el commit `895ff85` y se detuvo **antes** de tocar la base de
+datos: la migración era razonablemente segura, pero contenía SQL fuera del contrato estricto
+acordado (`DO $$` + `CREATE TRIGGER`, `BEFORE UPDATE ON`, `ALTER TABLE ... ENABLE ROW LEVEL
+SECURITY`, `COMMENT ON COLUMN`).
+
+Acción de este hotfix:
+
+- Se **retiraron** trigger/RLS/comments de `20260618000000_mikrotik_routers_reconciliation.sql`.
+- DB-1.1 queda como **migración schema-only mínima**: solo
+  `ALTER TABLE ... ADD COLUMN IF NOT EXISTS` y `CREATE INDEX IF NOT EXISTS`.
+- El auto-touch de `updated_at` (trigger), el RLS deny-by-default y las descripciones de
+  columna quedan para una fase posterior explícita **DB-1.2 Metadata/RLS/Triggers**, solo si
+  se requieren.
+- Motivo: cumplir el contrato de validación de Hermes y reducir el riesgo de la migración.
+
+Los tests de `tests/unit/mikrotik.schema-reconciliation.test.ts` ahora **fuerzan** el contrato:
+verifican que la migración NO contiene `DO $$`, `CREATE TRIGGER`, `BEFORE UPDATE`, `ENABLE ROW
+LEVEL SECURITY`, `COMMENT ON`, ni `DROP/DELETE/TRUNCATE/UPDATE/INSERT`.
+
 ## Cambios realizados
 
 ### 1. Migración (DB-1.1)
@@ -26,13 +47,14 @@ forma **idempotente, auto-suficiente y no destructiva**:
   está registrada en el historial.
 - `CREATE INDEX IF NOT EXISTS` para los índices canónicos (incluido el nuevo
   `idx_mikrotik_routers_connection_type`).
-- Trigger `updated_at` con guard idempotente; RLS deny-by-default.
-- `COMMENT ON COLUMN` documentando canónico vs deprecated (metadata, no datos).
 
-**Reglas cumplidas:** sin `DROP TABLE/COLUMN`, sin `DELETE/TRUNCATE/UPDATE` de datos, sin
-`INSERT`, sin recrear tablas. No hay backfill de datos en la migración (decisión: el
-sellado de espejos `management_ip`/`provisioning_status` queda como paso de datos posterior,
-ver Pendientes).
+**Contrato estricto (schema-only):** la migración contiene **únicamente**
+`ALTER TABLE ... ADD COLUMN IF NOT EXISTS` y `CREATE INDEX IF NOT EXISTS`. Sin
+`DROP/DELETE/TRUNCATE/UPDATE/INSERT`, sin `DO $$`, sin `CREATE TRIGGER`/`BEFORE UPDATE`, sin
+`ENABLE ROW LEVEL SECURITY`, sin `COMMENT ON`. La metadata (auto-touch de `updated_at`,
+RLS y descripciones de columna) se difiere a la fase DB-1.2 (ver «Hotfix strict migration
+contract»). No hay backfill de datos (el sellado de espejos `management_ip`/
+`provisioning_status` queda como paso posterior, ver Pendientes).
 
 ### 2. Tipos (DB-1.2)
 
@@ -63,8 +85,9 @@ ver Pendientes).
 
 - La migración añade cada columna de provisioning con `ADD COLUMN IF NOT EXISTS`.
 - Índices canónicos con `IF NOT EXISTS` (incl. `connection_type`) y creados tras las columnas.
-- No destructiva (sin DROP/DELETE/TRUNCATE/INSERT/UPDATE de datos).
-- COMMENT canónico/deprecated presente; RLS habilitado.
+- Contrato estricto: NO contiene `DO $$`, `CREATE TRIGGER`, `BEFORE UPDATE`, `ENABLE ROW
+  LEVEL SECURITY`, `COMMENT ON`, ni `DROP/DELETE/TRUNCATE/UPDATE/INSERT`.
+- Solo aparecen los dos tipos de statement del contrato (ALTER ADD COLUMN / CREATE INDEX).
 - Consistencia: las constantes TS cubren ambos modelos, sin duplicados, y el validador
   `.mjs` verifica exactamente el mismo conjunto canónico.
 
@@ -100,6 +123,9 @@ ver Pendientes).
 ## Pendientes (no en esta sesión)
 
 - Aplicación + validación staging por Hermes (runbook arriba).
+- **DB-1.2 Metadata/RLS/Triggers** (fase posterior explícita, solo si se requiere):
+  auto-touch de `updated_at` (trigger), RLS deny-by-default y descripciones de columna —
+  retirados de DB-1.1 por el contrato estricto de Hermes.
 - (Opcional) Migración futura de **backfill de espejos** (`management_ip := ip_address`,
   `provisioning_status := status`) con `UPDATE` guardado — fuera de DB-1 por la regla de no
   modificar datos en esta migración.

@@ -250,10 +250,21 @@ deja el schema canónico alcanzable. No se modifica ese archivo.
 
 ---
 
+## Migración implementada (DB-1.1) — contrato estricto schema-only
+
+La migración `supabase/migrations/20260618000000_mikrotik_routers_reconciliation.sql`
+implementa este diseño con un **contrato estricto**: contiene **únicamente**
+`ALTER TABLE ... ADD COLUMN IF NOT EXISTS` (columnas canónicas de provisioning) y
+`CREATE INDEX IF NOT EXISTS` (índices canónicos). **No** incluye triggers, RLS, `COMMENT ON`,
+ni backfill (`UPDATE`). Esa metadata se difiere a la fase posterior **DB-1.2
+Metadata/RLS/Triggers**, solo si se requiere. Detalle del cambio y motivo (validación de
+Hermes) en `docs/MIKROTIK_SCHEMA_IMPLEMENTATION_RESULT.md` § «Hotfix strict migration contract».
+
 ## Resumen ejecutivo
 
 - La migración de provisioning **ya es evolutiva**; no hay que reescribirla.
 - El modelo canónico = unión monitoreo + provisioning, **ya alcanzable sin recrear la tabla**.
+- La migración de reconciliación (20260618000000) es **schema-only**: solo columnas e índices.
 - DB-1 se reduce a: sellar decisiones canónicas (espejos `status`/`provisioning_status` e
   `ip_address`/`management_ip`), reconciliar el historial y alinear validadores/tests.
 - **No** se activa `USE_DB_MIKROTIK`, **no** se aplican migraciones desde Claude, **no** se
