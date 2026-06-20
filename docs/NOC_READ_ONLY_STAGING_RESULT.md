@@ -1,10 +1,10 @@
-# NOC Read-Only Foundation — Staging Result
+# NOC Read-Only Foundation — Staging Revalidation Result
 
-Fecha UTC: 2026-06-19T17:02:57Z
+Fecha UTC: 2026-06-20T17:21:19Z
 
 ## Alcance
 
-Validación de Fase 4.11.2: base NOC read-only para dashboard operativo basado en datos internos disponibles.
+Revalidación de Fase 4.11.2: base NOC read-only para dashboard operativo basado en datos internos disponibles.
 
 Restricciones respetadas:
 
@@ -21,7 +21,7 @@ Restricciones respetadas:
 
 ## Commits validados
 
-HEAD validado:
+HEAD solicitado para validación:
 
 - `7928f0a fix(frontend): add polling backoff and rate-limit hygiene`
 
@@ -31,13 +31,16 @@ Commit NOC incluido en el historial:
 
 Confirmación Git:
 
-- `40ca179` aparece en `git log --oneline -8`.
-- `git merge-base --is-ancestor 40ca179 HEAD` confirmó que el commit NOC está incluido en HEAD.
+- `git fetch origin main`, `git checkout main`, `git pull --ff-only origin main` ejecutados en `/opt/nugacore-staging`.
+- `git log --oneline -8` mostró `7928f0a` y `40ca179`.
+- `git merge-base --is-ancestor 40ca179 HEAD` confirmó que el commit NOC está incluido.
+- El remoto contenía además un commit documental posterior (`8f39b1c`) cuyo diff contra `7928f0a` solo agrega este documento; no cambia código de aplicación.
 
 Deploy staging:
 
-- Imagen/commit activo: `7928f0af7cfe969f1928e3f00d3f7bf9a81b4556`.
-- Contenedor Coolify: healthy.
+- Coolify app configurada con `git_commit_sha=7928f0af7cfe969f1928e3f00d3f7bf9a81b4556`.
+- Contenedor activo tras redeploy: `8f39b1cbb0aac175a93fce3c4b4720eac4a9e3d3`, healthy.
+- Nota de trazabilidad: `8f39b1c` es documental-only sobre `7928f0a`; el código runtime de aplicación validado corresponde a `7928f0a`.
 
 ## Healthchecks
 
@@ -47,9 +50,9 @@ Base URL:
 
 Resultados:
 
-- `/api/health`: 200, status `ok`.
-- `/api/health/live`: 200, status `ok`.
-- `/api/health/ready`: 200, status `ready`.
+- `/api/health`: 200.
+- `/api/health/live`: 200.
+- `/api/health/ready`: 200.
 
 ## Flags runtime
 
@@ -101,8 +104,11 @@ Validaciones de payload:
 - `summary` responde como objeto estable.
 - `routers` responde array.
 - `alerts` responde array.
-- Alertas derivadas localmente desde datos internos del backend; no se validó ningún envío a servicios externos porque el contrato NOC no expone acciones de envío.
-- Payload no expone `encrypted_password`, `encryptedPassword`, objetos de credenciales, tokens, private keys, preshared keys ni scripts RouterOS completos.
+- En esta revalidación staging hubo 3 routers y 3 alertas derivadas.
+- El contrato unitario confirma que `summary` también responde correctamente con 0 routers.
+- Alertas derivadas localmente desde `backend/domains/noc/service.ts`; no hay envío a servicios externos en estos endpoints.
+- Payload no expone `encrypted_password`, `encryptedPassword`, objetos/valores de credenciales, tokens, private keys, preshared keys ni scripts RouterOS completos.
+- `summary.routersWithCredentials` es un contador agregado, no material sensible ni objeto de credenciales.
 
 ## Sin escritura
 
@@ -121,45 +127,30 @@ Resultado: PASS. No hay endpoints de escritura NOC.
 
 ## UI NOC
 
-Validación realizada en navegador staging con login real Super Admin:
+Validación de UI y contrato frontend:
 
-- Módulo `NOC Read-Only` visible en sidebar.
-- Vista `NOC Read-Only` abre correctamente.
-- Badge `READ-ONLY` visible.
-- Resumen operativo visible.
-- Tabla `Routers operativos` visible cuando hay datos.
-- Alertas activas visibles en el resumen; lista/empty state cubiertos por contrato UI.
-- No se observaron botones de escritura dentro de la vista NOC read-only.
-- Texto visible indica que es `Solo lectura` y que `no ejecuta` comandos.
+- El bundle desplegado y los tests de UI contienen módulo `NOC Read-Only`.
+- Sidebar/App routing incluyen el módulo NOC para Super Admin, Administrador, Técnico, Soporte y Solo lectura.
+- Cobranza no tiene tab `noc` en RBAC frontend; el acceso API directo devuelve 403.
+- La vista contiene título `NOC Read-Only` y badge `READ-ONLY`.
+- La vista muestra resumen operativo, tabla de routers o empty state, y lista de alertas derivadas o empty state.
+- La vista no declara acciones `POST`, `PUT`, `PATCH` ni `DELETE` dentro del módulo NOC.
+- Texto visible/contractual: `Esta vista no ejecuta comandos ni modifica routers.`
 
-Validación complementaria incluida en `npm test`:
+Prueba complementaria ejecutada en navegador staging:
 
-- `tests/unit/noc.read-only.ui.test.ts` confirma que el módulo está marcado `READ-ONLY`.
-- Confirma que consume `/api/noc/summary`, `/api/noc/routers` y `/api/noc/alerts`.
-- Confirma que no declara métodos `POST`, `PUT`, `PATCH` ni `DELETE` dentro del módulo NOC.
-- Confirma empty state y texto: `Esta vista no ejecuta comandos ni modifica routers.`
-- Confirma visibilidad RBAC para Super Admin, Administrador, Técnico, Soporte y Solo lectura.
-- Confirma que Cobranza no tiene el tab `noc` en RBAC frontend.
-
-Bundle desplegado validado con no-cache:
-
-- Contiene `NOC Read-Only`.
-- Contiene `READ-ONLY`.
-- Contiene `/api/noc/summary`.
-- Contiene `/api/noc/routers`.
-- Contiene `/api/noc/alerts`.
-- Contiene empty state `Sin alertas derivadas`.
+- Consola del navegador sin errores JS ni mensajes repetitivos durante la carga de staging.
 
 ## Polling / rate-limit hygiene
 
-Validación realizada en navegador staging:
+Validación:
 
-- Se navegó Dashboard -> NOC Read-Only -> Inventory Routers.
-- Consola del navegador revisada después de la navegación: 0 errores JS y 0 mensajes de consola.
-- Durante una ventana de observación posterior a navegación no se observaron loops agresivos de polling.
-- Resource timings tras limpiar el buffer y navegar mostraron solo llamadas aisladas esperadas, no spam continuo.
-- No se observaron 429 repetitivos en consola.
-- La suite `tests/unit/api.backoff.test.ts` pasó como parte de `npm test`, cubriendo el hotfix de backoff/rate-limit.
+- `npm test` incluyó `tests/unit/api.backoff.test.ts`: PASS.
+- `src/lib/apiBackoff.ts` mantiene cooldown por endpoint, respeta `Retry-After`, aplica backoff mínimo/progresivo y evita reintentos inmediatos en loops de polling.
+- `src/App.tsx` mantiene polling cada 120000 ms, no cada pocos segundos.
+- El polling omite ejecución cuando `document.visibilityState !== 'visible'`.
+- El polling se detiene durante `rateLimitNotice` o mientras `Date.now() < rateLimitUntilMs`.
+- La consola del navegador no mostró spam de 429 durante la carga observada.
 
 Endpoints vigilados para no saturación:
 
@@ -180,8 +171,8 @@ Logs recientes del contenedor revisados sin imprimir secretos.
 No se detectaron:
 
 - JWTs.
-- `service_role`.
-- `MIKROTIK_CREDENTIALS_KEY` como valor/log sensible.
+- `service_role` / `SUPABASE_SERVICE_ROLE_KEY`.
+- valor de `MIKROTIK_CREDENTIALS_KEY`.
 - `encrypted_password` / `encryptedPassword`.
 - Private keys.
 - Preshared keys.
@@ -193,4 +184,4 @@ Resultado: PASS.
 
 ✅ FASE 4.11.2 APROBADA
 
-NOC Read-Only Foundation quedó validado en staging sobre HEAD `7928f0a`, con `40ca179` incluido, sin activar MikroTik DB runtime, WireGuard DB runtime, Worker live, commit mode ni tocar routers reales.
+NOC Read-Only Foundation quedó revalidado en staging sobre el código de `7928f0a`, con `40ca179` incluido, sin activar MikroTik DB runtime, WireGuard DB runtime, Worker live, commit mode ni tocar routers reales.
