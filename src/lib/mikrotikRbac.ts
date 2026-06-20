@@ -10,18 +10,16 @@
 // ====================================================================
 
 import type { UserRole } from './supabase';
+import { createRoleGuard } from './roleGuard';
 
-const MANAGE: UserRole[] = ['Super Admin', 'Administrador'];
-const SCRIPT: UserRole[] = ['Super Admin', 'Administrador', 'Técnico'];
+const MANAGE: readonly UserRole[] = ['Super Admin', 'Administrador'];
+const SCRIPT: readonly UserRole[] = ['Super Admin', 'Administrador', 'Técnico'];
 
 /** ¿Puede crear/editar routers? */
-export const canManageRouters = (role: UserRole | null | undefined): boolean =>
-  !!role && MANAGE.includes(role);
+export const canManageRouters = createRoleGuard(MANAGE);
 
 /** ¿Puede generar script de provisioning y probar conexión? */
-export const canGenerateScript = (role: UserRole | null | undefined): boolean =>
-  !!role && SCRIPT.includes(role);
+export const canGenerateScript = createRoleGuard(SCRIPT);
 
 /** ¿Puede rotar credenciales? (acción sensible) */
-export const canRotateCredentials = (role: UserRole | null | undefined): boolean =>
-  !!role && MANAGE.includes(role);
+export const canRotateCredentials = createRoleGuard(MANAGE);

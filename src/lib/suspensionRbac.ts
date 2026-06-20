@@ -8,14 +8,13 @@
 // ====================================================================
 
 import type { UserRole } from './supabase';
+import { createRoleGuard } from './roleGuard';
 
-const EVALUATE: UserRole[] = ['Super Admin', 'Administrador', 'Cobranza'];
-const POLICY: UserRole[] = ['Super Admin', 'Administrador'];
+const EVALUATE: readonly UserRole[] = ['Super Admin', 'Administrador', 'Cobranza'];
+const POLICY: readonly UserRole[] = ['Super Admin', 'Administrador'];
 
 /** ¿Puede disparar evaluaciones (generar órdenes)? */
-export const canEvaluateSuspension = (role: UserRole | null | undefined): boolean =>
-  !!role && EVALUATE.includes(role);
+export const canEvaluateSuspension = createRoleGuard(EVALUATE);
 
 /** ¿Puede editar la política de suspensiones? */
-export const canManageSuspensionPolicy = (role: UserRole | null | undefined): boolean =>
-  !!role && POLICY.includes(role);
+export const canManageSuspensionPolicy = createRoleGuard(POLICY);

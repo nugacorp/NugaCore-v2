@@ -6,12 +6,9 @@
 // ====================================================================
 
 import type { UserRole } from './supabase';
+import { createRoleGuard } from './roleGuard';
 
-const ONBOARDING_ROLES: UserRole[] = ['Super Admin', 'Administrador', 'Técnico'];
+const ONBOARDING_ROLES: readonly UserRole[] = ['Super Admin', 'Administrador', 'Técnico'];
 
 /** ¿El rol puede iniciar el onboarding wizard de un nuevo router? */
-export function canStartRouterOnboarding(role: UserRole | string | null | undefined): boolean {
-  if (!role) return false;
-  const normalized = String(role).trim().toLowerCase();
-  return ONBOARDING_ROLES.some((r) => r.toLowerCase() === normalized);
-}
+export const canStartRouterOnboarding = createRoleGuard(ONBOARDING_ROLES);

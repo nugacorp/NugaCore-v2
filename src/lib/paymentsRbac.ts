@@ -10,12 +10,9 @@
 // ====================================================================
 
 import type { UserRole } from './supabase';
+import { createRoleGuard } from './roleGuard';
 
-const PAYMENTS_WRITE_ROLES: UserRole[] = ['Super Admin', 'Administrador', 'Cobranza'];
+const PAYMENTS_WRITE_ROLES: readonly UserRole[] = ['Super Admin', 'Administrador', 'Cobranza'];
 
 /** ¿El rol puede crear órdenes y disparar reactivación lógica? */
-export function canWritePayments(role: UserRole | string | null | undefined): boolean {
-  if (!role) return false;
-  const normalized = String(role).trim().toLowerCase();
-  return PAYMENTS_WRITE_ROLES.some((r) => r.toLowerCase() === normalized);
-}
+export const canWritePayments = createRoleGuard(PAYMENTS_WRITE_ROLES);

@@ -1,16 +1,15 @@
-import { UserRole } from './supabase';
+import type { UserRole } from './supabase';
+import { createRoleGuard } from './roleGuard';
 
 // Roles con acceso al módulo RouterOS Templates Library.
 // Visible: Super Admin, Administrador, Técnico
 // NO visible: Cobranza, Soporte, Solo lectura
-const GENERATE_ROLES: UserRole[] = ['Super Admin', 'Administrador', 'Técnico'];
-const HISTORY_ROLES: UserRole[]  = ['Super Admin', 'Administrador'];
+const GENERATE_ROLES: readonly UserRole[] = ['Super Admin', 'Administrador', 'Técnico'];
+const HISTORY_ROLES: readonly UserRole[]  = ['Super Admin', 'Administrador'];
 
-export const canGenerateTemplate = (role: UserRole): boolean =>
-  GENERATE_ROLES.includes(role);
+export const canGenerateTemplate = createRoleGuard(GENERATE_ROLES);
 
-export const canViewTemplateHistory = (role: UserRole): boolean =>
-  HISTORY_ROLES.includes(role);
+export const canViewTemplateHistory = createRoleGuard(HISTORY_ROLES);
 
-export const canAccessTemplatesModule = (role: UserRole): boolean =>
-  GENERATE_ROLES.includes(role);
+// Acceder al módulo requiere los mismos roles que generar.
+export const canAccessTemplatesModule = canGenerateTemplate;

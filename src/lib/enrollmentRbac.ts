@@ -1,8 +1,10 @@
-import { UserRole } from './supabase';
+import type { UserRole } from './supabase';
+import { createRoleGuard } from './roleGuard';
 
-const ENROLL_ROLES: UserRole[] = ['Super Admin', 'Administrador', 'Técnico'];
-const REVOKE_ROLES: UserRole[] = ['Super Admin', 'Administrador'];
+const ENROLL_ROLES: readonly UserRole[] = ['Super Admin', 'Administrador', 'Técnico'];
+const REVOKE_ROLES: readonly UserRole[] = ['Super Admin', 'Administrador'];
 
-export const canStartEnrollment = (role: UserRole): boolean => ENROLL_ROLES.includes(role);
-export const canRevokeEnrollment = (role: UserRole): boolean => REVOKE_ROLES.includes(role);
-export const canAccessEnrollmentModule = (role: UserRole): boolean => ENROLL_ROLES.includes(role);
+export const canStartEnrollment = createRoleGuard(ENROLL_ROLES);
+export const canRevokeEnrollment = createRoleGuard(REVOKE_ROLES);
+// Acceder al módulo requiere los mismos roles que iniciar enrollment.
+export const canAccessEnrollmentModule = canStartEnrollment;
