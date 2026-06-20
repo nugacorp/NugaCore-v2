@@ -23,6 +23,9 @@ export interface NocRouterView {
   cpuUsagePct: number;
   memoryUsagePct: number;
   healthStatus: NocHealthStatus;
+  // Topología read-only (aditivo, 4.11.3): torre vinculada para la vista NOC.
+  towerId?: string;
+  towerName?: string;
 }
 
 export type NocAlertType =

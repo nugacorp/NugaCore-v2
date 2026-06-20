@@ -5,7 +5,7 @@
 // existentes de inventario de routers. No ejecuta RouterOS ni acciones write.
 // ====================================================================
 
-import { MikrotikRouterRegistryItem } from '../../state/store';
+import { MikrotikRouterRegistryItem, store } from '../../state/store';
 import {
   HIGH_CPU_CRITICAL_PCT,
   HIGH_CPU_WARNING_PCT,
@@ -116,7 +116,15 @@ export const nocReadOnlyService = {
   listRouters(): NocRouterView[] {
     const routers = nocReadOnlyRepository.listRouters();
     const referenceTimestampMs = resolveReferenceTimestampMs(routers);
-    return routers.map((router) => toNocRouterView(router, referenceTimestampMs));
+    const towerNameById = new Map(store.TOWERS.map((tower) => [tower.id, tower.name]));
+    return routers.map((router) => {
+      const view = toNocRouterView(router, referenceTimestampMs);
+      if (router.linkedTowerId) {
+        view.towerId = router.linkedTowerId;
+        view.towerName = towerNameById.get(router.linkedTowerId) ?? router.linkedTowerId;
+      }
+      return view;
+    });
   },
 
   listAlerts(): NocDerivedAlert[] {

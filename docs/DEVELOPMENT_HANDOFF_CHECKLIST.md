@@ -106,6 +106,25 @@ Backend + UI **read-only** sobre `mikrotik_routers` (store en memoria), sin acti
 **4.11.2 NOC Read-Only Foundation: implementada localmente** (pendiente validación
 Hermes en staging).
 
+**4.11.3 NOC Real Telemetry (read-only): implementada localmente** (pendiente
+validación Hermes en staging) — ver
+[`docs/NOC_REAL_TELEMETRY_RESULT.md`](./NOC_REAL_TELEMETRY_RESULT.md).
+
+Hecho (local, esta sesión; sin staging, sin producción, sin migraciones):
+
+- [x] Dominio `backend/domains/noc-telemetry/` (`types.ts`, `mappers.ts`, `service.ts`, `routes.ts`).
+- [x] Endpoints read-only `GET /api/noc/health` y `GET /api/noc/towers` (RBAC = 4.11.2; Cobranza 403).
+- [x] `GET /api/noc/alerts` reutilizado del dominio `noc` (no se duplica la ruta).
+- [x] `NocRouterView` enriquecido con `towerId?`/`towerName?` (aditivo, backward-compatible).
+- [x] UI `src/components/NocTelemetryModule.tsx` integrada en el tab `noc` (badge READ-ONLY, widgets, tablas, alertas).
+- [x] Tests: contract (16) + service unit (8) + ui unit (7).
+- [x] `npm run typecheck`, `npm test`, `npm run build` → PASS.
+- [x] Sin secretos; sin activar `USE_DB_MIKROTIK`/`USE_DB_WIREGUARD`/`MIKROTIK_WORKER_LIVE`/commit mode.
+
+Pendiente (NO en esta sesión):
+
+- [ ] Validación funcional staging por **Hermes** (endpoints + RBAC + payload sin secretos + UI).
+
 ### E. Qué NO hacer
 
 **No avanzar a Worker Live, Real Provisioning ni Commit Mode.** DB-1 e Inventory 4.11.1
@@ -422,7 +441,7 @@ no avanzar a un punto sin cerrar el anterior:
 
 1. **DB-1 — Reconciliar el schema de `mikrotik_routers`** antes de activar `USE_DB_MIKROTIK`.
 2. Inventory Read-Only (**4.11.1 foundation implementada localmente**; pendiente validación Hermes).
-3. NOC Read-Only.
+3. NOC Read-Only (**4.11.2 foundation + 4.11.3 real telemetry implementadas localmente**; pendiente validación Hermes).
 4. PROD-1 Manual Safe Mode.
 5. Safe Command Queue dry-run.
 

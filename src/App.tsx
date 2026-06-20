@@ -9,6 +9,7 @@ import SupportModule from './components/SupportModule';
 import InventoryModule from './components/InventoryModule';
 import InventoryRoutersModule from './components/InventoryRoutersModule';
 import NocReadOnlyModule from './components/NocReadOnlyModule';
+import NocTelemetryModule from './components/NocTelemetryModule';
 import GisModule from './components/GisModule';
 import FinanceOwnerModule from './components/FinanceOwnerModule';
 import SuspensionModule from './components/SuspensionModule';
@@ -928,7 +929,10 @@ export default function App() {
             )}
 
             {activeTab === 'noc' && (
-              <NocReadOnlyModule getAuthHeaders={getAuthHeaders} />
+              <>
+                <NocReadOnlyModule getAuthHeaders={getAuthHeaders} />
+                <NocTelemetryModule getAuthHeaders={getAuthHeaders} />
+              </>
             )}
 
             {activeTab === 'crm' && (
