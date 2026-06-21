@@ -951,7 +951,7 @@ export default function App() {
                   <span>Welcome to NugaCore</span>
                 </div>
                 <p className="text-sm text-slate-200 mt-1.5 leading-relaxed">
-                  Este es tu centro operativo unificado. Navega por Dashboard, Clientes y Red para la operación diaria; usa el MikroTik Workspace para routers, y Operaciones y Administración para análisis y ajustes.
+                  Este es tu centro operativo unificado. Navega por Inicio, Clientes y Red WISP para la operación diaria; usa MikroTik y Operaciones Seguras para los routers, y Reportes y Sistema para análisis y ajustes.
                 </p>
               </div>
               <div className="flex items-center gap-2 shrink-0">

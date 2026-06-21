@@ -599,6 +599,18 @@ PROD-6 Primer comando real en CHR         ← TODO, gated + autorización Ramiro
 PROD-7 Piloto en router no crítico        ← TODO, gated + autorización Ramiro
 ```
 
+#### UX-1 — Reorganización profesional del Sidebar (WISP)
+
+Estado: ✅ **Completada (solo UI/UX de navegación).**
+
+El sidebar pasó a 7 secciones con nombres claros en español que reflejan el flujo
+de un WISP: Inicio, Clientes, Red WISP, MikroTik, Operaciones Seguras, Reportes y
+Sistema. Se conservan los 21 IDs de tab, el `activeTab` y el RBAC; no se tocó
+backend, endpoints, providers ni RouterOS. Los badges de estado (SAFE MODE,
+DRY RUN, READ ONLY LAB) se muestran dentro de cada módulo, no en el sidebar.
+Resultado: [`docs/UI_NAVIGATION_REORGANIZATION_RESULT.md`](./docs/UI_NAVIGATION_REORGANIZATION_RESULT.md).
+**Avanzar a PROD-5 / CHR Read-Only real solo después de validar esta UX con Hermes.**
+
 ### FASE 4.12 — Zero Touch Provisioning
 
 Estado: 🔄 Pendiente

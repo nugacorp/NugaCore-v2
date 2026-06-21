@@ -65,14 +65,16 @@ export default function Sidebar({
   userProfile,
   onLogout
 }: SidebarProps) {
-  // Reorganización UX (pre PROD-4): los módulos se agrupan por dominio operativo
-  // en 6 secciones. No se crean ni eliminan módulos; solo se reordena la
-  // navegación. Los badges de estado de cada módulo (NEW, DRY RUN, SAFE MODE,
-  // READ ONLY LAB) se muestran DENTRO de su propio módulo, no aquí en el sidebar.
+  // Reorganización UX WISP (pre PROD-5): los módulos se agrupan por flujo
+  // operativo de un WISP en 7 secciones con nombres claros en español. No se
+  // crean ni eliminan módulos; solo cambian nombre/orden/grupo visual y se
+  // conservan los IDs existentes (no rompe activeTab ni RBAC). Los badges de
+  // estado de cada módulo (NEW, DRY RUN, SAFE MODE, READ ONLY LAB) se muestran
+  // DENTRO de su propio módulo, no aquí en el sidebar.
   const menuSections: MenuSection[] = [
     {
-      id: 'dashboard',
-      title: 'Dashboard',
+      id: 'inicio',
+      title: 'Inicio',
       items: [
         { id: 'dashboard', name: 'Dashboard', icon: Activity },
         { id: 'noc', name: 'NOC', icon: ShieldAlert },
@@ -82,49 +84,55 @@ export default function Sidebar({
       id: 'clientes',
       title: 'Clientes',
       items: [
-        { id: 'crm', name: 'Subscribers', icon: Users },
-        { id: 'billing', name: 'Plans & Billing', icon: CreditCard },
-        { id: 'payments', name: 'Payments', icon: Banknote },
-        { id: 'suspension', name: 'Suspensions', icon: Ban },
+        { id: 'crm', name: 'Clientes', icon: Users },
         { id: 'support', name: 'Tickets', icon: Wrench },
+        { id: 'suspension', name: 'Suspensiones', icon: Ban },
+        { id: 'payments', name: 'Pagos', icon: Banknote },
+        { id: 'billing', name: 'Facturación / Planes', icon: CreditCard },
       ],
     },
     {
-      id: 'red',
-      title: 'Red',
+      id: 'red-wisp',
+      title: 'Red WISP',
       items: [
-        { id: 'network', name: 'Network', icon: Network },
-        { id: 'gis', name: 'Infrastructure', icon: Map },
-        { id: 'inventory', name: 'Inventory', icon: Box },
+        { id: 'gis', name: 'Mapa / Infraestructura', icon: Map },
+        { id: 'network', name: 'Torres y Sitios', icon: Network },
+        { id: 'inventory', name: 'Inventario', icon: Box },
         { id: 'inventory-routers', name: 'Routers', icon: Cpu },
         { id: 'wireguard', name: 'WireGuard', icon: Shield },
       ],
     },
     {
-      id: 'mikrotik-workspace',
-      title: 'MikroTik Workspace',
+      id: 'mikrotik',
+      title: 'MikroTik',
       items: [
-        { id: 'mikrotik', name: 'MikroTik Core', icon: Terminal },
-        { id: 'router-enrollment', name: 'Router Enrollment', icon: Wifi },
-        { id: 'routeros-templates', name: 'Router Templates', icon: BookOpen },
-        { id: 'routeros-resources', name: 'Router Scripts', icon: FileCode },
+        { id: 'mikrotik', name: 'Panel MikroTik', icon: Terminal },
+        { id: 'router-enrollment', name: 'Alta de Router', icon: Wifi },
+        { id: 'routeros-templates', name: 'Plantillas', icon: BookOpen },
+        { id: 'routeros-resources', name: 'Scripts', icon: FileCode },
         { id: 'routeros-readonly', name: 'RouterOS Lab', icon: Server },
-        { id: 'manual-safe-mode', name: 'Manual Safe Mode', icon: ShieldCheck },
-        { id: 'safe-command-queue', name: 'Safe Command Queue', icon: ListChecks },
       ],
     },
     {
-      id: 'operaciones',
-      title: 'Operaciones',
+      id: 'operaciones-seguras',
+      title: 'Operaciones Seguras',
+      items: [
+        { id: 'manual-safe-mode', name: 'Modo Seguro Manual', icon: ShieldCheck },
+        { id: 'safe-command-queue', name: 'Cola Dry-Run', icon: ListChecks },
+      ],
+    },
+    {
+      id: 'reportes',
+      title: 'Reportes',
       items: [
         { id: 'finance', name: 'Analytics', icon: DollarSign },
       ],
     },
     {
-      id: 'administracion',
-      title: 'Administración',
+      id: 'sistema',
+      title: 'Sistema',
       items: [
-        { id: 'owner', name: 'Settings', icon: Shield },
+        { id: 'owner', name: 'Configuración', icon: Shield },
       ],
     },
   ];

@@ -72,6 +72,16 @@ Estado PROD-4 (implementado localmente, pendiente Hermes):
 - Tests `routeros.readonly.*` (contract/service/ui/providers/security).
 - Resultado local: `docs/CHR_REAL_READ_ONLY_RESULT.md`.
 
+Estado UX-1 (solo UI/UX de navegación, completada):
+
+- Sidebar reorganizado a 7 secciones WISP en español (Inicio, Clientes, Red WISP,
+  MikroTik, Operaciones Seguras, Reportes, Sistema) en `src/components/Sidebar.tsx`.
+- 21 IDs de tab conservados; `activeTab` y RBAC (`src/lib/rbac.ts`) sin cambios;
+  backend/endpoints/providers/RouterOS sin tocar. Badges dentro de cada módulo.
+- Contrato de navegación en `tests/unit/navigation.ui.test.ts`.
+- Resultado: `docs/UI_NAVIGATION_REORGANIZATION_RESULT.md`. No avanzar a PROD-5
+  hasta validar esta UX con Hermes.
+
 ### C.1 Hotfix paralelo activo (frontend)
 
 **NugaCore — Hotfix Frontend Polling / Rate Limit Hygiene**

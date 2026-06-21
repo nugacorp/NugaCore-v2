@@ -2,10 +2,10 @@ import { readFileSync } from 'node:fs';
 import { describe, expect, it } from 'vitest';
 
 // ====================================================================
-// UX Reorganization (pre PROD-4) — contrato de navegación del sidebar.
+// UX Reorganization WISP (pre PROD-5) — contrato de navegación del sidebar.
 //
 // Verifica que:
-//  - El sidebar se agrupa en las 6 secciones nuevas, en orden.
+//  - El sidebar se agrupa en las 7 secciones WISP nuevas, en orden.
 //  - Cada módulo existente queda en su sección correcta.
 //  - NO se elimina ningún módulo (los 21 tabs siguen presentes).
 //  - El sidebar ya no RENDERIZA badges de estado (sin campo `badge`,
@@ -18,25 +18,24 @@ const sidebarSource = readFileSync('src/components/Sidebar.tsx', 'utf8');
 const appSource = readFileSync('src/App.tsx', 'utf8');
 const rbacSource = readFileSync('src/lib/rbac.ts', 'utf8');
 
-// Estructura objetivo: 6 secciones con sus módulos (ids existentes).
+// Estructura objetivo: 7 secciones WISP con sus módulos (ids existentes).
 const EXPECTED_SECTIONS: Array<{ title: string; ids: string[] }> = [
-  { title: 'Dashboard', ids: ['dashboard', 'noc'] },
-  { title: 'Clientes', ids: ['crm', 'billing', 'payments', 'suspension', 'support'] },
-  { title: 'Red', ids: ['network', 'gis', 'inventory', 'inventory-routers', 'wireguard'] },
+  { title: 'Inicio', ids: ['dashboard', 'noc'] },
+  { title: 'Clientes', ids: ['crm', 'support', 'suspension', 'payments', 'billing'] },
+  { title: 'Red WISP', ids: ['gis', 'network', 'inventory', 'inventory-routers', 'wireguard'] },
   {
-    title: 'MikroTik Workspace',
+    title: 'MikroTik',
     ids: [
       'mikrotik',
       'router-enrollment',
       'routeros-templates',
       'routeros-resources',
       'routeros-readonly',
-      'manual-safe-mode',
-      'safe-command-queue',
     ],
   },
-  { title: 'Operaciones', ids: ['finance'] },
-  { title: 'Administración', ids: ['owner'] },
+  { title: 'Operaciones Seguras', ids: ['manual-safe-mode', 'safe-command-queue'] },
+  { title: 'Reportes', ids: ['finance'] },
+  { title: 'Sistema', ids: ['owner'] },
 ];
 
 const ALL_TAB_IDS = EXPECTED_SECTIONS.flatMap((s) => s.ids);
@@ -53,7 +52,7 @@ function sectionBlock(title: string): string {
 }
 
 describe('Sidebar — secciones reorganizadas', () => {
-  it('define las 6 secciones nuevas en orden', () => {
+  it('define las 7 secciones nuevas en orden', () => {
     let cursor = -1;
     for (const { title } of EXPECTED_SECTIONS) {
       const idx = sidebarSource.indexOf(`title: '${title}'`);
@@ -63,7 +62,12 @@ describe('Sidebar — secciones reorganizadas', () => {
     }
   });
 
-  it('ya NO usa las secciones antiguas (Operations / Management / System)', () => {
+  it('ya NO usa los títulos de sección previos a la reorganización WISP', () => {
+    // Reorg previa (6 secciones) y nomenclatura en inglés ya retiradas.
+    expect(sidebarSource).not.toContain("title: 'MikroTik Workspace'");
+    expect(sidebarSource).not.toContain("title: 'Operaciones'");
+    expect(sidebarSource).not.toContain("title: 'Administración'");
+    expect(sidebarSource).not.toContain("title: 'Red'");
     expect(sidebarSource).not.toContain("title: 'Operations'");
     expect(sidebarSource).not.toContain("title: 'Management'");
     expect(sidebarSource).not.toContain("title: 'System'");

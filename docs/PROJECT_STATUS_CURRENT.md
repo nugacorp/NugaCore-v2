@@ -65,6 +65,12 @@ detallado en `docs/DEVELOPMENT_HANDOFF_CHECKLIST.md` §0.D.
 7. PROD-4 CHR Real Read-Only (abstracción de providers). 🟡 implementada localmente, PREPARADO/NO CONECTADO (pendiente Hermes).
 8. PROD-5 Dry-Run/CHR → PROD-6 comando real CHR → PROD-7 piloto router no crítico. 🔄 TODO, gated (no implementar todavía).
 
+- UX-1 — Reorganización profesional del Sidebar (WISP). ✅ Solo UI/UX de
+  navegación: 7 secciones en español (Inicio, Clientes, Red WISP, MikroTik,
+  Operaciones Seguras, Reportes, Sistema), IDs/activeTab/RBAC conservados, sin
+  tocar backend ni RouterOS. Ver `docs/UI_NAVIGATION_REORGANIZATION_RESULT.md`.
+  Avanzar a PROD-5 solo tras validar esta UX con Hermes.
+
 No avanzar a un punto sin cerrar el anterior.
 
 > Última fase implementada localmente: **PROD-4 CHR Real Read-Only Integration**
