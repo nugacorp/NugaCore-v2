@@ -41,6 +41,23 @@ interface SidebarProps {
   onLogout?: () => void;
 }
 
+type BadgeTone = 'neutral' | 'success' | 'warning';
+
+type MenuItem = {
+  id: string;
+  name: string;
+  icon: React.ComponentType<{ className?: string }>;
+  highlight?: boolean;
+  badge?: string;
+  badgeTone?: BadgeTone;
+};
+
+type MenuSection = {
+  id: string;
+  title: string;
+  items: MenuItem[];
+};
+
 export default function Sidebar({ 
   activeTab, 
   setActiveTab, 
@@ -53,7 +70,7 @@ export default function Sidebar({
   userProfile,
   onLogout
 }: SidebarProps) {
-  const menuSections = [
+  const menuSections: MenuSection[] = [
     {
       id: 'operations',
       title: 'Operations',
@@ -82,7 +99,7 @@ export default function Sidebar({
       title: 'System',
       items: [
         { id: 'owner', name: 'Settings', icon: Shield },
-        { id: 'manual-safe-mode', name: 'Security', icon: ShieldCheck, badge: 'SAFE', badgeTone: 'success' },
+        { id: 'manual-safe-mode', name: 'Security', icon: ShieldCheck, badge: 'SAFE MODE', badgeTone: 'success' },
         { id: 'routeros-resources', name: 'Help', icon: FileCode },
         { id: 'routeros-templates', name: 'Templates', icon: BookOpen },
         { id: 'safe-command-queue', name: 'Command Queue', icon: ListChecks, badge: 'DRY RUN', badgeTone: 'neutral' },
@@ -94,7 +111,7 @@ export default function Sidebar({
     },
   ];
 
-  const getBadgeClasses = (tone?: 'neutral' | 'success' | 'warning') => {
+  const getBadgeClasses = (tone?: BadgeTone) => {
     if (tone === 'success') {
       return 'bg-emerald-500/10 text-emerald-400 border border-emerald-500/30';
     }
