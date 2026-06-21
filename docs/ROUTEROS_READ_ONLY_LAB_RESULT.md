@@ -81,15 +81,18 @@ Cobranza aunque el frontend ya oculta el módulo.
 - `tests/unit/routeros-readonly.ui.test.ts` (10): badge, banner, secciones,
   ausencia de `execute`/escritura, integración App/Sidebar/RBAC.
 - `tests/unit/routeros-readonly.static-safety.test.ts` (11): escanea
-  `backend/domains/routeros-readonly/**` y falla si aparece cualquier token de
-  escritura: `.add(`, `.set(`, `.remove(`, `.execute(`, `/ip firewall add`,
-  `/ip route add`, `/queue simple add`, `/ppp secret add`, `/interface add`,
-  `/tool fetch`.
+  `backend/domains/routeros-readonly/**` y falla si aparece cualquier API,
+  método o patrón de escritura RouterOS prohibido. La lista exacta vive en el
+  test para evitar documentar scripts write completos en GitHub.
 
 ## 7. Validación local
 
 - `npm run typecheck`: PASS.
 - `npm test`: PASS.
+  - 80 test files passed.
+  - 7 test files skipped.
+  - 1279 tests passed.
+  - 46 tests skipped.
 - `npm run build`: PASS.
 
 (Resultados completos en el reporte de la tarea; sin secretos en logs.)

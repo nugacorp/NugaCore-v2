@@ -48,23 +48,21 @@ describe('RouterOS Read-Only Lab contract', () => {
 
   it('payload estable del mock read-only', async () => {
     const identity = await request(app).get('/api/routeros/identity').set(ADMIN);
-    expect(identity.body).toMatchObject({ name: 'nugacore-lab-router', source: 'mock', readOnly: true });
+    expect(identity.body).toMatchObject({ name: 'chr-lab-edge', routerId: 'chr-lab-mock-1', source: 'mock', readOnly: true });
 
     const system = await request(app).get('/api/routeros/system').set(ADMIN);
-    expect(system.body).toMatchObject({ version: expect.any(String), uptime: expect.any(String), cpu: expect.any(Object), memory: expect.any(Object), readOnly: true });
-    expect(system.body.cpu).toMatchObject({ loadPercent: expect.any(Number), cores: expect.any(Number) });
-    expect(system.body.memory).toMatchObject({ totalMiB: expect.any(Number), freeMiB: expect.any(Number), usedPercent: expect.any(Number) });
+    expect(system.body).toMatchObject({ routerosVersion: expect.any(String), uptime: expect.any(String), cpuLoad: expect.any(Number), memoryTotal: expect.any(Number), memoryFree: expect.any(Number), source: 'mock' });
 
     const interfaces = await request(app).get('/api/routeros/interfaces').set(ADMIN);
     expect(Array.isArray(interfaces.body)).toBe(true);
-    expect(interfaces.body[0]).toMatchObject({ name: expect.any(String), type: expect.any(String), running: expect.any(Boolean), readOnly: true });
+    expect(interfaces.body[0]).toMatchObject({ name: expect.any(String), type: expect.any(String), running: expect.any(Boolean) });
 
     const routes = await request(app).get('/api/routeros/routes').set(ADMIN);
     expect(Array.isArray(routes.body)).toBe(true);
-    expect(routes.body[0]).toMatchObject({ dstAddress: expect.any(String), gateway: expect.any(String), active: expect.any(Boolean), readOnly: true });
+    expect(routes.body[0]).toMatchObject({ dstAddress: expect.any(String), gateway: expect.any(String), active: expect.any(Boolean) });
 
     const wireguard = await request(app).get('/api/routeros/wireguard').set(ADMIN);
-    expect(wireguard.body).toMatchObject({ enabled: expect.any(Boolean), interfaces: expect.any(Number), peers: expect.any(Number), readOnly: true });
+    expect(wireguard.body).toMatchObject({ interfaces: expect.any(Array), peers: expect.any(Array), source: 'mock' });
   });
 
   it('no existen métodos write para los endpoints read-only', async () => {

@@ -20,21 +20,14 @@ describe('RouterOS Read-Only Lab UI contract', () => {
   });
 
   it('muestra identidad, sistema, interfaces, WireGuard y rutas', () => {
-    for (const label of ['Identidad', 'Versión', 'CPU', 'RAM', 'Interfaces', 'WireGuard', 'Rutas']) {
+    for (const label of ['Identidad', 'RouterOS', 'CPU', 'RAM', 'Interfaces', 'WireGuard', 'Rutas']) {
       expect(moduleSource).toContain(label);
     }
   });
 
   it('usa solo endpoints GET read-only y no contiene rutas write', () => {
-    for (const path of [
-      '/api/routeros/identity',
-      '/api/routeros/system',
-      '/api/routeros/interfaces',
-      '/api/routeros/routes',
-      '/api/routeros/wireguard',
-    ]) {
-      expect(moduleSource).toContain(path);
-    }
+    expect(moduleSource).toContain("const paths = ['identity', 'system', 'interfaces', 'routes', 'wireguard']");
+    expect(moduleSource).toContain('fetch(`/api/routeros/${path}`, { headers })');
     expect(moduleSource).not.toContain('/execute');
     expect(moduleSource).not.toContain("method: 'POST'");
     expect(moduleSource).not.toContain("method: 'PUT'");
@@ -46,7 +39,8 @@ describe('RouterOS Read-Only Lab UI contract', () => {
 describe('RouterOS Read-Only Lab navigation integration', () => {
   it('Sidebar incluye el item routeros-readonly', () => {
     expect(sidebarSource).toContain("id: 'routeros-readonly'");
-    expect(sidebarSource).toContain('RouterOS Read-Only Lab');
+    expect(sidebarSource).toContain('RouterOS Lab');
+    expect(sidebarSource).toContain('READ ONLY LAB');
   });
 
   it('App importa y renderiza el módulo cuando el tab está activo', () => {
