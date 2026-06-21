@@ -125,6 +125,24 @@ Pendiente (NO en esta sesión):
 
 - [ ] Validación funcional staging por **Hermes** (endpoints + RBAC + payload sin secretos + UI).
 
+**PROD-1 Manual Safe Mode: implementada localmente** (pendiente validación Hermes en
+staging) — ver [`docs/PROD1_MANUAL_SAFE_MODE_RESULT.md`](./PROD1_MANUAL_SAFE_MODE_RESULT.md).
+
+Hecho (local, esta sesión; sin staging, sin producción, sin migraciones, sin ejecución real):
+
+- [x] Dominio `backend/domains/manual-safe-mode/` (`types.ts`, `repository.ts`, `mappers.ts`, `service.ts`, `routes.ts`) sobre store en memoria.
+- [x] Modelo `SafeAction` + auditoría `SafeActionAudit`; estados `PENDING/APPROVED/REJECTED/SIMULATED/CANCELLED` (**sin `EXECUTED`**); modos `MANUAL/DRY_RUN/FUTURE_AUTOMATION`.
+- [x] Endpoints `GET/POST /api/manual-actions`, `GET /:id`, `POST /:id/{approve,reject,simulate,cancel}` (RBAC; Cobranza 403).
+- [x] `simulateAction` solo `PENDING → SIMULATED` + auditoría; ningún endpoint ejecuta RouterOS/WireGuard/billing/suspensión/shell/workers.
+- [x] UI `src/modules/manual-safe-mode/ManualSafeModeModule.tsx` (badge SAFE MODE; standalone, sin cablear tab para no tocar RBAC-visual aprobado).
+- [x] Tests: contract (18) + service (11) + ui (5).
+- [x] `npm run typecheck`, `npm test`, `npm run build` → PASS.
+- [x] Sin secretos; sin activar `USE_DB_MIKROTIK`/`USE_DB_WIREGUARD`/`MIKROTIK_WORKER_LIVE`/commit mode; sin migraciones.
+
+Pendiente PROD-1 (NO en esta sesión):
+
+- [ ] Validación funcional staging por **Hermes** (ciclo de estados + RBAC + ausencia de ejecución real).
+
 ### E. Qué NO hacer
 
 **No avanzar a Worker Live, Real Provisioning ni Commit Mode.** DB-1 e Inventory 4.11.1

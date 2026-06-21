@@ -407,7 +407,10 @@ Diseño en [`docs/NOC_READ_ONLY_ARCHITECTURE.md`](./docs/NOC_READ_ONLY_ARCHITECT
 
 ### FASE 4.11 — NOC Read-Only
 
-Estado: 🟡 4.11.2 Foundation implementada localmente (pendiente validación Hermes)
+Estado: ✅ 4.11.2 Foundation + ✅ 4.11.3 Real Telemetry aprobadas en staging por Hermes.
+4.11.3 agrega `GET /api/noc/health` y `GET /api/noc/towers` (telemetría agregada por
+salud y por torre) más UI `NocTelemetryModule`; reutiliza `/api/noc/alerts`. Resultado:
+[`docs/NOC_REAL_TELEMETRY_RESULT.md`](./docs/NOC_REAL_TELEMETRY_RESULT.md).
 
 Subfase actual (4.11.2 Foundation):
 
@@ -454,6 +457,25 @@ Gate producción:
 - Datos sanitizados.
 - Alertas con rate limit.
 - No exponer MAC/IP privada de clientes en logs públicos.
+
+### PROD-1 — Manual Safe Mode
+
+Estado: 🟡 Implementada localmente (pendiente validación Hermes).
+
+Infraestructura segura para acciones manuales futuras (modo manual con confirmación
+humana). **NO ejecuta nada**: solo modela, audita y transiciona estados sobre store en
+memoria. Dominio `backend/domains/manual-safe-mode/`.
+
+- Modelo `SafeAction` (status `PENDING/APPROVED/REJECTED/SIMULATED/CANCELLED`;
+  **sin `EXECUTED`**) + auditoría `SafeActionAudit`.
+- Endpoints `GET/POST /api/manual-actions` (+ `:id`, `:id/approve|reject|simulate|cancel`).
+- `simulateAction` solo cambia `PENDING → SIMULATED` y audita; no ejecuta comandos.
+- RBAC: Super Admin, Administrador, Técnico, Soporte, Solo lectura. Cobranza 403.
+- UI `src/modules/manual-safe-mode/ManualSafeModeModule.tsx` (badge SAFE MODE).
+- Sin RouterOS, sin escritura real, sin commit mode, sin DB/migraciones.
+
+Resultado: [`docs/PROD1_MANUAL_SAFE_MODE_RESULT.md`](./docs/PROD1_MANUAL_SAFE_MODE_RESULT.md).
+Siguiente: Safe Command Queue (dry-run).
 
 ### FASE 4.12 — Zero Touch Provisioning
 

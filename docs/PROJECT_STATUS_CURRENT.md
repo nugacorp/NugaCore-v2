@@ -56,13 +56,18 @@ detallado en `docs/DEVELOPMENT_HANDOFF_CHECKLIST.md` §0.D.
 
 ## Orden de trabajo (estricto)
 
-1. DB-1 — Reconciliación de `mikrotik_routers`.
-2. NOC Read-Only.
-3. MikroTik Inventory Read-Only.
-4. PROD-1 Manual Safe Mode.
-5. Safe Command Queue dry-run.
+1. DB-1 — Reconciliación de `mikrotik_routers`. ✅
+2. MikroTik Inventory Read-Only (4.11.1). ✅
+3. NOC Read-Only (4.11.2 foundation + 4.11.3 real telemetry). ✅
+4. PROD-1 Manual Safe Mode. 🟡 implementada localmente (pendiente Hermes).
+5. Safe Command Queue dry-run. 🔜 siguiente.
 
 No avanzar a un punto sin cerrar el anterior.
+
+> Última fase implementada localmente: **PROD-1 Manual Safe Mode** — infraestructura
+> segura de acciones manuales auditadas, sin ejecución real ni estado `EXECUTED`.
+> Ver `docs/PROD1_MANUAL_SAFE_MODE_RESULT.md`. Detalle de tareas en
+> `docs/DEVELOPMENT_HANDOFF_CHECKLIST.md` §0.C.
 
 ## Prohibido activar (sin autorización explícita de Ramiro / fase aprobada)
 

@@ -8,6 +8,7 @@ import customersRoutes from './domains/customers/routes';
 import dashboardRoutes from './domains/dashboard/routes';
 import gisRoutes from './domains/gis/routes';
 import inventoryRoutes from './domains/inventory/routes';
+import manualSafeModeRoutes from './domains/manual-safe-mode/routes';
 import mikrotikRoutes from './domains/mikrotik/routes';
 import networkRoutes from './domains/network/routes';
 import nocRoutes from './domains/noc/routes';
@@ -44,6 +45,7 @@ export function registerRoutes(app: Express): void {
   app.use(inventoryRoutes);
   app.use(nocRoutes);
   app.use(nocTelemetryRoutes);
+  app.use(manualSafeModeRoutes);
   app.use(gisRoutes);
   app.use(dashboardRoutes);
   app.use(paymentsRoutes);
