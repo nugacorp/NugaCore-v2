@@ -47,6 +47,7 @@ export default function SupportModule({
 
   // Ticket Reply
   const [replyMessage, setReplyMessage] = useState('');
+  const [ticketQuery, setTicketQuery] = useState('');
 
   // Canvas Drawing Pad State
   const canvasRef = useRef<HTMLCanvasElement>(null);
@@ -67,6 +68,18 @@ export default function SupportModule({
       }
     }
   }, [selectedOrder, activeSubView]);
+
+  useEffect(() => {
+    if (!selectedTicket) return;
+    const freshTicket = tickets.find(t => t.id === selectedTicket.id);
+    if (!freshTicket) {
+      setSelectedTicket(null);
+      return;
+    }
+    if (freshTicket !== selectedTicket) {
+      setSelectedTicket(freshTicket);
+    }
+  }, [tickets, selectedTicket]);
 
   const startDrawing = (e: React.MouseEvent<HTMLCanvasElement>) => {
     setIsDrawing(true);
@@ -156,6 +169,20 @@ export default function SupportModule({
     setSelectedOrder(null);
   };
 
+  const normalizedTicketQuery = ticketQuery.trim().toLowerCase();
+  const filteredTickets = tickets.filter((ticket) => {
+    if (!normalizedTicketQuery) return true;
+    const searchable = [ticket.title, ticket.description, ticket.clientName, ticket.category, ticket.status].join(' ').toLowerCase();
+    return searchable.includes(normalizedTicketQuery);
+  });
+
+  const selectedTicketData = selectedTicket ? tickets.find(t => t.id === selectedTicket.id) || selectedTicket : null;
+  const selectedTicketClient = selectedTicketData?.clientId
+    ? clients.find(client => client.id === selectedTicketData.clientId)
+    : null;
+
+  const activeTicketCount = tickets.filter(t => t.status === 'open' || t.status === 'assigned').length;
+
   return (
     <div className="space-y-6 text-slate-200 p-6 bg-slate-900 min-h-screen font-sans">
       {/* Header sub navig */}
@@ -192,11 +219,16 @@ export default function SupportModule({
       </div>
 
       {activeSubView === 'tickets' ? (
-        <div className="grid grid-cols-1 lg:grid-cols-12 gap-6">
-          {/* Ticket list (7 columns) */}
-          <div className="lg:col-span-7 bg-slate-950 p-5 rounded-3xl border border-slate-800 space-y-4">
-            <div className="flex items-center justify-between border-b border-slate-900 pb-4 mb-4">
-              <span className="text-sm font-bold text-white tracking-wide">Buzón de Averías Activado</span>
+        <div id="ticket-workspace-view" className="grid grid-cols-1 lg:grid-cols-12 gap-6">
+          {/* Ticket list panel */}
+          <div className="lg:col-span-4 bg-slate-950 p-5 rounded-3xl border border-slate-800 space-y-4">
+            <div className="flex items-center justify-between border-b border-slate-900 pb-4">
+              <div>
+                <span className="text-sm font-bold text-white tracking-wide block">Buzón de Averías</span>
+                <span className="text-[10px] text-slate-500 font-mono uppercase tracking-widest">
+                  {activeTicketCount} activos
+                </span>
+              </div>
               <button
                 onClick={() => setShowAddTicket(true)}
                 id="create-new-ticket-btn"
@@ -206,74 +238,95 @@ export default function SupportModule({
               </button>
             </div>
 
-            <div className="space-y-3 max-h-[420px] overflow-y-auto pr-1">
-              {tickets.map((tk) => (
+            <div className="relative">
+              <Search className="w-4 h-4 text-slate-500 absolute left-3 top-2.5" />
+              <input
+                type="text"
+                value={ticketQuery}
+                onChange={(e) => setTicketQuery(e.target.value)}
+                placeholder="Buscar tickets, cliente o categoría..."
+                className="w-full bg-slate-900 border border-slate-800 rounded-xl pl-9 pr-3 py-2 text-xs focus:outline-none focus:border-indigo-500"
+              />
+            </div>
+
+            <div className="space-y-3 max-h-[470px] overflow-y-auto pr-1">
+              {filteredTickets.map((tk) => (
                 <div
                   key={tk.id}
                   id={`ticket-box-item-${tk.id}`}
                   onClick={() => setSelectedTicket(tk)}
-                  className={`p-3.5 rounded-2xl border cursor-pointer transition flex items-start justify-between ${
-                    selectedTicket?.id === tk.id
+                  className={`p-3.5 rounded-2xl border cursor-pointer transition flex items-start justify-between gap-3 ${
+                    selectedTicketData?.id === tk.id
                       ? 'bg-slate-900 border-indigo-500/50'
                       : 'bg-slate-900/40 border-slate-900 hover:border-slate-800'
                   }`}
                 >
-                  <div className="space-y-1">
-                    <div className="flex items-center space-x-2">
-                      <span className="font-bold text-white text-sm">{tk.title}</span>
-                      <span className="text-[10px] bg-slate-800 text-slate-400 border border-slate-700 px-1.5 py-0.2 rounded font-mono font-bold uppercase uppercase tracking-wider">
+                  <div className="space-y-1 min-w-0">
+                    <div className="flex items-center space-x-2 min-w-0">
+                      <span className="font-bold text-white text-sm truncate">{tk.title}</span>
+                      <span className="text-[10px] bg-slate-800 text-slate-400 border border-slate-700 px-1.5 py-0.2 rounded font-mono font-bold uppercase tracking-wider shrink-0">
                         {tk.category}
                       </span>
                     </div>
                     <p className="text-slate-400 font-sans text-xs line-clamp-1">{tk.description}</p>
-                    <div className="text-[10px] font-mono text-slate-500">
-                      Emitido por: {tk.clientName} | SLA: {tk.slaHours} horas
+                    <div className="text-[10px] font-mono text-slate-500 truncate">
+                      {tk.clientName} | SLA: {tk.slaHours}h
                     </div>
                   </div>
 
-                  <div className="text-right">
+                  <div className="text-right shrink-0">
                     {tk.status === 'open' && (
                       <span className="bg-rose-500/15 text-rose-400 border border-rose-500/20 text-[9px] font-mono px-1.5 py-0.5 rounded font-bold uppercase">
-                        Abierto
+                        Open
                       </span>
                     )}
                     {tk.status === 'assigned' && (
                       <span className="bg-amber-500/15 text-amber-400 border border-amber-500/20 text-[9px] font-mono px-1.5 py-0.5 rounded font-bold uppercase">
-                        Despachado
+                        Assigned
                       </span>
                     )}
                     {tk.status === 'resolved' && (
                       <span className="bg-emerald-500/15 text-emerald-400 border border-emerald-500/20 text-[9px] font-mono px-1.5 py-0.5 rounded font-bold uppercase">
-                        Solucionado
+                        Resolved
+                      </span>
+                    )}
+                    {tk.status === 'closed' && (
+                      <span className="bg-slate-800 text-slate-300 border border-slate-700 text-[9px] font-mono px-1.5 py-0.5 rounded font-bold uppercase">
+                        Closed
                       </span>
                     )}
                   </div>
                 </div>
               ))}
+
+              {filteredTickets.length === 0 && (
+                <div className="rounded-2xl border border-dashed border-slate-800 bg-slate-900/40 py-8 text-center">
+                  <p className="text-xs text-slate-500 font-mono">No se encontraron tickets con ese criterio.</p>
+                </div>
+              )}
             </div>
           </div>
 
-          {/* Ticket Messages Detail (5 columns) */}
+          {/* Conversation panel */}
           <div className="lg:col-span-5">
-            {selectedTicket ? (
-              <div id="ticket-chat-pane" className="bg-slate-950 p-6 rounded-3xl border border-slate-800 space-y-4 flex flex-col justify-between h-[480px]">
+            {selectedTicketData ? (
+              <div id="ticket-chat-pane" className="bg-slate-950 p-6 rounded-3xl border border-slate-800 space-y-4 flex flex-col justify-between h-[560px]">
                 <div>
                   <div className="flex items-center justify-between border-b border-slate-900 pb-3 mb-3">
                     <div>
-                      <span className="text-[9px] text-indigo-400 font-mono uppercase tracking-widest block font-bold">Bitácora Ticket</span>
-                      <h4 className="text-sm font-bold text-white line-clamp-1">{selectedTicket.title}</h4>
+                      <span className="text-[9px] text-indigo-400 font-mono uppercase tracking-widest block font-bold">Ticket Conversation</span>
+                      <h4 className="text-sm font-bold text-white line-clamp-1">{selectedTicketData.title}</h4>
                     </div>
                     <button onClick={() => setSelectedTicket(null)} className="text-slate-500 hover:text-white font-bold">✕</button>
                   </div>
 
-                  {/* Chat flow list */}
-                  <div className="space-y-3 h-[300px] overflow-y-auto pr-1 text-xs font-mono">
-                    {selectedTicket.messages.map((m, idx) => (
+                  <div className="space-y-3 h-[380px] overflow-y-auto pr-1 text-xs font-mono">
+                    {selectedTicketData.messages.map((m, idx) => (
                       <div key={idx} className={`space-y-1 ${m.sender === 'Cliente' ? 'text-left' : 'text-right'}`}>
                         <span className="text-[9px] text-slate-500 font-bold block">{m.sender} • {m.date}</span>
-                        <div className={`p-2.5 rounded-xl inline-block max-w-[90%] leading-relaxed ${
-                          m.sender === 'Cliente' 
-                            ? 'bg-slate-900 border border-slate-800 text-slate-300 text-left' 
+                        <div className={`p-2.5 rounded-xl inline-block max-w-[92%] leading-relaxed ${
+                          m.sender === 'Cliente'
+                            ? 'bg-slate-900 border border-slate-800 text-slate-300 text-left'
                             : 'bg-indigo-600 text-white text-left'
                         }`}>
                           <span>{m.message}</span>
@@ -283,14 +336,13 @@ export default function SupportModule({
                   </div>
                 </div>
 
-                {/* Send message form */}
                 <form onSubmit={handleReplySubmit} className="flex gap-2 border-t border-slate-900 pt-3">
                   <input
                     type="text"
                     required
                     value={replyMessage}
                     onChange={(e) => setReplyMessage(e.target.value)}
-                    placeholder="Escribe la respuesta del soporte técnico..."
+                    placeholder="Responder al cliente..."
                     className="flex-1 bg-slate-900 border border-slate-800/80 rounded-xl px-3 py-2 text-xs focus:outline-none focus:border-indigo-500"
                   />
                   <button
@@ -298,14 +350,94 @@ export default function SupportModule({
                     type="submit"
                     className="bg-indigo-600 hover:bg-indigo-500 text-white px-3.5 py-2 rounded-xl text-xs transition"
                   >
-                    Responder
+                    Enviar
                   </button>
                 </form>
               </div>
             ) : (
-              <div className="bg-slate-950 p-6 rounded-3xl border border-slate-800 text-center py-12 text-slate-500 font-mono">
+              <div className="bg-slate-950 p-6 rounded-3xl border border-slate-800 text-center py-16 text-slate-500 font-mono h-[560px] flex flex-col justify-center">
                 <MessageSquare className="w-12 h-12 text-slate-800 mx-auto mb-3" />
-                <p className="text-sm">Selecciona una avería del buzón para chatear con el cliente y documentar la bitácora técnica.</p>
+                <p className="text-sm">Selecciona un ticket para abrir la conversación y documentar resolución.</p>
+              </div>
+            )}
+          </div>
+
+          {/* Active ticket context sidebar */}
+          <div className="lg:col-span-3">
+            {selectedTicketData ? (
+              <div id="ticket-context-sidebar" className="bg-slate-950 p-5 rounded-3xl border border-slate-800 space-y-4 h-[560px] overflow-y-auto">
+                <div className="border-b border-slate-900 pb-3">
+                  <span className="text-[9px] text-emerald-400 font-mono uppercase tracking-widest block font-bold">Active Ticket</span>
+                  <p className="text-sm text-white font-semibold mt-1 line-clamp-2">{selectedTicketData.title}</p>
+                </div>
+
+                <div className="space-y-2">
+                  <span className="text-[10px] font-mono uppercase tracking-widest text-slate-500">Estado</span>
+                  <div>
+                    {selectedTicketData.status === 'open' && (
+                      <span className="bg-rose-500/15 text-rose-400 border border-rose-500/20 text-[10px] font-mono px-2 py-1 rounded-lg font-bold uppercase">Open</span>
+                    )}
+                    {selectedTicketData.status === 'assigned' && (
+                      <span className="bg-amber-500/15 text-amber-400 border border-amber-500/20 text-[10px] font-mono px-2 py-1 rounded-lg font-bold uppercase">Assigned</span>
+                    )}
+                    {selectedTicketData.status === 'resolved' && (
+                      <span className="bg-emerald-500/15 text-emerald-400 border border-emerald-500/20 text-[10px] font-mono px-2 py-1 rounded-lg font-bold uppercase">Resolved</span>
+                    )}
+                    {selectedTicketData.status === 'closed' && (
+                      <span className="bg-slate-800 text-slate-300 border border-slate-700 text-[10px] font-mono px-2 py-1 rounded-lg font-bold uppercase">Closed</span>
+                    )}
+                  </div>
+                </div>
+
+                <div className="space-y-2 bg-slate-900/40 border border-slate-900 rounded-xl p-3">
+                  <div className="flex items-center space-x-2 text-slate-300 text-xs">
+                    <AlertTriangle className="w-3.5 h-3.5 text-amber-400" />
+                    <span>Severidad: <strong className="uppercase">{selectedTicketData.severity}</strong></span>
+                  </div>
+                  <p className="text-[11px] text-slate-400 font-mono">SLA objetivo: {selectedTicketData.slaHours} horas</p>
+                </div>
+
+                <div className="space-y-2">
+                  <span className="text-[10px] font-mono uppercase tracking-widest text-slate-500">Subscriber</span>
+                  <div className="bg-slate-900/40 border border-slate-900 rounded-xl p-3 space-y-2">
+                    <div className="flex items-center space-x-2 text-slate-200 text-xs">
+                      <User className="w-3.5 h-3.5 text-indigo-400" />
+                      <span>{selectedTicketData.clientName}</span>
+                    </div>
+                    {selectedTicketClient?.phone && (
+                      <div className="flex items-center space-x-2 text-slate-400 text-[11px]">
+                        <Phone className="w-3.5 h-3.5" />
+                        <span>{selectedTicketClient.phone}</span>
+                      </div>
+                    )}
+                    {selectedTicketClient?.address && (
+                      <div className="flex items-start space-x-2 text-slate-400 text-[11px]">
+                        <MapPin className="w-3.5 h-3.5 mt-0.5" />
+                        <span>{selectedTicketClient.address}</span>
+                      </div>
+                    )}
+                  </div>
+                </div>
+
+                <div className="space-y-2">
+                  <span className="text-[10px] font-mono uppercase tracking-widest text-slate-500">Timeline</span>
+                  <div className="bg-slate-900/40 border border-slate-900 rounded-xl p-3 text-[11px] text-slate-400 space-y-1.5">
+                    <div className="flex items-center space-x-2">
+                      <Calendar className="w-3.5 h-3.5 text-slate-500" />
+                      <span>Creado: {selectedTicketData.created}</span>
+                    </div>
+                    {selectedTicketData.updatedAt && (
+                      <div className="flex items-center space-x-2">
+                        <Calendar className="w-3.5 h-3.5 text-slate-500" />
+                        <span>Última actualización: {selectedTicketData.updatedAt}</span>
+                      </div>
+                    )}
+                  </div>
+                </div>
+              </div>
+            ) : (
+              <div className="bg-slate-950 p-6 rounded-3xl border border-slate-800 text-center py-16 text-slate-500 font-mono h-[560px] flex flex-col justify-center">
+                <p className="text-sm">Aquí verás el contexto del ticket activo: estado, SLA y datos del abonado.</p>
               </div>
             )}
           </div>
@@ -331,7 +463,7 @@ export default function SupportModule({
                   <div className="space-y-1">
                     <div className="flex items-center space-x-2">
                       <span className="font-bold text-white text-sm">{wo.title}</span>
-                      <span className="bg-slate-800 text-slate-400 border border-slate-700 text-[10px] px-1.5 py-0.2 rounded font-mono font-bold uppercase uppercase tracking-wider">
+                      <span className="bg-slate-800 text-slate-400 border border-slate-700 text-[10px] px-1.5 py-0.2 rounded font-mono font-bold uppercase tracking-wider">
                         {wo.type}
                       </span>
                     </div>

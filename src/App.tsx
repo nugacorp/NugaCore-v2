@@ -58,7 +58,10 @@ import {
   WireguardPeerCreated
 } from './types';
 
-import { Cpu, AlertTriangle, CheckCircle, RefreshCw, Menu } from 'lucide-react';
+import { AlertTriangle, RefreshCw, Menu, Sparkles, ArrowRight } from 'lucide-react';
+
+const SIDEBAR_COLLAPSE_STORAGE_KEY = 'nugacore.sidebar.collapsed.v1';
+const WELCOME_BANNER_DISMISSED_KEY = 'nugacore.welcome.dismissed.v1';
 
 export default function App() {
   const [showLogin, setShowLogin] = useState<boolean>(false);
@@ -70,6 +73,20 @@ export default function App() {
   const [activeTab, setActiveTab] = useState<string>('dashboard');
 
   const [mobileMenuOpen, setMobileMenuOpen] = useState<boolean>(false);
+  const [sidebarCollapsed, setSidebarCollapsed] = useState<boolean>(() => {
+    try {
+      return localStorage.getItem(SIDEBAR_COLLAPSE_STORAGE_KEY) === '1';
+    } catch {
+      return false;
+    }
+  });
+  const [showWelcomeBanner, setShowWelcomeBanner] = useState<boolean>(() => {
+    try {
+      return localStorage.getItem(WELCOME_BANNER_DISMISSED_KEY) !== '1';
+    } catch {
+      return true;
+    }
+  });
   const [loading, setLoading] = useState<boolean>(true);
   const [errorStr, setErrorStr] = useState<string>('');
   const [notice, setNotice] = useState<string>('');
@@ -132,6 +149,35 @@ export default function App() {
     const t = setTimeout(() => setNotice(''), 3500);
     return () => clearTimeout(t);
   }, [notice]);
+
+  useEffect(() => {
+    try {
+      localStorage.setItem(SIDEBAR_COLLAPSE_STORAGE_KEY, sidebarCollapsed ? '1' : '0');
+    } catch {
+      // Ignore localStorage write failures (private mode / browser policy).
+    }
+  }, [sidebarCollapsed]);
+
+  useEffect(() => {
+    if (showWelcomeBanner) return;
+    try {
+      localStorage.setItem(WELCOME_BANNER_DISMISSED_KEY, '1');
+    } catch {
+      // Ignore localStorage write failures (private mode / browser policy).
+    }
+  }, [showWelcomeBanner]);
+
+  const dismissWelcomeBanner = () => {
+    setShowWelcomeBanner(false);
+  };
+
+  const startQuickTour = () => {
+    if (!userSession) return;
+    const preferredTabs = ['network', 'crm', 'support', 'dashboard'];
+    const firstAllowedTab = preferredTabs.find(tabId => canAccessTab(userSession.role, tabId)) || getDefaultTabByRole(userSession.role);
+    setActiveTab(firstAllowedTab);
+    setShowWelcomeBanner(false);
+  };
 
   // DB States
   const [stats, setStats] = useState<any>({
@@ -806,6 +852,8 @@ export default function App() {
   // Find system critical unacknowledged alerts to show in high-prominence top ticker
   const activeUnackCriticalAlert = alerts.find(a => !a.acknowledged && a.severity === 'critical');
   const activeTicketsCount = tickets.filter(t => t.status === 'open' || t.status === 'assigned').length;
+  const isSupportWorkspace = activeTab === 'support';
+  const shouldShowWelcomeBanner = showWelcomeBanner && activeTab === 'dashboard';
 
   if (!sessionBootstrapped) {
     return (
@@ -840,6 +888,8 @@ export default function App() {
         setActiveTab={setActiveTab} 
         activeAlertsCount={alerts.filter(a => !a.acknowledged).length}
         activeTicketsCount={activeTicketsCount}
+        collapsed={sidebarCollapsed}
+        onToggleCollapsed={() => setSidebarCollapsed(prev => !prev)}
         isOpen={mobileMenuOpen}
         onClose={() => setMobileMenuOpen(false)}
         userProfile={userSession}
@@ -849,9 +899,11 @@ export default function App() {
       {/* Main Content Area */}
       <div className="flex-1 flex flex-col min-w-0">
         {/* Desktop top bar: identidad / perfil / logout */}
-        <div id="desktop-top-bar" className="hidden md:flex items-center justify-end gap-3 py-2.5 px-6 bg-slate-950 border-b border-slate-900 shrink-0 sticky top-0 z-20">
-          <UserMenu profile={userSession} onLogout={handleLogout} />
-        </div>
+        {!isSupportWorkspace && (
+          <div id="desktop-top-bar" className="hidden md:flex items-center justify-end gap-3 py-2.5 px-6 bg-slate-950 border-b border-slate-900 shrink-0 sticky top-0 z-20">
+            <UserMenu profile={userSession} onLogout={handleLogout} />
+          </div>
+        )}
 
         {/* Mobile Navigation Header */}
         <div id="mobile-navigation-bar" className="md:hidden flex items-center justify-between py-3 px-4 bg-slate-950 border-b border-slate-900 shrink-0 sticky top-0 z-20">
@@ -870,6 +922,39 @@ export default function App() {
 
           <UserMenu profile={userSession} onLogout={handleLogout} />
         </div>
+
+        {shouldShowWelcomeBanner && (
+          <div className="px-4 md:px-6 pt-4">
+            <div className="rounded-2xl border border-indigo-500/20 bg-indigo-600/10 px-4 py-3.5 md:px-5 md:py-4 flex flex-col lg:flex-row lg:items-center justify-between gap-4">
+              <div className="min-w-0">
+                <div className="text-[11px] uppercase tracking-widest font-mono text-indigo-300/90 flex items-center space-x-1.5">
+                  <Sparkles className="w-3.5 h-3.5" />
+                  <span>Welcome to NugaCore</span>
+                </div>
+                <p className="text-sm text-slate-200 mt-1.5 leading-relaxed">
+                  Este es tu centro operativo unificado. Empieza por Operations para Network, Subscribers y Tickets; luego continúa con Management y System.
+                </p>
+              </div>
+              <div className="flex items-center gap-2 shrink-0">
+                <button
+                  type="button"
+                  onClick={startQuickTour}
+                  className="inline-flex items-center gap-1.5 bg-indigo-600 hover:bg-indigo-500 text-white text-xs font-semibold px-3 py-1.5 rounded-lg transition"
+                >
+                  <span>Take a Tour</span>
+                  <ArrowRight className="w-3.5 h-3.5" />
+                </button>
+                <button
+                  type="button"
+                  onClick={dismissWelcomeBanner}
+                  className="border border-slate-800 hover:border-slate-700 hover:bg-slate-900 text-slate-300 text-xs font-semibold px-3 py-1.5 rounded-lg transition"
+                >
+                  Dismiss
+                </button>
+              </div>
+            </div>
+          </div>
+        )}
 
         {/* Aviso RBAC (sin permiso / redirección) */}
         {notice && (
