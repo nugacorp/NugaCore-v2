@@ -21,12 +21,11 @@ import {
   ChevronLeft,
   ChevronRight,
   Banknote,
-  ShieldCheck,
-  ListChecks,
-  Server
+  Server,
+  BookText
 } from 'lucide-react';
 import { UserSessionProfile } from '../lib/supabase';
-import { canAccessTab } from '../lib/rbac';
+import { isVisibleInSidebar } from '../lib/rbac';
 
 interface SidebarProps {
   activeTab: string;
@@ -66,11 +65,18 @@ export default function Sidebar({
   onLogout
 }: SidebarProps) {
   // Reorganización UX WISP (pre PROD-5): los módulos se agrupan por flujo
-  // operativo de un WISP en 7 secciones con nombres claros en español. No se
+  // operativo de un WISP en 6 secciones con nombres claros en español. No se
   // crean ni eliminan módulos; solo cambian nombre/orden/grupo visual y se
-  // conservan los IDs existentes (no rompe activeTab ni RBAC). Los badges de
-  // estado de cada módulo (NEW, DRY RUN, SAFE MODE, READ ONLY LAB) se muestran
-  // DENTRO de su propio módulo, no aquí en el sidebar.
+  // conservan los IDs existentes (no rompe activeTab ni RBAC).
+  //
+  // Módulos NO listados aquí a propósito (siguen accesibles por RBAC y por
+  // tab/URL directo, pero no son módulos operativos normales del WISP):
+  //  - wireguard → infraestructura interna (peers automáticos en Alta de Router).
+  //  - manual-safe-mode / safe-command-queue → herramientas internas de seguridad.
+  // El filtro `isVisibleInSidebar` los oculta de forma centralizada (rbac.ts).
+  //
+  // Los badges de estado de cada módulo (NEW, DRY RUN, SAFE MODE, READ ONLY LAB)
+  // se muestran DENTRO de su propio módulo, no aquí en el sidebar.
   const menuSections: MenuSection[] = [
     {
       id: 'inicio',
@@ -98,14 +104,13 @@ export default function Sidebar({
         { id: 'gis', name: 'Mapa / Infraestructura', icon: Map },
         { id: 'network', name: 'Torres y Sitios', icon: Network },
         { id: 'inventory', name: 'Inventario', icon: Box },
-        { id: 'inventory-routers', name: 'Routers', icon: Cpu },
-        { id: 'wireguard', name: 'WireGuard', icon: Shield },
       ],
     },
     {
       id: 'mikrotik',
       title: 'MikroTik',
       items: [
+        { id: 'inventory-routers', name: 'Routers', icon: Cpu },
         { id: 'mikrotik', name: 'Panel MikroTik', icon: Terminal },
         { id: 'router-enrollment', name: 'Alta de Router', icon: Wifi },
         { id: 'routeros-templates', name: 'Plantillas', icon: BookOpen },
@@ -114,16 +119,8 @@ export default function Sidebar({
       ],
     },
     {
-      id: 'operaciones-seguras',
-      title: 'Operaciones Seguras',
-      items: [
-        { id: 'manual-safe-mode', name: 'Modo Seguro Manual', icon: ShieldCheck },
-        { id: 'safe-command-queue', name: 'Cola Dry-Run', icon: ListChecks },
-      ],
-    },
-    {
-      id: 'reportes',
-      title: 'Reportes',
+      id: 'operaciones',
+      title: 'Operaciones',
       items: [
         { id: 'finance', name: 'Analytics', icon: DollarSign },
       ],
@@ -133,14 +130,17 @@ export default function Sidebar({
       title: 'Sistema',
       items: [
         { id: 'owner', name: 'Configuración', icon: Shield },
+        { id: 'user-manual', name: 'Manual de Usuario', icon: BookText },
       ],
     },
   ];
 
-  // Filtering views according to basic Role Perms (FASE 1 Requirement)
+  // Filtra por VISIBILIDAD en sidebar: requiere acceso RBAC real y que el módulo
+  // no esté oculto (wireguard / manual-safe-mode / safe-command-queue). Los
+  // módulos ocultos siguen siendo accesibles por tab/URL directo (ver rbac.ts).
   const isAuthorizedTab = (tabId: string): boolean => {
     if (!userProfile) return false;
-    return canAccessTab(userProfile.role, tabId);
+    return isVisibleInSidebar(userProfile.role, tabId);
   };
 
   const filteredSections = menuSections

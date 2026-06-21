@@ -72,13 +72,20 @@ Estado PROD-4 (implementado localmente, pendiente Hermes):
 - Tests `routeros.readonly.*` (contract/service/ui/providers/security).
 - Resultado local: `docs/CHR_REAL_READ_ONLY_RESULT.md`.
 
-Estado UX-1 (solo UI/UX de navegación, completada):
+Estado UX-1 (solo UI/UX de navegación + Manual de Usuario, completada):
 
-- Sidebar reorganizado a 7 secciones WISP en español (Inicio, Clientes, Red WISP,
-  MikroTik, Operaciones Seguras, Reportes, Sistema) en `src/components/Sidebar.tsx`.
-- 21 IDs de tab conservados; `activeTab` y RBAC (`src/lib/rbac.ts`) sin cambios;
-  backend/endpoints/providers/RouterOS sin tocar. Badges dentro de cada módulo.
-- Contrato de navegación en `tests/unit/navigation.ui.test.ts`.
+- Sidebar en 6 secciones WISP en español (Inicio, Clientes, Red WISP, MikroTik,
+  Operaciones, Sistema) en `src/components/Sidebar.tsx`.
+- WireGuard, Modo Seguro Manual y Cola Dry-Run **ocultos del sidebar** (decisión
+  de producto): siguen accesibles por RBAC y tab/URL directo; código, rutas y
+  tests intactos. Separación visibilidad/acceso vía `isVisibleInSidebar` y
+  `SIDEBAR_HIDDEN_TABS` en `src/lib/rbac.ts`. RBAC funcional sin cambios.
+- Routers (`inventory-routers`) movido al grupo MikroTik.
+- Nuevo módulo `user-manual` (`src/modules/user-manual/UserManualModule.tsx`,
+  frontend, sin backend), visible para todos los roles incl. Cobranza.
+- Backend/endpoints/providers/RouterOS sin tocar. Badges dentro de cada módulo.
+- Tests: `navigation.ui`, `rbac.frontend`, `manual-safe-mode.ui`,
+  `safe-command-queue.ui`, `user-manual.ui`.
 - Resultado: `docs/UI_NAVIGATION_REORGANIZATION_RESULT.md`. No avanzar a PROD-5
   hasta validar esta UX con Hermes.
 

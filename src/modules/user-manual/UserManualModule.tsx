@@ -1,0 +1,242 @@
+import React, { useState } from 'react';
+import {
+  BookText,
+  LayoutDashboard,
+  Users,
+  Wrench,
+  CreditCard,
+  Banknote,
+  Ban,
+  Network,
+  Terminal,
+  Wifi,
+  BookOpen,
+  FileCode,
+  Server,
+  ShieldAlert,
+  Info,
+  ChevronDown,
+} from 'lucide-react';
+
+// ====================================================================
+// Manual de Usuario — guía rápida 100% frontend (sin backend, sin APIs).
+// Primera versión: secciones con pasos básicos para operar NugaCore. No
+// describe funciones internas (WireGuard, Safe Mode, Command Queue) como
+// módulos operativos normales.
+// ====================================================================
+
+type ManualSection = {
+  id: string;
+  title: string;
+  icon: React.ComponentType<{ className?: string }>;
+  summary: string;
+  steps: string[];
+};
+
+const SECTIONS: ManualSection[] = [
+  {
+    id: 'dashboard',
+    title: 'Inicio / Dashboard',
+    icon: LayoutDashboard,
+    summary: 'Vista general del estado operativo del WISP: clientes, cobranza, red y alertas.',
+    steps: [
+      'Abre "Inicio → Dashboard" para ver los indicadores clave (clientes activos, MRR, tickets, torres).',
+      'Revisa las alertas críticas que aparecen en la parte superior y siléncialas una vez atendidas.',
+      'Usa "Actualizar" para refrescar los datos contra el servidor.',
+    ],
+  },
+  {
+    id: 'clientes',
+    title: 'Clientes',
+    icon: Users,
+    summary: 'Alta y gestión de clientes y prospectos, con su plan asignado.',
+    steps: [
+      'Entra a "Clientes → Clientes".',
+      'Usa el botón de nuevo cliente para registrar nombre, contacto y plan.',
+      'Cambia el estado de un cliente (activo / suspendido / baja) desde su ficha.',
+    ],
+  },
+  {
+    id: 'tickets',
+    title: 'Tickets',
+    icon: Wrench,
+    summary: 'Soporte técnico y órdenes de trabajo de los clientes.',
+    steps: [
+      'Entra a "Clientes → Tickets".',
+      'Crea un ticket asociándolo al cliente y describe la incidencia.',
+      'Agrega mensajes de seguimiento y actualiza el estado de la orden de trabajo.',
+    ],
+  },
+  {
+    id: 'billing',
+    title: 'Facturación y Planes',
+    icon: CreditCard,
+    summary: 'Catálogo de planes, emisión de facturas y registro de cobros.',
+    steps: [
+      'Entra a "Clientes → Facturación / Planes".',
+      'Genera o edita facturas de un cliente.',
+      'Registra el pago de una factura (total o parcial) y consulta el estado de cuenta.',
+    ],
+  },
+  {
+    id: 'payments',
+    title: 'Pagos',
+    icon: Banknote,
+    summary: 'Portal de pagos y reactivación de servicio.',
+    steps: [
+      'Entra a "Clientes → Pagos".',
+      'Consulta los pagos registrados por cliente.',
+      'Usa el flujo de reactivación cuando un cliente regulariza su saldo.',
+    ],
+  },
+  {
+    id: 'suspension',
+    title: 'Suspensiones',
+    icon: Ban,
+    summary: 'Cortes y reactivaciones por mora (motor lógico, sin tocar routers reales).',
+    steps: [
+      'Entra a "Clientes → Suspensiones".',
+      'Revisa los clientes evaluables y las órdenes de corte/reactivación.',
+      'Evalúa un cliente o todos para generar las órdenes correspondientes. Es un proceso lógico/simulado.',
+    ],
+  },
+  {
+    id: 'red-wisp',
+    title: 'Red WISP',
+    icon: Network,
+    summary: 'Mapa de infraestructura, torres y sitios, e inventario de equipo.',
+    steps: [
+      'Entra a "Red WISP → Mapa / Infraestructura" para ver la cobertura en el mapa.',
+      'En "Torres y Sitios" administra torres, OLT/ONU y NAPs.',
+      'En "Inventario" controla el stock y los movimientos de equipo.',
+    ],
+  },
+  {
+    id: 'mikrotik',
+    title: 'MikroTik / Routers',
+    icon: Terminal,
+    summary: 'Inventario de routers y panel operativo MikroTik (lectura y provisioning seguro).',
+    steps: [
+      'Entra a "MikroTik → Routers" para ver el inventario read-only de routers.',
+      'Abre "Panel MikroTik" para consultar logs, copiloto y el estado de los routers provisionados.',
+      'El panel no ejecuta cambios destructivos: trabaja en modo lectura/seguro.',
+    ],
+  },
+  {
+    id: 'router-enrollment',
+    title: 'Alta de Router',
+    icon: Wifi,
+    summary: 'Onboarding guiado de un router nuevo. El acceso VPN se prepara automáticamente.',
+    steps: [
+      'Entra a "MikroTik → Alta de Router".',
+      'Completa el asistente con los datos del router y el tipo de conexión.',
+      'El sistema genera el script de provisioning y prepara el acceso interno por VPN sin pasos manuales.',
+    ],
+  },
+  {
+    id: 'templates-scripts',
+    title: 'Plantillas y Scripts',
+    icon: BookOpen,
+    summary: 'Plantillas RouterOS y scripts/recursos reutilizables para configurar routers.',
+    steps: [
+      'Entra a "MikroTik → Plantillas" para elegir o parametrizar una plantilla RouterOS.',
+      'Entra a "MikroTik → Scripts" para revisar los recursos y scripts disponibles.',
+      'Estas vistas generan configuración; no aplican cambios en routers reales por sí solas.',
+    ],
+  },
+  {
+    id: 'routeros-lab',
+    title: 'RouterOS Lab',
+    icon: Server,
+    summary: 'Laboratorio de solo lectura para inspeccionar un RouterOS sin ejecutar comandos.',
+    steps: [
+      'Entra a "MikroTik → RouterOS Lab".',
+      'Consulta identidad, sistema, interfaces, rutas y WireGuard del equipo de laboratorio.',
+      'Es estrictamente de lectura: no ejecuta ni modifica nada en RouterOS.',
+    ],
+  },
+  {
+    id: 'noc',
+    title: 'NOC',
+    icon: ShieldAlert,
+    summary: 'Centro de monitoreo en modo lectura: telemetría y alertas de la red.',
+    steps: [
+      'Entra a "Inicio → NOC".',
+      'Revisa la telemetría y las alertas activas de la red.',
+      'El NOC es read-only: sirve para vigilar, no para operar cambios.',
+    ],
+  },
+];
+
+export default function UserManualModule() {
+  const [openId, setOpenId] = useState<string>(SECTIONS[0].id);
+
+  return (
+    <div className="p-4 md:p-6 max-w-4xl mx-auto">
+      <header className="mb-6">
+        <div className="flex items-center space-x-3">
+          <div className="w-11 h-11 rounded-xl bg-indigo-600/15 border border-indigo-500/30 flex items-center justify-center">
+            <BookText className="w-6 h-6 text-indigo-400" />
+          </div>
+          <div>
+            <h1 className="text-xl md:text-2xl font-bold text-white tracking-tight">Manual de Usuario</h1>
+            <p className="text-sm text-slate-400 mt-0.5">Guía rápida para operar NugaCore.</p>
+          </div>
+        </div>
+      </header>
+
+      <div className="rounded-2xl border border-amber-500/20 bg-amber-500/5 px-4 py-3.5 mb-6 flex items-start space-x-3">
+        <Info className="w-4 h-4 text-amber-400 shrink-0 mt-0.5" />
+        <p className="text-xs leading-relaxed text-amber-200/90">
+          Las funciones internas de seguridad como WireGuard, Safe Mode y Command Queue no están
+          disponibles como módulos operativos normales. WireGuard se administra automáticamente al dar
+          de alta un router; Safe Mode y la Cola de Comandos son herramientas internas para fases futuras.
+        </p>
+      </div>
+
+      <div className="space-y-2.5">
+        {SECTIONS.map((section) => {
+          const Icon = section.icon;
+          const isOpen = openId === section.id;
+          return (
+            <div
+              key={section.id}
+              className="rounded-xl border border-slate-800 bg-slate-900/40 overflow-hidden"
+            >
+              <button
+                type="button"
+                onClick={() => setOpenId(isOpen ? '' : section.id)}
+                aria-expanded={isOpen}
+                className="w-full flex items-center justify-between px-4 py-3 text-left hover:bg-slate-900/70 transition"
+              >
+                <span className="flex items-center space-x-3 min-w-0">
+                  <Icon className="w-4 h-4 text-indigo-400 shrink-0" />
+                  <span className="text-sm font-semibold text-slate-100 truncate">{section.title}</span>
+                </span>
+                <ChevronDown
+                  className={`w-4 h-4 text-slate-500 shrink-0 transition-transform ${isOpen ? 'rotate-180' : ''}`}
+                />
+              </button>
+
+              {isOpen && (
+                <div className="px-4 pb-4 pt-1 border-t border-slate-800/70">
+                  <p className="text-xs text-slate-400 mb-3 leading-relaxed">{section.summary}</p>
+                  <ol className="space-y-2">
+                    {section.steps.map((step, idx) => (
+                      <li key={idx} className="flex items-start space-x-2.5 text-sm text-slate-300">
+                        <span className="mt-0.5 w-5 h-5 shrink-0 rounded-full bg-indigo-600/15 border border-indigo-500/30 text-indigo-300 text-[11px] font-mono flex items-center justify-center">
+                          {idx + 1}
+                        </span>
+                        <span className="leading-relaxed">{step}</span>
+                      </li>
+                    ))}
+                  </ol>
+                </div>
+              )}
+            </div>
+          );
+        })}
+      </div>
+    </div>
+  );
+}

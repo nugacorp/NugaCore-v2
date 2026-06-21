@@ -1,15 +1,15 @@
 import { readFileSync } from 'node:fs';
 import { describe, it, expect } from 'vitest';
-import { canAccessTab, getAllowedTabsByRole, getDefaultTabByRole } from '../../src/lib/rbac';
+import { canAccessTab, getAllowedTabsByRole, getDefaultTabByRole, isVisibleInSidebar, isSidebarHiddenTab } from '../../src/lib/rbac';
 import type { UserRole } from '../../src/lib/supabase';
 
 const ALL_ROLES: UserRole[] = ['Super Admin', 'Administrador', 'Cobranza', 'Técnico', 'Soporte', 'Solo lectura'];
 
 describe('RBAC visual por rol (frontend)', () => {
-  it('Super Admin ve todos los módulos (21)', () => {
+  it('Super Admin ve todos los módulos (22)', () => {
     const t = getAllowedTabsByRole('Super Admin');
-    expect(t.length).toBe(21);
-    expect(t).toEqual(expect.arrayContaining(['mikrotik', 'wireguard', 'routeros-resources', 'routeros-templates', 'router-enrollment', 'payments', 'owner', 'finance', 'billing', 'inventory', 'inventory-routers', 'suspension', 'manual-safe-mode', 'safe-command-queue', 'routeros-readonly']));
+    expect(t.length).toBe(22);
+    expect(t).toEqual(expect.arrayContaining(['mikrotik', 'wireguard', 'routeros-resources', 'routeros-templates', 'router-enrollment', 'payments', 'owner', 'finance', 'billing', 'inventory', 'inventory-routers', 'suspension', 'manual-safe-mode', 'safe-command-queue', 'routeros-readonly', 'user-manual']));
   });
 
   it('Administrador NO ve mikrotik / finance / owner', () => {
@@ -21,7 +21,7 @@ describe('RBAC visual por rol (frontend)', () => {
   });
 
   it('Cobranza ve billing/finance/payments; no mikrotik, red ni inventory-routers', () => {
-    expect(getAllowedTabsByRole('Cobranza')).toEqual(['dashboard', 'crm', 'billing', 'finance', 'suspension', 'payments']);
+    expect(getAllowedTabsByRole('Cobranza')).toEqual(['dashboard', 'crm', 'billing', 'finance', 'suspension', 'payments', 'user-manual']);
     expect(canAccessTab('Cobranza', 'mikrotik')).toBe(false);
     expect(canAccessTab('Cobranza', 'network')).toBe(false);
     expect(canAccessTab('Cobranza', 'inventory-routers')).toBe(false);
@@ -35,14 +35,14 @@ describe('RBAC visual por rol (frontend)', () => {
   });
 
   it('Soporte: dashboard/noc/crm/support/inventory-routers/gis; no billing ni mikrotik', () => {
-    expect(getAllowedTabsByRole('Soporte')).toEqual(['dashboard', 'noc', 'crm', 'support', 'inventory-routers', 'gis', 'manual-safe-mode', 'safe-command-queue', 'routeros-readonly']);
+    expect(getAllowedTabsByRole('Soporte')).toEqual(['dashboard', 'noc', 'crm', 'support', 'inventory-routers', 'gis', 'manual-safe-mode', 'safe-command-queue', 'routeros-readonly', 'user-manual']);
     expect(canAccessTab('Soporte', 'billing')).toBe(false);
     expect(canAccessTab('Soporte', 'mikrotik')).toBe(false);
     expect(canAccessTab('Soporte', 'inventory-routers')).toBe(true);
   });
 
   it('Solo lectura: lectura básica + noc + inventory-routers; sin mikrotik/support/owner', () => {
-    expect(getAllowedTabsByRole('Solo lectura')).toEqual(['dashboard', 'noc', 'crm', 'billing', 'suspension', 'network', 'inventory-routers', 'gis', 'manual-safe-mode', 'safe-command-queue', 'routeros-readonly']);
+    expect(getAllowedTabsByRole('Solo lectura')).toEqual(['dashboard', 'noc', 'crm', 'billing', 'suspension', 'network', 'inventory-routers', 'gis', 'manual-safe-mode', 'safe-command-queue', 'routeros-readonly', 'user-manual']);
     expect(canAccessTab('Solo lectura', 'mikrotik')).toBe(false);
     expect(canAccessTab('Solo lectura', 'owner')).toBe(false);
     expect(canAccessTab('Solo lectura', 'support')).toBe(false);
@@ -147,5 +147,48 @@ describe('RBAC visual por rol (frontend)', () => {
 
     expect(app).toContain('rateLimitUntilMs');
     expect(app).toContain('Date.now() < rateLimitUntilMs');
+  });
+});
+
+describe('Manual de Usuario — visible para todos los roles', () => {
+  it('está permitido (canAccessTab) para cada rol', () => {
+    for (const r of ALL_ROLES) {
+      expect(canAccessTab(r, 'user-manual'), `${r} debería poder ver user-manual`).toBe(true);
+    }
+  });
+
+  it('es visible en el sidebar para cada rol, incluida Cobranza', () => {
+    for (const r of ALL_ROLES) {
+      expect(isVisibleInSidebar(r, 'user-manual'), `${r} debería ver user-manual en el sidebar`).toBe(true);
+    }
+    expect(isVisibleInSidebar('Cobranza', 'user-manual')).toBe(true);
+  });
+});
+
+describe('Visibilidad en sidebar ≠ acceso (módulos internos ocultos)', () => {
+  const HIDDEN = ['wireguard', 'manual-safe-mode', 'safe-command-queue'] as const;
+
+  it('isSidebarHiddenTab marca exactamente los 3 módulos internos', () => {
+    for (const id of HIDDEN) {
+      expect(isSidebarHiddenTab(id), `${id} debería estar oculto`).toBe(true);
+    }
+    for (const id of ['dashboard', 'crm', 'mikrotik', 'inventory-routers', 'user-manual']) {
+      expect(isSidebarHiddenTab(id), `${id} NO debería estar oculto`).toBe(false);
+    }
+  });
+
+  it('Super Admin: módulos internos accesibles pero ocultos del sidebar', () => {
+    for (const id of HIDDEN) {
+      expect(canAccessTab('Super Admin', id), `${id} accesible`).toBe(true);
+      expect(isVisibleInSidebar('Super Admin', id), `${id} oculto en sidebar`).toBe(false);
+    }
+  });
+
+  it('isVisibleInSidebar respeta el RBAC: false si el rol no tiene acceso', () => {
+    // Cobranza no tiene mikrotik → ni accesible ni visible.
+    expect(canAccessTab('Cobranza', 'mikrotik')).toBe(false);
+    expect(isVisibleInSidebar('Cobranza', 'mikrotik')).toBe(false);
+    // Un módulo normal sí permitido a Cobranza es visible.
+    expect(isVisibleInSidebar('Cobranza', 'billing')).toBe(true);
   });
 });

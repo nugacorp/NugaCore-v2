@@ -1,144 +1,140 @@
-# Reorganización profesional de la navegación (Sidebar WISP)
+# Reorganización profesional de la navegación (Sidebar WISP) + Manual de Usuario
 
-> Cambio **solo UI/UX de navegación**. No se crean funcionalidades, no se toca
-> backend, no se cambian endpoints, no se modifican permisos reales, no se
-> activan flags, no se toca RouterOS ni routers reales.
+> Cambio **solo UI/UX de navegación** (más un módulo de documentación frontend).
+> No se crean funcionalidades backend, no se tocan APIs/endpoints, no se eliminan
+> módulos, no se cambian permisos reales, no se activan flags, no se toca RouterOS
+> ni routers reales.
 >
 > Última actualización: 2026-06-21. Rama: `main`.
 
 ## Problema anterior
 
-El sidebar mostraba muchos módulos técnicos al mismo nivel, con etiquetas en
-inglés o demasiado largas, agrupados en 6 secciones que mezclaban dominios
-operativos. El resultado se leía como una **lista técnica de módulos**, no como
-el flujo de trabajo de un WISP profesional. Además, el bloque "MikroTik
-Workspace" amontonaba funciones de router junto con las operaciones seguras
-(modo seguro manual y cola dry-run), que tienen otra naturaleza operativa.
+El sidebar mostraba módulos técnicos al mismo nivel, mezclando operación diaria
+del WISP con herramientas internas de seguridad (Safe Mode, Cola Dry-Run) e
+infraestructura interna (WireGuard). Para un operador de WISP esto era confuso:
+no quedaba claro qué se usa a diario y qué es interno/avanzado. Además faltaba un
+punto de entrada de ayuda para usuarios nuevos.
 
-Estructura previa (6 secciones):
+## Decisiones de producto
 
-```
-Dashboard            → Dashboard, NOC
-Clientes             → Subscribers, Plans & Billing, Payments, Suspensions, Tickets
-Red                  → Network, Infrastructure, Inventory, Routers, WireGuard
-MikroTik Workspace   → MikroTik Core, Router Enrollment, Router Templates,
-                       Router Scripts, RouterOS Lab, Manual Safe Mode,
-                       Safe Command Queue
-Operaciones          → Analytics
-Administración       → Settings
-```
+1. **WireGuard se oculta del sidebar.** Es infraestructura interna de NugaCore
+   (servidor en el VPS). Al generar un **Alta de Router** (Router Enrollment) el
+   sistema crea el peer automáticamente; el WISP no crea servidores ni peers a
+   mano. El backend y el dominio WireGuard se conservan intactos (lo usa el
+   enrollment).
+2. **Modo Seguro Manual y Cola Dry-Run se ocultan del sidebar.** Son herramientas
+   internas de seguridad para fases futuras (PROD-x). Se conservan código, rutas,
+   tests y acceso directo por tab/URL; solo dejan de listarse como módulos
+   operativos normales.
+3. **Routers vive dentro de MikroTik** (antes estaba suelto en Red).
+4. **Se agrega Manual de Usuario** como módulo visible (documentación frontend).
 
-## Nueva estructura (7 secciones, nombres claros en español)
+## Nueva estructura final del sidebar (6 secciones, español)
 
-```
+```text
 1. Inicio
-   - Dashboard            (id: dashboard)
-   - NOC                  (id: noc)
+   - Dashboard              (id: dashboard)
+   - NOC                    (id: noc)
 
 2. Clientes
-   - Clientes             (id: crm)
-   - Tickets              (id: support)
-   - Suspensiones         (id: suspension)
-   - Pagos                (id: payments)
-   - Facturación / Planes (id: billing)
+   - Clientes               (id: crm)
+   - Tickets                (id: support)
+   - Suspensiones           (id: suspension)
+   - Pagos                  (id: payments)
+   - Facturación / Planes   (id: billing)
 
 3. Red WISP
    - Mapa / Infraestructura (id: gis)
    - Torres y Sitios        (id: network)
    - Inventario             (id: inventory)
-   - Routers                (id: inventory-routers)
-   - WireGuard              (id: wireguard)
 
 4. MikroTik
-   - Panel MikroTik       (id: mikrotik)
-   - Alta de Router       (id: router-enrollment)
-   - Plantillas           (id: routeros-templates)
-   - Scripts              (id: routeros-resources)
-   - RouterOS Lab         (id: routeros-readonly)
+   - Routers                (id: inventory-routers)
+   - Panel MikroTik         (id: mikrotik)
+   - Alta de Router         (id: router-enrollment)
+   - Plantillas             (id: routeros-templates)
+   - Scripts                (id: routeros-resources)
+   - RouterOS Lab           (id: routeros-readonly)
 
-5. Operaciones Seguras
-   - Modo Seguro Manual   (id: manual-safe-mode)
-   - Cola Dry-Run         (id: safe-command-queue)
+5. Operaciones
+   - Analytics              (id: finance)
 
-6. Reportes
-   - Analytics            (id: finance)
-
-7. Sistema
-   - Configuración        (id: owner)
+6. Sistema
+   - Configuración          (id: owner)
+   - Manual de Usuario      (id: user-manual)   ← NUEVO
 ```
 
-## Módulos movidos / renombrados
+## Módulos ocultos del sidebar principal (no borrados)
 
-| ID (conservado)      | Antes (label)        | Ahora (label)            | Antes (sección)      | Ahora (sección)        |
-| -------------------- | -------------------- | ------------------------ | -------------------- | ---------------------- |
-| `dashboard`          | Dashboard            | Dashboard                | Dashboard            | Inicio                 |
-| `noc`                | NOC                  | NOC                      | Dashboard            | Inicio                 |
-| `crm`                | Subscribers          | Clientes                 | Clientes             | Clientes               |
-| `support`            | Tickets              | Tickets                  | Clientes             | Clientes               |
-| `suspension`         | Suspensions          | Suspensiones             | Clientes             | Clientes               |
-| `payments`           | Payments             | Pagos                    | Clientes             | Clientes               |
-| `billing`            | Plans & Billing      | Facturación / Planes     | Clientes             | Clientes               |
-| `gis`                | Infrastructure       | Mapa / Infraestructura   | Red                  | Red WISP               |
-| `network`            | Network              | Torres y Sitios          | Red                  | Red WISP               |
-| `inventory`          | Inventory            | Inventario               | Red                  | Red WISP               |
-| `inventory-routers`  | Routers              | Routers                  | Red                  | Red WISP               |
-| `wireguard`          | WireGuard            | WireGuard                | Red                  | Red WISP               |
-| `mikrotik`           | MikroTik Core        | Panel MikroTik           | MikroTik Workspace   | MikroTik               |
-| `router-enrollment`  | Router Enrollment    | Alta de Router           | MikroTik Workspace   | MikroTik               |
-| `routeros-templates` | Router Templates     | Plantillas               | MikroTik Workspace   | MikroTik               |
-| `routeros-resources` | Router Scripts       | Scripts                  | MikroTik Workspace   | MikroTik               |
-| `routeros-readonly`  | RouterOS Lab         | RouterOS Lab             | MikroTik Workspace   | MikroTik               |
-| `manual-safe-mode`   | Manual Safe Mode     | Modo Seguro Manual       | MikroTik Workspace   | Operaciones Seguras    |
-| `safe-command-queue` | Safe Command Queue   | Cola Dry-Run             | MikroTik Workspace   | Operaciones Seguras    |
-| `finance`            | Analytics            | Analytics                | Operaciones          | Reportes               |
-| `owner`              | Settings             | Configuración            | Administración       | Sistema                |
+| ID                   | Por qué se oculta                                              | ¿Accesible? |
+| -------------------- | ------------------------------------------------------------- | ----------- |
+| `wireguard`          | Infraestructura interna; peer automático en Alta de Router    | Sí (RBAC + tab directo) |
+| `manual-safe-mode`   | Herramienta interna de seguridad (fases futuras)              | Sí (RBAC + tab directo) |
+| `safe-command-queue` | Herramienta interna de seguridad (dry-run, fases futuras)     | Sí (RBAC + tab directo) |
 
-Cambio estructural clave: las **operaciones seguras** (`manual-safe-mode`,
-`safe-command-queue`) se separaron del bloque MikroTik a su propia sección, para
-no mezclar funciones de configuración de router con la operación segura
-(dry-run / modo seguro). `RouterOS Lab` se mantiene dentro de **MikroTik**.
+No se eliminan, no se rompen tests backend ni rutas. Solo no se renderizan como
+módulos visibles del sidebar normal.
+
+## Mecanismo: visibilidad ≠ acceso
+
+Se separó **acceso RBAC** de **visibilidad en sidebar** en `src/lib/rbac.ts`:
+
+- `canAccessTab(role, tab)` — acceso real (sin cambios; gobierna render en
+  `App.tsx` y redirección).
+- `SIDEBAR_HIDDEN_TABS` — set de módulos ocultos (`wireguard`,
+  `manual-safe-mode`, `safe-command-queue`).
+- `isSidebarHiddenTab(tab)` / `isVisibleInSidebar(role, tab)` —
+  `isVisibleInSidebar = canAccessTab && !isSidebarHiddenTab`. El sidebar filtra
+  sus items con este helper, de forma centralizada.
+
+Así los módulos ocultos siguen accesibles por tab/URL directo y se renderizan en
+`App.tsx` cuando `activeTab` coincide; simplemente no aparecen en el menú.
+
+## Manual de Usuario (nuevo módulo)
+
+- Archivo: `src/modules/user-manual/UserManualModule.tsx` (100% frontend, sin
+  backend ni APIs).
+- Tab id: `user-manual`. Integrado en `App.tsx`, `Sidebar.tsx` (Sistema) y
+  `rbac.ts` (AppTab, todos los roles, `MODULE_LABELS`).
+- Visible para **todos** los roles (Super Admin, Administrador, Técnico, Soporte,
+  Solo lectura y **Cobranza**).
+- Contenido: título, descripción y secciones con pasos básicos para Dashboard,
+  Clientes, Tickets, Facturación y Planes, Pagos, Suspensiones, Red WISP,
+  MikroTik / Routers, Alta de Router, Plantillas y Scripts, RouterOS Lab y NOC.
+- Aclara explícitamente que **WireGuard, Safe Mode y Command Queue no están
+  disponibles como módulos operativos normales**.
 
 ## IDs conservados
 
-Los **21 IDs de tab** siguen siendo exactamente los mismos. Solo cambiaron los
-labels visuales, el orden y el grupo. Por eso:
+Los IDs de tab existentes no cambian. Se agrega un único ID nuevo: `user-manual`
+(22 tabs en total = 21 previos + Manual). Por eso `activeTab` no se rompe y el
+view dispatcher de `App.tsx` sigue intacto. El "MikroTik Workspace" in-page
+(`MIKROTIK_WORKSPACE_TABS`) se conserva sin cambios.
 
-- `activeTab` no se rompe (los `id` de cada módulo no cambian).
-- Las vistas en `App.tsx` (view dispatcher por `activeTab`) no se tocan.
-- El "MikroTik Workspace" in-page de `App.tsx` (`MIKROTIK_WORKSPACE_TABS`)
-  se conserva sin cambios.
+## RBAC funcional sin cambios
 
-## RBAC sin cambios
+La matriz de **acceso** por rol (`roleTabs`) no se reduce: los módulos ocultos
+siguen accesibles para los roles que ya los tenían. Lo único añadido es
+`user-manual` para todos los roles. La novedad es la capa de **visibilidad** en
+sidebar, que no quita permisos.
 
-`src/lib/rbac.ts` **no se modificó**. La visibilidad por rol
-(`canAccessTab` / `getAllowedTabsByRole`) sigue idéntica:
+## Backend / APIs sin cambios
 
-- **Super Admin** ve los 21 módulos permitidos.
-- **Cobranza** no ve módulos restringidos (mikrotik, red, inventory-routers,
-  safe-mode, dry-run, routeros-readonly, owner).
-- Safe Mode, Dry-Run y RouterOS Lab siguen accesibles para los roles ya
-  autorizados (SA, Admin, Técnico, Soporte, Solo lectura).
+No se tocó backend, endpoints, providers, dominio WireGuard, RouterOS ni routers
+reales. No se activó ningún flag.
 
-El sidebar sigue filtrando cada sección por RBAC y oculta las secciones que
-quedan vacías para el rol activo (`filteredSections`).
+## Archivos modificados / creados
 
-## Backend sin cambios
-
-No se tocó backend, endpoints, providers, RouterOS ni routers reales. No se
-activó ningún flag (`USE_DB_*`, `MIKROTIK_WORKER_LIVE`, etc.).
-
-## Badges fuera del sidebar
-
-El sidebar **no** pinta badges ruidosos (SAFE MODE, DRY RUN, READ ONLY LAB,
-NEW, LIVE). Cada módulo conserva su badge **dentro** de su propia vista. El
-sidebar solo conserva los indicadores dinámicos de operación (alertas de red y
-tickets abiertos) como contadores.
-
-## Archivos modificados
-
-- `src/components/Sidebar.tsx` — nueva definición de `menuSections` (7 secciones).
-- `tests/unit/navigation.ui.test.ts` — contrato de navegación actualizado.
-- `src/App.tsx` — solo copy del banner de bienvenida (nombres de secciones nuevos).
+- `src/components/Sidebar.tsx` — 6 secciones, Routers en MikroTik, Manual en
+  Sistema, filtro `isVisibleInSidebar`.
+- `src/lib/rbac.ts` — `user-manual` (AppTab/roleTabs/labels), `SIDEBAR_HIDDEN_TABS`,
+  `isSidebarHiddenTab`, `isVisibleInSidebar`.
+- `src/App.tsx` — import + render de `UserManualModule`; copy del banner.
+- `src/modules/user-manual/UserManualModule.tsx` — **nuevo**.
+- `tests/unit/navigation.ui.test.ts`, `tests/unit/rbac.frontend.test.ts`,
+  `tests/unit/manual-safe-mode.ui.test.ts`, `tests/unit/safe-command-queue.ui.test.ts`
+  — actualizados.
+- `tests/unit/user-manual.ui.test.ts` — **nuevo**.
 - `docs/UI_NAVIGATION_REORGANIZATION_RESULT.md` — este documento.
 
 ## Validación
@@ -149,14 +145,16 @@ tickets abiertos) como contadores.
 
 ## Qué debe validar Hermes
 
-1. El sidebar renderiza las 7 secciones en orden: Inicio, Clientes, Red WISP,
-   MikroTik, Operaciones Seguras, Reportes, Sistema.
-2. Cada módulo aparece en su grupo correcto y con su nombre en español.
-3. No hay módulos duplicados ni faltantes (21 tabs).
-4. Cobranza no ve módulos restringidos; Super Admin ve todos los permitidos.
-5. Safe Mode, Dry-Run y RouterOS Lab siguen accesibles para roles permitidos.
-6. El sidebar no muestra badges ruidosos; los badges siguen dentro de cada vista.
-7. `activeTab` y RBAC sin regresiones.
+1. El sidebar muestra 6 secciones: Inicio, Clientes, Red WISP, MikroTik,
+   Operaciones, Sistema.
+2. El sidebar **NO** muestra WireGuard, Modo Seguro Manual ni Cola Dry-Run.
+3. Routers aparece dentro de MikroTik.
+4. Manual de Usuario aparece en Sistema y es visible para todos los roles,
+   incluida Cobranza.
+5. Los módulos ocultos siguen accesibles por tab/URL directo (RBAC intacto) y se
+   renderizan en `App.tsx`.
+6. No hay módulos duplicados; `activeTab` y RBAC sin regresiones.
+7. El sidebar no muestra badges ruidosos; los badges siguen dentro de cada vista.
 
 ## Siguiente fase recomendada
 

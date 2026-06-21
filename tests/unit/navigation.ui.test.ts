@@ -5,9 +5,13 @@ import { describe, expect, it } from 'vitest';
 // UX Reorganization WISP (pre PROD-5) — contrato de navegación del sidebar.
 //
 // Verifica que:
-//  - El sidebar se agrupa en las 7 secciones WISP nuevas, en orden.
-//  - Cada módulo existente queda en su sección correcta.
-//  - NO se elimina ningún módulo (los 21 tabs siguen presentes).
+//  - El sidebar se agrupa en las 6 secciones WISP finales, en orden.
+//  - Cada módulo VISIBLE queda en su sección correcta.
+//  - Routers (`inventory-routers`) vive dentro del grupo MikroTik.
+//  - Manual de Usuario (`user-manual`) vive en Sistema.
+//  - Los módulos internos (wireguard / manual-safe-mode / safe-command-queue)
+//    NO se renderizan en el sidebar, pero SÍ existen en el RBAC (siguen
+//    accesibles por tab/URL directo).
 //  - El sidebar ya no RENDERIZA badges de estado (sin campo `badge`,
 //    sin `getBadgeClasses`) ni usa anidamiento `parentId`.
 //  - WireGuard y Suspension quedan desacoplados del MikroTik Workspace
@@ -18,14 +22,15 @@ const sidebarSource = readFileSync('src/components/Sidebar.tsx', 'utf8');
 const appSource = readFileSync('src/App.tsx', 'utf8');
 const rbacSource = readFileSync('src/lib/rbac.ts', 'utf8');
 
-// Estructura objetivo: 7 secciones WISP con sus módulos (ids existentes).
+// Estructura objetivo: 6 secciones WISP con sus módulos VISIBLES (ids existentes).
 const EXPECTED_SECTIONS: Array<{ title: string; ids: string[] }> = [
   { title: 'Inicio', ids: ['dashboard', 'noc'] },
   { title: 'Clientes', ids: ['crm', 'support', 'suspension', 'payments', 'billing'] },
-  { title: 'Red WISP', ids: ['gis', 'network', 'inventory', 'inventory-routers', 'wireguard'] },
+  { title: 'Red WISP', ids: ['gis', 'network', 'inventory'] },
   {
     title: 'MikroTik',
     ids: [
+      'inventory-routers',
       'mikrotik',
       'router-enrollment',
       'routeros-templates',
@@ -33,12 +38,15 @@ const EXPECTED_SECTIONS: Array<{ title: string; ids: string[] }> = [
       'routeros-readonly',
     ],
   },
-  { title: 'Operaciones Seguras', ids: ['manual-safe-mode', 'safe-command-queue'] },
-  { title: 'Reportes', ids: ['finance'] },
-  { title: 'Sistema', ids: ['owner'] },
+  { title: 'Operaciones', ids: ['finance'] },
+  { title: 'Sistema', ids: ['owner', 'user-manual'] },
 ];
 
-const ALL_TAB_IDS = EXPECTED_SECTIONS.flatMap((s) => s.ids);
+// Módulos que existen y son accesibles, pero NO se listan en el sidebar.
+const HIDDEN_TAB_IDS = ['wireguard', 'manual-safe-mode', 'safe-command-queue'];
+
+const VISIBLE_TAB_IDS = EXPECTED_SECTIONS.flatMap((s) => s.ids);
+const ALL_TAB_IDS = [...VISIBLE_TAB_IDS, ...HIDDEN_TAB_IDS];
 
 // Bloque de fuente de una sección: desde su `title: '...'` hasta el inicio del
 // siguiente `title: '...'` (o el final del archivo).
@@ -51,8 +59,8 @@ function sectionBlock(title: string): string {
   return next === -1 ? rest : rest.slice(0, next);
 }
 
-describe('Sidebar — secciones reorganizadas', () => {
-  it('define las 7 secciones nuevas en orden', () => {
+describe('Sidebar — secciones reorganizadas (WISP)', () => {
+  it('define las 6 secciones nuevas en orden', () => {
     let cursor = -1;
     for (const { title } of EXPECTED_SECTIONS) {
       const idx = sidebarSource.indexOf(`title: '${title}'`);
@@ -62,10 +70,10 @@ describe('Sidebar — secciones reorganizadas', () => {
     }
   });
 
-  it('ya NO usa los títulos de sección previos a la reorganización WISP', () => {
-    // Reorg previa (6 secciones) y nomenclatura en inglés ya retiradas.
+  it('ya NO usa los títulos de sección de reorganizaciones previas', () => {
+    expect(sidebarSource).not.toContain("title: 'Operaciones Seguras'");
+    expect(sidebarSource).not.toContain("title: 'Reportes'");
     expect(sidebarSource).not.toContain("title: 'MikroTik Workspace'");
-    expect(sidebarSource).not.toContain("title: 'Operaciones'");
     expect(sidebarSource).not.toContain("title: 'Administración'");
     expect(sidebarSource).not.toContain("title: 'Red'");
     expect(sidebarSource).not.toContain("title: 'Operations'");
@@ -82,17 +90,53 @@ describe('Sidebar — secciones reorganizadas', () => {
       }
     });
   }
+
+  it('Routers (inventory-routers) vive en el grupo MikroTik', () => {
+    expect(sectionBlock('MikroTik')).toContain("id: 'inventory-routers'");
+    // y ya NO en Red WISP
+    expect(sectionBlock('Red WISP')).not.toContain("id: 'inventory-routers'");
+  });
+
+  it('Manual de Usuario (user-manual) vive en Sistema', () => {
+    const block = sectionBlock('Sistema');
+    expect(block).toContain("id: 'user-manual'");
+    expect(block).toContain('Manual de Usuario');
+  });
 });
 
-describe('Sidebar — no se elimina ningún módulo', () => {
-  it('los 21 módulos existentes siguen presentes', () => {
-    expect(ALL_TAB_IDS.length).toBe(21);
-    for (const id of ALL_TAB_IDS) {
-      expect(sidebarSource, `falta el módulo ${id} en el sidebar`).toContain(`id: '${id}'`);
+describe('Sidebar — módulos internos ocultos pero conservados', () => {
+  it('NO renderiza wireguard / manual-safe-mode / safe-command-queue como items', () => {
+    for (const id of HIDDEN_TAB_IDS) {
+      expect(sidebarSource, `${id} no debería aparecer como item del sidebar`).not.toContain(
+        `id: '${id}'`,
+      );
     }
   });
 
-  it('cubre todos los tabs declarados en el RBAC (AppTab)', () => {
+  it('usa el filtro centralizado isVisibleInSidebar', () => {
+    expect(sidebarSource).toContain('isVisibleInSidebar');
+  });
+
+  it('los módulos ocultos siguen declarados/accesibles en el RBAC (AppTab + roleTabs)', () => {
+    for (const id of HIDDEN_TAB_IDS) {
+      expect(rbacSource, `${id} debería seguir en el union AppTab`).toContain(`'${id}'`);
+    }
+    // rbac.ts define el set de ocultos y el helper de visibilidad.
+    expect(rbacSource).toContain('SIDEBAR_HIDDEN_TABS');
+    expect(rbacSource).toContain('export function isVisibleInSidebar');
+  });
+});
+
+describe('Sidebar — no se elimina ningún módulo', () => {
+  it('los 19 módulos visibles están presentes en el sidebar', () => {
+    expect(VISIBLE_TAB_IDS.length).toBe(19);
+    for (const id of VISIBLE_TAB_IDS) {
+      expect(sidebarSource, `falta el módulo visible ${id}`).toContain(`id: '${id}'`);
+    }
+  });
+
+  it('cubre los 22 tabs declarados en el RBAC (AppTab)', () => {
+    expect(ALL_TAB_IDS.length).toBe(22);
     for (const id of ALL_TAB_IDS) {
       expect(rbacSource, `${id} debería existir en el union AppTab`).toContain(`'${id}'`);
     }
@@ -136,5 +180,15 @@ describe('App — MikroTik Workspace in-page desacoplado', () => {
     const block = workspaceConstBlock();
     expect(block).not.toContain("id: 'wireguard'");
     expect(block).not.toContain("id: 'suspension'");
+  });
+});
+
+describe('App — Manual de Usuario integrado', () => {
+  it('importa y renderiza UserManualModule cuando el tab está activo', () => {
+    expect(appSource).toContain(
+      "import UserManualModule from './modules/user-manual/UserManualModule'",
+    );
+    expect(appSource).toContain("activeTab === 'user-manual'");
+    expect(appSource).toContain('<UserManualModule');
   });
 });

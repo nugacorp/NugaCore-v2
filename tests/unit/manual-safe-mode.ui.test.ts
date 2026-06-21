@@ -47,19 +47,26 @@ describe('Manual Safe Mode module UI contract', () => {
   });
 });
 
-describe('Manual Safe Mode navigation integration', () => {
-  it('Sidebar incluye el item manual-safe-mode', () => {
-    expect(sidebarSource).toContain("id: 'manual-safe-mode'");
-    expect(sidebarSource).toContain('SAFE MODE');
+describe('Manual Safe Mode — herramienta interna (no es módulo de sidebar)', () => {
+  it('NO se renderiza como item operativo en el sidebar', () => {
+    // Decisión de producto: es una herramienta interna de seguridad, no un
+    // módulo de operación normal. Sigue accesible por tab/URL directo.
+    expect(sidebarSource).not.toContain("id: 'manual-safe-mode'");
   });
 
-  it('App importa y renderiza el módulo cuando el tab está activo', () => {
+  it('rbac.ts lo marca oculto del sidebar pero conserva el acceso', () => {
+    expect(rbacSource).toContain("'manual-safe-mode'");
+    expect(rbacSource).toContain('SIDEBAR_HIDDEN_TABS');
+    expect(rbacSource).toContain('isVisibleInSidebar');
+  });
+
+  it('App importa y renderiza el módulo cuando el tab está activo (acceso directo)', () => {
     expect(appSource).toContain("import ManualSafeModeModule from './modules/manual-safe-mode/ManualSafeModeModule'");
     expect(appSource).toContain("activeTab === 'manual-safe-mode'");
     expect(appSource).toContain('<ManualSafeModeModule');
   });
 
-  it('RBAC frontend: visible para roles permitidos, oculto para Cobranza', () => {
+  it('RBAC interno: accesible para roles permitidos, no para Cobranza', () => {
     for (const role of ["'Super Admin'", "'Administrador'", "'Técnico'", "'Soporte'", "'Solo lectura'"]) {
       expect(lineWith(rbacSource, role), `${role} debería incluir manual-safe-mode`).toContain("'manual-safe-mode'");
     }

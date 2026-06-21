@@ -43,13 +43,20 @@ describe('Safe Command Queue module UI contract', () => {
   });
 });
 
-describe('Safe Command Queue navigation integration', () => {
-  it('Sidebar incluye el item safe-command-queue', () => {
-    expect(sidebarSource).toContain("id: 'safe-command-queue'");
-    expect(sidebarSource).toContain('DRY RUN');
+describe('Safe Command Queue — herramienta interna (no es módulo de sidebar)', () => {
+  it('NO se renderiza como item operativo en el sidebar', () => {
+    // Decisión de producto: herramienta interna de seguridad, no módulo de
+    // operación normal. Sigue accesible por tab/URL directo.
+    expect(sidebarSource).not.toContain("id: 'safe-command-queue'");
   });
 
-  it('App importa y renderiza el módulo cuando el tab está activo', () => {
+  it('rbac.ts lo marca oculto del sidebar pero conserva el acceso', () => {
+    expect(rbacSource).toContain("'safe-command-queue'");
+    expect(rbacSource).toContain('SIDEBAR_HIDDEN_TABS');
+    expect(rbacSource).toContain('isVisibleInSidebar');
+  });
+
+  it('App importa y renderiza el módulo cuando el tab está activo (acceso directo)', () => {
     expect(appSource).toContain(
       "import SafeCommandQueueModule from './modules/safe-command-queue/SafeCommandQueueModule'",
     );
@@ -57,7 +64,7 @@ describe('Safe Command Queue navigation integration', () => {
     expect(appSource).toContain('<SafeCommandQueueModule');
   });
 
-  it('RBAC frontend: visible para roles permitidos, oculto para Cobranza', () => {
+  it('RBAC interno: accesible para roles permitidos, no para Cobranza', () => {
     for (const role of ["'Super Admin'", "'Administrador'", "'Técnico'", "'Soporte'", "'Solo lectura'"]) {
       expect(lineWith(rbacSource, role), `${role} debería incluir safe-command-queue`).toContain(
         "'safe-command-queue'",

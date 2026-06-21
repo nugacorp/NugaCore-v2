@@ -13,6 +13,7 @@ import NocTelemetryModule from './components/NocTelemetryModule';
 import ManualSafeModeModule from './modules/manual-safe-mode/ManualSafeModeModule';
 import SafeCommandQueueModule from './modules/safe-command-queue/SafeCommandQueueModule';
 import RouterOSReadOnlyModule from './modules/routeros-readonly/RouterOSReadOnlyModule';
+import UserManualModule from './modules/user-manual/UserManualModule';
 import GisModule from './components/GisModule';
 import FinanceOwnerModule from './components/FinanceOwnerModule';
 import SuspensionModule from './components/SuspensionModule';
@@ -951,7 +952,7 @@ export default function App() {
                   <span>Welcome to NugaCore</span>
                 </div>
                 <p className="text-sm text-slate-200 mt-1.5 leading-relaxed">
-                  Este es tu centro operativo unificado. Navega por Inicio, Clientes y Red WISP para la operación diaria; usa MikroTik y Operaciones Seguras para los routers, y Reportes y Sistema para análisis y ajustes.
+                  Este es tu centro operativo unificado. Navega por Inicio, Clientes y Red WISP para la operación diaria; usa MikroTik para los routers, y Operaciones y Sistema para análisis y ajustes. ¿Primera vez? Abre el Manual de Usuario en Sistema.
                 </p>
               </div>
               <div className="flex items-center gap-2 shrink-0">
@@ -1083,6 +1084,10 @@ export default function App() {
 
             {activeTab === 'routeros-readonly' && (
               <RouterOSReadOnlyModule getAuthHeaders={getAuthHeaders} />
+            )}
+
+            {activeTab === 'user-manual' && (
+              <UserManualModule />
             )}
 
             {activeTab === 'crm' && (
