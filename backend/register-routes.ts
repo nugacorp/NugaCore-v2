@@ -15,6 +15,7 @@ import nocRoutes from './domains/noc/routes';
 import nocTelemetryRoutes from './domains/noc-telemetry/routes';
 import plansRoutes from './domains/plans/routes';
 import reportsRoutes from './domains/reports/routes';
+import routerosReadOnlyRoutes from './domains/routeros-readonly/routes';
 import routerosResourcesRoutes from './domains/routeros-resources/routes';
 import routerosTemplatesRoutes from './domains/routeros-templates/routes';
 import routerTemplateParametersRoutes from './domains/router-template-parameters/routes';
@@ -39,6 +40,7 @@ export function registerRoutes(app: Express): void {
   app.use(networkRoutes);
   app.use(mikrotikRoutes);
   app.use(wireguardRoutes);
+  app.use(routerosReadOnlyRoutes);
   app.use(routerosResourcesRoutes);
   app.use(routerosTemplatesRoutes);
   app.use(routerTemplateParametersRoutes);

@@ -391,6 +391,8 @@ PROD-1 Manual Safe Mode
   ↓
 Safe Command Queue (dry-run)
   ↓
+RouterOS Read-Only Lab (mock)
+  ↓
 4.9.3 Real Provisioning
 ```
 
@@ -460,7 +462,7 @@ Gate producción:
 
 ### PROD-1 — Manual Safe Mode
 
-Estado: 🟡 Implementada localmente (pendiente validación Hermes).
+Estado: ✅ Aprobada por Hermes en staging.
 
 Infraestructura segura para acciones manuales futuras (modo manual con confirmación
 humana). **NO ejecuta nada**: solo modela, audita y transiciona estados sobre store en
@@ -479,7 +481,7 @@ Siguiente: Safe Command Queue (dry-run).
 
 ### FAST-1 — Safe Command Queue (Dry-Run) + CHR Lab Prep
 
-Estado: 🟡 Implementada localmente (pendiente validación Hermes).
+Estado: ✅ Aprobada por Hermes en staging.
 
 Cola SEGURA de comandos en **dry-run**: modela/valida/simula/aprueba/rechaza/cancela y
 audita comandos **sin ejecutar nada**. Dominio `backend/domains/safe-command-queue/`.
@@ -497,7 +499,27 @@ audita comandos **sin ejecutar nada**. Dominio `backend/domains/safe-command-que
 - Sin RouterOS, sin worker live, sin commit mode, sin DB/migraciones.
 
 Resultado: [`docs/SAFE_COMMAND_QUEUE_DRY_RUN_RESULT.md`](./docs/SAFE_COMMAND_QUEUE_DRY_RUN_RESULT.md).
-Siguiente: RouterOS read-only en CHR de lab (gated).
+Validación staging: [`docs/SAFE_COMMAND_QUEUE_DRY_RUN_STAGING_RESULT.md`](./docs/SAFE_COMMAND_QUEUE_DRY_RUN_STAGING_RESULT.md).
+Siguiente: RouterOS Read-Only Lab.
+
+### PROD-3 — RouterOS Read-Only Lab
+
+Estado: ✅ Implementada localmente (mock read-only, pendiente validación staging si se solicita).
+
+Primera integración RouterOS de laboratorio. Es estrictamente read-only y usa provider mock;
+no conecta con RouterOS real, no toca routers reales y no activa Worker Live ni runtime DB.
+
+- Dominio `backend/domains/routeros-readonly/`.
+- Provider mock con identity, version, uptime, CPU, RAM, interfaces, routes y WireGuard summary.
+- Endpoints GET-only: `/api/routeros/identity`, `/api/routeros/system`, `/api/routeros/interfaces`, `/api/routeros/routes`, `/api/routeros/wireguard`.
+- Sin endpoints write en el dominio.
+- RBAC: SA/Admin/Técnico/Soporte/Solo lectura; Cobranza 403.
+- UI `src/modules/routeros-readonly/RouterOSReadOnlyModule.tsx` con badge READ ONLY LAB.
+- Tests contract/UI/security; safety guard impide APIs/verbos de mutación en el dominio.
+
+Resultado: [`docs/ROUTEROS_READ_ONLY_LAB_RESULT.md`](./docs/ROUTEROS_READ_ONLY_LAB_RESULT.md).
+
+Siguiente gated: laboratorio RouterOS real controlado/read-only solo con autorización explícita.
 
 ### PROD-3 a PROD-7 — Camino corto a producción controlada (MikroTik)
 

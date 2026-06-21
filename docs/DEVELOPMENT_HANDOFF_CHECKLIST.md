@@ -41,12 +41,23 @@ manda sobre la memoria, el roadmap y este checklist.
 
 ### C. Prioridad inmediata (absoluta)
 
-**4.11.2 — NOC Read-Only Foundation (validación staging por Hermes).**
+**PROD-3 — RouterOS Read-Only Lab (mock read-only).**
 
-DB-1 ya fue validada en staging por Hermes (`docs/MIKROTIK_SCHEMA_RECONCILIATION_STAGING_RESULT.md`) e
-Inventory Read-Only 4.11.1 ya fue aprobado en staging (`docs/INVENTORY_READ_ONLY_STAGING_RESULT.md`).
-La implementación local ya está completada; la prioridad actual es validar en staging
-sin activar flags peligrosos.
+DB-1, Inventory 4.11.1, NOC 4.11.2, NOC Real Telemetry 4.11.3,
+PROD-1 Manual Safe Mode y FAST-1 / PROD-2 Safe Command Queue Dry-Run ya fueron
+aprobadas por Hermes en staging. La prioridad actual es mantener PROD-3 en modo
+lab/mock read-only, sin conectar RouterOS real ni activar workers.
+
+Estado PROD-3:
+
+- Implementado localmente en `backend/domains/routeros-readonly/`.
+- Provider mock solamente.
+- Endpoints GET-only `/api/routeros/identity`, `/api/routeros/system`,
+  `/api/routeros/interfaces`, `/api/routeros/routes`, `/api/routeros/wireguard`.
+- UI `src/modules/routeros-readonly/RouterOSReadOnlyModule.tsx`.
+- RBAC: SA/Admin/Técnico/Soporte/Solo lectura permitidos; Cobranza 403.
+- Tests contract/UI/security agregados.
+- Resultado local: `docs/ROUTEROS_READ_ONLY_LAB_RESULT.md`.
 
 ### C.1 Hotfix paralelo activo (frontend)
 
