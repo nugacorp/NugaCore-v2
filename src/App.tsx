@@ -1097,6 +1097,7 @@ export default function App() {
                 plans={plans} 
                 onAddClient={handleAddClient}
                 onUpdateClientStatus={handleUpdateClientStatus}
+                getAuthHeaders={getAuthHeaders}
               />
             )}
 

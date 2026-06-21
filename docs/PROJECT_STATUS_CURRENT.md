@@ -1,7 +1,7 @@
 # NugaCore — Estado actual del proyecto
 
 > Resumen de arranque en frío para cualquier técnico, Hermes, Jarvis o Claude Code.
-> Última actualización: 2026-06-18. Fuente canónica de tareas:
+> Última actualización: 2026-06-21. Fuente canónica de tareas:
 > `docs/DEVELOPMENT_HANDOFF_CHECKLIST.md` (§0). Sin secretos en este documento.
 
 ## Rama y commits
@@ -26,6 +26,7 @@ No retomar salvo regresión documentada (ver handoff §0.A):
 - Suspension Engine (lógico).
 - HTTP Security (helmet + CORS allowlist + rate-limit).
 - Observability básica (correlation ID, métricas in-memory, access log).
+- CUSTOMER-IPAM-1: asignación de IP local/mock en alta de cliente WISP.
 
 ## Aprobaciones formales de Hermes
 
@@ -76,9 +77,19 @@ detallado en `docs/DEVELOPMENT_HANDOFF_CHECKLIST.md` §0.D.
   RouterOS sin cambios. Ver `docs/UI_NAVIGATION_SIMPLIFICATION_RESULT.md`. Avanzar a
   PROD-5 solo tras validar esta UX con Hermes.
 
+- CUSTOMER-IPAM-1 — Asignación de red en alta de Cliente Activo. ✅ Implementada
+  localmente con router/torre, pool, cálculo CIDR, selector/manual de IP,
+  validación de ocupadas y revalidación backend. Lead Comercial puede continuar
+  sin IP. Fuente mock/local; no RouterOS, no CHR, no Worker Live y sin flags
+  MikroTik. `assignedIp` reutiliza `clients.ip_assigned`; los metadatos
+  `routerId`/`poolId`/`ipAssignmentStatus` requieren persistencia DB futura. Ver
+  `docs/IP_ASSIGNMENT_CUSTOMER_ONBOARDING_RESULT.md`.
+
 No avanzar a un punto sin cerrar el anterior.
 
-> Última fase implementada localmente: **PROD-4 CHR Real Read-Only Integration**
+> Última funcionalidad implementada localmente: **CUSTOMER-IPAM-1**, sin alterar
+> el gate de infraestructura. La última fase RouterOS sigue siendo
+> **PROD-4 CHR Real Read-Only Integration**
 > (PREPARADO, NO CONECTADO) — abstracción de providers (interface async, mock,
 > routeros), feature flag `ROUTEROS_READONLY_PROVIDER` (default `mock`) y fallback
 > seguro a mock ante timeout/auth/host inalcanzable (API 200, `source=mock`, sin

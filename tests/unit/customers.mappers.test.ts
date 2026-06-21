@@ -39,6 +39,7 @@ describe('customers mappers', () => {
     expect(client.type).toBe('residential');
     expect(client.planId).toBe('plan-plus');
     expect(client.ip).toBe('10.100.10.12');
+    expect(client.assignedIp).toBe('10.100.10.12');
     expect(client.mac).toBe('BC:E6:7C:12:34:56');
     expect(client.pppoeUser).toBe('sofia_nuga');
     expect(client.connectionType).toBe('FTTH');
@@ -58,6 +59,7 @@ describe('customers mappers', () => {
     expect(client.phone).toBe('');
     expect(client.lat).toBe(0);
     expect(client.ip).toBe('');
+    expect(client.assignedIp).toBe('');
     expect(client.planId).toBe('');
     expect(client.connectionType).toBeUndefined();
     expect(client.mac).toBeUndefined();
@@ -81,6 +83,18 @@ describe('customers mappers', () => {
     expect(row).toEqual({ status: 'suspended', full_name: 'Nuevo Nombre' });
     // no debe incluir columnas no provistas
     expect(Object.keys(row)).toHaveLength(2);
+  });
+
+  it('assignedIp reutiliza la columna existente ip_assigned', () => {
+    const row = clientToRow({
+      ...rowToClient(fullRow),
+      ip: '0.0.0.0',
+      assignedIp: '192.168.100.25',
+    });
+    expect(row.ip_assigned).toBe('192.168.100.25');
+    expect(clientPatchToRow({ assignedIp: '192.168.100.30' })).toEqual({
+      ip_assigned: '192.168.100.30',
+    });
   });
 
   it('clientPatchToRow ignora claves desconocidas (id, documents)', () => {

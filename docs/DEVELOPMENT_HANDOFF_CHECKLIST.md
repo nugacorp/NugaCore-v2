@@ -93,6 +93,19 @@ Estado UX-1 (solo UI/UX de navegación + Manual de Usuario + Dashboard, completa
 - Resultado: `docs/UI_NAVIGATION_SIMPLIFICATION_RESULT.md`. No avanzar a PROD-5
   hasta validar esta UX con Hermes.
 
+Estado CUSTOMER-IPAM-1 (alta de cliente WISP, local/mock):
+
+- Dominio `backend/domains/ipam/` con repository mock y cálculo IPv4/CIDR local.
+- Endpoints `/api/ipam/routers`, `/api/ipam/routers/:routerId/pools`,
+  `/api/ipam/pools/:poolId/available-ips` y `/api/ipam/validate-ip`.
+- Alta CRM con Router/Torre, Pool/Segmento, selector/manual de IP y estado.
+- Cliente Activo requiere IP disponible; Lead Comercial puede quedar sin IP.
+- `POST /api/clients` revalida cualquier asignación enviada y bloquea duplicados.
+- Sin RouterOS, CHR, Worker Live, queues, address-list ni flags MikroTik.
+- `assignedIp` usa `clients.ip_assigned`; metadatos `routerId`, `poolId` y
+  `ipAssignmentStatus` solo persisten por ahora en el store local.
+- Resultado: `docs/IP_ASSIGNMENT_CUSTOMER_ONBOARDING_RESULT.md`.
+
 ### C.1 Hotfix paralelo activo (frontend)
 
 **NugaCore — Hotfix Frontend Polling / Rate Limit Hygiene**

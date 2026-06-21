@@ -4,6 +4,7 @@ import { store } from '../../../backend/state/store';
 import { READ_ROLES, requireRoles } from '../../common/rbac';
 import { asyncHandler } from '../../common/errors';
 import { getCustomersService, parseClientStatus, parseClientType } from './service';
+import { ipamService } from '../ipam/service';
 
 const router = Router();
 
@@ -38,7 +39,24 @@ router.get('/api/clients/:id', requireRoles(READ_ROLES), asyncHandler(async (req
 
 router.post('/api/clients', requireRoles(['super admin', 'administrador', 'soporte']), asyncHandler(async (req, res) => {
   const service = getCustomersService();
-  const { name, type, email, phone, address, city, planId, lat, lng, isConvertLead, leadId, notes, connectionType } = req.body;
+  const {
+    name,
+    type,
+    email,
+    phone,
+    address,
+    city,
+    planId,
+    lat,
+    lng,
+    isConvertLead,
+    leadId,
+    notes,
+    connectionType,
+    routerId,
+    poolId,
+    assignedIp,
+  } = req.body;
 
   // Validación de entrada (lanza 400 si es inválida).
   const { type: clientType } = service.validateCreate({ name, type, address, city, email });
@@ -50,6 +68,41 @@ router.post('/api/clients', requireRoles(['super admin', 'administrador', 'sopor
 
   const requestedStatus = parseClientStatus(req.body.status);
   const randomSub = Math.floor(Math.random() * 253) + 2;
+  const normalizedRouterId = String(routerId || '').trim();
+  const normalizedPoolId = String(poolId || '').trim();
+  const normalizedAssignedIp = String(assignedIp || '').trim();
+  const networkAssignmentProvided = Boolean(
+    normalizedRouterId || normalizedPoolId || normalizedAssignedIp,
+  );
+
+  let validatedAssignment:
+    | Awaited<ReturnType<typeof ipamService.validateIp>>
+    | null = null;
+
+  // Compatibilidad: callers legacy que todavía no envían asignación de red
+  // conservan su contrato actual. En cuanto un caller inicia el flujo IPAM,
+  // los tres campos se vuelven obligatorios y el backend revalida disponibilidad
+  // para impedir bypass o una selección obsoleta del frontend.
+  if (networkAssignmentProvided) {
+    if (!normalizedRouterId || !normalizedPoolId || !normalizedAssignedIp) {
+      return res.status(400).json({
+        error: 'routerId, poolId and assignedIp are required for network assignment',
+        code: 'IPAM_ASSIGNMENT_INCOMPLETE',
+      });
+    }
+    validatedAssignment = await ipamService.validateIp({
+      routerId: normalizedRouterId,
+      poolId: normalizedPoolId,
+      ip: normalizedAssignedIp,
+    });
+    if (!validatedAssignment.available) {
+      return res.status(409).json({
+        error: validatedAssignment.message,
+        code: `IPAM_${validatedAssignment.status.toUpperCase()}`,
+        validation: validatedAssignment,
+      });
+    }
+  }
 
   const newClient: Client = {
     id: await service.generateClientId(),
@@ -64,7 +117,15 @@ router.post('/api/clients', requireRoles(['super admin', 'administrador', 'sopor
     lng: Number(lng) || -99.1555,
     planId: planId || 'plan-basic',
     connectionType: connectionType || (clientType === 'corporate' || clientType === 'hotel' ? 'FTTH' : 'WISP'),
-    ip: isConvertLead ? `10.100.10.${randomSub}` : '0.0.0.0',
+    ip: validatedAssignment?.ip || (isConvertLead ? `10.100.10.${randomSub}` : '0.0.0.0'),
+    ...(validatedAssignment
+      ? {
+          routerId: validatedAssignment.routerId,
+          poolId: validatedAssignment.poolId,
+          assignedIp: validatedAssignment.ip,
+          ipAssignmentStatus: validatedAssignment.status,
+        }
+      : {}),
     mac: isConvertLead ? `00:1A:79:A1:BA:${randomSub.toString(16).toUpperCase().padStart(2, '0')}` : undefined,
     pppoeUser: isConvertLead ? `${name.toLowerCase().replace(/[^a-z0-9]/g, '_')}_nuga` : undefined,
     pppoePassword: isConvertLead ? 'NugaSecretPass' : undefined,

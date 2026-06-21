@@ -20,6 +20,11 @@ export interface Client {
   lng: number;
   planId: string;
   ip: string;
+  /** Asignación IPAM local; `ip` se conserva como alias legacy. */
+  routerId?: string;
+  poolId?: string;
+  assignedIp?: string;
+  ipAssignmentStatus?: 'available' | 'in_use' | 'reserved' | 'invalid' | 'out_of_pool';
   connectionType?: 'WISP' | 'FTTH';
   mac?: string;
   pppoeUser?: string;

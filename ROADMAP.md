@@ -109,6 +109,8 @@ Incluye:
 - Estados.
 - Búsquedas.
 - Dashboard básico.
+- Asignación IPAM local/mock en alta de cliente WISP: router/torre, pool,
+  cálculo de IPs libres y validación de duplicados sin RouterOS real.
 
 Estados:
 
@@ -124,6 +126,9 @@ Gate producción:
 - Historial consistente.
 - Paginación/búsqueda para listas grandes.
 - Backup antes de migrar.
+- Persistir `routerId`, `poolId` e `ipAssignmentStatus` en DB antes de depender
+  de esos metadatos fuera del store local.
+- Integración RouterOS solamente read-only y después de aprobar PROD-5/CHR.
 
 ### FASE 3 — Billing Persistence
 
@@ -617,6 +622,21 @@ cambios. Resultado:
 [`docs/UI_NAVIGATION_SIMPLIFICATION_RESULT.md`](./docs/UI_NAVIGATION_SIMPLIFICATION_RESULT.md)
 (antecedente: [`docs/UI_NAVIGATION_REORGANIZATION_RESULT.md`](./docs/UI_NAVIGATION_REORGANIZATION_RESULT.md)).
 **Avanzar a PROD-5 / CHR Read-Only real solo después de validar esta UX con Hermes.**
+
+#### CUSTOMER-IPAM-1 — Asignación de IP en alta de cliente WISP
+
+Estado: ✅ **Implementada localmente (mock/read-only; sin RouterOS).**
+
+El alta de Cliente Activo ahora exige router/torre, pool e IP validada. IPAM
+calcula libres desde CIDR, excluye gateway/network/broadcast/reservadas, datos
+mock y direcciones ya usadas por clientes NugaCore. Lead Comercial puede
+continuar sin IP. El backend expone `/api/ipam/**` y revalida el payload del alta
+para bloquear duplicados aunque la UI sea omitida. No activa flags MikroTik,
+Worker Live, Commit Mode ni escritura RouterOS. Resultado:
+[`docs/IP_ASSIGNMENT_CUSTOMER_ONBOARDING_RESULT.md`](./docs/IP_ASSIGNMENT_CUSTOMER_ONBOARDING_RESULT.md).
+
+Siguiente paso gated: fuente RouterOS read-only únicamente después de aprobar
+PROD-5/CHR; persistencia DB de metadatos IPAM requiere diseño/migración separada.
 
 ### FASE 4.12 — Zero Touch Provisioning
 

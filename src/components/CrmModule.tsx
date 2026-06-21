@@ -1,4 +1,4 @@
-import React, { useState } from 'react';
+import React, { useCallback, useEffect, useState } from 'react';
 import { 
   Users, 
   UserPlus, 
@@ -13,18 +13,61 @@ import {
   Phone, 
   FileText, 
   Image,
-  ArrowRight
+  ArrowRight,
+  Network,
+  ScanLine,
+  ShieldCheck,
+  XCircle,
+  Loader2
 } from 'lucide-react';
 import { Client, Plan } from '../types';
+import {
+  canSubmitCustomerOnboarding,
+  IpAssignmentValidation,
+  ipStatusLabel,
+  ipStatusMessage,
+  isValidIpv4Input,
+} from '../lib/ipamView';
+
+interface IpamRouterView {
+  id: string;
+  name: string;
+  kind: 'router' | 'tower';
+  description: string;
+}
+
+interface IpamPoolView {
+  id: string;
+  routerId: string;
+  name: string;
+  cidr: string;
+  gateway: string;
+  reservedIps: string[];
+}
+
+interface AvailableIpsResponse {
+  routerId: string;
+  poolId: string;
+  cidr: string;
+  totalAvailable: number;
+  ips: string[];
+}
 
 interface CrmModuleProps {
   clients: Client[];
   plans: Plan[];
   onAddClient: (newClientData: any) => Promise<void>;
   onUpdateClientStatus: (id: string, status: 'active' | 'suspended' | 'baja') => Promise<void>;
+  getAuthHeaders: () => Promise<Record<string, string>>;
 }
 
-export default function CrmModule({ clients, plans, onAddClient, onUpdateClientStatus }: CrmModuleProps) {
+export default function CrmModule({
+  clients,
+  plans,
+  onAddClient,
+  onUpdateClientStatus,
+  getAuthHeaders,
+}: CrmModuleProps) {
   const [searchTerm, setSearchTerm] = useState('');
   const [filterType, setFilterType] = useState<string>('all');
   const [filterStatus, setFilterStatus] = useState<string>('all');
@@ -42,8 +85,200 @@ export default function CrmModule({ clients, plans, onAddClient, onUpdateClientS
   const [formLng, setFormLng] = useState('-99.1555');
   const [formNotes, setFormNotes] = useState('');
   const [formConnectionType, setFormConnectionType] = useState<'WISP' | 'FTTH'>('WISP');
+  const [ipamRouters, setIpamRouters] = useState<IpamRouterView[]>([]);
+  const [ipamPools, setIpamPools] = useState<IpamPoolView[]>([]);
+  const [availableIps, setAvailableIps] = useState<string[]>([]);
+  const [formRouterId, setFormRouterId] = useState('');
+  const [formPoolId, setFormPoolId] = useState('');
+  const [formAssignedIp, setFormAssignedIp] = useState('');
+  const [ipEntryMode, setIpEntryMode] = useState<'select' | 'manual'>('select');
+  const [ipValidation, setIpValidation] = useState<IpAssignmentValidation | null>(null);
+  const [ipamLoading, setIpamLoading] = useState(false);
+  const [ipamError, setIpamError] = useState('');
   const [isLeadForm, setIsLeadForm] = useState(false);
   const [selectedClient, setSelectedClient] = useState<Client | null>(null);
+
+  const selectedPool = ipamPools.find((pool) => pool.id === formPoolId) || null;
+  const canConfirmAdd = canSubmitCustomerOnboarding({
+    name: formName,
+    isLead: isLeadForm,
+    routerId: formRouterId,
+    poolId: formPoolId,
+    assignedIp: formAssignedIp,
+    validation: ipValidation,
+  });
+
+  const resetNetworkAssignment = useCallback(() => {
+    setIpamPools([]);
+    setAvailableIps([]);
+    setFormRouterId('');
+    setFormPoolId('');
+    setFormAssignedIp('');
+    setIpEntryMode('select');
+    setIpValidation(null);
+    setIpamError('');
+  }, []);
+
+  const fetchIpamJson = useCallback(async <T,>(url: string, init?: RequestInit): Promise<T> => {
+    const authHeaders = await getAuthHeaders();
+    const response = await fetch(url, {
+      ...init,
+      headers: {
+        ...authHeaders,
+        ...(init?.body ? { 'Content-Type': 'application/json' } : {}),
+        ...(init?.headers || {}),
+      },
+    });
+    if (!response.ok) {
+      const body = await response.json().catch(() => null);
+      throw new Error(body?.error || `IPAM respondió HTTP ${response.status}`);
+    }
+    return await response.json() as T;
+  }, [getAuthHeaders]);
+
+  const loadIpamRouters = useCallback(async () => {
+    setIpamLoading(true);
+    setIpamError('');
+    try {
+      setIpamRouters(await fetchIpamJson<IpamRouterView[]>('/api/ipam/routers'));
+    } catch (error) {
+      setIpamRouters([]);
+      setIpamError(error instanceof Error ? error.message : 'No se pudieron cargar routers IPAM.');
+    } finally {
+      setIpamLoading(false);
+    }
+  }, [fetchIpamJson]);
+
+  useEffect(() => {
+    if (showAddForm && ipamRouters.length === 0) void loadIpamRouters();
+  }, [showAddForm, ipamRouters.length, loadIpamRouters]);
+
+  const handleRouterSelection = async (routerId: string) => {
+    setFormRouterId(routerId);
+    setFormPoolId('');
+    setFormAssignedIp('');
+    setAvailableIps([]);
+    setIpValidation(null);
+    setIpamError('');
+    if (!routerId) {
+      setIpamPools([]);
+      return;
+    }
+
+    setIpamLoading(true);
+    try {
+      const pools = await fetchIpamJson<IpamPoolView[]>(`/api/ipam/routers/${encodeURIComponent(routerId)}/pools`);
+      setIpamPools(pools);
+      setFormPoolId(pools[0]?.id || '');
+    } catch (error) {
+      setIpamPools([]);
+      setIpamError(error instanceof Error ? error.message : 'No se pudieron cargar pools IPAM.');
+    } finally {
+      setIpamLoading(false);
+    }
+  };
+
+  const validateAssignedIp = useCallback(async (ip: string): Promise<IpAssignmentValidation | null> => {
+    const normalizedIp = ip.trim();
+    if (!formRouterId) {
+      const validation: IpAssignmentValidation = {
+        routerId: '',
+        poolId: formPoolId,
+        ip: normalizedIp,
+        status: 'invalid',
+        available: false,
+        message: 'Selecciona router antes de asignar IP.',
+      };
+      setIpValidation(validation);
+      return validation;
+    }
+    if (!formPoolId) {
+      const validation: IpAssignmentValidation = {
+        routerId: formRouterId,
+        poolId: '',
+        ip: normalizedIp,
+        status: 'invalid',
+        available: false,
+        message: 'Selecciona un pool o segmento antes de asignar IP.',
+      };
+      setIpValidation(validation);
+      return validation;
+    }
+    if (!isValidIpv4Input(normalizedIp)) {
+      const validation: IpAssignmentValidation = {
+        routerId: formRouterId,
+        poolId: formPoolId,
+        ip: normalizedIp,
+        status: 'invalid',
+        available: false,
+        message: 'IP inválida. Escribe una dirección IPv4 válida.',
+      };
+      setIpValidation(validation);
+      return validation;
+    }
+
+    setIpamLoading(true);
+    setIpamError('');
+    try {
+      const validation = await fetchIpamJson<IpAssignmentValidation>('/api/ipam/validate-ip', {
+        method: 'POST',
+        body: JSON.stringify({
+          routerId: formRouterId,
+          poolId: formPoolId,
+          ip: normalizedIp,
+        }),
+      });
+      setIpValidation(validation);
+      return validation;
+    } catch (error) {
+      setIpValidation(null);
+      setIpamError(error instanceof Error ? error.message : 'No se pudo validar la IP.');
+      return null;
+    } finally {
+      setIpamLoading(false);
+    }
+  }, [fetchIpamJson, formPoolId, formRouterId]);
+
+  useEffect(() => {
+    if (ipEntryMode !== 'manual' || !formAssignedIp) return;
+    const timer = setTimeout(() => {
+      void validateAssignedIp(formAssignedIp);
+    }, 350);
+    return () => clearTimeout(timer);
+  }, [formAssignedIp, ipEntryMode, validateAssignedIp]);
+
+  const handleScanAvailableIps = async () => {
+    if (!formRouterId) {
+      setIpValidation({
+        routerId: '',
+        poolId: formPoolId,
+        ip: formAssignedIp,
+        status: 'invalid',
+        available: false,
+        message: 'Selecciona router antes de asignar IP.',
+      });
+      return;
+    }
+    if (!formPoolId) {
+      setIpamError('Selecciona un pool o segmento antes de escanear.');
+      return;
+    }
+
+    setIpamLoading(true);
+    setIpamError('');
+    try {
+      const result = await fetchIpamJson<AvailableIpsResponse>(
+        `/api/ipam/pools/${encodeURIComponent(formPoolId)}/available-ips`,
+      );
+      setAvailableIps(result.ips);
+      if (result.ips.length === 0) setIpamError('No hay IPs disponibles en este segmento.');
+    } catch (error) {
+      setAvailableIps([]);
+      setIpamError(error instanceof Error ? error.message : 'No se pudieron escanear IPs.');
+    } finally {
+      setIpamLoading(false);
+    }
+  };
 
   // Filter lists
   const filteredClients = clients.filter(c => {
@@ -57,7 +292,13 @@ export default function CrmModule({ clients, plans, onAddClient, onUpdateClientS
 
   const handleAddSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
-    if (!formName) return;
+    if (!canConfirmAdd) return;
+
+    let finalValidation = ipValidation;
+    if (!isLeadForm) {
+      finalValidation = await validateAssignedIp(formAssignedIp);
+      if (!finalValidation?.available) return;
+    }
 
     await onAddClient({
       name: formName,
@@ -72,6 +313,10 @@ export default function CrmModule({ clients, plans, onAddClient, onUpdateClientS
       lng: Number(formLng),
       notes: formNotes,
       status: isLeadForm ? 'lead' : 'active',
+      routerId: formRouterId || undefined,
+      poolId: formPoolId || undefined,
+      assignedIp: formAssignedIp.trim() || undefined,
+      ipAssignmentStatus: finalValidation?.status,
       isConvertLead: false
     });
 
@@ -83,6 +328,7 @@ export default function CrmModule({ clients, plans, onAddClient, onUpdateClientS
     setFormPlanId('');
     setFormNotes('');
     setFormConnectionType('WISP');
+    resetNetworkAssignment();
     setShowAddForm(false);
   };
 
@@ -235,7 +481,11 @@ export default function CrmModule({ clients, plans, onAddClient, onUpdateClientS
                         </td>
                         <td className="py-3 px-2 font-mono">
                           <div className="text-slate-300 font-semibold">{plan?.name || 'Ninguno'}</div>
-                          <div className="text-[10px] text-slate-500 mt-0.5">{client.ip !== '0.0.0.0' ? client.ip : 'Sin IP'}</div>
+                          <div className="text-[10px] text-slate-500 mt-0.5">
+                            {(client.assignedIp || client.ip) !== '0.0.0.0'
+                              ? (client.assignedIp || client.ip)
+                              : 'Sin IP'}
+                          </div>
                         </td>
                         <td className="py-3 px-2 text-slate-400">{client.city}</td>
                         <td className="py-3 px-2 text-right">
@@ -424,7 +674,7 @@ export default function CrmModule({ clients, plans, onAddClient, onUpdateClientS
       {/* Add Client Diagonal Modal Backdrop */}
       {showAddForm && (
         <div className="fixed inset-0 bg-black/60 backdrop-blur-sm z-50 flex items-center justify-center p-4">
-          <div className="bg-slate-950 border border-slate-800 rounded-3xl max-w-xl w-full max-h-[90vh] overflow-y-auto p-6 space-y-4">
+          <div className="bg-slate-950 border border-slate-800 rounded-3xl max-w-2xl w-full max-h-[90vh] overflow-y-auto p-6 space-y-4">
             <div className="flex items-center justify-between border-b border-slate-900 pb-3">
               <h3 className="text-base font-bold text-white flex items-center space-x-2">
                 <Briefcase className="w-4 h-4 text-indigo-400" />
@@ -504,6 +754,201 @@ export default function CrmModule({ clients, plans, onAddClient, onUpdateClientS
                   <option value="FTTH">FTTH - Fibra Óptica (Puerto Gpon / Caja NAP)</option>
                 </select>
               </div>
+
+              <section
+                id="customer-network-assignment"
+                className="space-y-3 rounded-2xl border border-slate-800 bg-slate-900/40 p-4"
+                aria-label="Asignación de Red"
+              >
+                <div className="flex items-start justify-between gap-3">
+                  <div>
+                    <h4 className="flex items-center gap-2 font-semibold text-white">
+                      <Network className="h-4 w-4 text-indigo-400" />
+                      <span>Asignación de Red</span>
+                    </h4>
+                    <p className="mt-1 text-[10px] text-slate-500">
+                      IPAM local/mock. No consulta ni modifica RouterOS.
+                    </p>
+                  </div>
+                  <span className="rounded border border-slate-700 bg-slate-950 px-2 py-1 font-mono text-[9px] text-slate-400">
+                    {isLeadForm ? 'Opcional para Lead' : 'Obligatorio'}
+                  </span>
+                </div>
+
+                <div className="grid grid-cols-1 gap-3 sm:grid-cols-2">
+                  <div className="space-y-1">
+                    <label htmlFor="customer-router-id" className="font-mono text-slate-400">
+                      Router / Torre
+                    </label>
+                    <select
+                      id="customer-router-id"
+                      value={formRouterId}
+                      required={!isLeadForm}
+                      disabled={ipamLoading && ipamRouters.length === 0}
+                      onChange={(event) => void handleRouterSelection(event.target.value)}
+                      className="w-full rounded-xl border border-slate-800 bg-slate-900 p-2.5 focus:outline-none focus:border-indigo-500 disabled:opacity-60"
+                    >
+                      <option value="">Selecciona router o torre...</option>
+                      {ipamRouters.map((router) => (
+                        <option key={router.id} value={router.id}>
+                          {router.name} · {router.kind === 'tower' ? 'Torre' : 'Router'}
+                        </option>
+                      ))}
+                    </select>
+                  </div>
+
+                  <div className="space-y-1">
+                    <label htmlFor="customer-pool-id" className="font-mono text-slate-400">
+                      Pool / Segmento
+                    </label>
+                    <select
+                      id="customer-pool-id"
+                      value={formPoolId}
+                      required={!isLeadForm}
+                      disabled={!formRouterId || ipamLoading || ipamPools.length === 0}
+                      onChange={(event) => {
+                        setFormPoolId(event.target.value);
+                        setFormAssignedIp('');
+                        setAvailableIps([]);
+                        setIpValidation(null);
+                      }}
+                      className="w-full rounded-xl border border-slate-800 bg-slate-900 p-2.5 focus:outline-none focus:border-indigo-500 disabled:opacity-60"
+                    >
+                      <option value="">Selecciona segmento...</option>
+                      {ipamPools.map((pool) => (
+                        <option key={pool.id} value={pool.id}>
+                          {pool.name} · {pool.cidr}
+                        </option>
+                      ))}
+                    </select>
+                  </div>
+                </div>
+
+                {selectedPool && (
+                  <div className="grid grid-cols-2 gap-2 rounded-xl border border-slate-800 bg-slate-950/70 p-2.5 font-mono text-[10px] text-slate-400">
+                    <span>Segmento: <strong className="text-slate-200">{selectedPool.cidr}</strong></span>
+                    <span>Gateway: <strong className="text-slate-200">{selectedPool.gateway}</strong></span>
+                  </div>
+                )}
+
+                <div className="flex flex-wrap gap-2">
+                  <button
+                    type="button"
+                    id="scan-available-ips-btn"
+                    onClick={() => void handleScanAvailableIps()}
+                    disabled={!formRouterId || !formPoolId || ipamLoading}
+                    className="inline-flex items-center gap-2 rounded-xl border border-indigo-500/30 bg-indigo-600/10 px-3 py-2 font-semibold text-indigo-300 transition hover:bg-indigo-600/20 disabled:cursor-not-allowed disabled:opacity-50"
+                  >
+                    {ipamLoading ? <Loader2 className="h-3.5 w-3.5 animate-spin" /> : <ScanLine className="h-3.5 w-3.5" />}
+                    <span>Escanear IPs disponibles</span>
+                  </button>
+                  <button
+                    type="button"
+                    onClick={() => {
+                      setIpEntryMode('select');
+                      setFormAssignedIp('');
+                      setIpValidation(null);
+                    }}
+                    className={`rounded-xl border px-3 py-2 font-mono text-[10px] transition ${
+                      ipEntryMode === 'select'
+                        ? 'border-indigo-500/40 bg-indigo-600/15 text-indigo-300'
+                        : 'border-slate-800 bg-slate-950 text-slate-400'
+                    }`}
+                  >
+                    Seleccionar IP libre
+                  </button>
+                  <button
+                    type="button"
+                    onClick={() => {
+                      setIpEntryMode('manual');
+                      setFormAssignedIp('');
+                      setIpValidation(null);
+                    }}
+                    className={`rounded-xl border px-3 py-2 font-mono text-[10px] transition ${
+                      ipEntryMode === 'manual'
+                        ? 'border-indigo-500/40 bg-indigo-600/15 text-indigo-300'
+                        : 'border-slate-800 bg-slate-950 text-slate-400'
+                    }`}
+                  >
+                    Escribir IP manualmente
+                  </button>
+                </div>
+
+                <div className="space-y-1">
+                  <label htmlFor="customer-assigned-ip" className="font-mono text-slate-400">
+                    IP asignada
+                  </label>
+                  {ipEntryMode === 'select' ? (
+                    <select
+                      id="customer-assigned-ip"
+                      value={formAssignedIp}
+                      required={!isLeadForm}
+                      disabled={!formPoolId || availableIps.length === 0}
+                      onChange={(event) => {
+                        const ip = event.target.value;
+                        setFormAssignedIp(ip);
+                        setIpValidation(null);
+                        if (ip) void validateAssignedIp(ip);
+                      }}
+                      className="w-full rounded-xl border border-slate-800 bg-slate-900 p-2.5 font-mono focus:outline-none focus:border-indigo-500 disabled:opacity-60"
+                    >
+                      <option value="">
+                        {availableIps.length > 0
+                          ? `Selecciona una de ${availableIps.length} IPs libres...`
+                          : 'Escanea el segmento para cargar IPs libres...'}
+                      </option>
+                      {availableIps.map((ip) => <option key={ip} value={ip}>{ip}</option>)}
+                    </select>
+                  ) : (
+                    <input
+                      id="customer-assigned-ip"
+                      type="text"
+                      inputMode="numeric"
+                      required={!isLeadForm}
+                      placeholder="192.168.100.25"
+                      value={formAssignedIp}
+                      onChange={(event) => {
+                        setFormAssignedIp(event.target.value);
+                        setIpValidation(null);
+                      }}
+                      className="w-full rounded-xl border border-slate-800 bg-slate-900 p-2.5 font-mono focus:outline-none focus:border-indigo-500"
+                    />
+                  )}
+                </div>
+
+                <div
+                  id="customer-ip-status"
+                  className={`flex items-start gap-2 rounded-xl border p-2.5 text-[11px] ${
+                    ipValidation?.status === 'available'
+                      ? 'border-emerald-500/30 bg-emerald-500/10 text-emerald-300'
+                      : ipValidation
+                        ? 'border-rose-500/30 bg-rose-500/10 text-rose-300'
+                        : 'border-slate-800 bg-slate-950/70 text-slate-500'
+                  }`}
+                >
+                  {ipValidation?.status === 'available'
+                    ? <ShieldCheck className="mt-0.5 h-4 w-4 shrink-0" />
+                    : <XCircle className="mt-0.5 h-4 w-4 shrink-0" />}
+                  <div>
+                    <span className="block font-mono font-bold uppercase">
+                      Estado de IP: {ipStatusLabel(ipValidation?.status || null)}
+                    </span>
+                    <span>
+                      {ipStatusMessage(ipValidation) || (
+                        formRouterId
+                          ? 'Escanea o escribe una IP para validar disponibilidad.'
+                          : 'Selecciona router antes de asignar IP.'
+                      )}
+                    </span>
+                  </div>
+                </div>
+
+                {ipamError && (
+                  <p className="rounded-xl border border-rose-500/30 bg-rose-500/10 p-2.5 text-rose-300">
+                    {ipamError}
+                  </p>
+                )}
+              </section>
 
               <div className="grid grid-cols-2 gap-3">
                 <div className="space-y-1">
@@ -593,7 +1038,8 @@ export default function CrmModule({ clients, plans, onAddClient, onUpdateClientS
                 <button
                   type="submit"
                   id="confirm-add-client-form-submit"
-                  className="bg-indigo-600 hover:bg-indigo-500 text-white px-5 py-2 rounded-xl transition font-semibold"
+                  disabled={!canConfirmAdd || ipamLoading}
+                  className="bg-indigo-600 hover:bg-indigo-500 text-white px-5 py-2 rounded-xl transition font-semibold disabled:cursor-not-allowed disabled:opacity-50"
                 >
                   Confirmar Alta
                 </button>
