@@ -73,17 +73,21 @@ Cobranza aunque el frontend ya oculta el módulo.
 
 ## 6. Tests
 
-- `tests/contract/routeros-readonly.contract.test.ts` (14): los 5 endpoints GET,
-  payloads estables, ausencia de secretos, RBAC 5 roles, Cobranza 403, métodos de
-  escritura → 404/403/405.
-- `tests/unit/routeros-readonly.service.test.ts` (10): service + mappers
+Una sola convención de nombres (`routeros.readonly.*`, alineada con
+`routeros.resources.*` / `routeros.templates.*`):
+
+- `tests/contract/routeros.readonly.contract.test.ts`: los 5 endpoints GET, RBAC
+  5 roles, Cobranza 403, payload estable del mock, métodos de escritura →
+  404/403/405, y ausencia de secretos/claves privadas/preshared keys.
+- `tests/unit/routeros.readonly.service.test.ts`: service + mappers
   (normalización de tipos, mac opcional, enabled derivado, sin claves).
-- `tests/unit/routeros-readonly.ui.test.ts` (10): badge, banner, secciones,
+- `tests/unit/routeros.readonly.ui.test.ts`: badge, banner, secciones,
   ausencia de `execute`/escritura, integración App/Sidebar/RBAC.
-- `tests/unit/routeros-readonly.static-safety.test.ts` (11): escanea
+- `tests/unit/routeros.readonly.security.test.ts`: escanea
   `backend/domains/routeros-readonly/**` y falla si aparece cualquier API,
-  método o patrón de escritura RouterOS prohibido. La lista exacta vive en el
-  test para evitar documentar scripts write completos en GitHub.
+  método o patrón de escritura RouterOS prohibido; además exige que el dominio
+  registre solo rutas GET. La lista exacta vive en el test para evitar documentar
+  patrones de escritura completos en GitHub.
 
 ## 7. Validación local
 

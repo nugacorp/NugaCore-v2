@@ -8,7 +8,7 @@ import {
 } from '../../backend/domains/routeros-readonly/mappers';
 
 // ====================================================================
-// PROD-3 RouterOS Read-Only — lógica del service y mappers (sin HTTP, sin
+// PROD-3 RouterOS Read-Only Lab — lógica del service y mappers (sin HTTP, sin
 // conexión real, sin ejecución).
 // ====================================================================
 

@@ -73,4 +73,14 @@ describe('RouterOS Read-Only Lab contract', () => {
       }
     }
   });
+
+  it('ningún endpoint expone secretos, claves privadas ni preshared keys', async () => {
+    for (const path of endpoints) {
+      const res = await request(app).get(path).set(ADMIN);
+      const serialized = JSON.stringify(res.body).toLowerCase();
+      for (const forbidden of ['privatekey', 'presharedkey', 'private key', 'preshared key', 'password']) {
+        expect(serialized, `${path} no debe exponer ${forbidden}`).not.toContain(forbidden);
+      }
+    }
+  });
 });

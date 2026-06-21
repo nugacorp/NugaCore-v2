@@ -184,7 +184,7 @@ Hecho (local, esta sesión; sin staging, sin producción, sin migraciones, sin R
 - [x] Endpoints **solo GET** `/api/routeros/{identity,system,interfaces,routes,wireguard}`; sin POST/PUT/PATCH/DELETE.
 - [x] RBAC: SA/Admin/Técnico/Soporte/Solo lectura; Cobranza 403. Payloads estables y sin secretos (sin claves privadas/preshared keys).
 - [x] UI `src/modules/routeros-readonly/RouterOSReadOnlyModule.tsx` (badge `READ ONLY LAB`, banner "Esta vista no ejecuta cambios ni comandos RouterOS."), cableada en `App` + `Sidebar` + `rbac.ts`. Sin botones de escritura ni `execute`.
-- [x] Tests: contract (14) + service/mappers (10) + ui (10) + **static-safety (11)** que falla si aparecen tokens de escritura RouterOS en el dominio.
+- [x] Tests (`routeros.readonly.*`): contract + service/mappers + ui + **security** (falla si aparecen tokens de escritura RouterOS en el dominio y exige rutas solo-GET).
 - [x] `npm run typecheck`, `npm test`, `npm run build` → PASS.
 - [x] Sin activar `USE_DB_MIKROTIK`/`USE_DB_WIREGUARD`/`MIKROTIK_WORKER_LIVE`/commit mode/write enabled.
 
