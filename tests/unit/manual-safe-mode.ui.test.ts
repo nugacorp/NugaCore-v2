@@ -48,9 +48,10 @@ describe('Manual Safe Mode module UI contract', () => {
 });
 
 describe('Manual Safe Mode navigation integration', () => {
-  it('Sidebar incluye el item manual-safe-mode', () => {
+  it('Sidebar incluye el item manual-safe-mode (badge SAFE MODE vive en el módulo, no en el sidebar)', () => {
     expect(sidebarSource).toContain("id: 'manual-safe-mode'");
-    expect(sidebarSource).toContain('SAFE MODE');
+    // Reorganización UX: el badge de estado se muestra dentro del módulo.
+    expect(sidebarSource).not.toContain('SAFE MODE');
   });
 
   it('App importa y renderiza el módulo cuando el tab está activo', () => {

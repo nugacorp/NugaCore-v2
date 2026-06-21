@@ -9,7 +9,6 @@ import {
   Wrench,
   Box,
   Map,
-  Sparkles,
   Cpu,
   Shield,
   DollarSign,
@@ -42,16 +41,10 @@ interface SidebarProps {
   onLogout?: () => void;
 }
 
-type BadgeTone = 'neutral' | 'success' | 'warning';
-
 type MenuItem = {
   id: string;
   name: string;
   icon: React.ComponentType<{ className?: string }>;
-  parentId?: string;
-  highlight?: boolean;
-  badge?: string;
-  badgeTone?: BadgeTone;
 };
 
 type MenuSection = {
@@ -72,62 +65,69 @@ export default function Sidebar({
   userProfile,
   onLogout
 }: SidebarProps) {
+  // Reorganización UX (pre PROD-4): los módulos se agrupan por dominio
+  // operativo. No se crean ni eliminan módulos; solo se reordena la navegación.
+  // Los badges de estado (NEW, DRY RUN, SAFE MODE, READ ONLY LAB) viven DENTRO
+  // de cada módulo, no en el sidebar.
   const menuSections: MenuSection[] = [
     {
-      id: 'operations',
-      title: 'Operations',
+      id: 'dashboard',
+      title: 'Dashboard',
       items: [
-        { id: 'network', name: 'Network', icon: Network },
+        { id: 'dashboard', name: 'Dashboard', icon: Activity },
+        { id: 'noc', name: 'NOC', icon: ShieldAlert },
+      ],
+    },
+    {
+      id: 'clientes',
+      title: 'Clientes',
+      items: [
         { id: 'crm', name: 'Subscribers', icon: Users },
+        { id: 'billing', name: 'Plans & Billing', icon: CreditCard },
+        { id: 'payments', name: 'Payments', icon: Banknote },
+        { id: 'suspension', name: 'Suspensions', icon: Ban },
         { id: 'support', name: 'Tickets', icon: Wrench },
       ],
     },
     {
-      id: 'management',
-      title: 'Management',
+      id: 'red',
+      title: 'Red',
       items: [
-        { id: 'dashboard', name: 'Dashboard', icon: Activity },
-        { id: 'billing', name: 'Plans & Billing', icon: CreditCard },
+        { id: 'network', name: 'Network', icon: Network },
         { id: 'gis', name: 'Infrastructure', icon: Map },
-        { id: 'mikrotik', name: 'Mikrotik', icon: Terminal, highlight: true, badge: 'NEW', badgeTone: 'warning' },
-        { id: 'router-enrollment', name: 'Router Enrollment', icon: Wifi, parentId: 'mikrotik', badge: 'NEW', badgeTone: 'warning' },
-        { id: 'routeros-resources', name: 'Router Scripts', icon: FileCode, parentId: 'mikrotik' },
-        { id: 'routeros-templates', name: 'Router Templates', icon: BookOpen, parentId: 'mikrotik' },
-        { id: 'wireguard', name: 'WireGuard', icon: Shield, parentId: 'mikrotik' },
-        { id: 'suspension', name: 'Suspension', icon: Ban, parentId: 'mikrotik' },
-        { id: 'payments', name: 'Payments', icon: Banknote },
-        { id: 'finance', name: 'Analytics', icon: DollarSign },
-        { id: 'noc', name: 'NOC', icon: ShieldAlert, badge: 'LIVE', badgeTone: 'success' },
+        { id: 'inventory', name: 'Inventory', icon: Box },
+        { id: 'inventory-routers', name: 'Routers', icon: Cpu },
+        { id: 'wireguard', name: 'WireGuard', icon: Shield },
       ],
     },
     {
-      id: 'system',
-      title: 'System',
+      id: 'mikrotik-workspace',
+      title: 'MikroTik Workspace',
+      items: [
+        { id: 'mikrotik', name: 'MikroTik Core', icon: Terminal },
+        { id: 'router-enrollment', name: 'Router Enrollment', icon: Wifi },
+        { id: 'routeros-templates', name: 'Router Templates', icon: BookOpen },
+        { id: 'routeros-resources', name: 'Router Scripts', icon: FileCode },
+        { id: 'routeros-readonly', name: 'RouterOS Lab', icon: Server },
+        { id: 'manual-safe-mode', name: 'Manual Safe Mode', icon: ShieldCheck },
+        { id: 'safe-command-queue', name: 'Safe Command Queue', icon: ListChecks },
+      ],
+    },
+    {
+      id: 'operaciones',
+      title: 'Operaciones',
+      items: [
+        { id: 'finance', name: 'Analytics', icon: DollarSign },
+      ],
+    },
+    {
+      id: 'administracion',
+      title: 'Administración',
       items: [
         { id: 'owner', name: 'Settings', icon: Shield },
-        { id: 'manual-safe-mode', name: 'Security', icon: ShieldCheck, badge: 'SAFE MODE', badgeTone: 'success' },
-        { id: 'safe-command-queue', name: 'Command Queue', icon: ListChecks, badge: 'DRY RUN', badgeTone: 'neutral' },
-        { id: 'routeros-readonly', name: 'RouterOS Lab', icon: Server, badge: 'READ ONLY LAB', badgeTone: 'neutral' },
-        { id: 'inventory', name: 'Inventory', icon: Box },
-        { id: 'inventory-routers', name: 'Routers', icon: Cpu, badge: 'RO', badgeTone: 'neutral' },
       ],
     },
   ];
-
-  const mikrotikFunctionTabs = menuSections
-    .flatMap(section => section.items)
-    .filter(item => item.parentId === 'mikrotik')
-    .map(item => item.id);
-
-  const getBadgeClasses = (tone?: BadgeTone) => {
-    if (tone === 'success') {
-      return 'bg-emerald-500/10 text-emerald-400 border border-emerald-500/30';
-    }
-    if (tone === 'warning') {
-      return 'bg-amber-500/10 text-amber-400 border border-amber-500/30';
-    }
-    return 'bg-slate-800/50 text-slate-300 border border-slate-700/70';
-  };
 
   // Filtering views according to basic Role Perms (FASE 1 Requirement)
   const isAuthorizedTab = (tabId: string): boolean => {
@@ -138,7 +138,7 @@ export default function Sidebar({
   const filteredSections = menuSections
     .map(section => ({
       ...section,
-      items: section.items.filter(item => isAuthorizedTab(item.id) && (!item.parentId || isAuthorizedTab(item.parentId)))
+      items: section.items.filter(item => isAuthorizedTab(item.id))
     }))
     .filter(section => section.items.length > 0);
 
@@ -229,15 +229,11 @@ export default function Sidebar({
                     </p>
                   )}
                   {section.items.map((item) => {
-                    const isNested = !!item.parentId;
-                    if (collapsed && isNested) return null;
-
                     const Icon = item.icon;
-                    const isMikrotikParentActive = item.id === 'mikrotik' && mikrotikFunctionTabs.includes(activeTab);
-                    const isActive = activeTab === item.id || isMikrotikParentActive;
+                    const isActive = activeTab === item.id;
                     const hasNetworkAlerts = item.id === 'network' && activeAlertsCount > 0;
                     const hasOpenTickets = item.id === 'support' && activeTicketsCount > 0;
-                    const hasIndicators = item.highlight || item.badge || hasNetworkAlerts || hasOpenTickets;
+                    const hasIndicators = hasNetworkAlerts || hasOpenTickets;
 
                     return (
                       <button
@@ -249,14 +245,14 @@ export default function Sidebar({
                         }}
                         title={collapsed ? item.name : undefined}
                         aria-label={item.name}
-                        className={`w-full flex items-center ${collapsed ? 'justify-center px-2.5 py-2.5' : isNested ? 'justify-between pl-8 pr-3.5 py-2 text-[13px]' : 'justify-between px-3.5 py-2.5 text-sm'} rounded-lg transition-all duration-200 group text-left ${
+                        className={`w-full flex items-center ${collapsed ? 'justify-center px-2.5 py-2.5' : 'justify-between px-3.5 py-2.5 text-sm'} rounded-lg transition-all duration-200 group text-left ${
                           isActive
                             ? 'bg-indigo-600/15 border border-indigo-500/30 text-white font-medium shadow-sm'
                             : 'text-slate-400 hover:bg-slate-900 hover:text-slate-100 border border-transparent'
                         }`}
                       >
-                        <div className={`flex items-center ${collapsed ? '' : isNested ? 'space-x-2.5 min-w-0' : 'space-x-3 min-w-0'}`}>
-                          <Icon className={`${isNested ? 'w-3.5 h-3.5' : 'w-4 h-4'} transition-transform group-hover:scale-110 shrink-0 ${
+                        <div className={`flex items-center ${collapsed ? '' : 'space-x-3 min-w-0'}`}>
+                          <Icon className={`w-4 h-4 transition-transform group-hover:scale-110 shrink-0 ${
                             isActive ? 'text-indigo-400' : 'text-slate-500 group-hover:text-slate-300'
                           }`} />
                           {!collapsed && <span className="truncate">{item.name}</span>}
@@ -264,14 +260,6 @@ export default function Sidebar({
 
                         {!collapsed && hasIndicators && (
                           <div className="flex items-center space-x-1.5 shrink-0">
-                            {item.highlight && (
-                              <Sparkles className="w-3.5 h-3.5 text-yellow-400 animate-pulse" />
-                            )}
-                            {item.badge && (
-                              <span className={`${getBadgeClasses(item.badgeTone)} text-[9px] px-1.5 py-0.5 rounded-full font-mono uppercase`}>
-                                {item.badge}
-                              </span>
-                            )}
                             {hasNetworkAlerts && (
                               <span className="bg-rose-500/15 text-rose-400 border border-rose-500/30 text-[10px] px-1.5 py-0.5 rounded-full font-mono">
                                 {activeAlertsCount}

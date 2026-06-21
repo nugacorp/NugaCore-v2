@@ -1,9 +1,10 @@
 // ====================================================================
-// PROD-3 — Rutas RouterOS Read-Only (laboratorio, mock).
+// PROD-3/PROD-4 — Rutas RouterOS Read-Only (laboratorio).
 //
 // SOLO endpoints GET. No existen POST/PUT/PATCH/DELETE: esta fase es
-// físicamente incapaz de escribir. Ningún endpoint ejecuta RouterOS, abre
-// conexiones ni toca routers reales.
+// físicamente incapaz de escribir. Ningún endpoint ejecuta comandos de
+// modificación ni toca routers reales; el provider activo es solo lectura y,
+// ante fallo, cae a mock seguro.
 //
 // RBAC: Super Admin, Administrador, Técnico, Soporte, Solo lectura.
 // Cobranza queda excluido (403).
@@ -28,7 +29,7 @@ router.get(
   '/api/routeros/identity',
   requireRoles(ROUTEROS_READ_ROLES),
   asyncHandler(async (_req, res) => {
-    res.json(routerOsReadOnlyService.getIdentity());
+    res.json(await routerOsReadOnlyService.getIdentity());
   }),
 );
 
@@ -36,7 +37,7 @@ router.get(
   '/api/routeros/system',
   requireRoles(ROUTEROS_READ_ROLES),
   asyncHandler(async (_req, res) => {
-    res.json(routerOsReadOnlyService.getSystem());
+    res.json(await routerOsReadOnlyService.getSystem());
   }),
 );
 
@@ -44,7 +45,7 @@ router.get(
   '/api/routeros/interfaces',
   requireRoles(ROUTEROS_READ_ROLES),
   asyncHandler(async (_req, res) => {
-    res.json(routerOsReadOnlyService.getInterfaces());
+    res.json(await routerOsReadOnlyService.getInterfaces());
   }),
 );
 
@@ -52,7 +53,7 @@ router.get(
   '/api/routeros/routes',
   requireRoles(ROUTEROS_READ_ROLES),
   asyncHandler(async (_req, res) => {
-    res.json(routerOsReadOnlyService.getRoutes());
+    res.json(await routerOsReadOnlyService.getRoutes());
   }),
 );
 
@@ -60,7 +61,7 @@ router.get(
   '/api/routeros/wireguard',
   requireRoles(ROUTEROS_READ_ROLES),
   asyncHandler(async (_req, res) => {
-    res.json(routerOsReadOnlyService.getWireguard());
+    res.json(await routerOsReadOnlyService.getWireguard());
   }),
 );
 

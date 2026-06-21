@@ -62,16 +62,19 @@ detallado en `docs/DEVELOPMENT_HANDOFF_CHECKLIST.md` §0.D.
 4. PROD-1 Manual Safe Mode. 🟡 implementada localmente (pendiente Hermes).
 5. FAST-1 Safe Command Queue dry-run. 🟡 implementada localmente (pendiente Hermes).
 6. PROD-3 RouterOS Read-Only Lab (mock). 🟡 implementada localmente (pendiente Hermes).
-7. PROD-4 CHR Real Read-Only → PROD-5 Dry-Run/CHR → PROD-6 comando real CHR → PROD-7 piloto router no crítico. 🔄 TODO, gated (no implementar todavía).
+7. PROD-4 CHR Real Read-Only (abstracción de providers). 🟡 implementada localmente, PREPARADO/NO CONECTADO (pendiente Hermes).
+8. PROD-5 Dry-Run/CHR → PROD-6 comando real CHR → PROD-7 piloto router no crítico. 🔄 TODO, gated (no implementar todavía).
 
 No avanzar a un punto sin cerrar el anterior.
 
-> Última fase implementada localmente: **PROD-3 RouterOS Read-Only Lab** — provider
-> mock + 5 endpoints GET `/api/routeros/*` + UI read-only (badge `READ ONLY LAB`) +
-> prueba de seguridad estática que hace al dominio incapaz de escribir. Sin RouterOS
-> real, sin conexión real, sin worker live, sin escritura. Ver
-> `docs/ROUTEROS_READ_ONLY_LAB_RESULT.md`. PROD-4 a PROD-7 quedan como TODO gated en
-> `ROADMAP.md`. Detalle de tareas en `docs/DEVELOPMENT_HANDOFF_CHECKLIST.md` §0.C.
+> Última fase implementada localmente: **PROD-4 CHR Real Read-Only Integration**
+> (PREPARADO, NO CONECTADO) — abstracción de providers (interface async, mock,
+> routeros), feature flag `ROUTEROS_READONLY_PROVIDER` (default `mock`) y fallback
+> seguro a mock ante timeout/auth/host inalcanzable (API 200, `source=mock`, sin
+> secretos en logs). El provider `routeros` queda sin cliente real: no conecta CHR
+> ni RB5009. Endpoints/UI/RBAC sin cambios. Sin escritura. Ver
+> `docs/CHR_REAL_READ_ONLY_RESULT.md`. PROD-5 a PROD-7 quedan como TODO gated en
+> `ROADMAP.md`. Detalle en `docs/DEVELOPMENT_HANDOFF_CHECKLIST.md` §0.C.
 
 ## Prohibido activar (sin autorización explícita de Ramiro / fase aprobada)
 

@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest';
-import { routerOsReadOnlyService } from '../../backend/domains/routeros-readonly/service';
-import { MOCK_ROUTER_ID } from '../../backend/domains/routeros-readonly/mock-provider';
+import { createRouterOsReadOnlyService, routerOsReadOnlyService } from '../../backend/domains/routeros-readonly/service';
+import { MOCK_ROUTER_ID, routerOsMockProvider } from '../../backend/domains/routeros-readonly/providers/mock-provider';
 import {
   mapInterface,
   mapRoute,
@@ -8,21 +8,28 @@ import {
 } from '../../backend/domains/routeros-readonly/mappers';
 
 // ====================================================================
-// PROD-3 RouterOS Read-Only Lab — lógica del service y mappers (sin HTTP, sin
-// conexión real, sin ejecución).
+// PROD-3/PROD-4 RouterOS Read-Only — service y mappers (sin HTTP, sin conexión
+// real, sin ejecución). El service por defecto usa mock (flag ausente).
 // ====================================================================
 
-describe('routerOsReadOnlyService', () => {
-  it('getIdentity devuelve identidad mock read-only', () => {
-    const identity = routerOsReadOnlyService.getIdentity();
+const service = createRouterOsReadOnlyService(routerOsMockProvider, routerOsMockProvider);
+
+describe('routerOsReadOnlyService (mock por defecto)', () => {
+  it('expone el service por defecto resuelto por flag', async () => {
+    const identity = await routerOsReadOnlyService.getIdentity();
+    expect(identity.source).toBe('mock');
+  });
+
+  it('getIdentity devuelve identidad mock read-only', async () => {
+    const identity = await service.getIdentity();
     expect(identity.name).toBeTruthy();
     expect(identity.routerId).toBe(MOCK_ROUTER_ID);
     expect(identity.source).toBe('mock');
     expect(identity.readOnly).toBe(true);
   });
 
-  it('getSystem normaliza CPU/RAM a números', () => {
-    const system = routerOsReadOnlyService.getSystem();
+  it('getSystem normaliza CPU/RAM a números', async () => {
+    const system = await service.getSystem();
     expect(typeof system.cpuLoad).toBe('number');
     expect(typeof system.memoryTotal).toBe('number');
     expect(typeof system.memoryFree).toBe('number');
@@ -32,8 +39,8 @@ describe('routerOsReadOnlyService', () => {
     expect(system.source).toBe('mock');
   });
 
-  it('getInterfaces devuelve interfaces con tipos normalizados', () => {
-    const interfaces = routerOsReadOnlyService.getInterfaces();
+  it('getInterfaces devuelve interfaces con tipos normalizados', async () => {
+    const interfaces = await service.getInterfaces();
     expect(interfaces.length).toBeGreaterThan(0);
     for (const iface of interfaces) {
       expect(typeof iface.running).toBe('boolean');
@@ -43,8 +50,8 @@ describe('routerOsReadOnlyService', () => {
     }
   });
 
-  it('getRoutes devuelve rutas con distancia numérica y active booleano', () => {
-    const routes = routerOsReadOnlyService.getRoutes();
+  it('getRoutes devuelve rutas con distancia numérica y active booleano', async () => {
+    const routes = await service.getRoutes();
     expect(routes.length).toBeGreaterThan(0);
     for (const route of routes) {
       expect(typeof route.distance).toBe('number');
@@ -53,8 +60,8 @@ describe('routerOsReadOnlyService', () => {
     }
   });
 
-  it('getWireguard devuelve summary con interfaces y peers, sin secretos', () => {
-    const wg = routerOsReadOnlyService.getWireguard();
+  it('getWireguard devuelve summary con interfaces y peers, sin secretos', async () => {
+    const wg = await service.getWireguard();
     expect(wg.source).toBe('mock');
     expect(Array.isArray(wg.interfaces)).toBe(true);
     expect(Array.isArray(wg.peers)).toBe(true);
@@ -63,13 +70,13 @@ describe('routerOsReadOnlyService', () => {
     expect(serialized).not.toContain('presharedkey');
   });
 
-  it('ninguna lectura expone claves sensibles', () => {
+  it('ninguna lectura expone claves sensibles', async () => {
     const full = JSON.stringify({
-      identity: routerOsReadOnlyService.getIdentity(),
-      system: routerOsReadOnlyService.getSystem(),
-      interfaces: routerOsReadOnlyService.getInterfaces(),
-      routes: routerOsReadOnlyService.getRoutes(),
-      wireguard: routerOsReadOnlyService.getWireguard(),
+      identity: await service.getIdentity(),
+      system: await service.getSystem(),
+      interfaces: await service.getInterfaces(),
+      routes: await service.getRoutes(),
+      wireguard: await service.getWireguard(),
     }).toLowerCase();
     for (const forbidden of ['privatekey', 'presharedkey', 'password', 'secret', 'bearer']) {
       expect(full).not.toContain(forbidden);

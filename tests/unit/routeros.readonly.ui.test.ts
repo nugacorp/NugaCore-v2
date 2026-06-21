@@ -37,10 +37,11 @@ describe('RouterOS Read-Only Lab UI contract', () => {
 });
 
 describe('RouterOS Read-Only Lab navigation integration', () => {
-  it('Sidebar incluye el item routeros-readonly', () => {
+  it('Sidebar incluye el item routeros-readonly (badge READ ONLY LAB vive en el módulo, no en el sidebar)', () => {
     expect(sidebarSource).toContain("id: 'routeros-readonly'");
     expect(sidebarSource).toContain('RouterOS Lab');
-    expect(sidebarSource).toContain('READ ONLY LAB');
+    // Reorganización UX: el badge de estado se muestra dentro del módulo.
+    expect(sidebarSource).not.toContain('READ ONLY LAB');
   });
 
   it('App importa y renderiza el módulo cuando el tab está activo', () => {

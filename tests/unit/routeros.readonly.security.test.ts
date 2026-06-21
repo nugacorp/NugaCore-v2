@@ -49,4 +49,30 @@ describe('RouterOS Read-Only Lab safety guard', () => {
       expect(routes).not.toContain(forbidden);
     }
   });
+
+  // PROD-4 — el provider RouterOS real debe ser incapaz de escribir.
+  it('routeros-provider no contiene APIs ni verbos de escritura RouterOS', () => {
+    const source = readFileSync(`${domainDir}/providers/routeros-provider.ts`, 'utf8');
+    for (const forbidden of [
+      '.set(',
+      '.add(',
+      '.remove(',
+      '.execute(',
+      '/ip firewall add',
+      '/ip route add',
+      '/queue simple add',
+      '/ppp secret add',
+      '/interface add',
+      '/tool fetch',
+    ]) {
+      expect(source, `prohibido en routeros-provider: ${forbidden}`).not.toContain(forbidden);
+    }
+  });
+
+  it('routeros-provider solo usa comandos print de allowlist', () => {
+    const source = readFileSync(`${domainDir}/providers/routeros-provider.ts`, 'utf8');
+    expect(source).toContain('READ_ONLY_COMMANDS');
+    expect(source).toContain("'/system/identity/print'");
+    expect(source).toContain("'/ip/route/print'");
+  });
 });

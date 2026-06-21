@@ -1,16 +1,20 @@
 // ====================================================================
-// PROD-3 — RouterOS Read-Only Lab Foundation — contratos del dominio.
+// PROD-3 / PROD-4 — RouterOS Read-Only — contratos del dominio.
 //
-// Representa datos RouterOS de LABORATORIO en modo mock. SOLO lectura:
-// no hay conexión real, no hay RouterOS real, no hay worker live, no hay
-// escritura. Todo proviene de un provider mock estable y vive en memoria.
+// Representa datos RouterOS de LABORATORIO. SOLO lectura: sin worker live,
+// sin escritura, sin commit. Los datos provienen de un provider:
+//   - `mock`     → datos estables en memoria (PROD-3).
+//   - `routeros` → CHR de lab por API read-only (PROD-4, gated/no conectado).
 //
-// `source` es siempre 'mock' y `readOnly` es siempre true: esta fase NO
-// ejecuta ningún comando ni toca routers reales.
+// `readOnly` es siempre true y `source` refleja qué provider sirvió la lectura
+// (mock por defecto, o tras fallback seguro). Esta fase NO ejecuta comandos de
+// escritura ni toca routers reales.
 // ====================================================================
 
-export const ROUTEROS_SOURCE = 'mock' as const;
-export type RouterOsSource = typeof ROUTEROS_SOURCE;
+// Orígenes posibles de una lectura. El contrato HTTP mantiene `mock` por
+// defecto; `routeros` se habilita solo bajo feature flag + CHR de lab conectado.
+export const ROUTEROS_SOURCES = ['mock', 'routeros'] as const;
+export type RouterOsSource = (typeof ROUTEROS_SOURCES)[number];
 
 // ── Modelo de dominio (camelCase, normalizado para NugaCore) ──────────
 
@@ -85,9 +89,9 @@ export interface RouterOsWireguardSummary {
 }
 
 // ── Filas "crudas" tal como las devolvería `print` real ───────────────
-// El provider mock entrega estas filas (strings, claves estilo RouterOS) y
-// los mappers las normalizan al modelo de dominio. Así el camino de parseo
-// queda listo para la fase futura PROD-4 (CHR real), sin cambiar contratos.
+// Tanto el provider mock como el provider RouterOS real entregan estas filas
+// (strings, claves estilo RouterOS) y los mappers las normalizan al modelo de
+// dominio. El contrato del provider (async) vive en `providers/provider-interface.ts`.
 
 export interface RawIdentityRow {
   name: string;
@@ -137,19 +141,4 @@ export interface RawWireguardPeerRow {
   rx: string;
   tx: string;
   disabled: string;
-}
-
-/**
- * Contrato del provider read-only. En PROD-3 lo implementa un mock estable.
- * En PROD-4 (gated) lo implementaría un provider contra el CHR de lab, SIN
- * cambiar este contrato ni los mappers.
- */
-export interface RouterOsReadOnlyProvider {
-  readonly source: RouterOsSource;
-  fetchIdentity(): RawIdentityRow;
-  fetchResource(): RawResourceRow;
-  fetchInterfaces(): RawInterfaceRow[];
-  fetchRoutes(): RawRouteRow[];
-  fetchWireguardInterfaces(): RawWireguardInterfaceRow[];
-  fetchWireguardPeers(): RawWireguardPeerRow[];
 }

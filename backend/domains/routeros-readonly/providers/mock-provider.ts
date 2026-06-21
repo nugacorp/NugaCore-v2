@@ -1,12 +1,14 @@
 // ====================================================================
-// PROD-3 — Provider mock RouterOS (read-only, laboratorio).
+// PROD-3/PROD-4 — Provider mock RouterOS (read-only, laboratorio).
 //
 // Devuelve datos ESTABLES de un router de laboratorio simulado, con la forma
 // "cruda" que entregaría `print` real (strings, claves estilo RouterOS). NO
 // se conecta a nada: sin red, sin RouterOS real, sin worker, sin escritura.
+// Implementa el contrato async común; resuelve datos en memoria.
 //
 // La salida NUNCA contiene secretos, claves privadas ni preshared keys: solo
-// metadatos no sensibles de observación.
+// metadatos no sensibles de observación. Es además el fallback seguro cuando
+// el provider RouterOS real no está disponible.
 // ====================================================================
 
 import {
@@ -16,9 +18,8 @@ import {
   RawRouteRow,
   RawWireguardInterfaceRow,
   RawWireguardPeerRow,
-  RouterOsReadOnlyProvider,
-  ROUTEROS_SOURCE,
-} from './types';
+} from '../types';
+import { RouterOsReadOnlyProvider } from './provider-interface';
 
 /** Identificador de laboratorio del router mock (no es un router real). */
 export const MOCK_ROUTER_ID = 'chr-lab-mock-1';
@@ -29,7 +30,7 @@ export const MOCK_ROUTER_ID = 'chr-lab-mock-1';
 //   /interface print
 //   /ip route print
 //   /interface wireguard print
-// (en esta fase NO se ejecuta ninguno; son datos de laboratorio).
+// (no se ejecuta ninguno; son datos de laboratorio en memoria).
 
 const IDENTITY: RawIdentityRow = {
   name: 'chr-lab-edge',
@@ -152,15 +153,15 @@ const WIREGUARD_PEERS: RawWireguardPeerRow[] = [
 const clone = <T>(value: T): T => JSON.parse(JSON.stringify(value)) as T;
 
 /**
- * Provider mock read-only. Implementa el contrato común; en PROD-4 (gated) se
- * sustituiría por un provider contra el CHR de lab sin cambiar mappers/service.
+ * Provider mock read-only (async). Implementa el contrato común resolviendo
+ * datos en memoria; sirve también de fallback seguro para el provider real.
  */
 export const routerOsMockProvider: RouterOsReadOnlyProvider = {
-  source: ROUTEROS_SOURCE,
-  fetchIdentity: () => clone(IDENTITY),
-  fetchResource: () => clone(RESOURCE),
-  fetchInterfaces: () => clone(INTERFACES),
-  fetchRoutes: () => clone(ROUTES),
-  fetchWireguardInterfaces: () => clone(WIREGUARD_INTERFACES),
-  fetchWireguardPeers: () => clone(WIREGUARD_PEERS),
+  source: 'mock',
+  fetchIdentity: async () => clone(IDENTITY),
+  fetchResource: async () => clone(RESOURCE),
+  fetchInterfaces: async () => clone(INTERFACES),
+  fetchRoutes: async () => clone(ROUTES),
+  fetchWireguardInterfaces: async () => clone(WIREGUARD_INTERFACES),
+  fetchWireguardPeers: async () => clone(WIREGUARD_PEERS),
 };

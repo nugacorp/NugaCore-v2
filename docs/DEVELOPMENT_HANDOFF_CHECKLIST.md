@@ -41,23 +41,36 @@ manda sobre la memoria, el roadmap y este checklist.
 
 ### C. Prioridad inmediata (absoluta)
 
-**PROD-3 — RouterOS Read-Only Lab (mock read-only).**
+**PROD-4 — CHR Real Read-Only Integration (abstracción de providers; PREPARADO,
+NO CONECTADO).**
 
 DB-1, Inventory 4.11.1, NOC 4.11.2, NOC Real Telemetry 4.11.3,
-PROD-1 Manual Safe Mode y FAST-1 / PROD-2 Safe Command Queue Dry-Run ya fueron
-aprobadas por Hermes en staging. La prioridad actual es mantener PROD-3 en modo
-lab/mock read-only, sin conectar RouterOS real ni activar workers.
+PROD-1 Manual Safe Mode, FAST-1 / PROD-2 Safe Command Queue Dry-Run y PROD-3
+RouterOS Read-Only Lab ya fueron aprobadas por Hermes / están validadas. La
+prioridad actual es validar PROD-4 manteniendo el comportamiento mock por defecto,
+sin conectar RouterOS real ni activar workers.
 
-Estado PROD-3:
+Estado PROD-3 (base, sin cambios de contrato):
 
 - Implementado localmente en `backend/domains/routeros-readonly/`.
-- Provider mock solamente.
 - Endpoints GET-only `/api/routeros/identity`, `/api/routeros/system`,
   `/api/routeros/interfaces`, `/api/routeros/routes`, `/api/routeros/wireguard`.
 - UI `src/modules/routeros-readonly/RouterOSReadOnlyModule.tsx`.
 - RBAC: SA/Admin/Técnico/Soporte/Solo lectura permitidos; Cobranza 403.
-- Tests contract/UI/security agregados.
 - Resultado local: `docs/ROUTEROS_READ_ONLY_LAB_RESULT.md`.
+
+Estado PROD-4 (implementado localmente, pendiente Hermes):
+
+- Abstracción de providers en `backend/domains/routeros-readonly/providers/`
+  (interface async, `mock-provider`, `routeros-provider`, `fallback`, factory).
+- Feature flag `ROUTEROS_READONLY_PROVIDER` (`mock` default | `routeros`).
+- Provider `routeros` PREPARADO pero **sin cliente real** (no configurado): cae a
+  mock por fallback (timeout/auth/host inalcanzable) → API 200, `source=mock`,
+  warning sin secretos.
+- Allowlist de comandos `print`; transporte read-only (`print` únicamente).
+- Endpoints/UI/RBAC sin cambios. Sin `.add/.set/.remove/.execute`, sin escritura.
+- Tests `routeros.readonly.*` (contract/service/ui/providers/security).
+- Resultado local: `docs/CHR_REAL_READ_ONLY_RESULT.md`.
 
 ### C.1 Hotfix paralelo activo (frontend)
 

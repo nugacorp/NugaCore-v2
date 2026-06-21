@@ -543,15 +543,23 @@ worker live, sin escritura. RBAC: SA/Admin/Técnico/Soporte/Solo lectura; Cobran
 
 #### PROD-4 — CHR Real Read-Only Integration
 
-Estado: 🔄 **TODO — no implementar todavía.** Requiere aprobación Hermes.
+Estado: 🟡 **Implementada localmente — PREPARADO, NO CONECTADO** (pendiente
+validación Hermes).
 
-Conexión **solo lectura** a un MikroTik CHR de laboratorio (nunca routers reales),
-con credenciales de lab fuera del repo. Comandos permitidos únicamente:
-`/system identity print`, `/system resource print`, `/interface print`,
-`/ip address print`, `/ip route print`, `/interface wireguard print`. Sin `.add`,
-sin `.set`, sin `.remove`, sin escritura. Allowlist estricta. Diseño:
-[`docs/ROUTEROS_READ_ONLY_API_PLAN.md`](./docs/ROUTEROS_READ_ONLY_API_PLAN.md),
+Abstracción de **providers** en el dominio RouterOS Read-Only: contrato async
+común con dos implementaciones (`mock` y `routeros`), feature flag
+`ROUTEROS_READONLY_PROVIDER` (default `mock`) y **fallback seguro** a mock ante
+timeout/auth/host inalcanzable (responde 200, `source=mock`, warning sin
+secretos). El provider `routeros` usa una **allowlist** de comandos `print` y un
+transporte read-only (`print` únicamente), pero queda **sin cliente real**: no
+conecta CHR ni RB5009. Endpoints/UI/RBAC sin cambios. Sin `.add/.set/.remove/
+.execute`, sin escritura. Resultado:
+[`docs/CHR_REAL_READ_ONLY_RESULT.md`](./docs/CHR_REAL_READ_ONLY_RESULT.md).
+Diseño: [`docs/ROUTEROS_READ_ONLY_API_PLAN.md`](./docs/ROUTEROS_READ_ONLY_API_PLAN.md),
 prep en [`docs/CHR_LAB_PREP_RUNBOOK.md`](./docs/CHR_LAB_PREP_RUNBOOK.md).
+Falta para conectar CHR real (fase posterior, gated): cliente RouterOS real
+(API-SSL `8729`), credenciales de lab fuera del repo, sanitización de salida y
+aprobación Hermes/Ramiro.
 
 #### PROD-5 — Safe Command Queue Dry-Run sobre CHR
 
@@ -582,8 +590,8 @@ reversible, monitoreo antes/después, rollback y aprobación explícita de Ramir
 ```text
 PROD-3 RouterOS Read-Only Lab (mock)      ← implementada localmente
   ↓ (Hermes)
-PROD-4 CHR Real Read-Only                 ← TODO, gated
-  ↓
+PROD-4 CHR Real Read-Only (abstracción)   ← implementada localmente (PREPARADO, NO CONECTADO)
+  ↓ (Hermes; luego conectar cliente CHR real, gated)
 PROD-5 Safe Command Queue Dry-Run / CHR   ← TODO, gated
   ↓
 PROD-6 Primer comando real en CHR         ← TODO, gated + autorización Ramiro

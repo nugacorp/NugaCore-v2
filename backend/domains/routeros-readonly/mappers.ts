@@ -6,7 +6,7 @@
 // abren conexiones y no producen scripts RouterOS: solo transforman datos.
 // ====================================================================
 
-import { MOCK_ROUTER_ID } from './mock-provider';
+import { MOCK_ROUTER_ID } from './providers/mock-provider';
 import {
   RawIdentityRow,
   RawInterfaceRow,
