@@ -19,6 +19,7 @@ import routerosResourcesRoutes from './domains/routeros-resources/routes';
 import routerosTemplatesRoutes from './domains/routeros-templates/routes';
 import routerTemplateParametersRoutes from './domains/router-template-parameters/routes';
 import routerEnrollmentRoutes from './domains/router-enrollment/routes';
+import safeCommandQueueRoutes from './domains/safe-command-queue/routes';
 import securityRoutes from './domains/security/routes';
 import suspensionRoutes from './domains/suspension/routes';
 import ticketsRoutes from './domains/tickets/routes';
@@ -46,6 +47,7 @@ export function registerRoutes(app: Express): void {
   app.use(nocRoutes);
   app.use(nocTelemetryRoutes);
   app.use(manualSafeModeRoutes);
+  app.use(safeCommandQueueRoutes);
   app.use(gisRoutes);
   app.use(dashboardRoutes);
   app.use(paymentsRoutes);

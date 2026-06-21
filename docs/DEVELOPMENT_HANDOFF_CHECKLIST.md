@@ -144,6 +144,25 @@ Pendiente PROD-1 (NO en esta sesión):
 
 - [ ] Validación funcional staging por **Hermes** (ciclo de estados + RBAC + ausencia de ejecución real).
 
+**FAST-1 Safe Command Queue (dry-run): implementada localmente** (pendiente validación
+Hermes) — ver [`docs/SAFE_COMMAND_QUEUE_DRY_RUN_RESULT.md`](./SAFE_COMMAND_QUEUE_DRY_RUN_RESULT.md).
+
+Hecho (local, esta sesión; sin staging, sin producción, sin migraciones, sin ejecución real):
+
+- [x] Dominio `backend/domains/safe-command-queue/` (store en memoria) — estados `PENDING/VALIDATED/SIMULATED/APPROVED/REJECTED/CANCELLED`; **sin `EXECUTED`/`RUNNING`/`COMPLETED`**; `dryRun=true`, `wouldExecute=false`.
+- [x] Endpoints `GET/POST /api/safe-command-queue` (+ `:id`, `:id/validate|simulate|approve|reject|cancel`); **sin `/execute`**; approve exige simular antes; RBAC con Cobranza 403.
+- [x] Dry-run preview (`simulatedCommands` descriptivos), `riskLevel`, `safetyWarnings`; payload/campos libres saneados vía `sanitize-sensitive-data`.
+- [x] UI `src/modules/safe-command-queue/SafeCommandQueueModule.tsx` (badge DRY RUN) cableada en Sidebar + App + RBAC frontend.
+- [x] Tests: contract (16) + service (10) + ui (8) + rbac.frontend actualizado.
+- [x] Docs de preparación: `docs/CHR_LAB_PREP_RUNBOOK.md` (Parte C) y `docs/ROUTEROS_READ_ONLY_API_PLAN.md` (Parte D), ambos documentales/gated.
+- [x] `npm run typecheck`, `npm test`, `npm run build` → PASS.
+- [x] Sin activar `USE_DB_MIKROTIK`/`USE_DB_WIREGUARD`/`MIKROTIK_WORKER_LIVE`/commit mode/write enabled; sin tocar RouterOS ni routers reales.
+
+Pendiente FAST-1 / siguiente (NO en esta sesión):
+
+- [ ] Validación staging por **Hermes** (ciclo dry-run + RBAC + ausencia de ejecución).
+- [ ] Fase siguiente (gated): RouterOS read-only en CHR de lab (`docs/ROUTEROS_READ_ONLY_API_PLAN.md`).
+
 ### E. Qué NO hacer
 
 **No avanzar a Worker Live, Real Provisioning ni Commit Mode.** DB-1 e Inventory 4.11.1

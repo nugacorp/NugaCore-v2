@@ -477,6 +477,28 @@ memoria. Dominio `backend/domains/manual-safe-mode/`.
 Resultado: [`docs/PROD1_MANUAL_SAFE_MODE_RESULT.md`](./docs/PROD1_MANUAL_SAFE_MODE_RESULT.md).
 Siguiente: Safe Command Queue (dry-run).
 
+### FAST-1 — Safe Command Queue (Dry-Run) + CHR Lab Prep
+
+Estado: 🟡 Implementada localmente (pendiente validación Hermes).
+
+Cola SEGURA de comandos en **dry-run**: modela/valida/simula/aprueba/rechaza/cancela y
+audita comandos **sin ejecutar nada**. Dominio `backend/domains/safe-command-queue/`.
+
+- Estados `PENDING/VALIDATED/SIMULATED/APPROVED/REJECTED/CANCELLED`; **sin
+  `EXECUTED`/`RUNNING`/`COMPLETED`**. `dryRun=true`, `wouldExecute=false`.
+- Tipos: SUSPEND/RESTORE_CUSTOMER, UPDATE_QUEUE/PLAN, ADD/REMOVE_ADDRESS_LIST, REBOOT_CPE.
+- Endpoints `GET/POST /api/safe-command-queue` (+ `:id`, `:id/validate|simulate|approve|reject|cancel`).
+  **No existe `/execute`.** Aprobar exige simular antes.
+- UI `src/modules/safe-command-queue/SafeCommandQueueModule.tsx` (badge DRY RUN).
+- RBAC: SA/Admin/Técnico/Soporte/Solo lectura; Cobranza 403.
+- Preparación documental de la fase siguiente:
+  [`docs/CHR_LAB_PREP_RUNBOOK.md`](./docs/CHR_LAB_PREP_RUNBOOK.md) y
+  [`docs/ROUTEROS_READ_ONLY_API_PLAN.md`](./docs/ROUTEROS_READ_ONLY_API_PLAN.md).
+- Sin RouterOS, sin worker live, sin commit mode, sin DB/migraciones.
+
+Resultado: [`docs/SAFE_COMMAND_QUEUE_DRY_RUN_RESULT.md`](./docs/SAFE_COMMAND_QUEUE_DRY_RUN_RESULT.md).
+Siguiente: RouterOS read-only en CHR de lab (gated).
+
 ### FASE 4.12 — Zero Touch Provisioning
 
 Estado: 🔄 Pendiente

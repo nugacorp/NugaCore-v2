@@ -20,7 +20,8 @@ import {
   X,
   LogOut,
   Banknote,
-  ShieldCheck
+  ShieldCheck,
+  ListChecks
 } from 'lucide-react';
 import { UserSessionProfile } from '../lib/supabase';
 import { canAccessTab } from '../lib/rbac';
@@ -64,6 +65,7 @@ export default function Sidebar({
     { id: 'gis', name: 'GIS & Cobertura Co-Map', icon: Map },
     { id: 'owner', name: 'Owner & Automatizaciones', icon: Shield },
     { id: 'manual-safe-mode', name: 'Modo Seguro Manual (SAFE MODE)', icon: ShieldCheck },
+    { id: 'safe-command-queue', name: 'Cola de Comandos (DRY RUN)', icon: ListChecks },
   ];
 
   // Filtering views according to basic Role Perms (FASE 1 Requirement)

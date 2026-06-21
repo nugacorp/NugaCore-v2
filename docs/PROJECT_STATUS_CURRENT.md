@@ -60,14 +60,17 @@ detallado en `docs/DEVELOPMENT_HANDOFF_CHECKLIST.md` §0.D.
 2. MikroTik Inventory Read-Only (4.11.1). ✅
 3. NOC Read-Only (4.11.2 foundation + 4.11.3 real telemetry). ✅
 4. PROD-1 Manual Safe Mode. 🟡 implementada localmente (pendiente Hermes).
-5. Safe Command Queue dry-run. 🔜 siguiente.
+5. FAST-1 Safe Command Queue dry-run. 🟡 implementada localmente (pendiente Hermes).
+6. RouterOS read-only en CHR de lab. 🔜 siguiente (gated, documental: planes listos).
 
 No avanzar a un punto sin cerrar el anterior.
 
-> Última fase implementada localmente: **PROD-1 Manual Safe Mode** — infraestructura
-> segura de acciones manuales auditadas, sin ejecución real ni estado `EXECUTED`.
-> Ver `docs/PROD1_MANUAL_SAFE_MODE_RESULT.md`. Detalle de tareas en
-> `docs/DEVELOPMENT_HANDOFF_CHECKLIST.md` §0.C.
+> Última fase implementada localmente: **FAST-1 Safe Command Queue (dry-run)** —
+> cola segura de comandos que NO ejecuta nada (sin estado `EXECUTED`/`RUNNING`/
+> `COMPLETED`, sin `/execute`), más preparación documental del CHR de lab y del plan
+> RouterOS read-only. Ver `docs/SAFE_COMMAND_QUEUE_DRY_RUN_RESULT.md`,
+> `docs/CHR_LAB_PREP_RUNBOOK.md` y `docs/ROUTEROS_READ_ONLY_API_PLAN.md`. Detalle de
+> tareas en `docs/DEVELOPMENT_HANDOFF_CHECKLIST.md` §0.C.
 
 ## Prohibido activar (sin autorización explícita de Ramiro / fase aprobada)
 

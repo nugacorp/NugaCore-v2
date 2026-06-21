@@ -11,6 +11,7 @@ import InventoryRoutersModule from './components/InventoryRoutersModule';
 import NocReadOnlyModule from './components/NocReadOnlyModule';
 import NocTelemetryModule from './components/NocTelemetryModule';
 import ManualSafeModeModule from './modules/manual-safe-mode/ManualSafeModeModule';
+import SafeCommandQueueModule from './modules/safe-command-queue/SafeCommandQueueModule';
 import GisModule from './components/GisModule';
 import FinanceOwnerModule from './components/FinanceOwnerModule';
 import SuspensionModule from './components/SuspensionModule';
@@ -938,6 +939,10 @@ export default function App() {
 
             {activeTab === 'manual-safe-mode' && (
               <ManualSafeModeModule getAuthHeaders={getAuthHeaders} />
+            )}
+
+            {activeTab === 'safe-command-queue' && (
+              <SafeCommandQueueModule getAuthHeaders={getAuthHeaders} />
             )}
 
             {activeTab === 'crm' && (
