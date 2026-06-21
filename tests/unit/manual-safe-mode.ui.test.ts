@@ -6,6 +6,12 @@ import { describe, expect, it } from 'vitest';
 // ====================================================================
 
 const moduleSource = readFileSync('src/modules/manual-safe-mode/ManualSafeModeModule.tsx', 'utf8');
+const appSource = readFileSync('src/App.tsx', 'utf8');
+const sidebarSource = readFileSync('src/components/Sidebar.tsx', 'utf8');
+const rbacSource = readFileSync('src/lib/rbac.ts', 'utf8');
+
+const lineWith = (src: string, needle: string): string =>
+  src.split('\n').find((line) => line.includes(needle)) ?? '';
 
 describe('Manual Safe Mode module UI contract', () => {
   it('marca la vista como SAFE MODE', () => {
@@ -32,9 +38,31 @@ describe('Manual Safe Mode module UI contract', () => {
     expect(moduleSource).toContain('No hay acciones manuales registradas.');
   });
 
-  it('no invoca ejecución real (sin endpoint /execute)', () => {
+  it('no invoca ejecución real (sin endpoint /execute, sin botón "Ejecutar")', () => {
     expect(moduleSource).not.toContain('/execute');
     // No declara EXECUTED como estado real (solo se menciona en comentario para negarlo).
     expect(moduleSource).not.toContain("'EXECUTED'");
+    // No hay acción real "Ejecutar" en la UI.
+    expect(moduleSource).not.toContain('Ejecutar');
+  });
+});
+
+describe('Manual Safe Mode navigation integration', () => {
+  it('Sidebar incluye el item manual-safe-mode', () => {
+    expect(sidebarSource).toContain("id: 'manual-safe-mode'");
+    expect(sidebarSource).toContain('SAFE MODE');
+  });
+
+  it('App importa y renderiza el módulo cuando el tab está activo', () => {
+    expect(appSource).toContain("import ManualSafeModeModule from './modules/manual-safe-mode/ManualSafeModeModule'");
+    expect(appSource).toContain("activeTab === 'manual-safe-mode'");
+    expect(appSource).toContain('<ManualSafeModeModule');
+  });
+
+  it('RBAC frontend: visible para roles permitidos, oculto para Cobranza', () => {
+    for (const role of ["'Super Admin'", "'Administrador'", "'Técnico'", "'Soporte'", "'Solo lectura'"]) {
+      expect(lineWith(rbacSource, role), `${role} debería incluir manual-safe-mode`).toContain("'manual-safe-mode'");
+    }
+    expect(lineWith(rbacSource, "'Cobranza'")).not.toContain("'manual-safe-mode'");
   });
 });

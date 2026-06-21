@@ -121,10 +121,8 @@ Respuesta `201` → objeto `SafeAction` (`status: "PENDING"`, sin `executedAt`).
 > crear código fuera del árbol del build se ubicó en
 > `src/modules/manual-safe-mode/`.
 >
-> **Nota de navegación:** el módulo se entrega standalone (no se cableó un tab nuevo
-> en `rbac.ts`/`Sidebar`/`App`) para no modificar la superficie RBAC-visual ya
-> aprobada ni sus tests. Exponerlo en el menú es un follow-up trivial cuando el
-> operador lo decida.
+> **Nota de navegación:** en la entrega inicial el módulo quedó standalone. Ya fue
+> cableado en navegación — ver §13 *Hotfix UI Navigation*.
 
 ## 6. Tests
 
@@ -184,3 +182,25 @@ Mantener el orden gated. Tras validar PROD-1 en staging, la continuación natura
 **Safe Command Queue (dry-run)** — modelar la cola de comandos sin ejecución real,
 sobre esta base. **NO** avanzar a `USE_DB_MIKROTIK`, `USE_DB_WIREGUARD`, Worker Live,
 RouterOS real ni commit mode.
+
+## 13. Hotfix UI Navigation
+
+El módulo Manual Safe Mode ya está **visible en la navegación** de NugaCore (en la
+entrega inicial quedó standalone; este hotfix lo cableó).
+
+- **Sidebar** (`src/components/Sidebar.tsx`): nuevo item `id: 'manual-safe-mode'`
+  → "Modo Seguro Manual (SAFE MODE)" (icono `ShieldCheck`).
+- **App** (`src/App.tsx`): import de `ManualSafeModeModule` y render bajo
+  `activeTab === 'manual-safe-mode'`.
+- **RBAC frontend** (`src/lib/rbac.ts`): nuevo `AppTab` `'manual-safe-mode'` agregado a
+  Super Admin, Administrador, Técnico, Soporte y Solo lectura; **Cobranza no lo ve**
+  (alineado con el RBAC del backend, que responde 403 a Cobranza). Etiqueta en
+  `MODULE_LABELS`: "Modo Seguro Manual".
+- **No se agregó ejecución real:** sin estado `EXECUTED`, sin endpoint `/execute`, sin
+  botón "Ejecutar". La vista mantiene badge SAFE MODE, banner de no-cambios-reales,
+  tabla, detalle e historial de auditoría. Backend sin cambios.
+
+Tests: `tests/unit/rbac.frontend.test.ts` actualizado (Super Admin pasa de 18 a 19
+módulos; arrays exactos de Soporte/Solo lectura; visibilidad manual-safe-mode) y
+`tests/unit/manual-safe-mode.ui.test.ts` ampliado con integración Sidebar/App/RBAC y
+ausencia de acción real.

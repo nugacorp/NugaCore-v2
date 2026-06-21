@@ -134,7 +134,8 @@ Hecho (local, esta sesión; sin staging, sin producción, sin migraciones, sin e
 - [x] Modelo `SafeAction` + auditoría `SafeActionAudit`; estados `PENDING/APPROVED/REJECTED/SIMULATED/CANCELLED` (**sin `EXECUTED`**); modos `MANUAL/DRY_RUN/FUTURE_AUTOMATION`.
 - [x] Endpoints `GET/POST /api/manual-actions`, `GET /:id`, `POST /:id/{approve,reject,simulate,cancel}` (RBAC; Cobranza 403).
 - [x] `simulateAction` solo `PENDING → SIMULATED` + auditoría; ningún endpoint ejecuta RouterOS/WireGuard/billing/suspensión/shell/workers.
-- [x] UI `src/modules/manual-safe-mode/ManualSafeModeModule.tsx` (badge SAFE MODE; standalone, sin cablear tab para no tocar RBAC-visual aprobado).
+- [x] UI `src/modules/manual-safe-mode/ManualSafeModeModule.tsx` (badge SAFE MODE).
+- [x] Hotfix UI Navigation: cableado en `Sidebar` + `App` + RBAC frontend (`rbac.ts` tab `manual-safe-mode`, visible para 5 roles, Cobranza oculto). Sin ejecución real.
 - [x] Tests: contract (18) + service (11) + ui (5).
 - [x] `npm run typecheck`, `npm test`, `npm run build` → PASS.
 - [x] Sin secretos; sin activar `USE_DB_MIKROTIK`/`USE_DB_WIREGUARD`/`MIKROTIK_WORKER_LIVE`/commit mode; sin migraciones.

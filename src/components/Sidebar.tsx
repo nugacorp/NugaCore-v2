@@ -19,7 +19,8 @@ import {
   Wifi,
   X,
   LogOut,
-  Banknote
+  Banknote,
+  ShieldCheck
 } from 'lucide-react';
 import { UserSessionProfile } from '../lib/supabase';
 import { canAccessTab } from '../lib/rbac';
@@ -62,6 +63,7 @@ export default function Sidebar({
     { id: 'inventory-routers', name: 'Inventario Routers (Read-Only)', icon: Cpu },
     { id: 'gis', name: 'GIS & Cobertura Co-Map', icon: Map },
     { id: 'owner', name: 'Owner & Automatizaciones', icon: Shield },
+    { id: 'manual-safe-mode', name: 'Modo Seguro Manual (SAFE MODE)', icon: ShieldCheck },
   ];
 
   // Filtering views according to basic Role Perms (FASE 1 Requirement)

@@ -18,7 +18,8 @@ export type AppTab =
   | 'inventory'
   | 'inventory-routers'
   | 'gis'
-  | 'owner';
+  | 'owner'
+  | 'manual-safe-mode';
 
 // ====================================================================
 // RBAC visual: qué módulos (tabs) ve cada rol. Mapeado a los tabs
@@ -27,12 +28,12 @@ export type AppTab =
 // la VISIBILIDAD del módulo.
 // ====================================================================
 const roleTabs: Record<UserRole, AppTab[]> = {
-  'Super Admin':  ['dashboard', 'noc', 'crm', 'billing', 'finance', 'suspension', 'payments', 'network', 'mikrotik', 'wireguard', 'routeros-resources', 'routeros-templates', 'router-enrollment', 'support', 'inventory', 'inventory-routers', 'gis', 'owner'],
-  'Administrador':['dashboard', 'noc', 'crm', 'billing', 'suspension', 'payments', 'network', 'wireguard', 'routeros-resources', 'routeros-templates', 'router-enrollment', 'support', 'inventory', 'inventory-routers', 'gis'],
+  'Super Admin':  ['dashboard', 'noc', 'crm', 'billing', 'finance', 'suspension', 'payments', 'network', 'mikrotik', 'wireguard', 'routeros-resources', 'routeros-templates', 'router-enrollment', 'support', 'inventory', 'inventory-routers', 'gis', 'owner', 'manual-safe-mode'],
+  'Administrador':['dashboard', 'noc', 'crm', 'billing', 'suspension', 'payments', 'network', 'wireguard', 'routeros-resources', 'routeros-templates', 'router-enrollment', 'support', 'inventory', 'inventory-routers', 'gis', 'manual-safe-mode'],
   'Cobranza':     ['dashboard', 'crm', 'billing', 'finance', 'suspension', 'payments'],
-  'Técnico':      ['dashboard', 'noc', 'suspension', 'network', 'mikrotik', 'routeros-resources', 'routeros-templates', 'router-enrollment', 'support', 'inventory', 'inventory-routers', 'gis'],
-  'Soporte':      ['dashboard', 'noc', 'crm', 'support', 'inventory-routers', 'gis'],
-  'Solo lectura': ['dashboard', 'noc', 'crm', 'billing', 'suspension', 'network', 'inventory-routers', 'gis'],
+  'Técnico':      ['dashboard', 'noc', 'suspension', 'network', 'mikrotik', 'routeros-resources', 'routeros-templates', 'router-enrollment', 'support', 'inventory', 'inventory-routers', 'gis', 'manual-safe-mode'],
+  'Soporte':      ['dashboard', 'noc', 'crm', 'support', 'inventory-routers', 'gis', 'manual-safe-mode'],
+  'Solo lectura': ['dashboard', 'noc', 'crm', 'billing', 'suspension', 'network', 'inventory-routers', 'gis', 'manual-safe-mode'],
 };
 
 // Fallback seguro para roles desconocidos / sin rol.
@@ -72,6 +73,7 @@ export const MODULE_LABELS: Record<AppTab, string> = {
   'inventory-routers': 'Inventario Routers (RO)',
   gis: 'GIS & Cobertura',
   owner: 'Owner & Automatizaciones',
+  'manual-safe-mode': 'Modo Seguro Manual',
 };
 
 export const getModuleLabel = (tab: string): string => MODULE_LABELS[tab as AppTab] || tab;

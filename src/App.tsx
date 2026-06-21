@@ -10,6 +10,7 @@ import InventoryModule from './components/InventoryModule';
 import InventoryRoutersModule from './components/InventoryRoutersModule';
 import NocReadOnlyModule from './components/NocReadOnlyModule';
 import NocTelemetryModule from './components/NocTelemetryModule';
+import ManualSafeModeModule from './modules/manual-safe-mode/ManualSafeModeModule';
 import GisModule from './components/GisModule';
 import FinanceOwnerModule from './components/FinanceOwnerModule';
 import SuspensionModule from './components/SuspensionModule';
@@ -933,6 +934,10 @@ export default function App() {
                 <NocReadOnlyModule getAuthHeaders={getAuthHeaders} />
                 <NocTelemetryModule getAuthHeaders={getAuthHeaders} />
               </>
+            )}
+
+            {activeTab === 'manual-safe-mode' && (
+              <ManualSafeModeModule getAuthHeaders={getAuthHeaders} />
             )}
 
             {activeTab === 'crm' && (
