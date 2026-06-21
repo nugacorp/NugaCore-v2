@@ -116,6 +116,16 @@ Estado actual:
 - Validaciones locales completadas: `npm run typecheck`, `npm test`, `npm run build`.
 - Pendiente: observación final en staging (frecuencia de 429 y comportamiento de cooldown).
 
+**Hotfix Payments Auth Headers**
+
+- `PaymentsModule` ya no autoafirma identidad con `x-user-role`/`x-user-id`.
+- Todas sus llamadas usan el Bearer JWT mediante `getAuthHeaders`.
+- Endpoints cubiertos: orders, actions, create order y reactivación.
+- RBAC visual y `canWritePayments` sin cambios.
+- Resultado: `docs/PAYMENTS_AUTH_HEADERS_HOTFIX_RESULT.md`.
+- Pendiente Hermes: redeploy/smoke test de Pagos. La host key SSH debe ser
+  verificada por el operador; no se modifica desde el repo.
+
 Documentos fuente:
 
 - `docs/FRONTEND_POLLING_RATE_LIMIT_AUDIT.md`

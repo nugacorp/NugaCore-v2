@@ -94,9 +94,10 @@ const canWrite = canWritePayments;
 
 interface PaymentsModuleProps {
   userRole: UserRole | string | null;
+  getAuthHeaders: () => Promise<Record<string, string>>;
 }
 
-export default function PaymentsModule({ userRole }: PaymentsModuleProps) {
+export default function PaymentsModule({ userRole, getAuthHeaders }: PaymentsModuleProps) {
   const [orders, setOrders] = useState<PaymentOrderView[]>([]);
   const [actions, setActions] = useState<MikrotikActionView[]>([]);
   const [loading, setLoading] = useState(true);
@@ -115,19 +116,14 @@ export default function PaymentsModule({ userRole }: PaymentsModuleProps) {
   const [reactivateId, setReactivateId] = useState('');
   const [reactivating, setReactivating] = useState(false);
 
-  const authHeaders = () => ({
-    'Content-Type': 'application/json',
-    'x-user-role': userRole || 'solo lectura',
-    'x-user-id': 'client',
-  });
-
   const loadData = useCallback(async () => {
     setLoading(true);
     setError('');
     try {
+      const headers = await getAuthHeaders();
       const [ordersRes, actionsRes] = await Promise.all([
-        fetch('/api/payments/orders', { headers: authHeaders() }),
-        fetch('/api/payments/actions', { headers: authHeaders() }),
+        fetch('/api/payments/orders', { headers }),
+        fetch('/api/payments/actions', { headers }),
       ]);
       if (ordersRes.ok) setOrders(await ordersRes.json());
       if (actionsRes.ok) setActions(await actionsRes.json());
@@ -136,7 +132,7 @@ export default function PaymentsModule({ userRole }: PaymentsModuleProps) {
     } finally {
       setLoading(false);
     }
-  }, [userRole]);
+  }, [getAuthHeaders]);
 
   useEffect(() => { loadData(); }, [loadData]);
 
@@ -145,9 +141,13 @@ export default function PaymentsModule({ userRole }: PaymentsModuleProps) {
     if (!formData.customerId || !formData.invoiceId || !formData.amountPesos) return;
     setFormLoading(true);
     try {
+      const headers = {
+        ...(await getAuthHeaders()),
+        'Content-Type': 'application/json',
+      };
       const res = await fetch('/api/payments/orders', {
         method: 'POST',
-        headers: authHeaders(),
+        headers,
         body: JSON.stringify({
           customerId: formData.customerId,
           invoiceId: formData.invoiceId,
@@ -176,9 +176,13 @@ export default function PaymentsModule({ userRole }: PaymentsModuleProps) {
     setReactivating(true);
     setError('');
     try {
+      const headers = {
+        ...(await getAuthHeaders()),
+        'Content-Type': 'application/json',
+      };
       const res = await fetch(`/api/payments/customers/${reactivateId.trim()}/reactivate`, {
         method: 'POST',
-        headers: authHeaders(),
+        headers,
       });
       if (!res.ok) {
         const err = await res.json();

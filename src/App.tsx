@@ -1254,7 +1254,10 @@ export default function App() {
 
             {activeTab === 'payments' && (
               <div className="p-6">
-                <PaymentsModule userRole={userSession.role} />
+                <PaymentsModule
+                  userRole={userSession.role}
+                  getAuthHeaders={getAuthHeaders}
+                />
               </div>
             )}
           </main>

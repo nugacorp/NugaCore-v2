@@ -85,6 +85,12 @@ detallado en `docs/DEVELOPMENT_HANDOFF_CHECKLIST.md` §0.D.
   `routerId`/`poolId`/`ipAssignmentStatus` requieren persistencia DB futura. Ver
   `docs/IP_ASSIGNMENT_CUSTOMER_ONBOARDING_RESULT.md`.
 
+- HOTFIX-PAYMENTS-AUTH — Pagos usa ahora Bearer JWT vía `getAuthHeaders` para
+  listar órdenes/acciones, crear órdenes y solicitar reactivación. Se eliminaron
+  trusted headers del módulo frontend; backend y RBAC no cambiaron. Pendiente
+  redeploy/smoke test de Hermes y verificación operativa de la host key SSH. Ver
+  `docs/PAYMENTS_AUTH_HEADERS_HOTFIX_RESULT.md`.
+
 No avanzar a un punto sin cerrar el anterior.
 
 > Última funcionalidad implementada localmente: **CUSTOMER-IPAM-1**, sin alterar
