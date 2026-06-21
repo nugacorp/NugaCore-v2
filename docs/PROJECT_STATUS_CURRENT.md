@@ -65,15 +65,16 @@ detallado en `docs/DEVELOPMENT_HANDOFF_CHECKLIST.md` §0.D.
 7. PROD-4 CHR Real Read-Only (abstracción de providers). 🟡 implementada localmente, PREPARADO/NO CONECTADO (pendiente Hermes).
 8. PROD-5 Dry-Run/CHR → PROD-6 comando real CHR → PROD-7 piloto router no crítico. 🔄 TODO, gated (no implementar todavía).
 
-- UX-1 — Reorganización profesional del Sidebar (WISP) + Manual de Usuario. ✅
-  Solo UI/UX de navegación: 6 secciones en español (Inicio, Clientes, Red WISP,
-  MikroTik, Operaciones, Sistema). WireGuard / Modo Seguro Manual / Cola Dry-Run
-  ocultos del sidebar (siguen accesibles por tab/URL; código/rutas/tests intactos)
-  vía `isVisibleInSidebar`/`SIDEBAR_HIDDEN_TABS`. Routers movido a MikroTik. Nuevo
-  módulo `user-manual` (frontend, sin backend) visible para todos los roles.
-  RBAC funcional/backend/RouterOS sin cambios. Ver
-  `docs/UI_NAVIGATION_REORGANIZATION_RESULT.md`. Avanzar a PROD-5 solo tras validar
-  esta UX con Hermes.
+- UX-1 — Simplificación de navegación WISP + Dashboard operativo. ✅ Solo UI/UX
+  (sin cambios de tema/colores): 6 secciones en español (Inicio, Clientes, Red,
+  MikroTik, Reportes, Sistema). NOC en Red; Routers en MikroTik; `RouterOS Lab` →
+  `Laboratorio MikroTik`. WireGuard / Modo Seguro Manual / Cola Dry-Run ocultos del
+  sidebar (siguen accesibles por tab/URL; código/rutas/tests intactos) vía
+  `isVisibleInSidebar`/`SIDEBAR_HIDDEN_TABS`. Módulo `user-manual` (frontend) visible
+  para todos los roles, con FAQ. Dashboard con "Resumen operativo" priorizado (estado
+  de red + alertas + KPIs enlazables) sobre datos existentes. RBAC funcional/backend/
+  RouterOS sin cambios. Ver `docs/UI_NAVIGATION_SIMPLIFICATION_RESULT.md`. Avanzar a
+  PROD-5 solo tras validar esta UX con Hermes.
 
 No avanzar a un punto sin cerrar el anterior.
 

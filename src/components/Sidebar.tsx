@@ -83,7 +83,6 @@ export default function Sidebar({
       title: 'Inicio',
       items: [
         { id: 'dashboard', name: 'Dashboard', icon: Activity },
-        { id: 'noc', name: 'NOC', icon: ShieldAlert },
       ],
     },
     {
@@ -92,15 +91,16 @@ export default function Sidebar({
       items: [
         { id: 'crm', name: 'Clientes', icon: Users },
         { id: 'support', name: 'Tickets', icon: Wrench },
-        { id: 'suspension', name: 'Suspensiones', icon: Ban },
         { id: 'payments', name: 'Pagos', icon: Banknote },
         { id: 'billing', name: 'Facturación / Planes', icon: CreditCard },
+        { id: 'suspension', name: 'Suspensiones', icon: Ban },
       ],
     },
     {
-      id: 'red-wisp',
-      title: 'Red WISP',
+      id: 'red',
+      title: 'Red',
       items: [
+        { id: 'noc', name: 'NOC', icon: ShieldAlert },
         { id: 'gis', name: 'Mapa / Infraestructura', icon: Map },
         { id: 'network', name: 'Torres y Sitios', icon: Network },
         { id: 'inventory', name: 'Inventario', icon: Box },
@@ -115,12 +115,12 @@ export default function Sidebar({
         { id: 'router-enrollment', name: 'Alta de Router', icon: Wifi },
         { id: 'routeros-templates', name: 'Plantillas', icon: BookOpen },
         { id: 'routeros-resources', name: 'Scripts', icon: FileCode },
-        { id: 'routeros-readonly', name: 'RouterOS Lab', icon: Server },
+        { id: 'routeros-readonly', name: 'Laboratorio MikroTik', icon: Server },
       ],
     },
     {
-      id: 'operaciones',
-      title: 'Operaciones',
+      id: 'reportes',
+      title: 'Reportes',
       items: [
         { id: 'finance', name: 'Analytics', icon: DollarSign },
       ],

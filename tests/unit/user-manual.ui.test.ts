@@ -24,15 +24,16 @@ describe('UserManualModule — contrato de contenido', () => {
       'Inicio / Dashboard',
       'Clientes',
       'Tickets',
-      'Facturación y Planes',
       'Pagos',
+      'Facturación y Planes',
       'Suspensiones',
-      'Red WISP',
+      'Red / NOC',
+      'Inventario',
       'MikroTik / Routers',
       'Alta de Router',
       'Plantillas y Scripts',
-      'RouterOS Lab',
-      'NOC',
+      'Laboratorio MikroTik',
+      'Preguntas frecuentes',
     ]) {
       expect(moduleSource, `falta la sección "${label}"`).toContain(label);
     }

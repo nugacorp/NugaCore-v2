@@ -24,9 +24,9 @@ const rbacSource = readFileSync('src/lib/rbac.ts', 'utf8');
 
 // Estructura objetivo: 6 secciones WISP con sus módulos VISIBLES (ids existentes).
 const EXPECTED_SECTIONS: Array<{ title: string; ids: string[] }> = [
-  { title: 'Inicio', ids: ['dashboard', 'noc'] },
-  { title: 'Clientes', ids: ['crm', 'support', 'suspension', 'payments', 'billing'] },
-  { title: 'Red WISP', ids: ['gis', 'network', 'inventory'] },
+  { title: 'Inicio', ids: ['dashboard'] },
+  { title: 'Clientes', ids: ['crm', 'support', 'payments', 'billing', 'suspension'] },
+  { title: 'Red', ids: ['noc', 'gis', 'network', 'inventory'] },
   {
     title: 'MikroTik',
     ids: [
@@ -38,7 +38,7 @@ const EXPECTED_SECTIONS: Array<{ title: string; ids: string[] }> = [
       'routeros-readonly',
     ],
   },
-  { title: 'Operaciones', ids: ['finance'] },
+  { title: 'Reportes', ids: ['finance'] },
   { title: 'Sistema', ids: ['owner', 'user-manual'] },
 ];
 
@@ -71,11 +71,11 @@ describe('Sidebar — secciones reorganizadas (WISP)', () => {
   });
 
   it('ya NO usa los títulos de sección de reorganizaciones previas', () => {
+    expect(sidebarSource).not.toContain("title: 'Red WISP'");
+    expect(sidebarSource).not.toContain("title: 'Operaciones'");
     expect(sidebarSource).not.toContain("title: 'Operaciones Seguras'");
-    expect(sidebarSource).not.toContain("title: 'Reportes'");
     expect(sidebarSource).not.toContain("title: 'MikroTik Workspace'");
     expect(sidebarSource).not.toContain("title: 'Administración'");
-    expect(sidebarSource).not.toContain("title: 'Red'");
     expect(sidebarSource).not.toContain("title: 'Operations'");
     expect(sidebarSource).not.toContain("title: 'Management'");
     expect(sidebarSource).not.toContain("title: 'System'");
@@ -93,8 +93,8 @@ describe('Sidebar — secciones reorganizadas (WISP)', () => {
 
   it('Routers (inventory-routers) vive en el grupo MikroTik', () => {
     expect(sectionBlock('MikroTik')).toContain("id: 'inventory-routers'");
-    // y ya NO en Red WISP
-    expect(sectionBlock('Red WISP')).not.toContain("id: 'inventory-routers'");
+    // y ya NO en Red
+    expect(sectionBlock('Red')).not.toContain("id: 'inventory-routers'");
   });
 
   it('Manual de Usuario (user-manual) vive en Sistema', () => {

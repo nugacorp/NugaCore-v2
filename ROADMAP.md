@@ -599,20 +599,23 @@ PROD-6 Primer comando real en CHR         ← TODO, gated + autorización Ramiro
 PROD-7 Piloto en router no crítico        ← TODO, gated + autorización Ramiro
 ```
 
-#### UX-1 — Reorganización profesional del Sidebar (WISP) + Manual de Usuario
+#### UX-1 — Simplificación de navegación WISP + Dashboard operativo
 
-Estado: ✅ **Completada (solo UI/UX de navegación + módulo de documentación).**
+Estado: ✅ **Completada (solo UI/UX + módulo de documentación; sin cambios de tema).**
 
-El sidebar quedó en 6 secciones con nombres claros en español que reflejan el
-flujo de un WISP: Inicio, Clientes, Red WISP, MikroTik, Operaciones y Sistema.
-Decisiones de producto: **WireGuard, Modo Seguro Manual y Cola Dry-Run se ocultan
-del sidebar** (infraestructura/herramientas internas) pero conservan código,
-rutas, tests y acceso por tab/URL directo; **Routers** se movió a MikroTik; se
-agregó el módulo **Manual de Usuario** (frontend, sin backend) visible para todos
-los roles. La visibilidad se separó del acceso vía `isVisibleInSidebar` /
-`SIDEBAR_HIDDEN_TABS` en `rbac.ts`. RBAC funcional, backend, endpoints, providers
-y RouterOS sin cambios. Resultado:
-[`docs/UI_NAVIGATION_REORGANIZATION_RESULT.md`](./docs/UI_NAVIGATION_REORGANIZATION_RESULT.md).
+Sidebar final en 6 secciones con nombres claros en español: **Inicio, Clientes,
+Red, MikroTik, Reportes y Sistema**. **NOC** vive en Red; **Routers** en MikroTik;
+`RouterOS Lab` se renombró a `Laboratorio MikroTik` (etiqueta del menú). Decisiones
+de producto: **WireGuard, Modo Seguro Manual y Cola Dry-Run se ocultan del sidebar**
+(infraestructura/herramientas internas) pero conservan código, rutas, tests y acceso
+por tab/URL directo (`isVisibleInSidebar` / `SIDEBAR_HIDDEN_TABS` en `rbac.ts`). Se
+mantiene el módulo **Manual de Usuario** (frontend, sin backend) visible para todos
+los roles, ahora con FAQ. El **Dashboard** agrega un "Resumen operativo" priorizado
+(estado de red + alertas y KPIs clave enlazables) reutilizando los mismos
+estilos/colores. RBAC funcional, backend, endpoints, providers, RouterOS y tema sin
+cambios. Resultado:
+[`docs/UI_NAVIGATION_SIMPLIFICATION_RESULT.md`](./docs/UI_NAVIGATION_SIMPLIFICATION_RESULT.md)
+(antecedente: [`docs/UI_NAVIGATION_REORGANIZATION_RESULT.md`](./docs/UI_NAVIGATION_REORGANIZATION_RESULT.md)).
 **Avanzar a PROD-5 / CHR Read-Only real solo después de validar esta UX con Hermes.**
 
 ### FASE 4.12 — Zero Touch Provisioning

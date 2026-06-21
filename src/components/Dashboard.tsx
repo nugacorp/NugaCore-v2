@@ -31,9 +31,11 @@ interface DashboardProps {
   onRefresh: () => void;
   onPostAlert: (type: 'tower' | 'olt' | 'client' | 'system', severity: 'critical' | 'warning' | 'info', source: string, msg: string) => void;
   getAuthHeaders: () => Promise<Record<string, string>>;
+  // Navegación opcional a un módulo (para los enlaces "ver detalle" del resumen).
+  onNavigate?: (tab: string) => void;
 }
 
-export default function Dashboard({ stats, alerts, onAcknowledgeAlerts, onRefresh, onPostAlert, getAuthHeaders }: DashboardProps) {
+export default function Dashboard({ stats, alerts, onAcknowledgeAlerts, onRefresh, onPostAlert, getAuthHeaders, onNavigate }: DashboardProps) {
   const [billingBotRunning, setBillingBotRunning] = useState(false);
   const [pingScanning, setPingScanning] = useState(false);
   const [scanResults, setScanResults] = useState<any[]>([]);
@@ -243,6 +245,28 @@ export default function Dashboard({ stats, alerts, onAcknowledgeAlerts, onRefres
     }, 2000);
   };
 
+  // ── Resumen operativo: deriva indicadores de prioridad usando SOLO datos ya
+  // disponibles en `stats`/`alerts` (sin integraciones nuevas). ───────────────
+  const towersOnline = stats.towers?.online ?? 0;
+  const towersWarning = stats.towers?.warning ?? 0;
+  const towersOffline = stats.towers?.offline ?? 0;
+  const towersTotal = towersOnline + towersWarning + towersOffline;
+  const activeAlertsCount = alerts.filter(a => !a.acknowledged).length;
+  const criticalAlertsCount = alerts.filter(a => !a.acknowledged && a.severity === 'critical').length;
+  const pendingToCollect = Math.max(0, (stats.facturacionMes ?? 0) - (stats.cobranzaMes ?? 0));
+  const networkOk = towersOffline === 0 && criticalAlertsCount === 0;
+
+  const go = (tab: string) => () => onNavigate?.(tab);
+
+  // Tarjetas KPI del resumen operativo (orden por prioridad operativa).
+  const operationalKpis: Array<{ label: string; value: string; tab: string; icon: typeof Users; tone: string }> = [
+    { label: 'Suscriptores activos', value: String(stats.activeClients ?? 0), tab: 'crm', icon: Users, tone: 'text-indigo-400' },
+    { label: 'Suspendidos', value: String(stats.suspendedClients ?? 0), tab: 'suspension', icon: AlertTriangle, tone: 'text-rose-400' },
+    { label: 'Tickets abiertos', value: String(stats.activeTickets ?? 0), tab: 'support', icon: Wrench, tone: 'text-amber-400' },
+    { label: 'Pendiente de cobro', value: formatMXN(pendingToCollect), tab: 'billing', icon: CreditCard, tone: 'text-yellow-400' },
+    { label: 'Ingresos del mes', value: formatMXN(stats.mrr ?? 0), tab: 'finance', icon: TrendingUp, tone: 'text-emerald-400' },
+  ];
+
   return (
     <div className="space-y-6 text-slate-100 font-sans p-6 bg-slate-900 min-h-screen">
       {/* Header section */}
@@ -267,6 +291,72 @@ export default function Dashboard({ stats, alerts, onAcknowledgeAlerts, onRefres
           </span>
         </div>
       </div>
+
+      {/* ═══ RESUMEN OPERATIVO ═══
+          Prioriza estado de red + alertas; luego KPIs clave enlazables a su
+          módulo. Mismos estilos/colores existentes (sin tema nuevo). */}
+      <section id="dashboard-operativo" className="space-y-4" aria-label="Resumen operativo">
+        <h3 className="text-xs text-slate-400 font-mono uppercase tracking-widest">Resumen operativo</h3>
+
+        {/* Estado general de la red + alertas NOC primero */}
+        <div className="bg-slate-950 border border-slate-800 rounded-xl p-4 flex flex-col sm:flex-row sm:items-center sm:justify-between gap-3">
+          <div className="flex items-center space-x-3">
+            <div className={`w-9 h-9 rounded-lg flex items-center justify-center border ${
+              networkOk
+                ? 'bg-emerald-500/10 border-emerald-500/30 text-emerald-400'
+                : 'bg-rose-500/10 border-rose-500/30 text-rose-400'
+            }`}>
+              {networkOk ? <CheckCircle className="w-5 h-5" /> : <AlertTriangle className="w-5 h-5" />}
+            </div>
+            <div>
+              <span className="text-[10px] text-slate-500 font-mono uppercase block">Estado general de la red</span>
+              <span className={`text-sm font-bold ${networkOk ? 'text-emerald-400' : 'text-rose-400'}`}>
+                {networkOk ? 'Red operativa' : 'Red requiere atención'}
+              </span>
+            </div>
+          </div>
+          <div className="flex items-center gap-2 flex-wrap">
+            <button
+              type="button"
+              onClick={go('noc')}
+              className="flex items-center space-x-1.5 text-xs font-mono px-2.5 py-1.5 rounded-lg bg-slate-900 border border-slate-800 text-slate-300 hover:border-slate-700 hover:text-white transition"
+            >
+              <Bell className={`w-3.5 h-3.5 ${activeAlertsCount > 0 ? 'text-rose-400' : 'text-slate-500'}`} />
+              <span>{activeAlertsCount} alertas NOC</span>
+            </button>
+            <span className="text-xs font-mono px-2.5 py-1.5 rounded-lg bg-slate-900 border border-slate-800 text-emerald-400">
+              Torres {towersOnline}/{towersTotal} online
+            </span>
+            <span className={`text-xs font-mono px-2.5 py-1.5 rounded-lg bg-slate-900 border border-slate-800 ${
+              towersOffline > 0 ? 'text-rose-400' : 'text-slate-400'
+            }`}>
+              {towersOffline} offline
+            </span>
+          </div>
+        </div>
+
+        {/* KPIs operativos clave (compactos, enlazables a su módulo) */}
+        <div className="grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-5 gap-3">
+          {operationalKpis.map(kpi => {
+            const Icon = kpi.icon;
+            return (
+              <button
+                key={kpi.label}
+                type="button"
+                onClick={go(kpi.tab)}
+                className="text-left bg-slate-950 border border-slate-800 rounded-xl p-3.5 hover:border-slate-700 transition group"
+              >
+                <div className="flex items-center justify-between">
+                  <span className="text-[10px] text-slate-500 font-mono uppercase">{kpi.label}</span>
+                  <Icon className={`w-4 h-4 ${kpi.tone}`} />
+                </div>
+                <div className="mt-2 text-xl font-extrabold tracking-tight text-white truncate">{kpi.value}</div>
+                <span className="text-[10px] text-slate-500 font-mono group-hover:text-slate-300 transition">Ver detalle →</span>
+              </button>
+            );
+          })}
+        </div>
+      </section>
 
       {/* Bento Stats Grid */}
       <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-4">

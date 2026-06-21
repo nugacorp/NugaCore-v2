@@ -72,21 +72,25 @@ Estado PROD-4 (implementado localmente, pendiente Hermes):
 - Tests `routeros.readonly.*` (contract/service/ui/providers/security).
 - Resultado local: `docs/CHR_REAL_READ_ONLY_RESULT.md`.
 
-Estado UX-1 (solo UI/UX de navegación + Manual de Usuario, completada):
+Estado UX-1 (solo UI/UX de navegación + Manual de Usuario + Dashboard, completada):
 
-- Sidebar en 6 secciones WISP en español (Inicio, Clientes, Red WISP, MikroTik,
-  Operaciones, Sistema) en `src/components/Sidebar.tsx`.
+- Sidebar final en 6 secciones WISP en español (Inicio, Clientes, Red, MikroTik,
+  Reportes, Sistema) en `src/components/Sidebar.tsx`. NOC vive en Red; Routers
+  (`inventory-routers`) en MikroTik; `RouterOS Lab` renombrado a `Laboratorio
+  MikroTik` (etiqueta del menú). Panel MikroTik (`mikrotik`) se mantiene visible
+  (no está en la lista de ocultos).
 - WireGuard, Modo Seguro Manual y Cola Dry-Run **ocultos del sidebar** (decisión
   de producto): siguen accesibles por RBAC y tab/URL directo; código, rutas y
   tests intactos. Separación visibilidad/acceso vía `isVisibleInSidebar` y
   `SIDEBAR_HIDDEN_TABS` en `src/lib/rbac.ts`. RBAC funcional sin cambios.
-- Routers (`inventory-routers`) movido al grupo MikroTik.
-- Nuevo módulo `user-manual` (`src/modules/user-manual/UserManualModule.tsx`,
-  frontend, sin backend), visible para todos los roles incl. Cobranza.
-- Backend/endpoints/providers/RouterOS sin tocar. Badges dentro de cada módulo.
+- Módulo `user-manual` (`src/modules/user-manual/UserManualModule.tsx`, frontend,
+  sin backend), visible para todos los roles incl. Cobranza; ahora con FAQ.
+- Dashboard (`src/components/Dashboard.tsx`): bloque "Resumen operativo" priorizado
+  (estado de red + alertas + KPIs enlazables) sobre datos existentes; sin tema nuevo.
+- Backend/endpoints/providers/RouterOS y tema/colores sin tocar.
 - Tests: `navigation.ui`, `rbac.frontend`, `manual-safe-mode.ui`,
-  `safe-command-queue.ui`, `user-manual.ui`.
-- Resultado: `docs/UI_NAVIGATION_REORGANIZATION_RESULT.md`. No avanzar a PROD-5
+  `safe-command-queue.ui`, `routeros.readonly.ui`, `user-manual.ui`, `dashboard.ui`.
+- Resultado: `docs/UI_NAVIGATION_SIMPLIFICATION_RESULT.md`. No avanzar a PROD-5
   hasta validar esta UX con Hermes.
 
 ### C.1 Hotfix paralelo activo (frontend)

@@ -952,7 +952,7 @@ export default function App() {
                   <span>Welcome to NugaCore</span>
                 </div>
                 <p className="text-sm text-slate-200 mt-1.5 leading-relaxed">
-                  Este es tu centro operativo unificado. Navega por Inicio, Clientes y Red WISP para la operación diaria; usa MikroTik para los routers, y Operaciones y Sistema para análisis y ajustes. ¿Primera vez? Abre el Manual de Usuario en Sistema.
+                  Este es tu centro operativo unificado. Navega por Inicio, Clientes y Red para la operación diaria; usa MikroTik para los routers, y Reportes y Sistema para análisis y ajustes. ¿Primera vez? Abre el Manual de Usuario en Sistema.
                 </p>
               </div>
               <div className="flex items-center gap-2 shrink-0">
@@ -1057,13 +1057,14 @@ export default function App() {
 
             {/* View Dispatcher */}
             {activeTab === 'dashboard' && (
-              <Dashboard 
-                stats={stats} 
+              <Dashboard
+                stats={stats}
                 alerts={alerts}
                 onAcknowledgeAlerts={handleAcknowledgeAlerts}
                 onRefresh={handleRefresh}
                 onPostAlert={handlePostAlert}
                 getAuthHeaders={getAuthHeaders}
+                onNavigate={setActiveTab}
               />
             )}
 
