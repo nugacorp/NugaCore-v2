@@ -61,23 +61,34 @@ const ROUTEROS_PATTERNS: RegExp[] = [
 export const looksLikeRouterOsScript = (text: string): boolean =>
   ROUTEROS_PATTERNS.some((re) => re.test(text));
 
-// Secretos embebidos en texto libre: `clave = valor`, Bearer y JWT sueltos.
-const INLINE_SECRET_ASSIGNMENT =
-  /\b(pass(?:word|wd)?|pwd|secret|token|authorization|auth[-_]?token|private[-_]?key|preshared[-_]?key|api[-_]?key|client[-_]?secret|service[-_]?role|credentials?|jwt)\b(\s*[:=]\s*)("[^"]*"|'[^']*'|[^\s,;)]+)/gi;
-const BEARER_TOKEN = /\bBearer\s+[A-Za-z0-9._~+/=-]+/gi;
-const JWT_TOKEN = /\beyJ[A-Za-z0-9_-]+\.[A-Za-z0-9_-]+\.[A-Za-z0-9_-]+/g;
+// Marcador sentinel de Hermes: cualquier string que lo contenga se redacta entero.
+const SENTINEL_MARKER = /PROD1_SENTINEL_/i;
+
+// Asignación de un secreto en texto libre: `claveSensible = valor` o `... : valor`.
+const SENSITIVE_ASSIGNMENT =
+  /\b(pass(?:word|wd)?|pwd|secret|tokens?|access[-_]?token|refresh[-_]?token|authorization|auth[-_]?token|private[-_]?key|preshared[-_]?key|api[-_]?key|client[-_]?secret|service[-_]?role|credentials?|jwt|bearer)\b\s*[:=]/i;
+
+// `Bearer <token>` y JWT sueltos (eyJ....eyJ....sig).
+const BEARER_TOKEN = /\bBearer\s+\S/i;
+const JWT_TOKEN = /\beyJ[A-Za-z0-9_-]+\.[A-Za-z0-9_-]+\.[A-Za-z0-9_-]+/;
+
+/** ¿El texto libre contiene algún indicio sensible (clave, sentinel, Bearer, JWT)? */
+export const containsSensitiveText = (text: string): boolean =>
+  SENTINEL_MARKER.test(text) ||
+  SENSITIVE_ASSIGNMENT.test(text) ||
+  BEARER_TOKEN.test(text) ||
+  JWT_TOKEN.test(text);
 
 /**
- * Sanea un string libre. Si parece un script RouterOS lo redacta completo;
- * de lo contrario redacta secretos embebidos (key=valor, Bearer, JWT).
+ * Sanea un string libre. Postura conservadora: si el texto parece un script
+ * RouterOS o contiene CUALQUIER indicio sensible (clave sensible, sentinel,
+ * Bearer, JWT), se redacta COMPLETO. No se intenta preservar partes sensibles.
  */
 export const sanitizeText = (text: string): string => {
   if (typeof text !== 'string' || text.length === 0) return text;
   if (looksLikeRouterOsScript(text)) return REDACTED_ROUTEROS_SCRIPT;
-  return text
-    .replace(INLINE_SECRET_ASSIGNMENT, `$1$2${REDACTED}`)
-    .replace(BEARER_TOKEN, `Bearer ${REDACTED}`)
-    .replace(JWT_TOKEN, REDACTED);
+  if (containsSensitiveText(text)) return REDACTED;
+  return text;
 };
 
 /**

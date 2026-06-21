@@ -238,4 +238,46 @@ describe('Manual Safe Mode contract', () => {
     expectNoSentinels(detail.body.audit);
     expectNoSentinels(detail.body);
   });
+
+  // ── Second hotfix: free-text sentinels (PROD1_SENTINEL_), leaks_count=0 ──
+  const countLeaks = (...bodies: unknown[]): number =>
+    bodies.reduce<number>(
+      (total, body) => total + (JSON.stringify(body).match(/PROD1_SENTINEL_/g)?.length ?? 0),
+      0,
+    );
+
+  it('campos libres con PROD1_SENTINEL_ no se filtran en ningún endpoint (leaks_count=0)', async () => {
+    const create = await request(app)
+      .post('/api/manual-actions')
+      .set(ADMIN)
+      .send({
+        actionType: 'mikrotik.read',
+        targetType: 'router',
+        targetId: 'mkt-1',
+        description: 'PROD1_SENTINEL_DESCRIPTION',
+        notes: 'password=PROD1_SENTINEL_NOTES',
+        payload: {
+          token: 'PROD1_SENTINEL_TOKEN',
+          nested: { privateKey: 'PROD1_SENTINEL_PK' },
+          freeText: 'algo con PROD1_SENTINEL_PAYLOAD adentro',
+        },
+      });
+    expect(create.status).toBe(201);
+
+    const id = create.body.id;
+    const list = await request(app).get('/api/manual-actions').set(ADMIN);
+    const detailBefore = await request(app).get(`/api/manual-actions/${id}`).set(ADMIN);
+    const reject = await request(app)
+      .post(`/api/manual-actions/${id}/reject`)
+      .set(ADMIN)
+      .send({ reason: 'privateKey=PROD1_SENTINEL_REASON' });
+    const detailAfter = await request(app).get(`/api/manual-actions/${id}`).set(ADMIN);
+
+    expect(reject.status).toBe(200);
+    expect(detailBefore.body.action.description).toBe('[REDACTED]');
+    expect(detailBefore.body.action.notes).toBe('[REDACTED]');
+
+    const leaks = countLeaks(create.body, list.body, detailBefore.body, reject.body, detailAfter.body);
+    expect(leaks, 'leaks_count debe ser 0').toBe(0);
+  });
 });

@@ -253,3 +253,49 @@ Backend sin cambios de arquitectura/estados/RBAC; no hay estado `EXECUTED`, endp
   incluyendo el reject reason (Caso 7).
 
 Resultado: `npm run typecheck` PASS · `npm test` 1170 passed / 46 skipped · `npm run build` PASS.
+
+## 15. Second Security Sanitization Hotfix (free-text)
+
+La primera redacción cubría claves de objetos y scripts RouterOS, pero Hermes
+revalidó (`3bf2722`) y siguió detectando fugas en **texto libre**
+(`redacted_count=97`, `routeros_redacted=true`, `leaks_count=3`,
+`audit_sentinel_hits=3`) en `description`, `reason` y `audit.details`: un valor
+sentinel "desnudo" (sin forma `clave=valor`) no se redactaba, y la redacción
+inline solo borraba el valor pero conservaba el resto del texto.
+
+### Cambio
+
+Se endureció `sanitizeText` a **redacción de string completo** (postura
+conservadora, sin preservar partes): un string libre se redacta entero a
+`[REDACTED]` si contiene **cualquier** indicio sensible, y a
+`[REDACTED_ROUTEROS_SCRIPT]` si parece un script RouterOS.
+
+Indicios que disparan redacción completa:
+
+- Marcador sentinel `PROD1_SENTINEL_` en cualquier parte del texto.
+- Asignación de clave sensible (`clave=valor` o `clave: valor`): `token`,
+  `accessToken`, `refreshToken`, `authorization`, `password`, `secret`,
+  `privateKey`/`private_key`, `presharedKey`/`preshared_key`, `credentials`,
+  `encrypted_password`/`encryptedPassword`, `serviceRole`, `jwt`,
+  `apiKey`/`api_key`, `clientSecret`/`client_secret`.
+- `Bearer <token>` y JWT sueltos (`eyJ…`).
+
+### Campos cubiertos
+
+`description`, `notes`, `reason` (reject), `payload` (deep, strings incluidos) y
+`audit.details` — todo string libre de creación/rechazo/simulación/cancelación pasa
+por el mismo sanitizer central. Atención especial al `reject reason` y a los
+`audit.details` que embeben `reason`/`description` (ya saneados en origen y de nuevo
+en `buildAudit`).
+
+### Cobertura de tests
+
+- `tests/unit/sanitize-sensitive-data.test.ts`: casos 1-7 del segundo hotfix
+  (token/password/privateKey/Bearer con `PROD1_SENTINEL_`, sentinel desnudo, script
+  RouterOS, texto normal preservado) + todas las variantes de asignación.
+- `tests/contract/manual-safe-mode.contract.test.ts`: acción con sentinels en
+  `description`/`notes`/`payload`/`reject reason`; se valida que POST, GET list, GET
+  detail, reject y `audit.details` **no** contienen `PROD1_SENTINEL_` →
+  **`leaks_count=0`**.
+
+Resultado: `npm run typecheck` PASS · `npm test` 1179 passed / 46 skipped · `npm run build` PASS.
