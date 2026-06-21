@@ -77,6 +77,30 @@ describe('Safe Command Queue contract', () => {
     expect(serialized).not.toContain('SHOULD_BE_REDACTED');
   });
 
+  it('description con sentinel se redacta en POST, list, detail y auditoría', async () => {
+    const created = await request(app)
+      .post('/api/safe-command-queue')
+      .set(ADMIN)
+      .send({
+        commandType: 'SUSPEND_CUSTOMER',
+        targetId: 'cust-sentinel-description',
+        description: 'PROD2_SENTINEL_DESCRIPTION',
+        payload: { reason: 'mora' },
+      });
+
+    expect(created.status).toBe(201);
+    expect(JSON.stringify(created.body)).not.toContain('PROD2_SENTINEL_');
+    expect(created.body.description).toBe('[REDACTED]');
+
+    const list = await request(app).get('/api/safe-command-queue').set(ADMIN);
+    expect(JSON.stringify(list.body)).not.toContain('PROD2_SENTINEL_');
+
+    const detail = await request(app).get(`/api/safe-command-queue/${created.body.id}`).set(ADMIN);
+    expect(JSON.stringify(detail.body)).not.toContain('PROD2_SENTINEL_');
+    expect(detail.body.command.description).toBe('[REDACTED]');
+    expect(detail.body.audit[0].details).not.toContain('PROD2_SENTINEL_');
+  });
+
   it('flujo validate → simulate → approve', async () => {
     const created = await createCommand(app);
     const id = created.body.id;

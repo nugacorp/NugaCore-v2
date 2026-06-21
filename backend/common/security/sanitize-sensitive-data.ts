@@ -62,7 +62,7 @@ export const looksLikeRouterOsScript = (text: string): boolean =>
   ROUTEROS_PATTERNS.some((re) => re.test(text));
 
 // Marcador sentinel de Hermes: cualquier string que lo contenga se redacta entero.
-const SENTINEL_MARKER = /PROD1_SENTINEL_/i;
+const SENTINEL_MARKER = /PROD\d+_SENTINEL_/i;
 
 // Asignación de un secreto en texto libre: `claveSensible = valor` o `... : valor`.
 const SENSITIVE_ASSIGNMENT =
