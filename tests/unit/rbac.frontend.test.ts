@@ -6,10 +6,10 @@ import type { UserRole } from '../../src/lib/supabase';
 const ALL_ROLES: UserRole[] = ['Super Admin', 'Administrador', 'Cobranza', 'Técnico', 'Soporte', 'Solo lectura'];
 
 describe('RBAC visual por rol (frontend)', () => {
-  it('Super Admin ve todos los módulos (20)', () => {
+  it('Super Admin ve todos los módulos (21)', () => {
     const t = getAllowedTabsByRole('Super Admin');
-    expect(t.length).toBe(20);
-    expect(t).toEqual(expect.arrayContaining(['mikrotik', 'wireguard', 'routeros-resources', 'routeros-templates', 'router-enrollment', 'payments', 'owner', 'finance', 'billing', 'inventory', 'inventory-routers', 'suspension', 'manual-safe-mode', 'safe-command-queue']));
+    expect(t.length).toBe(21);
+    expect(t).toEqual(expect.arrayContaining(['mikrotik', 'wireguard', 'routeros-resources', 'routeros-templates', 'router-enrollment', 'payments', 'owner', 'finance', 'billing', 'inventory', 'inventory-routers', 'suspension', 'manual-safe-mode', 'safe-command-queue', 'routeros-readonly']));
   });
 
   it('Administrador NO ve mikrotik / finance / owner', () => {
@@ -35,14 +35,14 @@ describe('RBAC visual por rol (frontend)', () => {
   });
 
   it('Soporte: dashboard/noc/crm/support/inventory-routers/gis; no billing ni mikrotik', () => {
-    expect(getAllowedTabsByRole('Soporte')).toEqual(['dashboard', 'noc', 'crm', 'support', 'inventory-routers', 'gis', 'manual-safe-mode', 'safe-command-queue']);
+    expect(getAllowedTabsByRole('Soporte')).toEqual(['dashboard', 'noc', 'crm', 'support', 'inventory-routers', 'gis', 'manual-safe-mode', 'safe-command-queue', 'routeros-readonly']);
     expect(canAccessTab('Soporte', 'billing')).toBe(false);
     expect(canAccessTab('Soporte', 'mikrotik')).toBe(false);
     expect(canAccessTab('Soporte', 'inventory-routers')).toBe(true);
   });
 
   it('Solo lectura: lectura básica + noc + inventory-routers; sin mikrotik/support/owner', () => {
-    expect(getAllowedTabsByRole('Solo lectura')).toEqual(['dashboard', 'noc', 'crm', 'billing', 'suspension', 'network', 'inventory-routers', 'gis', 'manual-safe-mode', 'safe-command-queue']);
+    expect(getAllowedTabsByRole('Solo lectura')).toEqual(['dashboard', 'noc', 'crm', 'billing', 'suspension', 'network', 'inventory-routers', 'gis', 'manual-safe-mode', 'safe-command-queue', 'routeros-readonly']);
     expect(canAccessTab('Solo lectura', 'mikrotik')).toBe(false);
     expect(canAccessTab('Solo lectura', 'owner')).toBe(false);
     expect(canAccessTab('Solo lectura', 'support')).toBe(false);
@@ -113,6 +113,16 @@ describe('RBAC visual por rol (frontend)', () => {
 
   it('safe-command-queue NO visible para Cobranza', () => {
     expect(canAccessTab('Cobranza', 'safe-command-queue')).toBe(false);
+  });
+
+  it('routeros-readonly visible para SA, Admin, Técnico, Soporte, Solo lectura', () => {
+    for (const r of ['Super Admin', 'Administrador', 'Técnico', 'Soporte', 'Solo lectura'] as UserRole[]) {
+      expect(canAccessTab(r, 'routeros-readonly'), `${r} debería ver routeros-readonly`).toBe(true);
+    }
+  });
+
+  it('routeros-readonly NO visible para Cobranza', () => {
+    expect(canAccessTab('Cobranza', 'routeros-readonly')).toBe(false);
   });
 
   it('App no dispara fetchData antes de tener sesión validada', () => {

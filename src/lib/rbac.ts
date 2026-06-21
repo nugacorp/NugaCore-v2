@@ -20,7 +20,8 @@ export type AppTab =
   | 'gis'
   | 'owner'
   | 'manual-safe-mode'
-  | 'safe-command-queue';
+  | 'safe-command-queue'
+  | 'routeros-readonly';
 
 // ====================================================================
 // RBAC visual: qué módulos (tabs) ve cada rol. Mapeado a los tabs
@@ -29,12 +30,12 @@ export type AppTab =
 // la VISIBILIDAD del módulo.
 // ====================================================================
 const roleTabs: Record<UserRole, AppTab[]> = {
-  'Super Admin':  ['dashboard', 'noc', 'crm', 'billing', 'finance', 'suspension', 'payments', 'network', 'mikrotik', 'wireguard', 'routeros-resources', 'routeros-templates', 'router-enrollment', 'support', 'inventory', 'inventory-routers', 'gis', 'owner', 'manual-safe-mode', 'safe-command-queue'],
-  'Administrador':['dashboard', 'noc', 'crm', 'billing', 'suspension', 'payments', 'network', 'wireguard', 'routeros-resources', 'routeros-templates', 'router-enrollment', 'support', 'inventory', 'inventory-routers', 'gis', 'manual-safe-mode', 'safe-command-queue'],
+  'Super Admin':  ['dashboard', 'noc', 'crm', 'billing', 'finance', 'suspension', 'payments', 'network', 'mikrotik', 'wireguard', 'routeros-resources', 'routeros-templates', 'router-enrollment', 'support', 'inventory', 'inventory-routers', 'gis', 'owner', 'manual-safe-mode', 'safe-command-queue', 'routeros-readonly'],
+  'Administrador':['dashboard', 'noc', 'crm', 'billing', 'suspension', 'payments', 'network', 'wireguard', 'routeros-resources', 'routeros-templates', 'router-enrollment', 'support', 'inventory', 'inventory-routers', 'gis', 'manual-safe-mode', 'safe-command-queue', 'routeros-readonly'],
   'Cobranza':     ['dashboard', 'crm', 'billing', 'finance', 'suspension', 'payments'],
-  'Técnico':      ['dashboard', 'noc', 'suspension', 'network', 'mikrotik', 'routeros-resources', 'routeros-templates', 'router-enrollment', 'support', 'inventory', 'inventory-routers', 'gis', 'manual-safe-mode', 'safe-command-queue'],
-  'Soporte':      ['dashboard', 'noc', 'crm', 'support', 'inventory-routers', 'gis', 'manual-safe-mode', 'safe-command-queue'],
-  'Solo lectura': ['dashboard', 'noc', 'crm', 'billing', 'suspension', 'network', 'inventory-routers', 'gis', 'manual-safe-mode', 'safe-command-queue'],
+  'Técnico':      ['dashboard', 'noc', 'suspension', 'network', 'mikrotik', 'routeros-resources', 'routeros-templates', 'router-enrollment', 'support', 'inventory', 'inventory-routers', 'gis', 'manual-safe-mode', 'safe-command-queue', 'routeros-readonly'],
+  'Soporte':      ['dashboard', 'noc', 'crm', 'support', 'inventory-routers', 'gis', 'manual-safe-mode', 'safe-command-queue', 'routeros-readonly'],
+  'Solo lectura': ['dashboard', 'noc', 'crm', 'billing', 'suspension', 'network', 'inventory-routers', 'gis', 'manual-safe-mode', 'safe-command-queue', 'routeros-readonly'],
 };
 
 // Fallback seguro para roles desconocidos / sin rol.
@@ -76,6 +77,7 @@ export const MODULE_LABELS: Record<AppTab, string> = {
   owner: 'Owner & Automatizaciones',
   'manual-safe-mode': 'Modo Seguro Manual',
   'safe-command-queue': 'Cola de Comandos (Dry-Run)',
+  'routeros-readonly': 'RouterOS Read-Only Lab',
 };
 
 export const getModuleLabel = (tab: string): string => MODULE_LABELS[tab as AppTab] || tab;

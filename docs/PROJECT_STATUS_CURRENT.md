@@ -61,16 +61,17 @@ detallado en `docs/DEVELOPMENT_HANDOFF_CHECKLIST.md` §0.D.
 3. NOC Read-Only (4.11.2 foundation + 4.11.3 real telemetry). ✅
 4. PROD-1 Manual Safe Mode. 🟡 implementada localmente (pendiente Hermes).
 5. FAST-1 Safe Command Queue dry-run. 🟡 implementada localmente (pendiente Hermes).
-6. RouterOS read-only en CHR de lab. 🔜 siguiente (gated, documental: planes listos).
+6. PROD-3 RouterOS Read-Only Lab (mock). 🟡 implementada localmente (pendiente Hermes).
+7. PROD-4 CHR Real Read-Only → PROD-5 Dry-Run/CHR → PROD-6 comando real CHR → PROD-7 piloto router no crítico. 🔄 TODO, gated (no implementar todavía).
 
 No avanzar a un punto sin cerrar el anterior.
 
-> Última fase implementada localmente: **FAST-1 Safe Command Queue (dry-run)** —
-> cola segura de comandos que NO ejecuta nada (sin estado `EXECUTED`/`RUNNING`/
-> `COMPLETED`, sin `/execute`), más preparación documental del CHR de lab y del plan
-> RouterOS read-only. Ver `docs/SAFE_COMMAND_QUEUE_DRY_RUN_RESULT.md`,
-> `docs/CHR_LAB_PREP_RUNBOOK.md` y `docs/ROUTEROS_READ_ONLY_API_PLAN.md`. Detalle de
-> tareas en `docs/DEVELOPMENT_HANDOFF_CHECKLIST.md` §0.C.
+> Última fase implementada localmente: **PROD-3 RouterOS Read-Only Lab** — provider
+> mock + 5 endpoints GET `/api/routeros/*` + UI read-only (badge `READ ONLY LAB`) +
+> prueba de seguridad estática que hace al dominio incapaz de escribir. Sin RouterOS
+> real, sin conexión real, sin worker live, sin escritura. Ver
+> `docs/ROUTEROS_READ_ONLY_LAB_RESULT.md`. PROD-4 a PROD-7 quedan como TODO gated en
+> `ROADMAP.md`. Detalle de tareas en `docs/DEVELOPMENT_HANDOFF_CHECKLIST.md` §0.C.
 
 ## Prohibido activar (sin autorización explícita de Ramiro / fase aprobada)
 

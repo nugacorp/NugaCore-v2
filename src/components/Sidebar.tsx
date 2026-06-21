@@ -23,7 +23,8 @@ import {
   ChevronRight,
   Banknote,
   ShieldCheck,
-  ListChecks
+  ListChecks,
+  Server
 } from 'lucide-react';
 import { UserSessionProfile } from '../lib/supabase';
 import { canAccessTab } from '../lib/rbac';
@@ -106,6 +107,7 @@ export default function Sidebar({
         { id: 'owner', name: 'Settings', icon: Shield },
         { id: 'manual-safe-mode', name: 'Security', icon: ShieldCheck, badge: 'SAFE MODE', badgeTone: 'success' },
         { id: 'safe-command-queue', name: 'Command Queue', icon: ListChecks, badge: 'DRY RUN', badgeTone: 'neutral' },
+        { id: 'routeros-readonly', name: 'RouterOS Lab', icon: Server, badge: 'READ ONLY LAB', badgeTone: 'neutral' },
         { id: 'inventory', name: 'Inventory', icon: Box },
         { id: 'inventory-routers', name: 'Routers', icon: Cpu, badge: 'RO', badgeTone: 'neutral' },
       ],

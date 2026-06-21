@@ -163,6 +163,32 @@ Pendiente FAST-1 / siguiente (NO en esta sesión):
 - [ ] Validación staging por **Hermes** (ciclo dry-run + RBAC + ausencia de ejecución).
 - [ ] Fase siguiente (gated): RouterOS read-only en CHR de lab (`docs/ROUTEROS_READ_ONLY_API_PLAN.md`).
 
+**PROD-3 RouterOS Read-Only Lab Foundation: implementada localmente** (pendiente
+validación Hermes en staging) — ver
+[`docs/ROUTEROS_READ_ONLY_LAB_RESULT.md`](./ROUTEROS_READ_ONLY_LAB_RESULT.md).
+
+Hecho (local, esta sesión; sin staging, sin producción, sin migraciones, sin RouterOS real, sin conexión real, sin escritura):
+
+- [x] Dominio `backend/domains/routeros-readonly/` (`types.ts`, `mock-provider.ts`, `mappers.ts`, `service.ts`, `routes.ts`) sobre provider **mock** en memoria.
+- [x] Endpoints **solo GET** `/api/routeros/{identity,system,interfaces,routes,wireguard}`; sin POST/PUT/PATCH/DELETE.
+- [x] RBAC: SA/Admin/Técnico/Soporte/Solo lectura; Cobranza 403. Payloads estables y sin secretos (sin claves privadas/preshared keys).
+- [x] UI `src/modules/routeros-readonly/RouterOSReadOnlyModule.tsx` (badge `READ ONLY LAB`, banner "Esta vista no ejecuta cambios ni comandos RouterOS."), cableada en `App` + `Sidebar` + `rbac.ts`. Sin botones de escritura ni `execute`.
+- [x] Tests: contract (14) + service/mappers (10) + ui (10) + **static-safety (11)** que falla si aparecen tokens de escritura RouterOS en el dominio.
+- [x] `npm run typecheck`, `npm test`, `npm run build` → PASS.
+- [x] Sin activar `USE_DB_MIKROTIK`/`USE_DB_WIREGUARD`/`MIKROTIK_WORKER_LIVE`/commit mode/write enabled.
+
+Pendiente PROD-3 (NO en esta sesión):
+
+- [ ] Validación funcional staging por **Hermes** (5 endpoints + RBAC + payload sin secretos + UI + ausencia de escritura).
+
+**PROD-4 a PROD-7: TODO — NO implementar todavía** (gated). Ver `ROADMAP.md`
+sección "PROD-3 a PROD-7":
+
+- [ ] PROD-4 CHR Real Read-Only Integration (solo lectura sobre CHR de lab; allowlist de `print`; requiere aprobación Hermes).
+- [ ] PROD-5 Safe Command Queue Dry-Run sobre CHR (simular contra datos del CHR; requiere PROD-4).
+- [ ] PROD-6 Primer comando real controlado en CHR (acción mínima reversible; requiere PROD-5 + autorización Ramiro).
+- [ ] PROD-7 Piloto en router no crítico (requiere PROD-6 + autorización Ramiro).
+
 ### E. Qué NO hacer
 
 **No avanzar a Worker Live, Real Provisioning ni Commit Mode.** DB-1 e Inventory 4.11.1

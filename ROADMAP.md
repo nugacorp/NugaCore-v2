@@ -499,6 +499,76 @@ audita comandos **sin ejecutar nada**. Dominio `backend/domains/safe-command-que
 Resultado: [`docs/SAFE_COMMAND_QUEUE_DRY_RUN_RESULT.md`](./docs/SAFE_COMMAND_QUEUE_DRY_RUN_RESULT.md).
 Siguiente: RouterOS read-only en CHR de lab (gated).
 
+### PROD-3 a PROD-7 — Camino corto a producción controlada (MikroTik)
+
+Ruta gated desde laboratorio mock hasta un piloto en router no crítico. **Orden
+estricto: no avanzar a una fase sin cerrar la anterior y sin aprobación Hermes /
+autorización explícita de Ramiro.** Cada fase mantiene apagados
+`USE_DB_MIKROTIK`, `USE_DB_WIREGUARD`, `MIKROTIK_WORKER_LIVE`,
+`MIKROTIK_COMMIT_MODE`, `MIKROTIK_WRITE_ENABLED` salvo autorización posterior.
+
+#### PROD-3 — RouterOS Read-Only Lab Foundation
+
+Estado: 🟡 **Implementada localmente** (pendiente validación Hermes).
+
+NugaCore sabe representar datos RouterOS de laboratorio en modo **mock**: provider
+mock, 5 endpoints GET `/api/routeros/*` (identity, system, interfaces, routes,
+wireguard), UI read-only `RouterOS Read-Only Lab` (badge `READ ONLY LAB`), tests
+(contract/service/ui/static-safety) y una prueba que hace al dominio
+**físicamente incapaz de escribir**. Sin conexión real, sin RouterOS real, sin
+worker live, sin escritura. RBAC: SA/Admin/Técnico/Soporte/Solo lectura; Cobranza
+403. Resultado: [`docs/ROUTEROS_READ_ONLY_LAB_RESULT.md`](./docs/ROUTEROS_READ_ONLY_LAB_RESULT.md).
+
+#### PROD-4 — CHR Real Read-Only Integration
+
+Estado: 🔄 **TODO — no implementar todavía.** Requiere aprobación Hermes.
+
+Conexión **solo lectura** a un MikroTik CHR de laboratorio (nunca routers reales),
+con credenciales de lab fuera del repo. Comandos permitidos únicamente:
+`/system identity print`, `/system resource print`, `/interface print`,
+`/ip address print`, `/ip route print`, `/interface wireguard print`. Sin `.add`,
+sin `.set`, sin `.remove`, sin escritura. Allowlist estricta. Diseño:
+[`docs/ROUTEROS_READ_ONLY_API_PLAN.md`](./docs/ROUTEROS_READ_ONLY_API_PLAN.md),
+prep en [`docs/CHR_LAB_PREP_RUNBOOK.md`](./docs/CHR_LAB_PREP_RUNBOOK.md).
+
+#### PROD-5 — Safe Command Queue Dry-Run sobre CHR
+
+Estado: 🔄 **TODO — no implementar todavía.** Requiere PROD-4 aprobado.
+
+Tomar comandos de la Safe Command Queue y **simularlos contra los datos del CHR**:
+validar precondiciones, generar plan de ejecución y rollback simulado. No ejecuta
+comandos, no modifica el CHR.
+
+#### PROD-6 — Primer comando real controlado en CHR
+
+Estado: 🔄 **TODO — no implementar todavía.** Requiere PROD-5 aprobado y
+autorización explícita de Ramiro.
+
+Solo CHR de lab: una acción mínima y reversible, con aprobación humana
+obligatoria, backup/export antes, rollback documentado y commit mode explícito
+**solo para CHR**. No routers reales.
+
+#### PROD-7 — Piloto en router no crítico
+
+Estado: 🔄 **TODO — no implementar todavía.** Requiere PROD-6 aprobado.
+
+Un router **no crítico**, en ventana de mantenimiento, con backup/export, acción
+reversible, monitoreo antes/después, rollback y aprobación explícita de Ramiro.
+
+#### Secuencia PROD-3 → PROD-7
+
+```text
+PROD-3 RouterOS Read-Only Lab (mock)      ← implementada localmente
+  ↓ (Hermes)
+PROD-4 CHR Real Read-Only                 ← TODO, gated
+  ↓
+PROD-5 Safe Command Queue Dry-Run / CHR   ← TODO, gated
+  ↓
+PROD-6 Primer comando real en CHR         ← TODO, gated + autorización Ramiro
+  ↓
+PROD-7 Piloto en router no crítico        ← TODO, gated + autorización Ramiro
+```
+
 ### FASE 4.12 — Zero Touch Provisioning
 
 Estado: 🔄 Pendiente

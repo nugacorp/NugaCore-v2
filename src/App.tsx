@@ -12,6 +12,7 @@ import NocReadOnlyModule from './components/NocReadOnlyModule';
 import NocTelemetryModule from './components/NocTelemetryModule';
 import ManualSafeModeModule from './modules/manual-safe-mode/ManualSafeModeModule';
 import SafeCommandQueueModule from './modules/safe-command-queue/SafeCommandQueueModule';
+import RouterOSReadOnlyModule from './modules/routeros-readonly/RouterOSReadOnlyModule';
 import GisModule from './components/GisModule';
 import FinanceOwnerModule from './components/FinanceOwnerModule';
 import SuspensionModule from './components/SuspensionModule';
@@ -62,6 +63,30 @@ import { AlertTriangle, RefreshCw, Menu, Sparkles, ArrowRight } from 'lucide-rea
 
 const SIDEBAR_COLLAPSE_STORAGE_KEY = 'nugacore.sidebar.collapsed.v1';
 const WELCOME_BANNER_DISMISSED_KEY = 'nugacore.welcome.dismissed.v1';
+
+const MIKROTIK_WORKSPACE_TABS = [
+  { id: 'mikrotik', label: 'Core' },
+  { id: 'router-enrollment', label: 'Enrollment' },
+  { id: 'routeros-resources', label: 'Router Scripts' },
+  { id: 'routeros-templates', label: 'Router Templates' },
+  { id: 'wireguard', label: 'WireGuard' },
+  { id: 'suspension', label: 'Suspension' },
+] as const;
+
+const isMikrotikWorkspaceTab = (tabId: string): boolean =>
+  MIKROTIK_WORKSPACE_TABS.some(tab => tab.id === tabId);
+
+const canAccessMikrotikWorkspaceTab = (role: UserSessionProfile['role'], tabId: string): boolean => {
+  if (!isMikrotikWorkspaceTab(tabId)) {
+    return canAccessTab(role, tabId);
+  }
+
+  if (tabId === 'mikrotik') {
+    return canAccessTab(role, 'mikrotik');
+  }
+
+  return canAccessTab(role, 'mikrotik') && canAccessTab(role, tabId);
+};
 
 export default function App() {
   const [showLogin, setShowLogin] = useState<boolean>(false);
@@ -138,7 +163,7 @@ export default function App() {
 
   useEffect(() => {
     if (!userSession) return;
-    if (!canAccessTab(userSession.role, activeTab)) {
+    if (!canAccessMikrotikWorkspaceTab(userSession.role, activeTab)) {
       setNotice('No tienes permiso para este módulo. Redirigiendo...');
       setActiveTab(getDefaultTabByRole(userSession.role));
     }
@@ -364,7 +389,7 @@ export default function App() {
       setRateLimitNotice('');
       // Cargas aisladas (no participan del Promise.all para no romper a roles
       // sin acceso a esos módulos).
-      if (activeTab === 'mikrotik' || activeTab === 'router-enrollment') {
+      if (isMikrotikWorkspaceTab(activeTab)) {
         try {
           setProvisionedRouters(await fetchJson('/api/mikrotik/routers'));
         } catch {
@@ -395,7 +420,7 @@ export default function App() {
           setSuspensionPolicy(null);
         }
       }
-      if (activeTab === 'wireguard') {
+      if (activeTab === 'wireguard' || activeTab === 'router-enrollment') {
         try {
           const [servers, peers] = await Promise.all([
             fetchJson('/api/wireguard/servers'),
@@ -852,6 +877,10 @@ export default function App() {
   // Find system critical unacknowledged alerts to show in high-prominence top ticker
   const activeUnackCriticalAlert = alerts.find(a => !a.acknowledged && a.severity === 'critical');
   const activeTicketsCount = tickets.filter(t => t.status === 'open' || t.status === 'assigned').length;
+  const isMikrotikFunctionTab = isMikrotikWorkspaceTab(activeTab);
+  const mikrotikWorkspaceTabsForRole = userSession
+    ? MIKROTIK_WORKSPACE_TABS.filter(tab => canAccessMikrotikWorkspaceTab(userSession.role, tab.id))
+    : [];
   const isSupportWorkspace = activeTab === 'support';
   const shouldShowWelcomeBanner = showWelcomeBanner && activeTab === 'dashboard';
 
@@ -1005,6 +1034,36 @@ export default function App() {
           </div>
         ) : (
           <main className="flex-1 overflow-y-auto">
+            {isMikrotikFunctionTab && (
+              <div id="mikrotik-workspace-nav" className="sticky top-0 z-10 bg-slate-950/95 backdrop-blur border-b border-slate-800 px-4 md:px-6 py-3">
+                <div className="flex flex-col lg:flex-row lg:items-center justify-between gap-2.5">
+                  <div>
+                    <p className="text-[10px] uppercase tracking-widest font-mono text-indigo-400/90">MikroTik Workspace</p>
+                    <p className="text-xs text-slate-400">WireGuard, Suspension y funciones Router consolidadas en un mismo módulo operativo.</p>
+                  </div>
+                  <div className="flex flex-wrap gap-1.5">
+                    {mikrotikWorkspaceTabsForRole.map(tab => {
+                      const isActiveWorkspaceTab = activeTab === tab.id;
+                      return (
+                        <button
+                          key={tab.id}
+                          type="button"
+                          onClick={() => setActiveTab(tab.id)}
+                          className={`px-2.5 py-1.5 rounded-lg text-[11px] font-mono border transition ${
+                            isActiveWorkspaceTab
+                              ? 'bg-indigo-600/20 border-indigo-500/40 text-indigo-200'
+                              : 'bg-slate-900 border-slate-800 text-slate-400 hover:text-slate-200 hover:border-slate-700'
+                          }`}
+                        >
+                          {tab.label}
+                        </button>
+                      );
+                    })}
+                  </div>
+                </div>
+              </div>
+            )}
+
             {/* View Dispatcher */}
             {activeTab === 'dashboard' && (
               <Dashboard 
@@ -1030,6 +1089,10 @@ export default function App() {
 
             {activeTab === 'safe-command-queue' && (
               <SafeCommandQueueModule getAuthHeaders={getAuthHeaders} />
+            )}
+
+            {activeTab === 'routeros-readonly' && (
+              <RouterOSReadOnlyModule getAuthHeaders={getAuthHeaders} />
             )}
 
             {activeTab === 'crm' && (
