@@ -805,6 +805,7 @@ export default function App() {
 
   // Find system critical unacknowledged alerts to show in high-prominence top ticker
   const activeUnackCriticalAlert = alerts.find(a => !a.acknowledged && a.severity === 'critical');
+  const activeTicketsCount = tickets.filter(t => t.status === 'open' || t.status === 'assigned').length;
 
   if (!sessionBootstrapped) {
     return (
@@ -837,7 +838,8 @@ export default function App() {
       <Sidebar 
         activeTab={activeTab} 
         setActiveTab={setActiveTab} 
-        activeAlertsCount={alerts.filter(a => !a.acknowledged).length} 
+        activeAlertsCount={alerts.filter(a => !a.acknowledged).length}
+        activeTicketsCount={activeTicketsCount}
         isOpen={mobileMenuOpen}
         onClose={() => setMobileMenuOpen(false)}
         userProfile={userSession}

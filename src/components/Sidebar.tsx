@@ -30,6 +30,7 @@ interface SidebarProps {
   activeTab: string;
   setActiveTab: (tab: string) => void;
   activeAlertsCount: number;
+  activeTicketsCount: number;
   isOpen?: boolean;
   onClose?: () => void;
   userProfile?: UserSessionProfile | null;
@@ -40,33 +41,62 @@ export default function Sidebar({
   activeTab, 
   setActiveTab, 
   activeAlertsCount,
+  activeTicketsCount,
   isOpen = false,
   onClose,
   userProfile,
   onLogout
 }: SidebarProps) {
-  const menuItems = [
-    { id: 'dashboard', name: 'Dashboard Ejecutivo', icon: Activity },
-    { id: 'noc', name: 'NOC Read-Only', icon: ShieldAlert },
-    { id: 'crm', name: 'CRM Clientes & Leads', icon: Users },
-    { id: 'billing', name: 'Facturación & Cobros', icon: CreditCard },
-    { id: 'finance', name: 'Finanzas & EBITDA', icon: DollarSign },
-    { id: 'suspension', name: 'Suspensiones & Cortes', icon: Ban },
-    { id: 'network', name: 'Red WISP & FTTH', icon: Network },
-    { id: 'mikrotik', name: 'MikroTik Core Control & Copilot', icon: Terminal, highlight: true },
-    { id: 'wireguard', name: 'WireGuard Manager', icon: Shield },
-    { id: 'routeros-resources', name: 'Recursos MikroTik (.rsc)', icon: FileCode },
-    { id: 'routeros-templates', name: 'Templates RouterOS Library', icon: BookOpen },
-    { id: 'router-enrollment', name: 'Enrollment WireGuard Auto', icon: Wifi },
-    { id: 'payments', name: 'Portal Pagos & Reactivación', icon: Banknote },
-    { id: 'support', name: 'Remesa Soporte & OT', icon: Wrench },
-    { id: 'inventory', name: 'Inventarios / ERP', icon: Box },
-    { id: 'inventory-routers', name: 'Inventario Routers (Read-Only)', icon: Cpu },
-    { id: 'gis', name: 'GIS & Cobertura Co-Map', icon: Map },
-    { id: 'owner', name: 'Owner & Automatizaciones', icon: Shield },
-    { id: 'manual-safe-mode', name: 'Modo Seguro Manual (SAFE MODE)', icon: ShieldCheck },
-    { id: 'safe-command-queue', name: 'Cola de Comandos (DRY RUN)', icon: ListChecks },
+  const menuSections = [
+    {
+      id: 'operations',
+      title: 'Operations',
+      items: [
+        { id: 'network', name: 'Network', icon: Network },
+        { id: 'crm', name: 'Subscribers', icon: Users },
+        { id: 'support', name: 'Tickets', icon: Wrench },
+      ],
+    },
+    {
+      id: 'management',
+      title: 'Management',
+      items: [
+        { id: 'dashboard', name: 'Dashboard', icon: Activity },
+        { id: 'billing', name: 'Plans & Billing', icon: CreditCard },
+        { id: 'gis', name: 'Infrastructure', icon: Map },
+        { id: 'mikrotik', name: 'Mikrotik', icon: Terminal, highlight: true, badge: 'NEW', badgeTone: 'warning' },
+        { id: 'router-enrollment', name: 'ACS / TR-069', icon: Wifi, badge: 'NEW', badgeTone: 'warning' },
+        { id: 'payments', name: 'Payments', icon: Banknote },
+        { id: 'finance', name: 'Analytics', icon: DollarSign },
+        { id: 'noc', name: 'NOC', icon: ShieldAlert, badge: 'LIVE', badgeTone: 'success' },
+      ],
+    },
+    {
+      id: 'system',
+      title: 'System',
+      items: [
+        { id: 'owner', name: 'Settings', icon: Shield },
+        { id: 'manual-safe-mode', name: 'Security', icon: ShieldCheck, badge: 'SAFE', badgeTone: 'success' },
+        { id: 'routeros-resources', name: 'Help', icon: FileCode },
+        { id: 'routeros-templates', name: 'Templates', icon: BookOpen },
+        { id: 'safe-command-queue', name: 'Command Queue', icon: ListChecks, badge: 'DRY RUN', badgeTone: 'neutral' },
+        { id: 'inventory', name: 'Inventory', icon: Box },
+        { id: 'inventory-routers', name: 'Routers', icon: Cpu, badge: 'RO', badgeTone: 'neutral' },
+        { id: 'wireguard', name: 'WireGuard', icon: Shield },
+        { id: 'suspension', name: 'Suspensions', icon: Ban },
+      ],
+    },
   ];
+
+  const getBadgeClasses = (tone?: 'neutral' | 'success' | 'warning') => {
+    if (tone === 'success') {
+      return 'bg-emerald-500/10 text-emerald-400 border border-emerald-500/30';
+    }
+    if (tone === 'warning') {
+      return 'bg-amber-500/10 text-amber-400 border border-amber-500/30';
+    }
+    return 'bg-slate-800/50 text-slate-300 border border-slate-700/70';
+  };
 
   // Filtering views according to basic Role Perms (FASE 1 Requirement)
   const isAuthorizedTab = (tabId: string): boolean => {
@@ -74,7 +104,12 @@ export default function Sidebar({
     return canAccessTab(userProfile.role, tabId);
   };
 
-  const filteredMenuItems = menuItems.filter(item => isAuthorizedTab(item.id));
+  const filteredSections = menuSections
+    .map(section => ({
+      ...section,
+      items: section.items.filter(item => isAuthorizedTab(item.id))
+    }))
+    .filter(section => section.items.length > 0);
 
   return (
     <>
@@ -121,42 +156,68 @@ export default function Sidebar({
             </div>
 
             {/* Navigation list */}
-            <nav className="space-y-1.5">
+            <nav className="space-y-4">
               <p className="text-[10px] text-slate-500 uppercase tracking-widest font-semibold px-3 mb-2 font-mono">Módulos Habilitados</p>
-              {filteredMenuItems.map((item) => {
-                const Icon = item.icon;
-                const isActive = activeTab === item.id;
-                return (
-                  <button
-                    key={item.id}
-                    id={`sidebar-tab-${item.id}`}
-                    onClick={() => {
-                      setActiveTab(item.id);
-                      if (onClose) onClose();
-                    }}
-                    className={`w-full flex items-center justify-between px-3.5 py-2.5 rounded-lg text-sm transition-all duration-200 group text-left ${
-                      isActive
-                        ? 'bg-indigo-600/15 border border-indigo-500/30 text-white font-medium shadow-sm'
-                        : 'text-slate-400 hover:bg-slate-900 hover:text-slate-100 border border-transparent'
-                    }`}
-                  >
-                    <div className="flex items-center space-x-3">
-                      <Icon className={`w-4 h-4 transition-transform group-hover:scale-110 ${
-                        isActive ? 'text-indigo-400' : 'text-slate-500 group-hover:text-slate-300'
-                      }`} />
-                      <span className="truncate">{item.name}</span>
-                    </div>
-                    {item.highlight && (
-                      <Sparkles className="w-3.5 h-3.5 text-yellow-400 animate-pulse shrink-0" />
-                    )}
-                    {item.id === 'network' && activeAlertsCount > 0 && (
-                      <span className="bg-rose-500/15 text-rose-400 border border-rose-500/30 text-[10px] px-1.5 py-0.5 rounded-full font-mono shrink-0">
-                        {activeAlertsCount} Alert
-                      </span>
-                    )}
-                  </button>
-                );
-              })}
+              {filteredSections.map(section => (
+                <div key={section.id} className="space-y-1.5">
+                  <p className="text-[10px] text-slate-600 uppercase tracking-widest font-semibold px-3 font-mono">
+                    {section.title}
+                  </p>
+                  {section.items.map((item) => {
+                    const Icon = item.icon;
+                    const isActive = activeTab === item.id;
+                    const hasNetworkAlerts = item.id === 'network' && activeAlertsCount > 0;
+                    const hasOpenTickets = item.id === 'support' && activeTicketsCount > 0;
+                    const hasIndicators = item.highlight || item.badge || hasNetworkAlerts || hasOpenTickets;
+
+                    return (
+                      <button
+                        key={item.id}
+                        id={`sidebar-tab-${item.id}`}
+                        onClick={() => {
+                          setActiveTab(item.id);
+                          if (onClose) onClose();
+                        }}
+                        className={`w-full flex items-center justify-between px-3.5 py-2.5 rounded-lg text-sm transition-all duration-200 group text-left ${
+                          isActive
+                            ? 'bg-indigo-600/15 border border-indigo-500/30 text-white font-medium shadow-sm'
+                            : 'text-slate-400 hover:bg-slate-900 hover:text-slate-100 border border-transparent'
+                        }`}
+                      >
+                        <div className="flex items-center space-x-3 min-w-0">
+                          <Icon className={`w-4 h-4 transition-transform group-hover:scale-110 shrink-0 ${
+                            isActive ? 'text-indigo-400' : 'text-slate-500 group-hover:text-slate-300'
+                          }`} />
+                          <span className="truncate">{item.name}</span>
+                        </div>
+
+                        {hasIndicators && (
+                          <div className="flex items-center space-x-1.5 shrink-0">
+                            {item.highlight && (
+                              <Sparkles className="w-3.5 h-3.5 text-yellow-400 animate-pulse" />
+                            )}
+                            {item.badge && (
+                              <span className={`${getBadgeClasses(item.badgeTone)} text-[9px] px-1.5 py-0.5 rounded-full font-mono uppercase`}>
+                                {item.badge}
+                              </span>
+                            )}
+                            {hasNetworkAlerts && (
+                              <span className="bg-rose-500/15 text-rose-400 border border-rose-500/30 text-[10px] px-1.5 py-0.5 rounded-full font-mono">
+                                {activeAlertsCount}
+                              </span>
+                            )}
+                            {hasOpenTickets && (
+                              <span className="bg-indigo-500/15 text-indigo-300 border border-indigo-500/30 text-[10px] px-1.5 py-0.5 rounded-full font-mono">
+                                {activeTicketsCount}
+                              </span>
+                            )}
+                          </div>
+                        )}
+                      </button>
+                    );
+                  })}
+                </div>
+              ))}
             </nav>
           </div>
 
