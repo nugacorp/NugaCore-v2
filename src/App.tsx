@@ -64,19 +64,29 @@ import { AlertTriangle, RefreshCw, Menu, Sparkles, ArrowRight } from 'lucide-rea
 const SIDEBAR_COLLAPSE_STORAGE_KEY = 'nugacore.sidebar.collapsed.v1';
 const WELCOME_BANNER_DISMISSED_KEY = 'nugacore.welcome.dismissed.v1';
 
-// Reorganización UX (pre PROD-4): el "MikroTik Workspace" in-page agrupa solo
-// las funciones de router (core, enrollment, scripts y templates). WireGuard y
-// Suspension dejaron de estar anidados aquí: ahora viven en Red y Clientes
-// respectivamente y su acceso lo gobierna directamente el RBAC (canAccessTab).
 const MIKROTIK_WORKSPACE_TABS = [
   { id: 'mikrotik', label: 'Core' },
   { id: 'router-enrollment', label: 'Enrollment' },
   { id: 'routeros-resources', label: 'Router Scripts' },
   { id: 'routeros-templates', label: 'Router Templates' },
+  { id: 'wireguard', label: 'WireGuard' },
+  { id: 'suspension', label: 'Suspension' },
 ] as const;
 
 const isMikrotikWorkspaceTab = (tabId: string): boolean =>
   MIKROTIK_WORKSPACE_TABS.some(tab => tab.id === tabId);
+
+const canAccessMikrotikWorkspaceTab = (role: UserSessionProfile['role'], tabId: string): boolean => {
+  if (!isMikrotikWorkspaceTab(tabId)) {
+    return canAccessTab(role, tabId);
+  }
+
+  if (tabId === 'mikrotik') {
+    return canAccessTab(role, 'mikrotik');
+  }
+
+  return canAccessTab(role, 'mikrotik') && canAccessTab(role, tabId);
+};
 
 export default function App() {
   const [showLogin, setShowLogin] = useState<boolean>(false);
@@ -153,7 +163,7 @@ export default function App() {
 
   useEffect(() => {
     if (!userSession) return;
-    if (!canAccessTab(userSession.role, activeTab)) {
+    if (!canAccessMikrotikWorkspaceTab(userSession.role, activeTab)) {
       setNotice('No tienes permiso para este módulo. Redirigiendo...');
       setActiveTab(getDefaultTabByRole(userSession.role));
     }
@@ -869,7 +879,7 @@ export default function App() {
   const activeTicketsCount = tickets.filter(t => t.status === 'open' || t.status === 'assigned').length;
   const isMikrotikFunctionTab = isMikrotikWorkspaceTab(activeTab);
   const mikrotikWorkspaceTabsForRole = userSession
-    ? MIKROTIK_WORKSPACE_TABS.filter(tab => canAccessTab(userSession.role, tab.id))
+    ? MIKROTIK_WORKSPACE_TABS.filter(tab => canAccessMikrotikWorkspaceTab(userSession.role, tab.id))
     : [];
   const isSupportWorkspace = activeTab === 'support';
   const shouldShowWelcomeBanner = showWelcomeBanner && activeTab === 'dashboard';
@@ -951,7 +961,7 @@ export default function App() {
                   <span>Welcome to NugaCore</span>
                 </div>
                 <p className="text-sm text-slate-200 mt-1.5 leading-relaxed">
-                  Este es tu centro operativo unificado. Navega por Dashboard, Clientes y Red para la operación diaria; usa el MikroTik Workspace para routers, y Operaciones y Administración para análisis y ajustes.
+                  Este es tu centro operativo unificado. Empieza por Operations para Network, Subscribers y Tickets; luego continúa con Management y System.
                 </p>
               </div>
               <div className="flex items-center gap-2 shrink-0">
@@ -1029,7 +1039,7 @@ export default function App() {
                 <div className="flex flex-col lg:flex-row lg:items-center justify-between gap-2.5">
                   <div>
                     <p className="text-[10px] uppercase tracking-widest font-mono text-indigo-400/90">MikroTik Workspace</p>
-                    <p className="text-xs text-slate-400">Core, Enrollment, Router Scripts y Router Templates consolidados en un mismo módulo operativo.</p>
+                    <p className="text-xs text-slate-400">WireGuard, Suspension y funciones Router consolidadas en un mismo módulo operativo.</p>
                   </div>
                   <div className="flex flex-wrap gap-1.5">
                     {mikrotikWorkspaceTabsForRole.map(tab => {
