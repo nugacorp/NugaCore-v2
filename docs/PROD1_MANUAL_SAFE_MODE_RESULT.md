@@ -204,3 +204,52 @@ Tests: `tests/unit/rbac.frontend.test.ts` actualizado (Super Admin pasa de 18 a 
 módulos; arrays exactos de Soporte/Solo lectura; visibilidad manual-safe-mode) y
 `tests/unit/manual-safe-mode.ui.test.ts` ampliado con integración Sidebar/App/RBAC y
 ausencia de acción real.
+
+## 14. Security Sanitization Hotfix
+
+Hermes validó PROD-1 y encontró un bloqueador: los datos libres del cliente se
+almacenaban y devolvían sin redacción (`POST 201` → `GET detail 200`, `leaks_count=3`).
+Este hotfix corrige la fuga sin tocar arquitectura, estados ni RBAC.
+
+### Sanitización profunda
+
+Utilidad central única: `backend/common/security/sanitize-sensitive-data.ts`. Toda
+redacción del dominio pasa por ahí (no se duplica lógica). Funciona recursivamente
+sobre objetos, arrays, objetos anidados y arrays de objetos.
+
+- **Redacción de secretos por clave** → `[REDACTED]`. Coincidencia por substring
+  normalizada (lowercase, sin `_`/`-`), cubriendo variantes camelCase y snake_case:
+  `token`, `accessToken`, `refreshToken`, `authorization`, `password`, `secret`,
+  `privateKey`/`private_key`, `presharedKey`/`preshared_key`, `credentials`/`credential`,
+  `encrypted_password`/`encryptedPassword`, `serviceRole`, `jwt`, `bearer`,
+  `apiKey`/`api_key`, `clientSecret`/`client_secret`.
+- **Redacción de scripts RouterOS** → `[REDACTED_ROUTEROS_SCRIPT]` cuando el string
+  contiene patrones como `/system`, `/ip firewall`, `/interface wireguard`,
+  `/ppp secret`, `/user add` u otros bloques de comandos.
+- **Secretos embebidos en texto libre** (`clave=valor`, `Bearer …`, JWT `eyJ…`) →
+  `[REDACTED]`.
+
+### Dónde se aplica
+
+En el choke point de construcción del dominio:
+
+- `SafeAction.payload` → `sanitizeSensitiveData` (deep).
+- `SafeAction.description`, `notes`, `actionType`, `targetType`, `targetId` →
+  `sanitizeText`.
+- `rejectAction` reason → `sanitizeText` antes de persistir en `notes` y auditar.
+- `SafeActionAudit.details` → `sanitizeText` (todos los detalles de auditoría).
+
+Backend sin cambios de arquitectura/estados/RBAC; no hay estado `EXECUTED`, endpoint
+`/execute` ni ejecución real.
+
+### Cobertura de tests
+
+- `tests/unit/sanitize-sensitive-data.test.ts` (11): clave plana (Caso 1), objeto
+  anidado (Caso 2), array de objetos (Caso 3), script RouterOS (Caso 4), todas las
+  variantes de clave, secretos embebidos en texto, y conservación de valores no
+  sensibles.
+- `tests/contract/manual-safe-mode.contract.test.ts` (+3): `GET list` sin secretos
+  (Caso 5), `GET detail` con payload redactado (Caso 6), `audit details` sin secretos
+  incluyendo el reject reason (Caso 7).
+
+Resultado: `npm run typecheck` PASS · `npm test` 1170 passed / 46 skipped · `npm run build` PASS.

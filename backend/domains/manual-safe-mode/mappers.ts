@@ -6,6 +6,7 @@
 // ====================================================================
 
 import { BadRequestError, ConflictError } from '../../common/errors';
+import { sanitizeSensitiveData, sanitizeText } from '../../common/security/sanitize-sensitive-data';
 import {
   CreateSafeActionInput,
   EXECUTION_MODES,
@@ -53,16 +54,20 @@ export const buildSafeAction = (
   id,
   createdAt: nowIso(),
   createdBy,
-  actionType: requireString(input.actionType, 'actionType'),
-  targetType: requireString(input.targetType, 'targetType'),
-  targetId: requireString(input.targetId, 'targetId'),
-  description: requireString(input.description, 'description'),
-  payload: normalizePayload(input.payload),
+  // Campos libres del cliente: saneados antes de persistir (security hotfix).
+  actionType: sanitizeText(requireString(input.actionType, 'actionType')),
+  targetType: sanitizeText(requireString(input.targetType, 'targetType')),
+  targetId: sanitizeText(requireString(input.targetId, 'targetId')),
+  description: sanitizeText(requireString(input.description, 'description')),
+  payload: sanitizeSensitiveData(normalizePayload(input.payload)),
   status: 'PENDING',
   executionMode: normalizeExecutionMode(input.executionMode),
   // dryRun por defecto true (postura segura). Solo false si se pasa explícito.
   dryRun: input.dryRun === undefined ? true : Boolean(input.dryRun),
-  notes: typeof input.notes === 'string' && input.notes.trim() !== '' ? input.notes.trim() : undefined,
+  notes:
+    typeof input.notes === 'string' && input.notes.trim() !== ''
+      ? sanitizeText(input.notes.trim())
+      : undefined,
 });
 
 export const buildAudit = (
@@ -77,7 +82,8 @@ export const buildAudit = (
   timestamp: nowIso(),
   actor,
   event,
-  details,
+  // Saneo central: ningún detalle de auditoría debe filtrar secretos/scripts.
+  details: sanitizeText(details),
 });
 
 // ── Máquina de estados (read-only safe) ───────────────────────────────

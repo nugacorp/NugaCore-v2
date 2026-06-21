@@ -8,6 +8,7 @@
 // ====================================================================
 
 import { NotFoundError } from '../../common/errors';
+import { sanitizeText } from '../../common/security/sanitize-sensitive-data';
 import { buildAudit, buildSafeAction, resolveTransition } from './mappers';
 import { manualSafeModeRepository as repo } from './repository';
 import { CreateSafeActionInput, SafeAction, SafeActionDetail, SafeActionEvent } from './types';
@@ -50,9 +51,11 @@ export const manualSafeModeService = {
   rejectAction(id: string, actor: string, reason?: string): SafeAction {
     const action = requireAction(id);
     const status = resolveTransition(action.status, 'REJECTED');
-    const notes = reason && reason.trim() !== '' ? reason.trim() : action.notes;
+    // El reason es texto libre del cliente: sanearlo antes de persistir/auditar.
+    const safeReason = reason && reason.trim() !== '' ? sanitizeText(reason.trim()) : undefined;
+    const notes = safeReason ?? action.notes;
     const updated = repo.update(id, { status, notes })!;
-    audit(id, actor, 'REJECTED', reason ? `Acción rechazada: ${reason.trim()}` : 'Acción rechazada.');
+    audit(id, actor, 'REJECTED', safeReason ? `Acción rechazada: ${safeReason}` : 'Acción rechazada.');
     return updated;
   },
 

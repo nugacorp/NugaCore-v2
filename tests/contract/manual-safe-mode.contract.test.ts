@@ -173,4 +173,69 @@ describe('Manual Safe Mode contract', () => {
     const res = await request(app).post(`/api/manual-actions/${created.body.id}/execute`).set(ADMIN).send({});
     expect([403, 404]).toContain(res.status);
   });
+
+  // ── Security sanitization hotfix ──────────────────────────────────
+  const SENTINELS = [
+    'SENTINEL_TOKEN_LEAK',
+    'SENTINEL_PK_LEAK',
+    'SENTINEL_SECRET_LEAK',
+    'SENTINEL_DESC_LEAK',
+    'SENTINEL_NOTES_LEAK',
+    'SENTINEL_REASON_LEAK',
+  ];
+
+  const createSensitive = () =>
+    request(app)
+      .post('/api/manual-actions')
+      .set(ADMIN)
+      .send({
+        actionType: 'mikrotik.read',
+        targetType: 'router',
+        targetId: 'mkt-1',
+        description: 'password=SENTINEL_DESC_LEAK',
+        notes: 'token=SENTINEL_NOTES_LEAK',
+        payload: {
+          token: 'SENTINEL_TOKEN_LEAK',
+          nested: { privateKey: 'SENTINEL_PK_LEAK' },
+          list: [{ secret: 'SENTINEL_SECRET_LEAK' }],
+          script: '/system reboot',
+        },
+      });
+
+  const expectNoSentinels = (body: unknown) => {
+    const serialized = JSON.stringify(body);
+    for (const sentinel of SENTINELS) {
+      expect(serialized, `no debe filtrar ${sentinel}`).not.toContain(sentinel);
+    }
+  };
+
+  it('Caso 5: GET list no expone secretos', async () => {
+    await createSensitive();
+    const list = await request(app).get('/api/manual-actions').set(ADMIN);
+    expect(list.status).toBe(200);
+    expectNoSentinels(list.body);
+  });
+
+  it('Caso 6: GET detail no expone secretos (payload redactado)', async () => {
+    const created = await createSensitive();
+    const detail = await request(app).get(`/api/manual-actions/${created.body.id}`).set(ADMIN);
+    expect(detail.status).toBe(200);
+    expectNoSentinels(detail.body);
+    expect(detail.body.action.payload.token).toBe('[REDACTED]');
+    expect(detail.body.action.payload.nested.privateKey).toBe('[REDACTED]');
+    expect(detail.body.action.payload.list[0].secret).toBe('[REDACTED]');
+    expect(detail.body.action.payload.script).toBe('[REDACTED_ROUTEROS_SCRIPT]');
+  });
+
+  it('Caso 7: audit details no expone secretos (incluye reject reason)', async () => {
+    const created = await createSensitive();
+    await request(app)
+      .post(`/api/manual-actions/${created.body.id}/reject`)
+      .set(ADMIN)
+      .send({ reason: 'token=SENTINEL_REASON_LEAK' });
+    const detail = await request(app).get(`/api/manual-actions/${created.body.id}`).set(ADMIN);
+    expect(detail.status).toBe(200);
+    expectNoSentinels(detail.body.audit);
+    expectNoSentinels(detail.body);
+  });
 });
