@@ -111,6 +111,8 @@ Incluye:
 - Dashboard básico.
 - Asignación IPAM local/mock en alta de cliente WISP: router/torre, pool,
   cálculo de IPs libres y validación de duplicados sin RouterOS real.
+- Flujo WISP-1 a WISP-5 local/mock: capacidad por nodo, GPS, cobertura,
+  reserva de equipo sin descuento de stock y providers IPAM con fallback.
 
 Estados:
 
@@ -129,6 +131,8 @@ Gate producción:
 - Persistir `routerId`, `poolId` e `ipAssignmentStatus` en DB antes de depender
   de esos metadatos fuera del store local.
 - Integración RouterOS solamente read-only y después de aprobar PROD-5/CHR.
+- Validar en staging el flujo WISP completo antes de cualquier integración
+  real. `IPAM_PROVIDER` debe permanecer en `mock`.
 
 ### FASE 3 — Billing Persistence
 

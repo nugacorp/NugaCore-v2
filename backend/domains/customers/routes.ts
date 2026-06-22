@@ -37,7 +37,7 @@ router.get('/api/clients/:id', requireRoles(READ_ROLES), asyncHandler(async (req
   res.json(client);
 }));
 
-router.post('/api/clients', requireRoles(['super admin', 'administrador', 'soporte']), asyncHandler(async (req, res) => {
+router.post('/api/clients', requireRoles(['super admin', 'administrador', 'tecnico', 'soporte']), asyncHandler(async (req, res) => {
   const service = getCustomersService();
   const {
     name,
@@ -56,6 +56,8 @@ router.post('/api/clients', requireRoles(['super admin', 'administrador', 'sopor
     routerId,
     poolId,
     assignedIp,
+    equipmentReservationId,
+    mac,
   } = req.body;
 
   // Validación de entrada (lanza 400 si es inválida).
@@ -126,7 +128,12 @@ router.post('/api/clients', requireRoles(['super admin', 'administrador', 'sopor
           ipAssignmentStatus: validatedAssignment.status,
         }
       : {}),
-    mac: isConvertLead ? `00:1A:79:A1:BA:${randomSub.toString(16).toUpperCase().padStart(2, '0')}` : undefined,
+    equipmentReservationId: equipmentReservationId ? String(equipmentReservationId) : undefined,
+    mac: mac
+      ? String(mac).trim().toUpperCase()
+      : isConvertLead
+        ? `00:1A:79:A1:BA:${randomSub.toString(16).toUpperCase().padStart(2, '0')}`
+        : undefined,
     pppoeUser: isConvertLead ? `${name.toLowerCase().replace(/[^a-z0-9]/g, '_')}_nuga` : undefined,
     pppoePassword: isConvertLead ? 'NugaSecretPass' : undefined,
     contractId: isConvertLead ? `CONT-2026-${120 + store.CLIENTS.length}` : undefined,

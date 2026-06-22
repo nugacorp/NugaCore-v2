@@ -33,6 +33,18 @@ describe('Dashboard — resumen operativo', () => {
     }
   });
 
+  it('muestra los widgets de operación WISP solicitados', () => {
+    expect(dashboardSource).toContain('id="dashboard-wisp-operations"');
+    for (const label of [
+      'Clientes por torre',
+      'Capacidad utilizada',
+      'Equipos reservados',
+      'Instalaciones pendientes',
+    ]) {
+      expect(dashboardSource, `falta el widget "${label}"`).toContain(label);
+    }
+  });
+
   it('deriva indicadores de datos existentes (stats/alerts), sin integraciones nuevas', () => {
     expect(dashboardSource).toContain('stats.activeClients');
     expect(dashboardSource).toContain('stats.suspendedClients');

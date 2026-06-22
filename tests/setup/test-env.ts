@@ -73,6 +73,7 @@ if (!runDb && !runAuth) {
   // Identidad por trusted-headers (dev): las lecturas de contrato sin
   // Bearer resuelven a 'solo lectura'. Forzado para no depender del .env.
   process.env.AUTH_TRUST_HEADERS = 'true';
+  process.env.IPAM_PROVIDER = 'mock';
   process.env.NODE_ENV = 'test';
 } else if (runAuth) {
   // -------- MODO AUTH REAL (staging JWT-only) --------

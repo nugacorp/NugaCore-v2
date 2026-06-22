@@ -58,6 +58,23 @@ const SECTIONS: ManualSection[] = [
     ],
   },
   {
+    id: 'alta-cliente-wisp',
+    title: 'Alta de Cliente WISP',
+    icon: Wifi,
+    summary: 'Flujo completo de alta con GPS, cobertura, IPAM y reserva de inventario.',
+    steps: [
+      'En "Clientes → Clientes", abre "Alta Nuevo Cliente" y selecciona Cliente Activo.',
+      'Selecciona Router / Torre. Revisa clientes activos, capacidad libre y porcentaje utilizado; es un indicador informativo que no bloquea el alta.',
+      'Pulsa "Obtener ubicación actual" para capturar GPS o edita latitud/longitud manualmente. El sistema valida los rangos permitidos.',
+      'Pulsa "Calcular cobertura" para consultar distancia, azimut, cobertura estimada y estado GOOD / WARNING / POOR. La advertencia no bloquea el alta.',
+      'En Reserva de equipo selecciona CPE, PoE o fuente, serie y MAC. La reserva queda en estado RESERVED sin descontar stock.',
+      'En Asignación de Red selecciona el pool, escanea o captura una IP y confirma que esté disponible antes de crear el cliente.',
+      '[Captura placeholder: capacidad del router y asignación IPAM]',
+      '[Captura placeholder: GPS y resultado de cobertura]',
+      '[Captura placeholder: reserva de inventario para instalación]',
+    ],
+  },
+  {
     id: 'tickets',
     title: 'Tickets',
     icon: Wrench,
@@ -121,6 +138,7 @@ const SECTIONS: ManualSection[] = [
       'Entra a "Red → Inventario".',
       'Consulta existencias por almacén y el detalle de cada artículo.',
       'Registra entradas, salidas y transferencias de equipo.',
+      'Las reservas creadas desde el alta WISP son internas/mock y no descuentan existencias hasta una fase posterior autorizada.',
     ],
   },
   {

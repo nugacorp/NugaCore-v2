@@ -2,6 +2,8 @@ node_modules/
 build/
 dist/
 coverage/
+!backend/domains/coverage/
+!backend/domains/coverage/**
 .DS_Store
 
 # Logs y temporales (incluye el log de depuración y su symlink)

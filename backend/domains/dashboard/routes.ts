@@ -2,6 +2,8 @@ import { Router } from 'express';
 import { store } from '../../../backend/state/store';
 import { READ_ROLES, requireRoles } from '../../common/rbac';
 import { suspensionKpis } from '../suspension/engine';
+import { ipamService } from '../ipam/service';
+import { customerEquipmentService } from '../inventory/customer-equipment/service';
 
 const router = Router();
 
@@ -186,6 +188,16 @@ router.get('/api/dashboard-stats', requireRoles(READ_ROLES), async (_req, res) =
   const monthCobranza = store.INVOICES.filter((f) => f.status === 'paid').reduce((acc, f) => acc + f.amount, 0);
   const monthFacturacion = store.INVOICES.reduce((acc, f) => acc + f.amount, 0);
   const suspension = await suspensionKpis();
+  const ipamRouters = await ipamService.listRouters();
+  const capacities = (
+    await Promise.all(ipamRouters.map((item) => ipamService.capacity(item.id)))
+  ).filter((item): item is NonNullable<typeof item> => item !== null);
+  const reservedEquipment = customerEquipmentService.countReservations();
+  const pendingInstallations = (
+    store.WORK_ORDERS.filter(
+      (order) => order.type === 'installation' && order.status !== 'canceled' && order.status !== 'completed',
+    ).length + reservedEquipment
+  );
 
   res.json({
     activeClients: kpis.customers.active,
@@ -209,6 +221,23 @@ router.get('/api/dashboard-stats', requireRoles(READ_ROLES), async (_req, res) =
     },
     // Motor de Suspensiones (Fase 4.5/4.5.1) — read-only, sin efectos.
     suspension,
+    wispOperations: {
+      clientsByTower: capacities.map((capacity) => ({
+        routerId: capacity.routerId,
+        routerName: capacity.routerName,
+        activeClients: capacity.activeClients,
+      })),
+      capacityUtilizationPercent: capacities.length > 0
+        ? Number(
+            (
+              capacities.reduce((sum, item) => sum + item.utilizationPercent, 0) /
+              capacities.length
+            ).toFixed(2),
+          )
+        : 0,
+      reservedEquipment,
+      pendingInstallations,
+    },
   });
 });
 

@@ -18,7 +18,9 @@ import {
   ScanLine,
   ShieldCheck,
   XCircle,
-  Loader2
+  Loader2,
+  PackageCheck,
+  Crosshair
 } from 'lucide-react';
 import { Client, Plan } from '../types';
 import {
@@ -28,6 +30,12 @@ import {
   ipStatusMessage,
   isValidIpv4Input,
 } from '../lib/ipamView';
+import {
+  areValidCoordinates,
+  capacityToneClasses,
+  isValidLatitudeInput,
+  isValidLongitudeInput,
+} from '../lib/wispOnboardingView';
 
 interface IpamRouterView {
   id: string;
@@ -53,12 +61,51 @@ interface AvailableIpsResponse {
   ips: string[];
 }
 
+interface RouterCapacityView {
+  routerId: string;
+  routerName: string;
+  totalCapacity: number;
+  activeClients: number;
+  freeCapacity: number;
+  utilizationPercent: number;
+}
+
+interface CoverageView {
+  distanceKm: number;
+  azimuth: number;
+  estimatedCoverage: number;
+  status: 'GOOD' | 'WARNING' | 'POOR';
+}
+
+interface CustomerEquipmentView {
+  id: string;
+  kind: 'CPE' | 'POE' | 'POWER_SUPPLY';
+  name: string;
+  brand: string;
+  model: string;
+  availableQty: number;
+  serials: string[];
+}
+
+interface EquipmentReservationView {
+  id: string;
+  equipmentId: string;
+  equipmentName: string;
+  serial: string;
+  mac: string;
+  customerLabel: string;
+  status: 'RESERVED';
+  createdAt: string;
+}
+
 interface CrmModuleProps {
   clients: Client[];
   plans: Plan[];
   onAddClient: (newClientData: any) => Promise<void>;
   onUpdateClientStatus: (id: string, status: 'active' | 'suspended' | 'baja') => Promise<void>;
   getAuthHeaders: () => Promise<Record<string, string>>;
+  canCreateClient: boolean;
+  canManageClientLifecycle: boolean;
 }
 
 export default function CrmModule({
@@ -67,6 +114,8 @@ export default function CrmModule({
   onAddClient,
   onUpdateClientStatus,
   getAuthHeaders,
+  canCreateClient,
+  canManageClientLifecycle,
 }: CrmModuleProps) {
   const [searchTerm, setSearchTerm] = useState('');
   const [filterType, setFilterType] = useState<string>('all');
@@ -95,11 +144,27 @@ export default function CrmModule({
   const [ipValidation, setIpValidation] = useState<IpAssignmentValidation | null>(null);
   const [ipamLoading, setIpamLoading] = useState(false);
   const [ipamError, setIpamError] = useState('');
+  const [routerCapacity, setRouterCapacity] = useState<RouterCapacityView | null>(null);
+  const [gpsLoading, setGpsLoading] = useState(false);
+  const [gpsMessage, setGpsMessage] = useState('');
+  const [gpsError, setGpsError] = useState('');
+  const [coverage, setCoverage] = useState<CoverageView | null>(null);
+  const [coverageLoading, setCoverageLoading] = useState(false);
+  const [coverageError, setCoverageError] = useState('');
+  const [customerEquipment, setCustomerEquipment] = useState<CustomerEquipmentView[]>([]);
+  const [formEquipmentId, setFormEquipmentId] = useState('');
+  const [formEquipmentSerial, setFormEquipmentSerial] = useState('');
+  const [formEquipmentMac, setFormEquipmentMac] = useState('');
+  const [equipmentReservation, setEquipmentReservation] = useState<EquipmentReservationView | null>(null);
+  const [equipmentLoading, setEquipmentLoading] = useState(false);
+  const [equipmentError, setEquipmentError] = useState('');
   const [isLeadForm, setIsLeadForm] = useState(false);
   const [selectedClient, setSelectedClient] = useState<Client | null>(null);
 
   const selectedPool = ipamPools.find((pool) => pool.id === formPoolId) || null;
-  const canConfirmAdd = canSubmitCustomerOnboarding({
+  const selectedEquipment = customerEquipment.find((item) => item.id === formEquipmentId) || null;
+  const coordinatesValid = areValidCoordinates(formLat, formLng);
+  const canConfirmAdd = coordinatesValid && canSubmitCustomerOnboarding({
     name: formName,
     isLead: isLeadForm,
     routerId: formRouterId,
@@ -117,6 +182,9 @@ export default function CrmModule({
     setIpEntryMode('select');
     setIpValidation(null);
     setIpamError('');
+    setRouterCapacity(null);
+    setCoverage(null);
+    setCoverageError('');
   }, []);
 
   const fetchIpamJson = useCallback(async <T,>(url: string, init?: RequestInit): Promise<T> => {
@@ -149,9 +217,32 @@ export default function CrmModule({
     }
   }, [fetchIpamJson]);
 
+  const loadCustomerEquipment = useCallback(async () => {
+    setEquipmentLoading(true);
+    setEquipmentError('');
+    try {
+      setCustomerEquipment(
+        await fetchIpamJson<CustomerEquipmentView[]>('/api/inventory/customer-equipment'),
+      );
+    } catch (error) {
+      setCustomerEquipment([]);
+      setEquipmentError(error instanceof Error ? error.message : 'No se pudo cargar equipo disponible.');
+    } finally {
+      setEquipmentLoading(false);
+    }
+  }, [fetchIpamJson]);
+
   useEffect(() => {
-    if (showAddForm && ipamRouters.length === 0) void loadIpamRouters();
-  }, [showAddForm, ipamRouters.length, loadIpamRouters]);
+    if (!showAddForm) return;
+    if (ipamRouters.length === 0) void loadIpamRouters();
+    if (customerEquipment.length === 0) void loadCustomerEquipment();
+  }, [
+    showAddForm,
+    ipamRouters.length,
+    customerEquipment.length,
+    loadIpamRouters,
+    loadCustomerEquipment,
+  ]);
 
   const handleRouterSelection = async (routerId: string) => {
     setFormRouterId(routerId);
@@ -160,6 +251,9 @@ export default function CrmModule({
     setAvailableIps([]);
     setIpValidation(null);
     setIpamError('');
+    setRouterCapacity(null);
+    setCoverage(null);
+    setCoverageError('');
     if (!routerId) {
       setIpamPools([]);
       return;
@@ -167,14 +261,111 @@ export default function CrmModule({
 
     setIpamLoading(true);
     try {
-      const pools = await fetchIpamJson<IpamPoolView[]>(`/api/ipam/routers/${encodeURIComponent(routerId)}/pools`);
+      const [pools, capacity] = await Promise.all([
+        fetchIpamJson<IpamPoolView[]>(`/api/ipam/routers/${encodeURIComponent(routerId)}/pools`),
+        fetchIpamJson<RouterCapacityView>(`/api/ipam/routers/${encodeURIComponent(routerId)}/capacity`),
+      ]);
       setIpamPools(pools);
       setFormPoolId(pools[0]?.id || '');
+      setRouterCapacity(capacity);
     } catch (error) {
       setIpamPools([]);
       setIpamError(error instanceof Error ? error.message : 'No se pudieron cargar pools IPAM.');
     } finally {
       setIpamLoading(false);
+    }
+  };
+
+  const checkCoverage = useCallback(async (
+    latitude = formLat,
+    longitude = formLng,
+    routerId = formRouterId,
+  ) => {
+    setCoverageError('');
+    setCoverage(null);
+    if (!routerId) {
+      setCoverageError('Selecciona un router o torre para calcular cobertura.');
+      return;
+    }
+    if (!areValidCoordinates(latitude, longitude)) {
+      setCoverageError('Captura una latitud y longitud válidas.');
+      return;
+    }
+
+    setCoverageLoading(true);
+    try {
+      const params = new URLSearchParams({
+        routerId,
+        latitude: String(latitude),
+        longitude: String(longitude),
+      });
+      setCoverage(await fetchIpamJson<CoverageView>(`/api/coverage/check?${params.toString()}`));
+    } catch (error) {
+      setCoverageError(error instanceof Error ? error.message : 'No se pudo estimar la cobertura.');
+    } finally {
+      setCoverageLoading(false);
+    }
+  }, [fetchIpamJson, formLat, formLng, formRouterId]);
+
+  const handleGetCurrentLocation = () => {
+    setGpsMessage('');
+    setGpsError('');
+    if (typeof navigator === 'undefined' || !navigator.geolocation) {
+      setGpsError('Geolocalización no disponible en este navegador.');
+      return;
+    }
+
+    setGpsLoading(true);
+    navigator.geolocation.getCurrentPosition(
+      (position) => {
+        const latitude = position.coords.latitude.toFixed(6);
+        const longitude = position.coords.longitude.toFixed(6);
+        setFormLat(latitude);
+        setFormLng(longitude);
+        setGpsMessage('GPS capturado correctamente.');
+        setGpsLoading(false);
+        if (formRouterId) void checkCoverage(latitude, longitude, formRouterId);
+      },
+      () => {
+        setGpsError('No fue posible obtener la ubicación actual. Puedes capturarla manualmente.');
+        setGpsLoading(false);
+      },
+      { enableHighAccuracy: true, timeout: 10000, maximumAge: 30000 },
+    );
+  };
+
+  const handleReserveEquipment = async () => {
+    setEquipmentError('');
+    setEquipmentReservation(null);
+    if (!formName.trim()) {
+      setEquipmentError('Captura el nombre del cliente antes de reservar equipo.');
+      return;
+    }
+    if (!formEquipmentId || !formEquipmentSerial || !formEquipmentMac.trim()) {
+      setEquipmentError('Selecciona equipo, serie y captura la MAC.');
+      return;
+    }
+
+    setEquipmentLoading(true);
+    try {
+      setEquipmentReservation(
+        await fetchIpamJson<EquipmentReservationView>(
+          '/api/inventory/customer-equipment/reservations',
+          {
+            method: 'POST',
+            body: JSON.stringify({
+              equipmentId: formEquipmentId,
+              serial: formEquipmentSerial,
+              mac: formEquipmentMac,
+              customerLabel: formName,
+            }),
+          },
+        ),
+      );
+    } catch (error) {
+      setEquipmentError(error instanceof Error ? error.message : 'No se pudo reservar el equipo.');
+    } finally {
+      setEquipmentLoading(false);
     }
   };
 
@@ -292,6 +483,11 @@ export default function CrmModule({
 
   const handleAddSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
+    setGpsError('');
+    if (!coordinatesValid) {
+      setGpsError('Latitud o longitud inválida.');
+      return;
+    }
     if (!canConfirmAdd) return;
 
     let finalValidation = ipValidation;
@@ -317,6 +513,8 @@ export default function CrmModule({
       poolId: formPoolId || undefined,
       assignedIp: formAssignedIp.trim() || undefined,
       ipAssignmentStatus: finalValidation?.status,
+      equipmentReservationId: equipmentReservation?.id,
+      mac: equipmentReservation?.mac || formEquipmentMac.trim() || undefined,
       isConvertLead: false
     });
 
@@ -328,6 +526,13 @@ export default function CrmModule({
     setFormPlanId('');
     setFormNotes('');
     setFormConnectionType('WISP');
+    setGpsMessage('');
+    setGpsError('');
+    setFormEquipmentId('');
+    setFormEquipmentSerial('');
+    setFormEquipmentMac('');
+    setEquipmentReservation(null);
+    setEquipmentError('');
     resetNetworkAssignment();
     setShowAddForm(false);
   };
@@ -361,17 +566,19 @@ export default function CrmModule({
             Gestión completa de suscriptores residenciales, corporativos, gobierno y embudo de ventas de prospectos.
           </p>
         </div>
-        <button
-          onClick={() => {
-            setIsLeadForm(false);
-            setShowAddForm(true);
-          }}
-          id="add-customer-btn"
-          className="flex items-center space-x-2 bg-indigo-600 hover:bg-indigo-500 border border-indigo-500 text-white px-4 py-2 rounded-xl text-sm font-semibold transition shadow-lg shadow-indigo-500/10 self-start"
-        >
-          <UserPlus className="w-4 h-4" />
-          <span>Alta Nuevo Cliente</span>
-        </button>
+        {canCreateClient && (
+          <button
+            onClick={() => {
+              setIsLeadForm(false);
+              setShowAddForm(true);
+            }}
+            id="add-customer-btn"
+            className="flex items-center space-x-2 bg-indigo-600 hover:bg-indigo-500 border border-indigo-500 text-white px-4 py-2 rounded-xl text-sm font-semibold transition shadow-lg shadow-indigo-500/10 self-start"
+          >
+            <UserPlus className="w-4 h-4" />
+            <span>Alta Nuevo Cliente</span>
+          </button>
+        )}
       </div>
 
       {/* Main Grid: Filters on Left (or lists), details on Right */}
@@ -490,7 +697,7 @@ export default function CrmModule({
                         <td className="py-3 px-2 text-slate-400">{client.city}</td>
                         <td className="py-3 px-2 text-right">
                           <div className="flex items-center justify-end space-x-1.5">
-                            {client.status === 'suspended' && (
+                            {canManageClientLifecycle && client.status === 'suspended' && (
                               <button
                                 onClick={(e) => {
                                   e.stopPropagation();
@@ -607,7 +814,7 @@ export default function CrmModule({
                 </div>
 
                 {/* Lead context & Conversion action */}
-                {selectedClient.status === 'lead' && (
+                {canCreateClient && selectedClient.status === 'lead' && (
                   <div className="bg-gradient-to-tr from-indigo-900/20 to-sky-900/20 p-4 rounded-2xl border border-indigo-500/20 space-y-3">
                     <div className="flex items-center space-x-1.5 text-indigo-300 font-bold font-mono">
                       <TrendingUp className="w-4 h-4" />
@@ -628,7 +835,7 @@ export default function CrmModule({
                 )}
 
                 {/* Suspension / Reactivation core triggers */}
-                {selectedClient.status !== 'lead' && (
+                {canManageClientLifecycle && selectedClient.status !== 'lead' && (
                   <div className="border-t border-slate-900 pt-4 space-y-2">
                     <span className="text-slate-500 block uppercase text-[9px] font-mono mb-1">Comandos RouterOS MikroTik</span>
                     <div className="flex gap-2">
@@ -672,7 +879,7 @@ export default function CrmModule({
       </div>
 
       {/* Add Client Diagonal Modal Backdrop */}
-      {showAddForm && (
+      {canCreateClient && showAddForm && (
         <div className="fixed inset-0 bg-black/60 backdrop-blur-sm z-50 flex items-center justify-center p-4">
           <div className="bg-slate-950 border border-slate-800 rounded-3xl max-w-2xl w-full max-h-[90vh] overflow-y-auto p-6 space-y-4">
             <div className="flex items-center justify-between border-b border-slate-900 pb-3">
@@ -823,6 +1030,31 @@ export default function CrmModule({
                     </select>
                   </div>
                 </div>
+
+                {routerCapacity && (
+                  <div
+                    id="customer-router-capacity"
+                    className={`rounded-xl border p-3 ${capacityToneClasses(routerCapacity.utilizationPercent)}`}
+                  >
+                    <div className="flex items-center justify-between gap-3">
+                      <div>
+                        <span className="block text-[10px] font-mono uppercase opacity-80">
+                          Capacidad de {routerCapacity.routerName}
+                        </span>
+                        <strong className="text-lg">{routerCapacity.utilizationPercent}% utilizada</strong>
+                      </div>
+                      <TrendingUp className="h-5 w-5" />
+                    </div>
+                    <div className="mt-2 grid grid-cols-3 gap-2 text-[10px] font-mono">
+                      <span>Activos: <strong>{routerCapacity.activeClients}</strong></span>
+                      <span>Libres: <strong>{routerCapacity.freeCapacity}</strong></span>
+                      <span>Total: <strong>{routerCapacity.totalCapacity}</strong></span>
+                    </div>
+                    <p className="mt-2 text-[10px] opacity-75">
+                      Indicador informativo; no bloquea el alta.
+                    </p>
+                  </div>
+                )}
 
                 {selectedPool && (
                   <div className="grid grid-cols-2 gap-2 rounded-xl border border-slate-800 bg-slate-950/70 p-2.5 font-mono text-[10px] text-slate-400">
@@ -996,26 +1228,227 @@ export default function CrmModule({
                 </div>
               </div>
 
-              <div className="grid grid-cols-2 gap-3">
-                <div className="space-y-1">
-                  <label className="text-slate-400 font-mono">Coordenada Latitud GPS</label>
-                  <input
-                    type="text"
-                    value={formLat}
-                    onChange={(e) => setFormLat(e.target.value)}
-                    className="w-full bg-slate-900 border border-slate-800 rounded-xl p-2.5 font-mono"
-                  />
+              <section
+                id="customer-gps-coverage"
+                className="space-y-3 rounded-2xl border border-slate-800 bg-slate-900/40 p-4"
+                aria-label="GPS y cobertura"
+              >
+                <div className="flex items-center justify-between gap-3">
+                  <div>
+                    <h4 className="flex items-center gap-2 font-semibold text-white">
+                      <Crosshair className="h-4 w-4 text-indigo-400" />
+                      GPS y cobertura
+                    </h4>
+                    <p className="mt-1 text-[10px] text-slate-500">
+                      Coordenadas editables y estimación informativa de cobertura.
+                    </p>
+                  </div>
+                  <button
+                    type="button"
+                    id="get-current-location-btn"
+                    onClick={handleGetCurrentLocation}
+                    disabled={gpsLoading}
+                    className="inline-flex items-center gap-2 rounded-xl border border-indigo-500/30 bg-indigo-600/10 px-3 py-2 font-semibold text-indigo-300 transition hover:bg-indigo-600/20 disabled:opacity-50"
+                  >
+                    {gpsLoading
+                      ? <Loader2 className="h-3.5 w-3.5 animate-spin" />
+                      : <MapPin className="h-3.5 w-3.5" />}
+                    <span>Obtener ubicación actual</span>
+                  </button>
                 </div>
-                <div className="space-y-1">
-                  <label className="text-slate-400 font-mono">Coordenada Longitud GPS</label>
-                  <input
-                    type="text"
-                    value={formLng}
-                    onChange={(e) => setFormLng(e.target.value)}
-                    className="w-full bg-slate-900 border border-slate-800 rounded-xl p-2.5 font-mono"
-                  />
+
+                <div className="grid grid-cols-2 gap-3">
+                  <div className="space-y-1">
+                    <label htmlFor="customer-latitude" className="text-slate-400 font-mono">
+                      Coordenada Latitud GPS
+                    </label>
+                    <input
+                      id="customer-latitude"
+                      type="number"
+                      step="any"
+                      min="-90"
+                      max="90"
+                      required
+                      value={formLat}
+                      onChange={(e) => {
+                        setFormLat(e.target.value);
+                        setGpsMessage('');
+                        setCoverage(null);
+                      }}
+                      className={`w-full bg-slate-900 border rounded-xl p-2.5 font-mono ${
+                        isValidLatitudeInput(formLat) ? 'border-slate-800' : 'border-rose-500/60'
+                      }`}
+                    />
+                  </div>
+                  <div className="space-y-1">
+                    <label htmlFor="customer-longitude" className="text-slate-400 font-mono">
+                      Coordenada Longitud GPS
+                    </label>
+                    <input
+                      id="customer-longitude"
+                      type="number"
+                      step="any"
+                      min="-180"
+                      max="180"
+                      required
+                      value={formLng}
+                      onChange={(e) => {
+                        setFormLng(e.target.value);
+                        setGpsMessage('');
+                        setCoverage(null);
+                      }}
+                      className={`w-full bg-slate-900 border rounded-xl p-2.5 font-mono ${
+                        isValidLongitudeInput(formLng) ? 'border-slate-800' : 'border-rose-500/60'
+                      }`}
+                    />
+                  </div>
                 </div>
-              </div>
+
+                <div className="flex flex-wrap items-center gap-2">
+                  <button
+                    type="button"
+                    id="check-customer-coverage-btn"
+                    onClick={() => void checkCoverage()}
+                    disabled={!formRouterId || !coordinatesValid || coverageLoading}
+                    className="inline-flex items-center gap-2 rounded-xl border border-slate-700 bg-slate-950 px-3 py-2 font-semibold text-slate-300 hover:border-indigo-500/40 hover:text-indigo-300 disabled:opacity-50"
+                  >
+                    {coverageLoading
+                      ? <Loader2 className="h-3.5 w-3.5 animate-spin" />
+                      : <ScanLine className="h-3.5 w-3.5" />}
+                    Calcular cobertura
+                  </button>
+                  {gpsMessage && <span className="text-emerald-400">{gpsMessage}</span>}
+                  {gpsError && <span className="text-rose-400">{gpsError}</span>}
+                </div>
+
+                {coverage && (
+                  <div
+                    id="customer-coverage-result"
+                    className={`grid grid-cols-2 gap-2 rounded-xl border p-3 font-mono text-[10px] sm:grid-cols-4 ${
+                      coverage.status === 'GOOD'
+                        ? 'border-emerald-500/30 bg-emerald-500/10 text-emerald-300'
+                        : coverage.status === 'WARNING'
+                          ? 'border-amber-500/30 bg-amber-500/10 text-amber-300'
+                          : 'border-rose-500/30 bg-rose-500/10 text-rose-300'
+                    }`}
+                  >
+                    <span>Distancia: <strong>{coverage.distanceKm} km</strong></span>
+                    <span>Azimut: <strong>{coverage.azimuth}°</strong></span>
+                    <span>Cobertura: <strong>{coverage.estimatedCoverage}%</strong></span>
+                    <span>Estado: <strong>{coverage.status}</strong></span>
+                  </div>
+                )}
+                {coverageError && <p className="text-rose-400">{coverageError}</p>}
+                <p className="text-[10px] text-slate-500">
+                  La estimación no bloquea el alta y no consulta equipos reales.
+                </p>
+              </section>
+
+              <section
+                id="customer-equipment-reservation"
+                className="space-y-3 rounded-2xl border border-slate-800 bg-slate-900/40 p-4"
+                aria-label="Reserva de equipo"
+              >
+                <div>
+                  <h4 className="flex items-center gap-2 font-semibold text-white">
+                    <PackageCheck className="h-4 w-4 text-indigo-400" />
+                    Reserva de equipo para instalación
+                  </h4>
+                  <p className="mt-1 text-[10px] text-slate-500">
+                    Reserva interna/mock. No descuenta ni modifica stock.
+                  </p>
+                </div>
+
+                <div className="grid grid-cols-1 gap-3 sm:grid-cols-3">
+                  <div className="space-y-1">
+                    <label htmlFor="customer-equipment-id" className="font-mono text-slate-400">
+                      Equipo
+                    </label>
+                    <select
+                      id="customer-equipment-id"
+                      value={formEquipmentId}
+                      disabled={equipmentLoading}
+                      onChange={(event) => {
+                        setFormEquipmentId(event.target.value);
+                        setFormEquipmentSerial('');
+                        setEquipmentReservation(null);
+                        setEquipmentError('');
+                      }}
+                      className="w-full rounded-xl border border-slate-800 bg-slate-900 p-2.5"
+                    >
+                      <option value="">Selecciona CPE, PoE o fuente...</option>
+                      {customerEquipment.map((item) => (
+                        <option key={item.id} value={item.id}>
+                          {item.kind} · {item.name} · {item.availableQty} disponibles
+                        </option>
+                      ))}
+                    </select>
+                  </div>
+                  <div className="space-y-1">
+                    <label htmlFor="customer-equipment-serial" className="font-mono text-slate-400">
+                      Serie
+                    </label>
+                    <select
+                      id="customer-equipment-serial"
+                      value={formEquipmentSerial}
+                      disabled={!selectedEquipment}
+                      onChange={(event) => {
+                        setFormEquipmentSerial(event.target.value);
+                        setEquipmentReservation(null);
+                      }}
+                      className="w-full rounded-xl border border-slate-800 bg-slate-900 p-2.5 font-mono disabled:opacity-50"
+                    >
+                      <option value="">Selecciona serie...</option>
+                      {selectedEquipment?.serials.map((serial) => (
+                        <option key={serial} value={serial}>{serial}</option>
+                      ))}
+                    </select>
+                  </div>
+                  <div className="space-y-1">
+                    <label htmlFor="customer-equipment-mac" className="font-mono text-slate-400">
+                      MAC
+                    </label>
+                    <input
+                      id="customer-equipment-mac"
+                      type="text"
+                      placeholder="AA:BB:CC:DD:EE:FF"
+                      value={formEquipmentMac}
+                      onChange={(event) => {
+                        setFormEquipmentMac(event.target.value.toUpperCase());
+                        setEquipmentReservation(null);
+                      }}
+                      className="w-full rounded-xl border border-slate-800 bg-slate-900 p-2.5 font-mono uppercase"
+                    />
+                  </div>
+                </div>
+
+                <button
+                  type="button"
+                  id="reserve-customer-equipment-btn"
+                  onClick={() => void handleReserveEquipment()}
+                  disabled={equipmentLoading || !formEquipmentId || !formEquipmentSerial || !formEquipmentMac}
+                  className="inline-flex items-center gap-2 rounded-xl border border-indigo-500/30 bg-indigo-600/10 px-3 py-2 font-semibold text-indigo-300 hover:bg-indigo-600/20 disabled:opacity-50"
+                >
+                  {equipmentLoading
+                    ? <Loader2 className="h-3.5 w-3.5 animate-spin" />
+                    : <PackageCheck className="h-3.5 w-3.5" />}
+                  Reservar equipo
+                </button>
+
+                {equipmentReservation && (
+                  <p
+                    id="customer-equipment-reserved-status"
+                    className="rounded-xl border border-emerald-500/30 bg-emerald-500/10 p-2.5 text-emerald-300"
+                  >
+                    Equipo reservado para instalación. Serie {equipmentReservation.serial}.
+                  </p>
+                )}
+                {equipmentError && (
+                  <p className="rounded-xl border border-rose-500/30 bg-rose-500/10 p-2.5 text-rose-300">
+                    {equipmentError}
+                  </p>
+                )}
+              </section>
 
               <div className="space-y-1">
                 <label className="text-slate-400 font-mono">Notas de Instalación / Comentarios</label>

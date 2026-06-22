@@ -266,6 +266,61 @@ export default function Dashboard({ stats, alerts, onAcknowledgeAlerts, onRefres
     { label: 'Pendiente de cobro', value: formatMXN(pendingToCollect), tab: 'billing', icon: CreditCard, tone: 'text-yellow-400' },
     { label: 'Ingresos del mes', value: formatMXN(stats.mrr ?? 0), tab: 'finance', icon: TrendingUp, tone: 'text-emerald-400' },
   ];
+  const wispOperations = stats.wispOperations || {};
+  const clientsByTower = Array.isArray(wispOperations.clientsByTower)
+    ? wispOperations.clientsByTower
+    : [];
+  const towerClientsTotal = clientsByTower.reduce(
+    (sum: number, item: { activeClients?: number }) => sum + Number(item.activeClients || 0),
+    0,
+  );
+  const towerSummary = clientsByTower
+    .slice(0, 2)
+    .map((item: { routerName?: string; activeClients?: number }) =>
+      `${item.routerName || 'Nodo'}: ${item.activeClients || 0}`,
+    )
+    .join(' · ');
+  const wispKpis: Array<{
+    label: string;
+    value: string;
+    detail: string;
+    tab: string;
+    icon: typeof Users;
+    tone: string;
+  }> = [
+    {
+      label: 'Clientes por torre',
+      value: String(towerClientsTotal),
+      detail: towerSummary || 'Sin nodos registrados',
+      tab: 'crm',
+      icon: Users,
+      tone: 'text-indigo-400',
+    },
+    {
+      label: 'Capacidad utilizada',
+      value: `${Number(wispOperations.capacityUtilizationPercent || 0).toFixed(1)}%`,
+      detail: 'Promedio de routers y torres',
+      tab: 'crm',
+      icon: Signal,
+      tone: 'text-amber-400',
+    },
+    {
+      label: 'Equipos reservados',
+      value: String(wispOperations.reservedEquipment || 0),
+      detail: 'Reserva mock; stock sin cambios',
+      tab: 'inventory',
+      icon: Layers,
+      tone: 'text-emerald-400',
+    },
+    {
+      label: 'Instalaciones pendientes',
+      value: String(wispOperations.pendingInstallations || 0),
+      detail: 'Órdenes y reservas por atender',
+      tab: 'support',
+      icon: Wrench,
+      tone: 'text-rose-400',
+    },
+  ];
 
   return (
     <div className="space-y-6 text-slate-100 font-sans p-6 bg-slate-900 min-h-screen">
@@ -352,6 +407,30 @@ export default function Dashboard({ stats, alerts, onAcknowledgeAlerts, onRefres
                 </div>
                 <div className="mt-2 text-xl font-extrabold tracking-tight text-white truncate">{kpi.value}</div>
                 <span className="text-[10px] text-slate-500 font-mono group-hover:text-slate-300 transition">Ver detalle →</span>
+              </button>
+            );
+          })}
+        </div>
+      </section>
+
+      <section id="dashboard-wisp-operations" className="space-y-3" aria-label="Operación WISP">
+        <h3 className="text-xs text-slate-400 font-mono uppercase tracking-widest">Operación WISP</h3>
+        <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-3">
+          {wispKpis.map((kpi) => {
+            const Icon = kpi.icon;
+            return (
+              <button
+                key={kpi.label}
+                type="button"
+                onClick={go(kpi.tab)}
+                className="text-left bg-slate-950 border border-slate-800 rounded-xl p-4 hover:border-slate-700 transition"
+              >
+                <div className="flex items-center justify-between">
+                  <span className="text-[10px] text-slate-500 font-mono uppercase">{kpi.label}</span>
+                  <Icon className={`w-4 h-4 ${kpi.tone}`} />
+                </div>
+                <div className="mt-2 text-2xl font-extrabold tracking-tight text-white">{kpi.value}</div>
+                <p className="mt-1 text-[10px] text-slate-500 font-mono truncate">{kpi.detail}</p>
               </button>
             );
           })}

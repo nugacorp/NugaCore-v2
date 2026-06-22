@@ -1,11 +1,17 @@
 import type { Client } from '../../../src/types';
 import { getCustomersService } from '../customers/service';
-import { ipamRepository, type IpamRepository } from './repository';
-import { toPoolView, toRouterView } from './mappers';
+import { ipamViewSource, toPoolView, toRouterView } from './mappers';
+import {
+  mockIpamProvider,
+  readIpamWithFallback,
+  resolveIpamProvider,
+  type IpamProvider,
+} from './providers';
 import type {
   AvailableIpsResult,
   IpValidationInput,
   IpValidationResult,
+  IpamCapacityResult,
   IpamOccupiedAddress,
   IpamPool,
 } from './types';
@@ -62,21 +68,40 @@ const clientIp = (client: Client): string => (client.assignedIp || client.ip || 
 
 export class IpamService {
   constructor(
-    private readonly repository: IpamRepository,
+    private readonly primary: IpamProvider,
+    private readonly fallback: IpamProvider = mockIpamProvider,
     private readonly assignedClientsProvider: AssignedClientsProvider = async () => [],
   ) {}
 
-  listRouters() {
-    return this.repository.listRouters().map(toRouterView);
+  private read<T>(read: (provider: IpamProvider) => Promise<T>) {
+    return readIpamWithFallback(this.primary, this.fallback, read);
   }
 
-  listPools(routerId: string) {
-    if (!this.repository.findRouter(routerId)) return null;
-    return this.repository.listPools(routerId).map(toPoolView);
+  async listRouters() {
+    const result = await this.read((provider) => provider.listRouters());
+    return result.data.map((router) => toRouterView(router, result.source));
+  }
+
+  async getRouter(routerId: string) {
+    const result = await this.read((provider) => provider.findRouter(routerId));
+    return result.data ? toRouterView(result.data, result.source) : null;
+  }
+
+  async listPools(routerId: string) {
+    const result = await this.read(async (provider) => {
+      const router = await provider.findRouter(routerId);
+      return router ? provider.listPools(routerId) : null;
+    });
+    return result.data?.map((pool) => toPoolView(pool, result.source)) ?? null;
+  }
+
+  private async findPool(poolId: string) {
+    return this.read((provider) => provider.findPool(poolId));
   }
 
   private async occupiedForPool(pool: IpamPool): Promise<IpamOccupiedAddress[]> {
-    const occupied = this.repository.listOccupied(pool.id);
+    const result = await this.read((provider) => provider.listOccupied(pool.id));
+    const occupied = result.data;
     const clients = await this.assignedClientsProvider();
     for (const client of clients) {
       const ip = clientIp(client);
@@ -91,8 +116,41 @@ export class IpamService {
     return occupied;
   }
 
+  async capacity(routerId: string): Promise<IpamCapacityResult | null> {
+    const result = await this.read(async (provider) => {
+      const [router, seed] = await Promise.all([
+        provider.findRouter(routerId),
+        provider.getCapacity(routerId),
+      ]);
+      return router && seed ? { router, seed } : null;
+    });
+    if (!result.data) return null;
+
+    const clients = await this.assignedClientsProvider();
+    const assignedActive = clients.filter(
+      (client) => client.status === 'active' && client.routerId === routerId,
+    ).length;
+    const activeClients = Math.min(
+      result.data.seed.totalCapacity,
+      result.data.seed.baselineActiveClients + assignedActive,
+    );
+    const freeCapacity = Math.max(0, result.data.seed.totalCapacity - activeClients);
+
+    return {
+      routerId,
+      routerName: result.data.router.name,
+      totalCapacity: result.data.seed.totalCapacity,
+      activeClients,
+      freeCapacity,
+      utilizationPercent: Number(
+        ((activeClients / Math.max(1, result.data.seed.totalCapacity)) * 100).toFixed(2),
+      ),
+    };
+  }
+
   async availableIps(poolId: string): Promise<AvailableIpsResult | null> {
-    const pool = this.repository.findPool(poolId);
+    const poolResult = await this.findPool(poolId);
+    const pool = poolResult.data;
     if (!pool) return null;
 
     const cidr = parseCidr(pool.cidr);
@@ -103,7 +161,7 @@ export class IpamService {
         cidr: pool.cidr,
         totalAvailable: 0,
         ips: [],
-        source: 'mock-local',
+        source: ipamViewSource(poolResult.source),
       };
     }
 
@@ -121,7 +179,7 @@ export class IpamService {
       cidr: pool.cidr,
       totalAvailable: ips.length,
       ips,
-      source: 'mock-local',
+      source: ipamViewSource(poolResult.source),
     };
   }
 
@@ -140,8 +198,11 @@ export class IpamService {
       };
     }
 
-    const router = this.repository.findRouter(routerId);
-    const pool = this.repository.findPool(poolId);
+    const result = await this.read(async (provider) => ({
+      router: await provider.findRouter(routerId),
+      pool: await provider.findPool(poolId),
+    }));
+    const { router, pool } = result.data;
     if (!router || !pool || pool.routerId !== router.id) {
       return {
         ...base,
@@ -200,6 +261,7 @@ export class IpamService {
 }
 
 export const ipamService = new IpamService(
-  ipamRepository,
+  resolveIpamProvider(),
+  mockIpamProvider,
   async () => getCustomersService().list({}),
 );

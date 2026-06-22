@@ -25,6 +25,7 @@ export interface Client {
   poolId?: string;
   assignedIp?: string;
   ipAssignmentStatus?: 'available' | 'in_use' | 'reserved' | 'invalid' | 'out_of_pool';
+  equipmentReservationId?: string;
   connectionType?: 'WISP' | 'FTTH';
   mac?: string;
   pppoeUser?: string;

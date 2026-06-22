@@ -1098,6 +1098,8 @@ export default function App() {
                 onAddClient={handleAddClient}
                 onUpdateClientStatus={handleUpdateClientStatus}
                 getAuthHeaders={getAuthHeaders}
+                canCreateClient={['Super Admin', 'Administrador', 'Técnico', 'Soporte'].includes(userSession.role)}
+                canManageClientLifecycle={['Super Admin', 'Administrador', 'Cobranza'].includes(userSession.role)}
               />
             )}
 

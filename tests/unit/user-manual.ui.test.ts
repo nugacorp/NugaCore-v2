@@ -23,6 +23,7 @@ describe('UserManualModule — contrato de contenido', () => {
     for (const label of [
       'Inicio / Dashboard',
       'Clientes',
+      'Alta de Cliente WISP',
       'Tickets',
       'Pagos',
       'Facturación y Planes',
@@ -36,6 +37,18 @@ describe('UserManualModule — contrato de contenido', () => {
       'Preguntas frecuentes',
     ]) {
       expect(moduleSource, `falta la sección "${label}"`).toContain(label);
+    }
+  });
+
+  it('documenta GPS, cobertura, IPAM e inventario con capturas placeholder', () => {
+    for (const content of [
+      'Obtener ubicación actual',
+      'Calcular cobertura',
+      'Asignación de Red',
+      'Reserva de equipo',
+      '[Captura placeholder:',
+    ]) {
+      expect(moduleSource).toContain(content);
     }
   });
 

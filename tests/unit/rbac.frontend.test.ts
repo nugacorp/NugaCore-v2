@@ -27,9 +27,9 @@ describe('RBAC visual por rol (frontend)', () => {
     expect(canAccessTab('Cobranza', 'inventory-routers')).toBe(false);
   });
 
-  it('Técnico ve red/mikrotik/soporte; no finanzas ni billing', () => {
+  it('Técnico ve alta de clientes/red/mikrotik/soporte; no finanzas ni billing', () => {
     const t = getAllowedTabsByRole('Técnico');
-    expect(t).toEqual(expect.arrayContaining(['network', 'mikrotik', 'support', 'inventory', 'gis']));
+    expect(t).toEqual(expect.arrayContaining(['crm', 'network', 'mikrotik', 'support', 'inventory', 'gis']));
     expect(t).not.toContain('finance');
     expect(t).not.toContain('billing');
   });

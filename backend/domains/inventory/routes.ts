@@ -3,6 +3,10 @@ import { WarehouseItem } from '../../../src/types';
 import { store } from '../../../backend/state/store';
 import { READ_ROLES, requireRoles } from '../../common/rbac';
 import { inventoryRoutersService } from './routers/service';
+import {
+  customerEquipmentService,
+  EquipmentReservationError,
+} from './customer-equipment/service';
 
 const router = Router();
 
@@ -19,6 +23,35 @@ const withState = (item: WarehouseItem) => {
     stateUpdatedAt: state.updatedAt,
   };
 };
+
+router.get('/api/inventory/customer-equipment', requireRoles(READ_ROLES), (_req, res) => {
+  res.json(customerEquipmentService.listEquipment());
+});
+
+router.get('/api/inventory/customer-equipment/reservations', requireRoles(READ_ROLES), (_req, res) => {
+  res.json(customerEquipmentService.listReservations());
+});
+
+router.post(
+  '/api/inventory/customer-equipment/reservations',
+  requireRoles(['super admin', 'administrador', 'tecnico', 'soporte']),
+  (req, res) => {
+    try {
+      const reservation = customerEquipmentService.reserve({
+        equipmentId: String(req.body?.equipmentId || ''),
+        serial: String(req.body?.serial || ''),
+        mac: String(req.body?.mac || ''),
+        customerLabel: String(req.body?.customerLabel || ''),
+      });
+      res.status(201).json(reservation);
+    } catch (error) {
+      if (error instanceof EquipmentReservationError) {
+        return res.status(400).json({ error: error.message, code: error.code });
+      }
+      throw error;
+    }
+  },
+);
 
 const parseOperationalStatus = (value: unknown) => {
   const raw = String(value || '').trim().toLowerCase();

@@ -5,6 +5,9 @@ export interface IpamRouter {
   name: string;
   kind: IpamRouterKind;
   description: string;
+  latitude: number;
+  longitude: number;
+  coverageRadiusKm: number;
 }
 
 export interface IpamPool {
@@ -47,5 +50,20 @@ export interface AvailableIpsResult {
   cidr: string;
   totalAvailable: number;
   ips: string[];
-  source: 'mock-local';
+  source: 'mock-local' | 'routeros-read-only';
+}
+
+export interface IpamCapacitySeed {
+  routerId: string;
+  totalCapacity: number;
+  baselineActiveClients: number;
+}
+
+export interface IpamCapacityResult {
+  routerId: string;
+  routerName: string;
+  totalCapacity: number;
+  activeClients: number;
+  freeCapacity: number;
+  utilizationPercent: number;
 }

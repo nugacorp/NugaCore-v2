@@ -2,6 +2,7 @@ import { describe, expect, it } from 'vitest';
 import type { Client } from '../../src/types';
 import { MockIpamRepository } from '../../backend/domains/ipam/repository';
 import { IpamService } from '../../backend/domains/ipam/service';
+import { createMockIpamProvider } from '../../backend/domains/ipam/providers/mock-provider';
 
 const assignedClient: Client = {
   id: 'c-ipam-test',
@@ -20,7 +21,8 @@ const assignedClient: Client = {
 };
 
 const service = new IpamService(
-  new MockIpamRepository(),
+  createMockIpamProvider(new MockIpamRepository()),
+  createMockIpamProvider(new MockIpamRepository()),
   async () => [assignedClient],
 );
 
@@ -31,8 +33,8 @@ const input = (ip: string) => ({
 });
 
 describe('IPAM local/mock service', () => {
-  it('lista routers mock sin consultar RouterOS', () => {
-    const routers = service.listRouters();
+  it('lista routers mock sin consultar RouterOS', async () => {
+    const routers = await service.listRouters();
     expect(routers.map((router) => router.id)).toEqual([
       'rb5009-main',
       'tower-san-ramon',
@@ -40,8 +42,8 @@ describe('IPAM local/mock service', () => {
     expect(routers.every((router) => router.source === 'mock-local')).toBe(true);
   });
 
-  it('lista pools conocidos por router', () => {
-    const pools = service.listPools('rb5009-main');
+  it('lista pools conocidos por router', async () => {
+    const pools = await service.listPools('rb5009-main');
     expect(pools).toHaveLength(1);
     expect(pools?.[0]).toMatchObject({
       id: 'pool-rb5009-main-100',

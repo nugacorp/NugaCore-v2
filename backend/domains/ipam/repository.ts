@@ -6,12 +6,18 @@ const ROUTERS: IpamRouter[] = [
     name: 'RB5009 Principal',
     kind: 'router',
     description: 'Router core local de referencia (mock; sin RouterOS).',
+    latitude: 19.3912,
+    longitude: -99.1712,
+    coverageRadiusKm: 5,
   },
   {
     id: 'tower-san-ramon',
     name: 'Torre San Ramón',
     kind: 'tower',
     description: 'Nodo WISP local de referencia (mock; sin RouterOS).',
+    latitude: 19.3854,
+    longitude: -99.191,
+    coverageRadiusKm: 3,
   },
 ];
 

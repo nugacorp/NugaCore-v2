@@ -101,4 +101,29 @@ describe('IPAM API — local/mock, sin RouterOS', () => {
     expect(response.status).toBe(409);
     expect(response.body.code).toBe('IPAM_IN_USE');
   });
+
+  it('Técnico puede completar el alta WISP sin permisos de ciclo de vida', async () => {
+    const response = await request(app)
+      .post('/api/clients')
+      .set({ 'x-user-role': 'tecnico', 'x-user-id': 'ipam-contract-tech' })
+      .send({
+        name: 'Cliente WISP Técnico',
+        type: 'residential',
+        address: 'Calle Técnica 25',
+        city: 'CDMX',
+        planId: 'plan-basic',
+        routerId: 'tower-san-ramon',
+        poolId: 'pool-tower-san-ramon-101',
+        assignedIp: '192.168.101.25',
+      });
+    expect(response.status).toBe(201);
+    expect(response.body).toMatchObject({
+      routerId: 'tower-san-ramon',
+      assignedIp: '192.168.101.25',
+    });
+    await request(app)
+      .delete(`/api/clients/${response.body.id}`)
+      .set({ 'x-user-role': 'super admin', 'x-user-id': 'ipam-contract-admin' })
+      .expect(204);
+  });
 });

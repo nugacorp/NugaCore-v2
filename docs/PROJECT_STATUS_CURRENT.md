@@ -1,7 +1,7 @@
 # NugaCore — Estado actual del proyecto
 
 > Resumen de arranque en frío para cualquier técnico, Hermes, Jarvis o Claude Code.
-> Última actualización: 2026-06-21. Fuente canónica de tareas:
+> Última actualización: 2026-06-22. Fuente canónica de tareas:
 > `docs/DEVELOPMENT_HANDOFF_CHECKLIST.md` (§0). Sin secretos en este documento.
 
 ## Rama y commits
@@ -27,6 +27,8 @@ No retomar salvo regresión documentada (ver handoff §0.A):
 - HTTP Security (helmet + CORS allowlist + rate-limit).
 - Observability básica (correlation ID, métricas in-memory, access log).
 - CUSTOMER-IPAM-1: asignación de IP local/mock en alta de cliente WISP.
+- WISP-CORE-1: capacidad, GPS, cobertura, reserva de equipo e IPAM providers
+  con fallback mock para el alta completa de cliente.
 
 ## Aprobaciones formales de Hermes
 
@@ -85,6 +87,15 @@ detallado en `docs/DEVELOPMENT_HANDOFF_CHECKLIST.md` §0.D.
   `routerId`/`poolId`/`ipAssignmentStatus` requieren persistencia DB futura. Ver
   `docs/IP_ASSIGNMENT_CUSTOMER_ONBOARDING_RESULT.md`.
 
+- WISP-CORE-1 — Sprint WISP-1 a WISP-5. ✅ Implementado y validado localmente:
+  capacidad informativa, GPS automático/manual, cobertura por distancia/azimut,
+  reserva `RESERVED` sin descuento de stock, providers IPAM async y fallback
+  automático a mock. Técnico puede realizar el alta sin ganar permisos de
+  ciclo de vida. Dashboard y Manual actualizados. `IPAM_PROVIDER=mock`
+  permanece como default; el provider RouterOS no está conectado ni configurado.
+  Ver `docs/WISP_CORE_PRODUCTION_SPRINT_RESULT.md`. Pendiente validación staging;
+  no avanzar a PROD-5 ni Worker Live.
+
 - HOTFIX-PAYMENTS-AUTH — Pagos usa ahora Bearer JWT vía `getAuthHeaders` para
   listar órdenes/acciones, crear órdenes y solicitar reactivación. Se eliminaron
   trusted headers del módulo frontend; backend y RBAC no cambiaron. Pendiente
@@ -93,7 +104,7 @@ detallado en `docs/DEVELOPMENT_HANDOFF_CHECKLIST.md` §0.D.
 
 No avanzar a un punto sin cerrar el anterior.
 
-> Última funcionalidad implementada localmente: **CUSTOMER-IPAM-1**, sin alterar
+> Última funcionalidad implementada localmente: **WISP-CORE-1**, sin alterar
 > el gate de infraestructura. La última fase RouterOS sigue siendo
 > **PROD-4 CHR Real Read-Only Integration**
 > (PREPARADO, NO CONECTADO) — abstracción de providers (interface async, mock,

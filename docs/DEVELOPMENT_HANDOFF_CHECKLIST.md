@@ -106,6 +106,26 @@ Estado CUSTOMER-IPAM-1 (alta de cliente WISP, local/mock):
   `ipAssignmentStatus` solo persisten por ahora en el store local.
 - Resultado: `docs/IP_ASSIGNMENT_CUSTOMER_ONBOARDING_RESULT.md`.
 
+Estado WISP-CORE-1 (WISP-1 a WISP-5, implementado localmente):
+
+- Capacidad informativa por router/torre en
+  `GET /api/ipam/routers/:routerId/capacity`.
+- GPS automático con `navigator.geolocation`, edición manual y validación de
+  latitud/longitud.
+- Cobertura mock/local en `GET /api/coverage/check` con distancia, azimut,
+  porcentaje y `GOOD/WARNING/POOR`; no bloquea altas.
+- Reserva de CPE/PoE/fuente en memoria con estado `RESERVED`; no descuenta stock.
+- Técnico puede acceder a CRM y crear el alta WISP; los controles de ciclo de
+  vida permanecen limitados a sus roles backend existentes.
+- Providers IPAM async con `IPAM_PROVIDER=mock` default y provider `routeros`
+  no configurado que cae a mock. Sin cliente, host, credenciales ni comandos.
+- Dashboard con clientes por torre, capacidad, reservas e instalaciones pendientes.
+- Manual actualizado con Alta de Cliente WISP y placeholders.
+- `npm run typecheck`, `npm test` (1358 passed) y `npm run build`: PASS.
+- Resultado: `docs/WISP_CORE_PRODUCTION_SPRINT_RESULT.md`.
+- Pendiente: validación staging por Hermes. No avanzar a PROD-5, Worker Live
+  ni RouterOS real.
+
 ### C.1 Hotfix paralelo activo (frontend)
 
 **NugaCore — Hotfix Frontend Polling / Rate Limit Hygiene**
