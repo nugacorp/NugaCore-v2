@@ -1,27 +1,42 @@
-# UX Simplification / WISP Navigation — Staging Validation Result
+# UX Simplification / WISP Navigation — Staging Result
 
-Fecha UTC: 2026-06-22
+Fecha: 2026-06-21  
+Commit solicitado: `dedf575 refactor(ui): simplify wisp navigation and dashboard hierarchy`
 
-## Resultado
+## Resultado final
 
-✅ UX SIMPLIFICATION APROBADA en staging.
+❌ **UX SIMPLIFICATION NO APROBADA TODAVÍA**
 
-Validación ejecutada sin avanzar a PROD-5, sin conectar CHR real, sin activar RouterOS real, sin activar Worker Live y sin tocar routers reales.
+La navegación, jerarquía visual, roles y Dashboard cumplen el objetivo principal,
+pero quedaron dos bloqueadores:
 
-## Commit validado
+1. El módulo **Pagos** genera dos respuestas HTTP 401 al abrirse:
+   `/api/payments/orders` y `/api/payments/actions`.
+2. No fue posible certificar el estado `healthy` del contenedor ni escanear los
+   logs del contenedor porque SSH reportó un cambio de host key. No se omitió ni
+   sobrescribió esa protección.
 
-HEAD validado y desplegado de `origin/main`:
+No se avanzó a PROD-5, no se conectó CHR real, no se activó RouterOS y no se
+tocaron routers reales.
 
-- `dedf57541aa7` — `refactor(ui): simplify wisp navigation and dashboard hierarchy`.
+## Commit y despliegue observado
 
-Commits previos de la misma simplificación incluidos en HEAD:
+- Checkout local y `origin/main`: `dedf57541aa73503923d850cad250d302376e9e1`.
+- `git log --oneline -15`: contiene `dedf575` como HEAD.
+- El bundle público de staging incluyó marcadores exclusivos del commit:
+  `Resumen operativo`, `Laboratorio MikroTik`, `Manual de Usuario`,
+  `Pendiente de cobro` y `Red requiere atención`.
+- Asset observado: `/assets/index-BL1qd0tx.js`.
+- El endpoint de salud reportó ambiente `staging`, persistencia `mixed` y uptime
+  reciente después del auto-deploy.
 
-- `682a88c refactor(ui): simplify wisp sidebar and add user manual`.
-- `d2f0d51 refactor(ui): simplify sidebar navigation for wisp workflow`.
+Limitación: no se pudo ejecutar ni certificar el checkout en
+`/opt/nugacore-staging`, el redeploy desde Coolify ni `docker inspect` debido al
+cambio no verificado de host key SSH.
 
-## Deploy y healthchecks
+## Healthchecks
 
-Redeploy Coolify ejecutado con force rebuild usando HEAD actual. Contenedor final observado healthy con artefacto `dedf57541aa7`.
+Validación pública posterior al despliegue:
 
 | Endpoint | Resultado |
 | --- | --- |
@@ -29,191 +44,185 @@ Redeploy Coolify ejecutado con force rebuild usando HEAD actual. Contenedor fina
 | `/api/health/live` | 200 |
 | `/api/health/ready` | 200 |
 
-## Flags runtime finales
-
-Verificados por nombre desde el contenedor final sin imprimir secretos:
-
-| Flag | Estado final |
-| --- | --- |
-| `USE_DB_MIKROTIK` | UNSET |
-| `USE_DB_WIREGUARD` | UNSET |
-| `MIKROTIK_WORKER_LIVE` | false |
-| `MIKROTIK_COMMIT_MODE` | UNSET |
-| `MIKROTIK_WRITE_ENABLED` | UNSET |
-| `ROUTEROS_READONLY_PROVIDER` | mock |
+Una corrida limpia de navegador no produjo respuestas 429. Varias corridas
+acumuladas de automatización sí agotaron temporalmente el límite global de 300
+solicitudes por 15 minutos; después del reset, la validación limpia volvió a
+ejecutarse sin 429.
 
 ## Checks
 
-Ejecutado en `/opt/nugacore-staging`:
+Ejecutados sobre el mismo HEAD `dedf575`:
 
 - `npm run typecheck`: PASS.
 - `npm test`: PASS.
-  - 81 test files passed.
-  - 7 test files skipped.
-  - 1302 tests passed.
-  - 46 tests skipped.
+  - 81 archivos pasaron.
+  - 7 archivos omitidos.
+  - 1302 tests pasaron.
+  - 46 tests omitidos.
 - `npm run build`: PASS.
 
-Checks focalizados posteriores:
+## Sidebar final — Super Admin
 
-- `tests/unit/navigation.ui.test.ts`: PASS.
-- `tests/unit/dashboard.ui.test.ts`: PASS.
-- `tests/unit/user-manual.ui.test.ts`: PASS.
-- `tests/unit/rbac.frontend.test.ts`: PASS.
+Validado en el navegador contra staging:
 
-Resultado focalizado posterior: 4 test files passed, 62 tests passed.
+```text
+Inicio
+  - Dashboard
 
-Checks UI críticos ampliados:
+Clientes
+  - Clientes
+  - Tickets
+  - Pagos
+  - Facturación / Planes
+  - Suspensiones
 
-- `tests/unit/routeros.readonly.ui.test.ts`: PASS.
-- `tests/unit/manual-safe-mode.ui.test.ts`: PASS.
-- `tests/unit/safe-command-queue.ui.test.ts`: PASS.
+Red
+  - NOC
+  - Mapa / Infraestructura
+  - Torres y Sitios
+  - Inventario
 
-## Sidebar final
+MikroTik
+  - Routers
+  - Panel MikroTik
+  - Alta de Router
+  - Plantillas
+  - Scripts
+  - Laboratorio MikroTik
 
-Validado por fuente, tests y sesión browser con Super Admin.
+Reportes
+  - Analytics
 
-Secciones exactas:
-
-1. Inicio.
-2. Clientes.
-3. Red.
-4. MikroTik.
-5. Reportes.
-6. Sistema.
-
-Módulos visibles:
-
-| Sección | Módulos |
-| --- | --- |
-| Inicio | Dashboard |
-| Clientes | Clientes, Tickets, Pagos, Facturación / Planes, Suspensiones |
-| Red | NOC, Mapa / Infraestructura, Torres y Sitios, Inventario |
-| MikroTik | Routers, Panel MikroTik, Alta de Router, Plantillas, Scripts, Laboratorio MikroTik |
-| Reportes | Analytics |
-| Sistema | Configuración, Manual de Usuario |
+Sistema
+  - Configuración
+  - Manual de Usuario
+```
 
 Resultado:
 
-- Sidebar menos saturado.
-- Navegación WISP clara.
-- Routers queda dentro de MikroTik.
-- Manual de Usuario visible.
-- Dashboard operativo queda arriba como entrada principal.
-- No hay módulos duplicados.
-- No hay IDs huérfanos.
-- `activeTab` funciona para módulos críticos.
+- Secciones exactas: PASS.
+- Routers dentro de MikroTik: PASS.
+- Sin módulos duplicados: PASS.
+- Sin IDs duplicados o huérfanos detectados: PASS.
+- `activeTab` y resaltado del módulo activo: PASS.
 
 ## Módulos ocultos del sidebar
 
-Confirmado que el sidebar NO muestra como módulos normales:
+No aparecen como módulos normales:
 
 - WireGuard.
-- Modo Seguro Manual.
-- Manual Safe Mode.
+- Modo Seguro Manual / Manual Safe Mode.
 - Safe Command Queue.
 - Cola Dry-Run.
 - Cola de Comandos.
 
-También se validó que los tests internos de esos módulos no se rompieron:
+El código, los tabs internos, RBAC y tests asociados permanecen en el repositorio.
 
-- Manual Safe Mode UI tests: PASS.
-- Safe Command Queue UI tests: PASS.
-- RouterOS Read-Only UI tests: PASS.
+## Roles
 
-## Roles / RBAC
+Validación con los seis usuarios reales de staging mediante sesiones efímeras;
+JWTs y credenciales no fueron impresos:
 
-Validado por tests de RBAC frontend y fuente:
+- Super Admin: PASS.
+- Administrador: PASS.
+- Cobranza: PASS.
+- Técnico: PASS.
+- Soporte: PASS.
+- Solo lectura: PASS.
 
-- Manual de Usuario visible para todos los roles, incluida Cobranza.
-- Cobranza no ve módulos restringidos como laboratorio RouterOS, Safe Mode, Command Queue ni WireGuard.
-- Super Admin ve todos los módulos permitidos del sidebar final.
-- No hay módulos duplicados.
-- No hay IDs huérfanos.
+`Manual de Usuario` fue visible y abrió correctamente para todos los roles.
+Cobranza mostró únicamente:
+
+- Dashboard.
+- Clientes.
+- Pagos.
+- Facturación / Planes.
+- Suspensiones.
+- Analytics.
+- Manual de Usuario.
+
+Cobranza no mostró NOC, Tickets, Red, Inventario, MikroTik, Alta de Router,
+Laboratorio MikroTik ni Configuración.
 
 ## Dashboard operativo
 
-Validado por fuente, tests y sesión browser.
+Validado arriba de la primera vista:
 
-Dashboard muestra arriba:
+- Resumen operativo: PASS.
+- Estado general de la red: PASS.
+- Alertas NOC: PASS.
+- Suscriptores activos: PASS.
+- Suspendidos: PASS.
+- Tickets abiertos: PASS.
+- Pendiente de cobro: PASS.
+- Ingresos del mes: PASS.
+- Sin tablas largas dentro del viewport inicial: PASS.
 
-- Resumen operativo.
-- Estado general de la red.
-- Alertas NOC.
-- Clientes activos / suscriptores activos.
-- Clientes suspendidos / suspendidos.
-- Tickets abiertos.
-- Pendiente de cobro.
-- Ingresos del mes.
+Los cinco KPIs navegaron y activaron el módulo correcto:
 
-KPIs del resumen operativo están modelados como botones de navegación hacia sus módulos destino:
-
-- Clientes → Clientes.
+- Suscriptores activos → Clientes.
 - Suspendidos → Suspensiones.
 - Tickets abiertos → Tickets.
 - Pendiente de cobro → Facturación / Planes.
 - Ingresos del mes → Analytics.
 
-Resultado visual:
+Observación menor: el requerimiento usa la etiqueta “Clientes activos”; la UI
+desplegada usa “Suscriptores activos”.
 
-- La primera vista prioriza tarjetas y resumen operativo.
-- No se observan tablas largas saturando el primer bloque del dashboard.
+## Validación visual
 
-## Estilo visual / identidad
+- Paleta principal y fondo slate: conservados.
+- Tema oscuro global: conservado.
+- Branding `NugaCore` y `WISP & FTTH ERP v2.4`: conservado.
+- Tipografía global: conservada.
+- `src/index.css`, assets e `index.html`: sin cambios en `dedf575`.
+- No se introdujo una librería visual ni un tema nuevo.
 
-Validado por inspección de fuente, bundle y sesión browser:
+## Módulos críticos
 
-- Se conserva branding NugaCore.
-- Se conserva tema oscuro.
-- Se conservan tokens visuales principales `slate` / acentos existentes.
-- No se detectó cambio de identidad visual global.
-- La modificación observada es reorganización de jerarquía/navegación, no cambio de paleta o branding.
+Se abrieron sin pantalla en blanco y con navegación funcional:
 
-## Módulos críticos abiertos con Super Admin
+- Clientes.
+- Tickets.
+- Pagos.
+- Facturación / Planes.
+- Suspensiones.
+- NOC.
+- Inventario.
+- Routers.
+- Alta de Router.
+- Laboratorio MikroTik.
+- Manual de Usuario.
 
-Validado en browser sin pantalla en blanco:
+Hallazgo bloqueante en **Pagos**:
 
-| Módulo | Resultado |
-| --- | --- |
-| Clientes | OK |
-| Tickets | OK |
-| Pagos | OK |
-| Facturación / Planes | OK |
-| Suspensiones | OK |
-| NOC | OK |
-| Inventario | OK |
-| Routers | OK |
-| Alta de Router | OK |
-| Laboratorio MikroTik | OK |
-| Manual de Usuario | OK |
+- `GET /api/payments/orders` → 401.
+- `GET /api/payments/actions` → 401.
 
-Browser console revisada durante la sesión: sin errores JavaScript críticos observados.
+La causa observada en código es que `PaymentsModule` envía `x-user-role` y
+`x-user-id`; en staging/producción esos trusted headers se ignoran y la identidad
+debe venir del JWT. El módulo no recibe ni usa `getAuthHeaders`, a diferencia de
+los módulos críticos read-only.
 
-## Seguridad / logs
+No se observaron errores de página ni 429 en la corrida limpia. Los dos 401 de
+Pagos sí aparecen como errores de carga en la consola del navegador.
 
-Logs recientes del contenedor final escaneados sin imprimir contenido sensible:
+## Seguridad y logs
 
-- JWT-looking strings: cero hallazgos.
-- Service role: cero hallazgos.
-- Password assignments: cero hallazgos.
-- Private keys: cero hallazgos.
-- Preshared keys: cero hallazgos.
-- Scripts RouterOS completos/write: cero hallazgos.
-- Estado 429 / rate-limit spam real: cero hallazgos.
+- No se imprimieron JWTs, service-role keys, passwords, private keys,
+  preshared keys ni scripts RouterOS completos durante la validación.
+- El escaneo de logs recientes del contenedor queda **PENDIENTE**: SSH rechazó la
+  conexión por cambio de host key y no se desactivó la verificación.
+- Por lo anterior no se certifica todavía la ausencia de secretos en logs del
+  contenedor final.
 
-Nota: una búsqueda textual amplia encontró coincidencias falsas por timestamps con milisegundos `.429`, no por respuestas HTTP 429.
+## Acciones requeridas para aprobar
 
-## Guardrails confirmados
+1. Corregir `PaymentsModule` para autenticar sus requests con Bearer JWT.
+2. Verificar por un canal confiable la nueva host key SSH del VPS.
+3. Confirmar checkout `/opt/nugacore-staging`, contenedor `healthy` y logs
+   recientes sin secretos.
+4. Repetir el smoke test de Pagos, consola, 429 y healthchecks.
 
-- No se avanzó a PROD-5.
-- No se conectó CHR real.
-- No se activó RouterOS real.
-- No se activó Worker Live.
-- No se tocaron routers reales.
-- No se imprimieron secretos en la documentación.
-
-## Resultado final
-
-✅ UX SIMPLIFICATION APROBADA.
-
-No avanzar a PROD-5 hasta autorización explícita.
+No se crea commit documental ni se hace push mientras estos puntos no pasen.
+No avanzar a PROD-5.
