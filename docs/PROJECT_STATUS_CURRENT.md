@@ -65,8 +65,8 @@ detallado en `docs/DEVELOPMENT_HANDOFF_CHECKLIST.md` §0.D.
 4. PROD-1 Manual Safe Mode. 🟡 implementada localmente (pendiente Hermes).
 5. FAST-1 Safe Command Queue dry-run. 🟡 implementada localmente (pendiente Hermes).
 6. PROD-3 RouterOS Read-Only Lab (mock). 🟡 implementada localmente (pendiente Hermes).
-7. PROD-4 CHR Real Read-Only (abstracción de providers). 🟡 implementada localmente, PREPARADO/NO CONECTADO (pendiente Hermes).
-8. PROD-5 Dry-Run/CHR → PROD-6 comando real CHR → PROD-7 piloto router no crítico. 🔄 TODO, gated (no implementar todavía).
+7. PROD-4 CHR Real Read-Only (cliente REST real, gated/solo lab). 🟡 implementada localmente — CONECTABLE al CHR de lab por env; sin credenciales cae a mock (pendiente validación Hermes con CHR de lab). Ver `docs/PROD5_CHR_REAL_READ_ONLY_RESULT.md`.
+8. PROD-5 Dry-Run/CHR → PROD-6 comando real CHR → PROD-7 piloto router no crítico. 🔄 TODO, gated (no implementar todavía). Nota: el "PROD-5" de este sprint fue conectar el CHR real read-only (= completar PROD-4), NO el Safe Command Queue Dry-Run del roadmap.
 
 - UX-1 — Simplificación de navegación WISP + Dashboard operativo. ✅ Solo UI/UX
   (sin cambios de tema/colores): 6 secciones en español (Inicio, Clientes, Red,

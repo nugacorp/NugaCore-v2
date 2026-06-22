@@ -552,23 +552,29 @@ worker live, sin escritura. RBAC: SA/Admin/Técnico/Soporte/Solo lectura; Cobran
 
 #### PROD-4 — CHR Real Read-Only Integration
 
-Estado: 🟡 **Implementada localmente — PREPARADO, NO CONECTADO** (pendiente
-validación Hermes).
+Estado: 🟡 **Implementada localmente — CLIENTE REAL CONECTABLE (gated, solo lab)**
+(pendiente validación Hermes con CHR de lab).
 
 Abstracción de **providers** en el dominio RouterOS Read-Only: contrato async
 común con dos implementaciones (`mock` y `routeros`), feature flag
 `ROUTEROS_READONLY_PROVIDER` (default `mock`) y **fallback seguro** a mock ante
 timeout/auth/host inalcanzable (responde 200, `source=mock`, warning sin
 secretos). El provider `routeros` usa una **allowlist** de comandos `print` y un
-transporte read-only (`print` únicamente), pero queda **sin cliente real**: no
-conecta CHR ni RB5009. Endpoints/UI/RBAC sin cambios. Sin `.add/.set/.remove/
-.execute`, sin escritura. Resultado:
-[`docs/CHR_REAL_READ_ONLY_RESULT.md`](./docs/CHR_REAL_READ_ONLY_RESULT.md).
-Diseño: [`docs/ROUTEROS_READ_ONLY_API_PLAN.md`](./docs/ROUTEROS_READ_ONLY_API_PLAN.md),
-prep en [`docs/CHR_LAB_PREP_RUNBOOK.md`](./docs/CHR_LAB_PREP_RUNBOOK.md).
-Falta para conectar CHR real (fase posterior, gated): cliente RouterOS real
-(API-SSL `8729`), credenciales de lab fuera del repo, sanitización de salida y
-aprobación Hermes/Ramiro.
+transporte read-only (`print` únicamente). Endpoints/UI/RBAC sin cambios de
+contrato (la UI añade un indicador `Fuente: MOCK | ROUTEROS`). Sin
+`.add/.set/.remove/.execute`, sin escritura.
+
+Completado en esta fase (etiquetada **PROD-5** en el sprint, = conectar el CHR
+real read-only de PROD-4): cliente RouterOS REST **real** de solo lectura
+(`providers/routeros-client.ts`), configurado por entorno (`ROUTEROS_HOST/PORT/
+USERNAME/PASSWORD/TIMEOUT_MS/TLS`), que mapea cada `print` allowlisted a su ruta
+REST y hace `GET` HTTPS con Basic Auth y timeout. Sin credenciales → cae a mock.
+Logs `routeros_read_success` / `routeros_read_fallback` sin secretos. Resultado:
+[`docs/PROD5_CHR_REAL_READ_ONLY_RESULT.md`](./docs/PROD5_CHR_REAL_READ_ONLY_RESULT.md)
+(antecedente [`docs/CHR_REAL_READ_ONLY_RESULT.md`](./docs/CHR_REAL_READ_ONLY_RESULT.md)).
+Producción permanece en `mock`; solo CHR de **lab**. Falta (gated): validación
+Hermes/Ramiro con CHR de lab real (credenciales fuera del repo). No avanza a
+PROD-6 ni RouterOS write.
 
 #### PROD-5 — Safe Command Queue Dry-Run sobre CHR
 
@@ -599,8 +605,8 @@ reversible, monitoreo antes/después, rollback y aprobación explícita de Ramir
 ```text
 PROD-3 RouterOS Read-Only Lab (mock)      ← implementada localmente
   ↓ (Hermes)
-PROD-4 CHR Real Read-Only (abstracción)   ← implementada localmente (PREPARADO, NO CONECTADO)
-  ↓ (Hermes; luego conectar cliente CHR real, gated)
+PROD-4 CHR Real Read-Only (cliente real)  ← implementada localmente (CONECTABLE, gated/solo lab)
+  ↓ (Hermes valida con CHR de lab real, gated)
 PROD-5 Safe Command Queue Dry-Run / CHR   ← TODO, gated
   ↓
 PROD-6 Primer comando real en CHR         ← TODO, gated + autorización Ramiro

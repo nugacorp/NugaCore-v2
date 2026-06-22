@@ -37,12 +37,22 @@ export async function readWithFallback<T>(
   read: (provider: RouterOsReadOnlyProvider) => Promise<T>,
 ): Promise<ReadResult<T>> {
   try {
-    return { data: await read(primary), source: primary.source };
+    const data = await read(primary);
+    // Log seguro de lectura REAL exitosa (sin secretos): solo evento + source.
+    if (primary.source === 'routeros') {
+      logger.info('routeros-readonly: lectura real OK', {
+        event: 'routeros_read_success',
+        source: primary.source,
+      });
+    }
+    return { data, source: primary.source };
   } catch (error) {
     if (primary.source === fallback.source) {
       throw error;
     }
+    // Log seguro de fallback (sin secretos): evento, providers y código/nombre.
     logger.warn('routeros-readonly: provider primario falló; usando fallback mock seguro', {
+      event: 'routeros_read_fallback',
       primary: primary.source,
       fallback: fallback.source,
       reason: safeReason(error),

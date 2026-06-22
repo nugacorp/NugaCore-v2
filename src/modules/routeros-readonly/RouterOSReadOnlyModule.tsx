@@ -145,6 +145,11 @@ export default function RouterOSReadOnlyModule({ getAuthHeaders }: Props) {
     void load();
   }, [load]);
 
+  // Fuente efectiva de los datos (mock por defecto / routeros si el CHR de lab
+  // respondió). Solo indicador visual; no cambia el comportamiento read-only.
+  const dataSource = (data?.identity.source ?? 'mock').toUpperCase();
+  const isRealSource = dataSource === 'ROUTEROS';
+
   return (
     <div className="p-6 space-y-6 bg-slate-950 min-h-full text-slate-100">
       <div className="flex items-center justify-between flex-wrap gap-3">
@@ -154,14 +159,27 @@ export default function RouterOSReadOnlyModule({ getAuthHeaders }: Props) {
             <span>RouterOS Read-Only Lab</span>
           </h2>
           <p className="text-sm text-slate-400 mt-1">
-            Datos RouterOS de laboratorio en modo mock. Solo lectura.
+            Datos RouterOS de laboratorio. Solo lectura.
           </p>
         </div>
 
-        <span className="inline-flex items-center space-x-1.5 px-2.5 py-1 rounded-lg bg-slate-900 border border-indigo-800 text-xs text-indigo-300 font-mono">
-          <Eye className="w-3.5 h-3.5" />
-          <span>READ ONLY LAB</span>
-        </span>
+        <div className="flex items-center gap-2 flex-wrap">
+          <span
+            className={`inline-flex items-center space-x-1.5 px-2.5 py-1 rounded-lg text-xs font-mono border ${
+              isRealSource
+                ? 'bg-slate-900 border-emerald-800 text-emerald-300'
+                : 'bg-slate-900 border-slate-700 text-slate-300'
+            }`}
+            title="Origen efectivo de los datos (mock o CHR de laboratorio)"
+          >
+            <span className="text-slate-500">Fuente:</span>
+            <span>{dataSource}</span>
+          </span>
+          <span className="inline-flex items-center space-x-1.5 px-2.5 py-1 rounded-lg bg-slate-900 border border-indigo-800 text-xs text-indigo-300 font-mono">
+            <Eye className="w-3.5 h-3.5" />
+            <span>READ ONLY LAB</span>
+          </span>
+        </div>
       </div>
 
       <div className="p-3 rounded-lg bg-indigo-950/30 border border-indigo-900 text-indigo-200 text-sm">
@@ -398,7 +416,7 @@ export default function RouterOSReadOnlyModule({ getAuthHeaders }: Props) {
 
       <p className="text-xs text-slate-500 flex items-center gap-2">
         <Activity className="w-3.5 h-3.5" />
-        PROD-3 RouterOS Read-Only Lab — mock; sin RouterOS real, sin worker live, sin escritura.
+        RouterOS Read-Only Lab — solo lectura; sin worker live, sin escritura. Fuente actual: {dataSource}.
       </p>
     </div>
   );

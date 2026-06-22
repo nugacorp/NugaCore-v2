@@ -59,18 +59,26 @@ Estado PROD-3 (base, sin cambios de contrato):
 - RBAC: SA/Admin/Técnico/Soporte/Solo lectura permitidos; Cobranza 403.
 - Resultado local: `docs/ROUTEROS_READ_ONLY_LAB_RESULT.md`.
 
-Estado PROD-4 (implementado localmente, pendiente Hermes):
+Estado PROD-4 / PROD-5 — CHR Real Read-Only (cliente real conectable, gated/solo lab):
 
 - Abstracción de providers en `backend/domains/routeros-readonly/providers/`
   (interface async, `mock-provider`, `routeros-provider`, `fallback`, factory).
 - Feature flag `ROUTEROS_READONLY_PROVIDER` (`mock` default | `routeros`).
-- Provider `routeros` PREPARADO pero **sin cliente real** (no configurado): cae a
-  mock por fallback (timeout/auth/host inalcanzable) → API 200, `source=mock`,
-  warning sin secretos.
-- Allowlist de comandos `print`; transporte read-only (`print` únicamente).
-- Endpoints/UI/RBAC sin cambios. Sin `.add/.set/.remove/.execute`, sin escritura.
-- Tests `routeros.readonly.*` (contract/service/ui/providers/security).
-- Resultado local: `docs/CHR_REAL_READ_ONLY_RESULT.md`.
+- **PROD-5 (este sprint = conectar el CHR real read-only de PROD-4):** cliente
+  REST real `providers/routeros-client.ts` configurado por entorno
+  (`ROUTEROS_HOST/PORT/USERNAME/PASSWORD/TIMEOUT_MS/TLS_REJECT_UNAUTHORIZED`).
+  Mapea cada `print` allowlisted a su ruta REST y hace `GET` HTTPS con Basic Auth
+  y timeout. Sin credenciales → cliente no configurado → fallback a mock
+  (API 200, `source=mock`). Logs `routeros_read_success`/`routeros_read_fallback`
+  sin secretos. UI: indicador `Fuente: MOCK | ROUTEROS` (sin rediseño).
+- Allowlist de comandos `print`; transporte read-only (solo `GET`). Sin
+  `.add/.set/.remove/.execute`, sin escritura.
+- ⚠️ Producción permanece en `mock`. La integración `routeros` es **solo CHR de
+  lab**; NO apuntar a RB5009 ni routers reales. Pendiente validación Hermes.
+- Endpoints/RBAC sin cambios de contrato.
+- Tests `routeros.readonly.*` + `routeros.client` + `routeros.provider.integration`.
+- Resultado local: `docs/PROD5_CHR_REAL_READ_ONLY_RESULT.md`
+  (antecedente `docs/CHR_REAL_READ_ONLY_RESULT.md`).
 
 Estado UX-1 (solo UI/UX de navegación + Manual de Usuario + Dashboard, completada):
 
