@@ -281,20 +281,6 @@ export default function App() {
     setRateLimitUntilMs(Date.now() + retryAfterMs);
   }, []);
 
-  const shouldPollCoreDataset = useCallback((tab: string): boolean => {
-    return [
-      'dashboard',
-      'crm',
-      'billing',
-      'network',
-      'support',
-      'inventory',
-      'gis',
-      'finance',
-      'owner',
-    ].includes(tab);
-  }, []);
-
   // Fetch initial system database.
   // Debe ejecutarse solo cuando ya existe una sesión validada: los endpoints
   // protegidos rechazan correctamente cualquier request sin Bearer JWT.
@@ -316,71 +302,87 @@ export default function App() {
 
     try {
       setLoading(true);
-      const shouldLoadCoreDataset = shouldPollCoreDataset(activeTab);
 
-      if (shouldLoadCoreDataset) {
-        const [
-          resStats,
-          resClients,
-          resPlans,
-          resInvoices,
-          resTowers,
-          resOlts,
-          resOnus,
-          resTickets,
-          resWorkOrders,
-          resInventory,
-          resAlerts,
-          resMktLogs,
-          resNaps,
-          resBillingSummary,
-          resRevenueReport,
-        ] = await Promise.all([
-          fetchJson('/api/dashboard-stats'),
-          fetchJson('/api/clients'),
-          fetchJson('/api/plans'),
-          fetchJson('/api/billing/invoices'),
-          fetchJson('/api/network-towers'),
-          fetchJson('/api/olt'),
-          fetchJson('/api/onu'),
-          fetchJson('/api/tickets'),
-          fetchJson('/api/workorders'),
-          fetchJson('/api/inventory'),
-          fetchJson('/api/alerts'),
-          fetchJson('/api/mikrotik/logs'),
-          fetchJson('/api/naps'),
-          fetchJson('/api/billing/account-summary'),
-          fetchJson('/api/billing/revenue-report'),
-        ]);
-
-        setStats(resStats);
-        setClients(resClients);
-        setPlans(resPlans);
-        setInvoices(resInvoices);
-        setBillingSummary(resBillingSummary);
-        setRevenueReport(resRevenueReport);
-        setTowers(resTowers);
-        setOlts(resOlts);
-        setOnus(resOnus);
-        setTickets(resTickets);
-        setWorkOrders(resWorkOrders);
-        setInventory(resInventory);
-        setAlerts(resAlerts);
-        setMikrotikLogs(resMktLogs);
-        setNaps(resNaps);
-      } else {
+      // Carga solo el dataset que necesita la vista activa. Antes el shell
+      // disparaba ~15 endpoints globales en cada navegación/poll; al abrir varios
+      // módulos eso agotaba el rate-limit y producía spam de 429 en consola.
+      if (activeTab === 'dashboard') {
         const [resStats, resAlerts] = await Promise.all([
           fetchJson('/api/dashboard-stats'),
           fetchJson('/api/alerts'),
         ]);
         setStats(resStats);
         setAlerts(resAlerts);
-      }
-      setErrorStr('');
-      setRateLimitNotice('');
-      // Cargas aisladas (no participan del Promise.all para no romper a roles
-      // sin acceso a esos módulos).
-      if (isMikrotikWorkspaceTab(activeTab)) {
+      } else if (activeTab === 'crm') {
+        const [resClients, resPlans] = await Promise.all([
+          fetchJson('/api/clients'),
+          fetchJson('/api/plans'),
+        ]);
+        setClients(resClients);
+        setPlans(resPlans);
+      } else if (activeTab === 'billing') {
+        const [resClients, resInvoices, resBillingSummary, resRevenueReport] = await Promise.all([
+          fetchJson('/api/clients'),
+          fetchJson('/api/billing/invoices'),
+          fetchJson('/api/billing/account-summary'),
+          fetchJson('/api/billing/revenue-report'),
+        ]);
+        setClients(resClients);
+        setInvoices(resInvoices);
+        setBillingSummary(resBillingSummary);
+        setRevenueReport(resRevenueReport);
+      } else if (activeTab === 'network') {
+        const [resClients, resTowers, resOlts, resOnus, resNaps] = await Promise.all([
+          fetchJson('/api/clients'),
+          fetchJson('/api/network-towers'),
+          fetchJson('/api/olt'),
+          fetchJson('/api/onu'),
+          fetchJson('/api/naps'),
+        ]);
+        setClients(resClients);
+        setTowers(resTowers);
+        setOlts(resOlts);
+        setOnus(resOnus);
+        setNaps(resNaps);
+      } else if (activeTab === 'support') {
+        const [resClients, resTickets, resWorkOrders] = await Promise.all([
+          fetchJson('/api/clients'),
+          fetchJson('/api/tickets'),
+          fetchJson('/api/workorders'),
+        ]);
+        setClients(resClients);
+        setTickets(resTickets);
+        setWorkOrders(resWorkOrders);
+      } else if (activeTab === 'inventory') {
+        setInventory(await fetchJson('/api/inventory'));
+      } else if (activeTab === 'gis') {
+        const [resClients, resTowers, resOlts, resOnus, resNaps] = await Promise.all([
+          fetchJson('/api/clients'),
+          fetchJson('/api/network-towers'),
+          fetchJson('/api/olt'),
+          fetchJson('/api/onu'),
+          fetchJson('/api/naps'),
+        ]);
+        setClients(resClients);
+        setTowers(resTowers);
+        setOlts(resOlts);
+        setOnus(resOnus);
+        setNaps(resNaps);
+      } else if (activeTab === 'finance' || activeTab === 'owner') {
+        const [resClients, resInvoices, resTickets] = await Promise.all([
+          fetchJson('/api/clients'),
+          fetchJson('/api/billing/invoices'),
+          fetchJson('/api/tickets'),
+        ]);
+        setClients(resClients);
+        setInvoices(resInvoices);
+        setTickets(resTickets);
+      } else if (isMikrotikWorkspaceTab(activeTab)) {
+        try {
+          setMikrotikLogs(await fetchJson('/api/mikrotik/logs'));
+        } catch {
+          setMikrotikLogs([]);
+        }
         try {
           setProvisionedRouters(await fetchJson('/api/mikrotik/routers'));
         } catch {
@@ -392,6 +394,10 @@ export default function App() {
           setWorkerRuns([]);
         }
       }
+
+      setErrorStr('');
+      setRateLimitNotice('');
+
       if (activeTab === 'suspension') {
         try {
           const [customers, orders, events, policy] = await Promise.all([
@@ -440,7 +446,6 @@ export default function App() {
     activeTab,
     fetchJson,
     setRateLimitMessage,
-    shouldPollCoreDataset,
     rateLimitUntilMs,
   ]);
 

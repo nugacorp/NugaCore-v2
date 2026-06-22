@@ -142,6 +142,15 @@ describe('RBAC visual por rol (frontend)', () => {
     expect(app).toContain("document.removeEventListener('visibilitychange'");
   });
 
+  it('App carga solo el dataset de la vista activa para no agotar rate-limit', () => {
+    const app = readFileSync('src/App.tsx', 'utf8');
+
+    expect(app).not.toContain('shouldPollCoreDataset');
+    expect(app).toContain("activeTab === 'dashboard'");
+    expect(app).toContain("activeTab === 'network'");
+    expect(app).toContain('Carga solo el dataset que necesita la vista activa');
+  });
+
   it('App respeta cooldown de 429 para evitar loops de polling agresivo', () => {
     const app = readFileSync('src/App.tsx', 'utf8');
 
