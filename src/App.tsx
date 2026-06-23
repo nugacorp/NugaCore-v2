@@ -14,6 +14,7 @@ import ManualSafeModeModule from './modules/manual-safe-mode/ManualSafeModeModul
 import SafeCommandQueueModule from './modules/safe-command-queue/SafeCommandQueueModule';
 import RouterOSReadOnlyModule from './modules/routeros-readonly/RouterOSReadOnlyModule';
 import UserManualModule from './modules/user-manual/UserManualModule';
+import InventorySyncModule from './modules/inventory-sync/InventorySyncModule';
 import GisModule from './components/GisModule';
 import FinanceOwnerModule from './components/FinanceOwnerModule';
 import SuspensionModule from './components/SuspensionModule';
@@ -1094,6 +1095,10 @@ export default function App() {
 
             {activeTab === 'user-manual' && (
               <UserManualModule />
+            )}
+
+            {activeTab === 'inventory-sync' && (
+              <InventorySyncModule getAuthHeaders={getAuthHeaders} />
             )}
 
             {activeTab === 'crm' && (

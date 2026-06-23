@@ -22,7 +22,8 @@ import {
   ChevronRight,
   Banknote,
   Server,
-  BookText
+  BookText,
+  GitCompare
 } from 'lucide-react';
 import { UserSessionProfile } from '../lib/supabase';
 import { isVisibleInSidebar } from '../lib/rbac';
@@ -116,6 +117,7 @@ export default function Sidebar({
         { id: 'routeros-templates', name: 'Plantillas', icon: BookOpen },
         { id: 'routeros-resources', name: 'Scripts', icon: FileCode },
         { id: 'routeros-readonly', name: 'Laboratorio MikroTik', icon: Server },
+        { id: 'inventory-sync', name: 'Inventory Sync', icon: GitCompare },
       ],
     },
     {

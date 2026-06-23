@@ -36,6 +36,7 @@ const EXPECTED_SECTIONS: Array<{ title: string; ids: string[] }> = [
       'routeros-templates',
       'routeros-resources',
       'routeros-readonly',
+      'inventory-sync',
     ],
   },
   { title: 'Reportes', ids: ['finance'] },
@@ -128,15 +129,15 @@ describe('Sidebar — módulos internos ocultos pero conservados', () => {
 });
 
 describe('Sidebar — no se elimina ningún módulo', () => {
-  it('los 19 módulos visibles están presentes en el sidebar', () => {
-    expect(VISIBLE_TAB_IDS.length).toBe(19);
+  it('los 20 módulos visibles están presentes en el sidebar', () => {
+    expect(VISIBLE_TAB_IDS.length).toBe(20);
     for (const id of VISIBLE_TAB_IDS) {
       expect(sidebarSource, `falta el módulo visible ${id}`).toContain(`id: '${id}'`);
     }
   });
 
-  it('cubre los 22 tabs declarados en el RBAC (AppTab)', () => {
-    expect(ALL_TAB_IDS.length).toBe(22);
+  it('cubre los 23 tabs declarados en el RBAC (AppTab)', () => {
+    expect(ALL_TAB_IDS.length).toBe(23);
     for (const id of ALL_TAB_IDS) {
       expect(rbacSource, `${id} debería existir en el union AppTab`).toContain(`'${id}'`);
     }

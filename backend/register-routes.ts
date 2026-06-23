@@ -9,6 +9,7 @@ import coverageRoutes from './domains/coverage/routes';
 import dashboardRoutes from './domains/dashboard/routes';
 import gisRoutes from './domains/gis/routes';
 import inventoryRoutes from './domains/inventory/routes';
+import inventorySyncRoutes from './domains/inventory-sync/routes';
 import ipamRoutes from './domains/ipam/routes';
 import manualSafeModeRoutes from './domains/manual-safe-mode/routes';
 import mikrotikRoutes from './domains/mikrotik/routes';
@@ -49,6 +50,7 @@ export function registerRoutes(app: Express): void {
   app.use(routerEnrollmentRoutes);
   app.use(ticketsRoutes);
   app.use(inventoryRoutes);
+  app.use(inventorySyncRoutes);
   app.use(ipamRoutes);
   app.use(nocRoutes);
   app.use(nocTelemetryRoutes);
