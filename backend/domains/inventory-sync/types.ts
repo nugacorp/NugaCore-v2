@@ -63,6 +63,10 @@ export interface InventorySyncSnapshotResponse {
   generatedAt: string;
   source: RouterOsSource;
   readOnly: true;
+  /** Contract names used by the staging validation handoff. */
+  nugaCoreInventory: NugaInventoryRouter[];
+  routerosSnapshot: RouterOsInventorySnapshot[];
+  /** Backward-compatible aliases consumed by the current UI/tests. */
   nugacore: NugaInventoryRouter[];
   routeros: RouterOsInventorySnapshot[];
 }

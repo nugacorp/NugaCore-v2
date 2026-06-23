@@ -79,8 +79,12 @@ describe('Inventory Sync Read-Only contract', () => {
     const res = await request(app).get('/api/inventory-sync/snapshot').set(ADMIN);
     expect(res.status).toBe(200);
     expect(res.body).toMatchObject({ source: 'mock', readOnly: true });
+    expect(Array.isArray(res.body.nugaCoreInventory)).toBe(true);
+    expect(Array.isArray(res.body.routerosSnapshot)).toBe(true);
     expect(Array.isArray(res.body.nugacore)).toBe(true);
     expect(Array.isArray(res.body.routeros)).toBe(true);
+    expect(res.body.nugaCoreInventory).toEqual(res.body.nugacore);
+    expect(res.body.routerosSnapshot).toEqual(res.body.routeros);
     expect(res.body.routeros[0]).toMatchObject({ source: 'mock', name: expect.any(String) });
   });
 

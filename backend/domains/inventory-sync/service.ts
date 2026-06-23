@@ -57,6 +57,8 @@ export const createInventorySyncService = (deps: InventorySyncDeps = defaultDeps
         generatedAt: new Date().toISOString(),
         source,
         readOnly: true,
+        nugaCoreInventory: nugacore,
+        routerosSnapshot: snapshots,
         nugacore,
         routeros: snapshots,
       };
