@@ -9,6 +9,12 @@ import {
 const crmSource = readFileSync('src/components/CrmModule.tsx', 'utf8');
 const appSource = readFileSync('src/App.tsx', 'utf8');
 
+const requiredClientFields = {
+  type: 'residential',
+  address: 'Av. Reforma 101',
+  city: 'CDMX',
+};
+
 const available: IpAssignmentValidation = {
   routerId: 'rb5009-main',
   poolId: 'pool-rb5009-main-100',
@@ -51,6 +57,7 @@ describe('Alta de cliente — asignación IPAM UI', () => {
   it('IP ocupada bloquea Confirmar Alta', () => {
     expect(canSubmitCustomerOnboarding({
       name: 'Cliente Activo',
+      ...requiredClientFields,
       isLead: false,
       routerId: occupied.routerId,
       poolId: occupied.poolId,
@@ -62,6 +69,7 @@ describe('Alta de cliente — asignación IPAM UI', () => {
   it('IP válida permite Confirmar Alta para Cliente Activo', () => {
     expect(canSubmitCustomerOnboarding({
       name: 'Cliente Activo',
+      ...requiredClientFields,
       isLead: false,
       routerId: available.routerId,
       poolId: available.poolId,
@@ -73,6 +81,7 @@ describe('Alta de cliente — asignación IPAM UI', () => {
   it('Cliente Activo requiere router, pool e IP validada', () => {
     expect(canSubmitCustomerOnboarding({
       name: 'Cliente sin red',
+      ...requiredClientFields,
       isLead: false,
       routerId: '',
       poolId: '',
@@ -84,12 +93,28 @@ describe('Alta de cliente — asignación IPAM UI', () => {
   it('Lead Comercial puede continuar sin IP', () => {
     expect(canSubmitCustomerOnboarding({
       name: 'Prospecto Comercial',
+      ...requiredClientFields,
       isLead: true,
       routerId: '',
       poolId: '',
       assignedIp: '',
       validation: null,
     })).toBe(true);
+  });
+
+  it('bloquea submit si faltan campos requeridos por backend', () => {
+    expect(canSubmitCustomerOnboarding({
+      name: 'Cliente incompleto',
+      type: 'residential',
+      address: '',
+      city: 'CDMX',
+      isLead: true,
+      routerId: '',
+      poolId: '',
+      assignedIp: '',
+      validation: null,
+    })).toBe(false);
+    expect(crmSource).toContain('required');
   });
 
   it('el submit envía routerId, poolId, assignedIp e ipAssignmentStatus', () => {

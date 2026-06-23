@@ -29,13 +29,18 @@ export const isNetworkAssignmentRequired = (isLead: boolean): boolean => !isLead
 
 export const canSubmitCustomerOnboarding = (input: {
   name: string;
+  type: string;
+  address: string;
+  city: string;
   isLead: boolean;
   routerId: string;
   poolId: string;
   assignedIp: string;
   validation: IpAssignmentValidation | null;
 }): boolean => {
-  if (!input.name.trim()) return false;
+  // Mantener sincronizado con la validación del backend de /api/clients.
+  // Evita enviar formularios incompletos que terminan en 400 en consola.
+  if (!input.name.trim() || !input.type.trim() || !input.address.trim() || !input.city.trim()) return false;
   if (!isNetworkAssignmentRequired(input.isLead)) return true;
   return Boolean(
     input.routerId &&

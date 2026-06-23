@@ -166,6 +166,9 @@ export default function CrmModule({
   const coordinatesValid = areValidCoordinates(formLat, formLng);
   const canConfirmAdd = coordinatesValid && canSubmitCustomerOnboarding({
     name: formName,
+    type: formType,
+    address: formAddress,
+    city: formCity,
     isLead: isLeadForm,
     routerId: formRouterId,
     poolId: formPoolId,
@@ -1213,6 +1216,7 @@ export default function CrmModule({
                     placeholder="Av. Reforma 101"
                     value={formAddress}
                     onChange={(e) => setFormAddress(e.target.value)}
+                    required
                     className="w-full bg-slate-900 border border-slate-800 rounded-xl p-2.5"
                   />
                 </div>
@@ -1223,6 +1227,7 @@ export default function CrmModule({
                     placeholder="CDMX"
                     value={formCity}
                     onChange={(e) => setFormCity(e.target.value)}
+                    required
                     className="w-full bg-slate-900 border border-slate-800 rounded-xl p-2.5"
                   />
                 </div>
