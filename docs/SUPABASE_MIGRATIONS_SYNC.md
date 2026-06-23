@@ -28,8 +28,10 @@ el entorno local; ver memoria del proyecto).
 | 20260613120000 | router_enrollment_template_parameters | ✅ aplicada | Fase 4.9.2 |
 | 20260617000000 | router_enrollment_router_snapshot | ✅ aplicada | Fase 4.9.2.1; columna+índice GIN ya en schema, **registrada en historial el 2026-06-18** (SQL idempotente, no-op) |
 | 20260617120000 | router_enrollment_wireguard_snapshot | ✅ aplicada | Fase 4.9.2.1; ídem, **registrada el 2026-06-18** |
+| 20260618000000 | mikrotik_routers_reconciliation | ✅ aplicada | DB-1; `ADD COLUMN IF NOT EXISTS` evolutivo (ver ROADMAP DB-1) |
+| 20260622000000 | inventory_schema | 🔄 **pendiente (Hermes)** | Fase 5.1; aditiva/idempotente, RLS deny-by-default. Crea `warehouses`, `inventory_items`, `inventory_movements`, `inventory_transfers`, `inventory_assignments`. Aplicar antes de `USE_DB_INVENTORY=true` |
 
-**13 de 14 aplicadas y registradas.** Pendiente: `mikrotik_provisioning_schema`.
+**Pendientes de aplicar/registrar:** `mikrotik_provisioning_schema` (conflicto, ver abajo) y `inventory_schema` (Fase 5.1, segura de aplicar).
 
 ## Conflicto pendiente: `mikrotik_routers` (drift del repo)
 

@@ -680,7 +680,7 @@ Gate producción:
 
 ### FASE 5 — Inventory Management
 
-Estado: 🔄 Pendiente
+Estado: 🟡 **5.1 code-complete local** (pendiente validación Hermes). Resto 🔄.
 
 Equipos:
 
@@ -698,6 +698,30 @@ Funciones:
 - Garantías.
 - Series.
 - Asignaciones.
+
+#### FASE 5.1 — Persistencia + UI aditiva
+
+Estado: ✅ **Code-complete local** (typecheck/test/build verdes; pendiente Hermes).
+
+Da persistencia real al Inventario ERP detrás de `USE_DB_INVENTORY` (default
+`false` → store), promoviendo el **almacén** a entidad de primera clase y
+modelando **transferencias** con ciclo `pending → completed | cancelled`.
+Refactor del dominio a service+repository (Store + Supabase) sin romper el
+contrato API v1 ni el frontend congelado; UI aditiva (Almacenes,
+Transferencias, stock por almacén) como sub-tabs del módulo Inventario.
+
+- Migración `20260622000000_inventory_schema.sql` (warehouses, inventory_items,
+  inventory_movements, inventory_transfers, inventory_assignments; RLS).
+- Endpoints aditivos `/api/inventory/warehouses*` y `/api/inventory/transfers*`.
+- Tests: `inventory.contract.test.ts` (hermético) + `inventory.db.contract.test.ts`.
+- Resultado: [`docs/INVENTORY_ERP_5_1_RESULT.md`](./docs/INVENTORY_ERP_5_1_RESULT.md).
+  Diseño: [`docs/INVENTORY_ERP_PERSISTENCE.md`](./docs/INVENTORY_ERP_PERSISTENCE.md).
+
+#### FASE 5.2 — Series, garantías y reportes (gated)
+
+Estado: 🔄 Pendiente. Trazabilidad por número de serie, garantías, valuación y
+reportes de inventario; almacenes dinámicos en los selects existentes (requiere
+autorización de UI).
 
 ### FASE 6 — Ticketing System
 

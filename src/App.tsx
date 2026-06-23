@@ -7,6 +7,8 @@ import NetworkModule from './components/NetworkModule';
 import MikrotikModule from './components/MikrotikModule';
 import SupportModule from './components/SupportModule';
 import InventoryModule from './components/InventoryModule';
+import WarehousesModule from './components/WarehousesModule';
+import InventoryTransfersModule from './components/InventoryTransfersModule';
 import InventoryRoutersModule from './components/InventoryRoutersModule';
 import NocReadOnlyModule from './components/NocReadOnlyModule';
 import NocTelemetryModule from './components/NocTelemetryModule';
@@ -219,6 +221,8 @@ export default function App() {
   const [tickets, setTickets] = useState<Ticket[]>([]);
   const [workOrders, setWorkOrders] = useState<TaskOrder[]>([]);
   const [inventory, setInventory] = useState<WarehouseItem[]>([]);
+  // Fase 5.1: sub-tab interna del módulo Inventario ERP (aditiva, sin tocar el sidebar).
+  const [inventorySubTab, setInventorySubTab] = useState<'items' | 'warehouses' | 'transfers'>('items');
   const [alerts, setAlerts] = useState<NocAlert[]>([]);
   const [mikrotikLogs, setMikrotikLogs] = useState<any[]>([]);
   const [naps, setNaps] = useState<NapBox[]>([]);
@@ -1193,11 +1197,43 @@ export default function App() {
             )}
 
             {activeTab === 'inventory' && (
-              <InventoryModule
-                inventory={inventory}
-                onMovement={handleInventoryMovement}
-                onAddItem={handleAddInventoryItem}
-              />
+              <div>
+                {/* Fase 5.1: tira de sub-tabs aditiva del Inventario ERP. */}
+                <div className="bg-slate-900 px-6 pt-6">
+                  <div className="inline-flex bg-slate-950 border border-slate-800 rounded-xl p-1 gap-1">
+                    {([
+                      ['items', 'Artículos'],
+                      ['warehouses', 'Almacenes'],
+                      ['transfers', 'Transferencias'],
+                    ] as const).map(([key, label]) => (
+                      <button
+                        key={key}
+                        id={`inventory-subtab-${key}`}
+                        onClick={() => setInventorySubTab(key)}
+                        className={`px-3 py-1.5 text-xs font-mono rounded-lg transition ${
+                          inventorySubTab === key ? 'bg-indigo-600 text-white shadow' : 'text-slate-400 hover:text-slate-200'
+                        }`}
+                      >
+                        {label}
+                      </button>
+                    ))}
+                  </div>
+                </div>
+
+                {inventorySubTab === 'items' && (
+                  <InventoryModule
+                    inventory={inventory}
+                    onMovement={handleInventoryMovement}
+                    onAddItem={handleAddInventoryItem}
+                  />
+                )}
+                {inventorySubTab === 'warehouses' && (
+                  <WarehousesModule getAuthHeaders={getAuthHeaders} />
+                )}
+                {inventorySubTab === 'transfers' && (
+                  <InventoryTransfersModule getAuthHeaders={getAuthHeaders} />
+                )}
+              </div>
             )}
 
             {activeTab === 'inventory-routers' && (

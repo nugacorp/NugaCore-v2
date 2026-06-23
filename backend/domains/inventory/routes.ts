@@ -1,7 +1,9 @@
 import { Router } from 'express';
 import { WarehouseItem } from '../../../src/types';
-import { store } from '../../../backend/state/store';
+import type { InventoryItemState } from '../../state/store';
+import { asyncHandler } from '../../common/errors';
 import { READ_ROLES, requireRoles } from '../../common/rbac';
+import { getInventoryService } from './service';
 import { inventoryRoutersService } from './routers/service';
 import {
   customerEquipmentService,
@@ -10,20 +12,13 @@ import {
 
 const router = Router();
 
-const nowStamp = () => new Date().toISOString().replace('T', ' ').substring(0, 16);
+// Roles de escritura del inventario (igual que el contrato previo de routes.ts):
+// Cobranza, Soporte y Solo lectura quedan fuera de las mutaciones.
+const WRITE_ROLES = ['super admin', 'administrador', 'tecnico'] as const;
 
-const withState = (item: WarehouseItem) => {
-  const state = store.getInventoryState(item.id);
-  return {
-    ...item,
-    operationalStatus: state.operationalStatus,
-    assignedToType: state.assignedToType,
-    assignedToId: state.assignedToId,
-    assignedToLabel: state.assignedToLabel,
-    stateUpdatedAt: state.updatedAt,
-  };
-};
-
+// ====================================================================
+// Customer equipment (reservas) — sin cambios de contrato.
+// ====================================================================
 router.get('/api/inventory/customer-equipment', requireRoles(READ_ROLES), (_req, res) => {
   res.json(customerEquipmentService.listEquipment());
 });
@@ -53,337 +48,10 @@ router.post(
   },
 );
 
-const parseOperationalStatus = (value: unknown) => {
-  const raw = String(value || '').trim().toLowerCase();
-  if (raw === 'disponible') return 'Disponible' as const;
-  if (raw === 'instalado') return 'Instalado' as const;
-  if (raw === 'en reparacion') return 'En reparacion' as const;
-  if (raw === 'danado') return 'Danado' as const;
-  if (raw === 'perdido') return 'Perdido' as const;
-  if (raw === 'baja') return 'Baja' as const;
-  return null;
-};
-
-router.get('/api/inventory', requireRoles(READ_ROLES), (req, res) => {
-  const q = String(req.query.q || '').trim().toLowerCase();
-  const warehouse = String(req.query.warehouse || '').trim();
-  const status = parseOperationalStatus(req.query.operationalStatus);
-
-  const rows = store.INVENTORY
-    .filter((item) => {
-      const state = store.getInventoryState(item.id);
-      const matchesQuery =
-        !q ||
-        item.name.toLowerCase().includes(q) ||
-        item.model.toLowerCase().includes(q) ||
-        item.brand.toLowerCase().includes(q);
-      const matchesWarehouse = !warehouse || item.warehouse === warehouse;
-      const matchesStatus = !status || state.operationalStatus === status;
-      return matchesQuery && matchesWarehouse && matchesStatus;
-    })
-    .map(withState);
-
-  res.json(rows);
-});
-
-router.get('/api/inventory/movements', requireRoles(READ_ROLES), (req, res) => {
-  const itemId = String(req.query.itemId || '').trim();
-  const rows = itemId
-    ? store.INVENTORY_MOVEMENTS.filter((row) => row.itemId === itemId)
-    : store.INVENTORY_MOVEMENTS;
-  res.json(rows);
-});
-
-router.get('/api/inventory/assignments', requireRoles(READ_ROLES), (req, res) => {
-  const itemId = String(req.query.itemId || '').trim();
-  const rows = itemId
-    ? store.INVENTORY_ASSIGNMENTS.filter((row) => row.itemId === itemId)
-    : store.INVENTORY_ASSIGNMENTS;
-  res.json(rows);
-});
-
-router.get('/api/inventory/:id/state', requireRoles(READ_ROLES), (req, res) => {
-  const item = store.INVENTORY.find((row) => row.id === req.params.id);
-  if (!item) {
-    return res.status(404).json({ error: 'Inventory item not found' });
-  }
-  const state = store.getInventoryState(item.id);
-  res.json({
-    itemId: item.id,
-    itemName: item.name,
-    ...state,
-  });
-});
-
-router.put('/api/inventory/:id/state', requireRoles(['super admin', 'administrador', 'tecnico']), (req, res) => {
-  const item = store.INVENTORY.find((row) => row.id === req.params.id);
-  if (!item) {
-    return res.status(404).json({ error: 'Inventory item not found' });
-  }
-
-  const state = store.getInventoryState(item.id);
-  const nextStatus = parseOperationalStatus(req.body.operationalStatus);
-  if (!nextStatus) {
-    return res.status(400).json({ error: 'Invalid operationalStatus' });
-  }
-
-  state.operationalStatus = nextStatus;
-  state.updatedAt = nowStamp();
-
-  res.json({
-    itemId: item.id,
-    itemName: item.name,
-    ...state,
-  });
-});
-
-router.put('/api/inventory/:id', requireRoles(['super admin', 'administrador', 'tecnico']), (req, res) => {
-  const index = store.INVENTORY.findIndex((row) => row.id === req.params.id);
-  if (index === -1) {
-    return res.status(404).json({ error: 'Inventory item not found' });
-  }
-
-  const current = store.INVENTORY[index];
-  const { name, category, model, brand, warehouse, serials } = req.body;
-  store.INVENTORY[index] = {
-    ...current,
-    ...(name !== undefined ? { name: String(name) } : {}),
-    ...(category !== undefined ? { category } : {}),
-    ...(model !== undefined ? { model: String(model) } : {}),
-    ...(brand !== undefined ? { brand: String(brand) } : {}),
-    ...(warehouse !== undefined ? { warehouse } : {}),
-    ...(serials !== undefined
-      ? {
-          serials: Array.isArray(serials)
-            ? serials
-            : String(serials)
-                .split(',')
-                .map((value) => value.trim())
-                .filter(Boolean),
-        }
-      : {}),
-  };
-
-  res.json(withState(store.INVENTORY[index]));
-});
-
-router.post('/api/inventory/movement', requireRoles(['super admin', 'administrador', 'tecnico']), (req, res) => {
-  const { itemId, type, qty, toWarehouse, reason } = req.body;
-  const qtyNum = Number(qty);
-  if (!Number.isFinite(qtyNum) || qtyNum <= 0) {
-    return res.status(400).json({ error: 'Invalid qty. Must be greater than 0.' });
-  }
-
-  const item = store.INVENTORY.find((i) => i.id === itemId);
-  if (item) {
-    const originalWarehouse = item.warehouse;
-
-    if (type === 'in') {
-      item.qty += qtyNum;
-      const state = store.getInventoryState(item.id);
-      if (state.operationalStatus === 'Perdido' || state.operationalStatus === 'Baja') {
-        state.operationalStatus = 'Disponible';
-      }
-      state.updatedAt = nowStamp();
-    } else if (type === 'out') {
-      if (item.qty >= qtyNum) {
-        item.qty -= qtyNum;
-      } else {
-        return res.status(400).json({ error: 'Insufficient stock' });
-      }
-    } else if (type === 'transfer') {
-      if (!toWarehouse) {
-        return res.status(400).json({ error: 'toWarehouse is required for transfer movements' });
-      }
-
-      if (item.qty >= qtyNum) {
-        item.qty -= qtyNum;
-        const destItem = store.INVENTORY.find((i) => i.name === item.name && i.warehouse === toWarehouse);
-        if (destItem) {
-          destItem.qty += qtyNum;
-        } else {
-          const createdItem: WarehouseItem = {
-            id: 'item-' + Date.now(),
-            name: item.name,
-            category: item.category,
-            model: item.model,
-            brand: item.brand,
-            qty: qtyNum,
-            warehouse: toWarehouse,
-            serials: [],
-          };
-          store.INVENTORY.push(createdItem);
-          store.getInventoryState(createdItem.id);
-        }
-      } else {
-        return res.status(400).json({ error: 'Insufficient stock for transfer' });
-      }
-    } else {
-      return res.status(400).json({ error: 'Invalid movement type' });
-    }
-
-    store.logInventoryMovement({
-      itemId: item.id,
-      itemName: item.name,
-      type,
-      qty: qtyNum,
-      fromWarehouse: originalWarehouse,
-      toWarehouse: type === 'transfer' ? toWarehouse : undefined,
-      reason: reason ? String(reason) : undefined,
-      actorId: req.authContext?.userId,
-    });
-
-    res.json(store.INVENTORY.map(withState));
-  } else {
-    res.status(404).json({ error: 'Inventory item not found' });
-  }
-});
-
-router.post('/api/inventory/:id/assign', requireRoles(['super admin', 'administrador', 'tecnico']), (req, res) => {
-  const item = store.INVENTORY.find((row) => row.id === req.params.id);
-  if (!item) {
-    return res.status(404).json({ error: 'Inventory item not found' });
-  }
-
-  const qty = Number(req.body.qty || 1);
-  if (!Number.isFinite(qty) || qty <= 0) {
-    return res.status(400).json({ error: 'Invalid qty. Must be greater than 0.' });
-  }
-  if (item.qty < qty) {
-    return res.status(400).json({ error: 'Insufficient stock for assignment' });
-  }
-
-  const targetType = req.body.targetType as 'tower' | 'client' | 'technician' | undefined;
-  const targetId = req.body.targetId ? String(req.body.targetId) : undefined;
-  const targetLabel = req.body.targetLabel ? String(req.body.targetLabel) : undefined;
-  if (!targetType || !targetId || !targetLabel) {
-    return res.status(400).json({ error: 'Missing assignment target fields: targetType, targetId, targetLabel' });
-  }
-
-  item.qty -= qty;
-  const state = store.getInventoryState(item.id);
-  state.operationalStatus = 'Instalado';
-  state.assignedToType = targetType;
-  state.assignedToId = targetId;
-  state.assignedToLabel = targetLabel;
-  state.updatedAt = nowStamp();
-
-  store.logInventoryAssignment({
-    itemId: item.id,
-    itemName: item.name,
-    action: 'assign',
-    qty,
-    targetType,
-    targetId,
-    targetLabel,
-    notes: req.body.notes ? String(req.body.notes) : undefined,
-    actorId: req.authContext?.userId,
-  });
-
-  store.logInventoryMovement({
-    itemId: item.id,
-    itemName: item.name,
-    type: 'out',
-    qty,
-    fromWarehouse: item.warehouse,
-    reason: `Asignacion a ${targetType}:${targetLabel}`,
-    actorId: req.authContext?.userId,
-  });
-
-  res.json(withState(item));
-});
-
-router.post('/api/inventory/:id/unassign', requireRoles(['super admin', 'administrador', 'tecnico']), (req, res) => {
-  const item = store.INVENTORY.find((row) => row.id === req.params.id);
-  if (!item) {
-    return res.status(404).json({ error: 'Inventory item not found' });
-  }
-
-  const qty = Number(req.body.qty || 1);
-  if (!Number.isFinite(qty) || qty <= 0) {
-    return res.status(400).json({ error: 'Invalid qty. Must be greater than 0.' });
-  }
-
-  item.qty += qty;
-  const state = store.getInventoryState(item.id);
-  state.operationalStatus = 'Disponible';
-  state.assignedToType = 'warehouse';
-  state.assignedToId = 'principal';
-  state.assignedToLabel = item.warehouse;
-  state.updatedAt = nowStamp();
-
-  store.logInventoryAssignment({
-    itemId: item.id,
-    itemName: item.name,
-    action: 'unassign',
-    qty,
-    targetType: req.body.targetType,
-    targetId: req.body.targetId ? String(req.body.targetId) : undefined,
-    targetLabel: req.body.targetLabel ? String(req.body.targetLabel) : undefined,
-    notes: req.body.notes ? String(req.body.notes) : undefined,
-    actorId: req.authContext?.userId,
-  });
-
-  store.logInventoryMovement({
-    itemId: item.id,
-    itemName: item.name,
-    type: 'in',
-    qty,
-    toWarehouse: item.warehouse,
-    reason: 'Retorno de asignacion tecnica',
-    actorId: req.authContext?.userId,
-  });
-
-  res.json(withState(item));
-});
-
-router.post('/api/inventory/add', requireRoles(['super admin', 'administrador', 'tecnico']), (req, res) => {
-  const { name, category, model, brand, qty, warehouse, serials } = req.body;
-  if (!name || !model || !brand) {
-    return res.status(400).json({ error: 'Missing required fields: name, model, and brand are required' });
-  }
-
-  const initialQty = Number(qty) || 0;
-  const serialsArr = Array.isArray(serials)
-    ? serials
-    : (serials ? String(serials).split(',').map((s) => s.trim()).filter(Boolean) : []);
-
-  const newItem: WarehouseItem = {
-    id: `item-${Date.now()}`,
-    name,
-    category: category || 'Other',
-    model,
-    brand,
-    qty: initialQty,
-    warehouse: warehouse || 'Principal',
-    serials: serialsArr,
-  };
-
-  store.INVENTORY.unshift(newItem);
-  const state = store.getInventoryState(newItem.id);
-  state.assignedToLabel = newItem.warehouse;
-  state.updatedAt = nowStamp();
-
-  store.logInventoryMovement({
-    itemId: newItem.id,
-    itemName: newItem.name,
-    type: 'in',
-    qty: initialQty,
-    toWarehouse: newItem.warehouse,
-    reason: 'Alta inicial de articulo',
-    actorId: req.authContext?.userId,
-  });
-
-  res.status(201).json(withState(newItem));
-});
-
 // ====================================================================
-// Inventory Read-Only de routers MikroTik (Fase 4.11.1).
-//
-// READ-ONLY: lee `mikrotik_routers` desde el store en memoria
-// (`USE_DB_MIKROTIK` apagado). Sin escritura, sin conexión RouterOS, sin
-// comandos. No expone secretos. RBAC de lectura de operación; Cobranza queda
-// excluido (no opera infraestructura de red), igual que el provisioning.
+// Inventory Read-Only de routers MikroTik (Fase 4.11.1) — sin cambios.
+// READ-ONLY: lee `mikrotik_routers` desde el store; sin escritura, sin RouterOS.
+// Definido ANTES de las rutas con `:id` para precedencia de rutas literales.
 // ====================================================================
 const INVENTORY_ROUTERS_READ_ROLES = ['super admin', 'administrador', 'tecnico', 'soporte', 'solo lectura'] as const;
 
@@ -403,5 +71,236 @@ router.get('/api/inventory/routers/:id', requireRoles([...INVENTORY_ROUTERS_READ
   }
   res.json(view);
 });
+
+// ====================================================================
+// Almacenes (Fase 5.1) — entidad de primera clase. Rutas literales antes
+// de `/api/inventory/:id/*` para evitar captura por el parámetro.
+// ====================================================================
+router.get('/api/inventory/warehouses', requireRoles(READ_ROLES), asyncHandler(async (_req, res) => {
+  res.json(await getInventoryService().listWarehouses());
+}));
+
+router.post('/api/inventory/warehouses', requireRoles([...WRITE_ROLES]), asyncHandler(async (req, res) => {
+  const created = await getInventoryService().createWarehouse({
+    name: String(req.body?.name ?? ''),
+    code: req.body?.code !== undefined ? String(req.body.code) : undefined,
+    type: req.body?.type,
+    location: req.body?.location !== undefined ? String(req.body.location) : undefined,
+    notes: req.body?.notes !== undefined ? String(req.body.notes) : undefined,
+    isActive: req.body?.isActive,
+  });
+  res.status(201).json(created);
+}));
+
+router.get('/api/inventory/warehouses/:id', requireRoles(READ_ROLES), asyncHandler(async (req, res) => {
+  const wh = await getInventoryService().getWarehouse(req.params.id);
+  if (!wh) {
+    res.status(404).json({ error: 'Warehouse not found' });
+    return;
+  }
+  res.json(wh);
+}));
+
+router.get('/api/inventory/warehouses/:id/stock', requireRoles(READ_ROLES), asyncHandler(async (req, res) => {
+  const stock = await getInventoryService().getWarehouseStock(req.params.id);
+  if (!stock) {
+    res.status(404).json({ error: 'Warehouse not found' });
+    return;
+  }
+  res.json(stock);
+}));
+
+router.put('/api/inventory/warehouses/:id', requireRoles([...WRITE_ROLES]), asyncHandler(async (req, res) => {
+  const { name, code, type, location, notes, isActive } = req.body ?? {};
+  const patch: Record<string, unknown> = {};
+  if (name !== undefined) patch.name = String(name);
+  if (code !== undefined) patch.code = String(code);
+  if (type !== undefined) patch.type = type;
+  if (location !== undefined) patch.location = String(location);
+  if (notes !== undefined) patch.notes = String(notes);
+  if (isActive !== undefined) patch.isActive = Boolean(isActive);
+  const updated = await getInventoryService().updateWarehouse(req.params.id, patch);
+  if (!updated) {
+    res.status(404).json({ error: 'Warehouse not found' });
+    return;
+  }
+  res.json(updated);
+}));
+
+router.delete('/api/inventory/warehouses/:id', requireRoles([...WRITE_ROLES]), asyncHandler(async (req, res) => {
+  const ok = await getInventoryService().deleteWarehouse(req.params.id);
+  if (!ok) {
+    res.status(404).json({ error: 'Warehouse not found' });
+    return;
+  }
+  res.status(204).send();
+}));
+
+// ====================================================================
+// Transferencias (Fase 5.1) — ciclo pending → completed/cancelled.
+// ====================================================================
+router.get('/api/inventory/transfers', requireRoles(READ_ROLES), asyncHandler(async (_req, res) => {
+  res.json(await getInventoryService().listTransfers());
+}));
+
+router.post('/api/inventory/transfers', requireRoles([...WRITE_ROLES]), asyncHandler(async (req, res) => {
+  const created = await getInventoryService().createTransfer({
+    itemId: String(req.body?.itemId ?? ''),
+    qty: req.body?.qty,
+    toWarehouse: String(req.body?.toWarehouse ?? ''),
+    reason: req.body?.reason !== undefined ? String(req.body.reason) : undefined,
+    actorId: req.authContext?.userId,
+  });
+  res.status(201).json(created);
+}));
+
+router.get('/api/inventory/transfers/:id', requireRoles(READ_ROLES), asyncHandler(async (req, res) => {
+  const transfer = await getInventoryService().getTransfer(req.params.id);
+  if (!transfer) {
+    res.status(404).json({ error: 'Transfer not found' });
+    return;
+  }
+  res.json(transfer);
+}));
+
+router.post('/api/inventory/transfers/:id/complete', requireRoles([...WRITE_ROLES]), asyncHandler(async (req, res) => {
+  res.json(await getInventoryService().completeTransfer(req.params.id));
+}));
+
+router.post('/api/inventory/transfers/:id/cancel', requireRoles([...WRITE_ROLES]), asyncHandler(async (req, res) => {
+  res.json(await getInventoryService().cancelTransfer(req.params.id));
+}));
+
+// ====================================================================
+// Items, movimientos y asignaciones — contrato API v1 preservado.
+// ====================================================================
+router.get('/api/inventory', requireRoles(READ_ROLES), asyncHandler(async (req, res) => {
+  const rows = await getInventoryService().listItems({
+    q: String(req.query.q || '').trim().toLowerCase() || undefined,
+    warehouse: String(req.query.warehouse || '').trim() || undefined,
+    operationalStatus: normalizeOpStatus(req.query.operationalStatus),
+  });
+  res.json(rows);
+}));
+
+router.get('/api/inventory/movements', requireRoles(READ_ROLES), asyncHandler(async (req, res) => {
+  const itemId = String(req.query.itemId || '').trim() || undefined;
+  res.json(await getInventoryService().listMovements(itemId));
+}));
+
+router.get('/api/inventory/assignments', requireRoles(READ_ROLES), asyncHandler(async (req, res) => {
+  const itemId = String(req.query.itemId || '').trim() || undefined;
+  res.json(await getInventoryService().listAssignments(itemId));
+}));
+
+router.get('/api/inventory/:id/state', requireRoles(READ_ROLES), asyncHandler(async (req, res) => {
+  const state = await getInventoryService().getItemState(req.params.id);
+  if (!state) {
+    res.status(404).json({ error: 'Inventory item not found' });
+    return;
+  }
+  res.json(state);
+}));
+
+router.put('/api/inventory/:id/state', requireRoles([...WRITE_ROLES]), asyncHandler(async (req, res) => {
+  const state = await getInventoryService().setOperationalStatus(req.params.id, req.body.operationalStatus);
+  if (!state) {
+    res.status(404).json({ error: 'Inventory item not found' });
+    return;
+  }
+  res.json(state);
+}));
+
+router.put('/api/inventory/:id', requireRoles([...WRITE_ROLES]), asyncHandler(async (req, res) => {
+  const { name, category, model, brand, warehouse, serials } = req.body ?? {};
+  const patch: Partial<WarehouseItem> = {};
+  if (name !== undefined) patch.name = String(name);
+  if (category !== undefined) patch.category = category;
+  if (model !== undefined) patch.model = String(model);
+  if (brand !== undefined) patch.brand = String(brand);
+  if (warehouse !== undefined) patch.warehouse = warehouse;
+  if (serials !== undefined) {
+    patch.serials = Array.isArray(serials)
+      ? serials
+      : String(serials).split(',').map((v) => v.trim()).filter(Boolean);
+  }
+  const updated = await getInventoryService().updateItem(req.params.id, patch);
+  if (!updated) {
+    res.status(404).json({ error: 'Inventory item not found' });
+    return;
+  }
+  res.json(updated);
+}));
+
+router.post('/api/inventory/movement', requireRoles([...WRITE_ROLES]), asyncHandler(async (req, res) => {
+  const { itemId, type, qty, toWarehouse, reason } = req.body ?? {};
+  const rows = await getInventoryService().applyMovement({
+    itemId: String(itemId ?? ''),
+    type,
+    qty,
+    toWarehouse: toWarehouse !== undefined ? String(toWarehouse) : undefined,
+    reason: reason !== undefined ? String(reason) : undefined,
+    actorId: req.authContext?.userId,
+  });
+  res.json(rows);
+}));
+
+router.post('/api/inventory/:id/assign', requireRoles([...WRITE_ROLES]), asyncHandler(async (req, res) => {
+  const item = await getInventoryService().assign({
+    itemId: req.params.id,
+    qty: req.body?.qty ?? 1,
+    targetType: req.body?.targetType,
+    targetId: req.body?.targetId ? String(req.body.targetId) : '',
+    targetLabel: req.body?.targetLabel ? String(req.body.targetLabel) : '',
+    notes: req.body?.notes ? String(req.body.notes) : undefined,
+    actorId: req.authContext?.userId,
+  });
+  res.json(item);
+}));
+
+router.post('/api/inventory/:id/unassign', requireRoles([...WRITE_ROLES]), asyncHandler(async (req, res) => {
+  const item = await getInventoryService().unassign({
+    itemId: req.params.id,
+    qty: req.body?.qty ?? 1,
+    targetType: req.body?.targetType,
+    targetId: req.body?.targetId ? String(req.body.targetId) : undefined,
+    targetLabel: req.body?.targetLabel ? String(req.body.targetLabel) : undefined,
+    notes: req.body?.notes ? String(req.body.notes) : undefined,
+    actorId: req.authContext?.userId,
+  });
+  res.json(item);
+}));
+
+router.post('/api/inventory/add', requireRoles([...WRITE_ROLES]), asyncHandler(async (req, res) => {
+  const { name, category, model, brand, qty, warehouse, serials } = req.body ?? {};
+  const created = await getInventoryService().addItem(
+    {
+      name: name ? String(name) : '',
+      category,
+      model: model ? String(model) : '',
+      brand: brand ? String(brand) : '',
+      qty,
+      warehouse: warehouse !== undefined ? String(warehouse) : undefined,
+      serials,
+    },
+    req.authContext?.userId,
+  );
+  res.status(201).json(created);
+}));
+
+// Normaliza el operationalStatus de query (acepta etiquetas en minúscula).
+function normalizeOpStatus(value: unknown): InventoryItemState['operationalStatus'] | undefined {
+  const raw = String(value || '').trim().toLowerCase();
+  if (!raw) return undefined;
+  const map: Record<string, InventoryItemState['operationalStatus']> = {
+    disponible: 'Disponible',
+    instalado: 'Instalado',
+    'en reparacion': 'En reparacion',
+    danado: 'Danado',
+    perdido: 'Perdido',
+    baja: 'Baja',
+  };
+  return map[raw];
+}
 
 export default router;
