@@ -1114,6 +1114,8 @@ export default function App() {
                 getAuthHeaders={getAuthHeaders}
                 canCreateClient={['Super Admin', 'Administrador', 'Técnico', 'Soporte'].includes(userSession.role)}
                 canManageClientLifecycle={['Super Admin', 'Administrador', 'Cobranza'].includes(userSession.role)}
+                userRole={userSession.role}
+                onNavigate={setActiveTab}
               />
             )}
 

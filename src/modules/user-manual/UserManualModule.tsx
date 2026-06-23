@@ -58,6 +58,20 @@ const SECTIONS: ManualSection[] = [
     ],
   },
   {
+    id: 'acciones-rapidas-cliente',
+    title: 'Acciones rápidas y Cliente 360',
+    icon: Users,
+    summary: 'Operación ágil del cliente desde la lista, sin cambiar de módulo.',
+    steps: [
+      'En la lista de clientes, usa la columna "Acciones" y el botón ⋮ para abrir el menú agrupado (Cliente, Servicio, Cobranza, Soporte, Red, Historial). Solo verás las acciones permitidas por tu rol.',
+      'Elige "Ver perfil" para abrir el panel Cliente 360 con resumen (plan, IP, router, dirección, GPS), acciones rápidas e historial reciente.',
+      '"Copiar IP" copia la IP al portapapeles; "Ver ubicación" abre Google Maps si el cliente tiene coordenadas.',
+      'Registrar pago y Crear ticket guardan un registro local (mock) en el historial del cliente; aún no impactan facturación ni soporte reales.',
+      'Suspender / Reactivar piden confirmación y se registran como SIMULACIÓN: no ejecutan cambios en el router. Generar factura y Cambiar plan muestran "pendiente de integración".',
+      'Cambiar IP valida el formato y que no esté duplicada con otro cliente; la aplicación al router está pendiente de integración.',
+    ],
+  },
+  {
     id: 'alta-cliente-wisp',
     title: 'Alta de Cliente WISP',
     icon: Wifi,

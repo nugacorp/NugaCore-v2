@@ -20,9 +20,15 @@ import {
   XCircle,
   Loader2,
   PackageCheck,
-  Crosshair
+  Crosshair,
+  MoreVertical,
+  Copy
 } from 'lucide-react';
 import { Client, Plan } from '../types';
+import type { UserRole } from '../lib/supabase';
+import { clientActionCaps } from '../lib/rbac';
+import ClientActionsMenu, { ClientQuickAction } from './ClientActionsMenu';
+import Client360Panel, { ClientHistoryEntry } from './Client360Panel';
 import {
   canSubmitCustomerOnboarding,
   IpAssignmentValidation,
@@ -106,6 +112,8 @@ interface CrmModuleProps {
   getAuthHeaders: () => Promise<Record<string, string>>;
   canCreateClient: boolean;
   canManageClientLifecycle: boolean;
+  userRole: UserRole;
+  onNavigate?: (tab: string) => void;
 }
 
 export default function CrmModule({
@@ -116,6 +124,8 @@ export default function CrmModule({
   getAuthHeaders,
   canCreateClient,
   canManageClientLifecycle,
+  userRole,
+  onNavigate,
 }: CrmModuleProps) {
   const [searchTerm, setSearchTerm] = useState('');
   const [filterType, setFilterType] = useState<string>('all');
@@ -160,6 +170,193 @@ export default function CrmModule({
   const [equipmentError, setEquipmentError] = useState('');
   const [isLeadForm, setIsLeadForm] = useState(false);
   const [selectedClient, setSelectedClient] = useState<Client | null>(null);
+
+  // ── Client 360 + acciones rápidas ───────────────────────────────────
+  const caps = clientActionCaps(userRole);
+  const [actionsMenuFor, setActionsMenuFor] = useState<string | null>(null);
+  const [client360, setClient360] = useState<Client | null>(null);
+  const [toast, setToast] = useState<string | null>(null);
+  // Historial mock/local por cliente (pagos/tickets/eventos simulados desde acciones rápidas).
+  const [localHistory, setLocalHistory] = useState<Record<string, ClientHistoryEntry[]>>({});
+  // Modal de acción rápida. 'pending' = acción aún no integrada (informativa).
+  const [actionModal, setActionModal] = useState<
+    | { type: 'pay' | 'ticket' | 'suspend' | 'reactivate' | 'change-ip'; client: Client }
+    | { type: 'pending'; client: Client; title: string; message: string }
+    | null
+  >(null);
+  // Campos de los modales locales.
+  const [payAmount, setPayAmount] = useState('');
+  const [payMethod, setPayMethod] = useState('Efectivo');
+  const [ticketSubject, setTicketSubject] = useState('');
+  const [ticketDetail, setTicketDetail] = useState('');
+  const [newIp, setNewIp] = useState('');
+  const [ipFeedback, setIpFeedback] = useState<{ ok: boolean; message: string } | null>(null);
+
+  const showToast = useCallback((message: string) => {
+    setToast(message);
+    window.setTimeout(() => setToast((current) => (current === message ? null : current)), 2600);
+  }, []);
+
+  const pushHistory = useCallback((clientId: string, entry: Omit<ClientHistoryEntry, 'id' | 'date'>) => {
+    const full: ClientHistoryEntry = {
+      ...entry,
+      id: `h-${Date.now()}-${Math.floor(Math.random() * 90 + 10)}`,
+      date: new Date().toISOString().replace('T', ' ').substring(0, 16),
+    };
+    setLocalHistory((prev) => ({ ...prev, [clientId]: [full, ...(prev[clientId] || [])] }));
+  }, []);
+
+  const clientHasGps = (c: Client) =>
+    Number.isFinite(c.lat) && Number.isFinite(c.lng) && !(c.lat === 0 && c.lng === 0);
+
+  const clientIp = (c: Client) => {
+    const ip = c.assignedIp || c.ip;
+    return ip && ip !== '0.0.0.0' ? ip : '';
+  };
+
+  const handleQuickAction = useCallback((action: ClientQuickAction, client: Client) => {
+    setActionsMenuFor(null);
+    switch (action) {
+      case 'view-profile':
+        setClient360(client);
+        break;
+      case 'view-history':
+        setClient360(client);
+        break;
+      case 'edit':
+        setClient360(client);
+        showToast('Edición completa pendiente de integración.');
+        break;
+      case 'suspend':
+        setActionModal({ type: 'suspend', client });
+        break;
+      case 'reactivate':
+        setActionModal({ type: 'reactivate', client });
+        break;
+      case 'change-plan':
+        setActionModal({ type: 'pending', client, title: 'Cambiar plan', message: 'Cambio de plan pendiente de integración.' });
+        break;
+      case 'change-ip':
+        setNewIp('');
+        setIpFeedback(null);
+        setActionModal({ type: 'change-ip', client });
+        break;
+      case 'register-payment':
+        setPayAmount('');
+        setPayMethod('Efectivo');
+        setActionModal({ type: 'pay', client });
+        break;
+      case 'generate-invoice':
+        setActionModal({ type: 'pending', client, title: 'Generar factura', message: 'Generación de factura pendiente de integración.' });
+        break;
+      case 'account-statement':
+        if (onNavigate) {
+          onNavigate('billing');
+          showToast(`Abriendo estado de cuenta de ${client.name}.`);
+        } else {
+          setActionModal({ type: 'pending', client, title: 'Estado de cuenta', message: 'Estado de cuenta disponible en el módulo Facturación.' });
+        }
+        break;
+      case 'create-ticket':
+        setTicketSubject('');
+        setTicketDetail('');
+        setActionModal({ type: 'ticket', client });
+        break;
+      case 'view-tickets':
+        if (onNavigate) {
+          onNavigate('support');
+          showToast(`Abriendo soporte para ${client.name}.`);
+        } else {
+          showToast('Módulo de tickets no disponible para tu rol.');
+        }
+        break;
+      case 'view-router':
+        if (onNavigate) {
+          onNavigate('inventory-routers');
+          showToast(client.routerId ? `Router asignado: ${client.routerId}` : 'Cliente sin router asignado.');
+        } else {
+          showToast(client.routerId ? `Router asignado: ${client.routerId}` : 'Cliente sin router asignado.');
+        }
+        break;
+      case 'view-location':
+        if (clientHasGps(client)) {
+          window.open(`https://www.google.com/maps?q=${client.lat},${client.lng}`, '_blank', 'noopener,noreferrer');
+        } else {
+          showToast('Cliente sin coordenadas.');
+        }
+        break;
+      case 'copy-ip': {
+        const ip = clientIp(client);
+        if (!ip) {
+          showToast('Cliente sin IP asignada.');
+          break;
+        }
+        if (typeof navigator !== 'undefined' && navigator.clipboard) {
+          void navigator.clipboard.writeText(ip);
+        }
+        showToast(`IP copiada al portapapeles: ${ip}`);
+        break;
+      }
+      default:
+        break;
+    }
+  }, [onNavigate, showToast]);
+
+  const submitLocalPayment = (client: Client) => {
+    const amount = Number(payAmount);
+    if (!Number.isFinite(amount) || amount <= 0) {
+      showToast('Captura un monto válido.');
+      return;
+    }
+    pushHistory(client.id, {
+      kind: 'pago',
+      label: `Pago registrado (local): $${amount.toFixed(2)} ${payMethod}`,
+      detail: 'Registro local/mock — no aplica a facturación real.',
+    });
+    setActionModal(null);
+    showToast('Pago registrado localmente (mock).');
+  };
+
+  const submitLocalTicket = (client: Client) => {
+    if (!ticketSubject.trim()) {
+      showToast('Captura el asunto del ticket.');
+      return;
+    }
+    pushHistory(client.id, {
+      kind: 'ticket',
+      label: `Ticket (local): ${ticketSubject.trim()}`,
+      detail: ticketDetail.trim() || 'Registro local/mock — no abre ticket real.',
+    });
+    setActionModal(null);
+    showToast('Ticket registrado localmente (mock).');
+  };
+
+  const confirmSimulatedStatus = (client: Client, kind: 'suspend' | 'reactivate') => {
+    pushHistory(client.id, {
+      kind: 'evento',
+      label: kind === 'suspend' ? 'Suspensión (simulación)' : 'Reactivación (simulación)',
+      detail: 'Simulación local — no se aplicó ningún cambio en el router.',
+    });
+    setActionModal(null);
+    showToast(kind === 'suspend'
+      ? 'Suspensión registrada como simulación (no se aplicó al router).'
+      : 'Reactivación registrada como simulación (no se aplicó al router).');
+  };
+
+  const validateLocalIp = (client: Client) => {
+    const ip = newIp.trim();
+    const ipv4 = /^(25[0-5]|2[0-4]\d|1?\d?\d)(\.(25[0-5]|2[0-4]\d|1?\d?\d)){3}$/;
+    if (!ipv4.test(ip)) {
+      setIpFeedback({ ok: false, message: 'IP inválida. Escribe una dirección IPv4 válida.' });
+      return;
+    }
+    const duplicate = clients.some((c) => c.id !== client.id && (c.assignedIp === ip || c.ip === ip));
+    if (duplicate) {
+      setIpFeedback({ ok: false, message: 'IP duplicada: ya está asignada a otro cliente.' });
+      return;
+    }
+    setIpFeedback({ ok: true, message: 'IP válida y sin duplicados. Aplicación al router pendiente de integración.' });
+  };
 
   const selectedPool = ipamPools.find((pool) => pool.id === formPoolId) || null;
   const selectedEquipment = customerEquipment.find((item) => item.id === formEquipmentId) || null;
@@ -637,7 +834,7 @@ export default function CrmModule({
                     <th className="py-3 px-2">Estatus</th>
                     <th className="py-3 px-2">IP & Plan</th>
                     <th className="py-3 px-2">Ciudad</th>
-                    <th className="py-3 px-2 text-right">Acción</th>
+                    <th className="py-3 px-2 text-right">Acciones</th>
                   </tr>
                 </thead>
                 <tbody className="divide-y divide-slate-900">
@@ -699,7 +896,7 @@ export default function CrmModule({
                         </td>
                         <td className="py-3 px-2 text-slate-400">{client.city}</td>
                         <td className="py-3 px-2 text-right">
-                          <div className="flex items-center justify-end space-x-1.5">
+                          <div className="relative flex items-center justify-end space-x-1.5">
                             {canManageClientLifecycle && client.status === 'suspended' && (
                               <button
                                 onClick={(e) => {
@@ -717,6 +914,26 @@ export default function CrmModule({
                             >
                               Inspeccionar
                             </button>
+                            <button
+                              id={`crm-actions-btn-${client.id}`}
+                              aria-label="Acciones"
+                              title="Acciones rápidas"
+                              onClick={(e) => {
+                                e.stopPropagation();
+                                setActionsMenuFor((current) => (current === client.id ? null : client.id));
+                              }}
+                              className="text-slate-400 hover:text-white p-1 rounded border border-slate-700 bg-slate-800 hover:bg-slate-700 transition"
+                            >
+                              <MoreVertical className="w-3.5 h-3.5" />
+                            </button>
+                            {actionsMenuFor === client.id && (
+                              <ClientActionsMenu
+                                client={client}
+                                caps={caps}
+                                onAction={handleQuickAction}
+                                onClose={() => setActionsMenuFor(null)}
+                              />
+                            )}
                           </div>
                         </td>
                       </tr>
@@ -1484,6 +1701,133 @@ export default function CrmModule({
               </div>
             </form>
           </div>
+        </div>
+      )}
+
+      {/* ── Cliente 360 (panel integral) ───────────────────────────── */}
+      {client360 && (
+        <Client360Panel
+          client={client360}
+          planName={plans.find((p) => p.id === client360.planId)?.name || 'Sin plan'}
+          caps={caps}
+          history={localHistory[client360.id] || []}
+          onAction={handleQuickAction}
+          onClose={() => setClient360(null)}
+        />
+      )}
+
+      {/* ── Modal de acción rápida (pago/ticket/suspensión/IP/pendiente) ── */}
+      {actionModal && (
+        <div className="fixed inset-0 bg-black/60 backdrop-blur-sm z-50 flex items-center justify-center p-4">
+          <div id="client-action-modal" className="bg-slate-950 border border-slate-800 rounded-3xl max-w-sm w-full p-6 space-y-4 shadow-2xl">
+            <div className="flex items-center justify-between border-b border-slate-900 pb-3">
+              <h3 className="text-sm font-bold text-white font-mono">
+                {actionModal.type === 'pay' && `Registrar pago · ${actionModal.client.name}`}
+                {actionModal.type === 'ticket' && `Crear ticket · ${actionModal.client.name}`}
+                {actionModal.type === 'suspend' && `Suspender servicio · ${actionModal.client.name}`}
+                {actionModal.type === 'reactivate' && `Reactivar servicio · ${actionModal.client.name}`}
+                {actionModal.type === 'change-ip' && `Cambiar IP · ${actionModal.client.name}`}
+                {actionModal.type === 'pending' && actionModal.title}
+              </h3>
+              <button onClick={() => setActionModal(null)} className="text-slate-400 hover:text-white font-bold">✕</button>
+            </div>
+
+            {actionModal.type === 'pay' && (
+              <div className="space-y-3 text-xs font-mono">
+                <p className="text-[10px] text-slate-500">Registro local/mock. No aplica a facturación real.</p>
+                <div className="space-y-1">
+                  <label className="text-slate-400">Monto</label>
+                  <input type="number" min="1" value={payAmount} onChange={(e) => setPayAmount(e.target.value)}
+                    className="w-full bg-slate-900 border border-slate-800 rounded-xl p-2.5 text-white focus:outline-none focus:border-indigo-500" />
+                </div>
+                <div className="space-y-1">
+                  <label className="text-slate-400">Método</label>
+                  <select value={payMethod} onChange={(e) => setPayMethod(e.target.value)}
+                    className="w-full bg-slate-900 border border-slate-800 rounded-xl p-2.5 text-white focus:outline-none">
+                    <option>Efectivo</option><option>Transferencia</option><option>Tarjeta</option><option>OXXO</option>
+                  </select>
+                </div>
+                <div className="border-t border-slate-900 pt-3 flex justify-end gap-2">
+                  <button onClick={() => setActionModal(null)} className="border border-slate-800 hover:bg-slate-900 text-slate-400 px-4 py-2 rounded-xl">Cancelar</button>
+                  <button id="confirm-local-payment" onClick={() => submitLocalPayment(actionModal.client)} className="bg-indigo-600 hover:bg-indigo-500 text-white px-5 py-2 rounded-xl font-bold">Registrar (local)</button>
+                </div>
+              </div>
+            )}
+
+            {actionModal.type === 'ticket' && (
+              <div className="space-y-3 text-xs font-mono">
+                <p className="text-[10px] text-slate-500">Registro local/mock. No abre un ticket real.</p>
+                <div className="space-y-1">
+                  <label className="text-slate-400">Asunto</label>
+                  <input type="text" value={ticketSubject} onChange={(e) => setTicketSubject(e.target.value)}
+                    className="w-full bg-slate-900 border border-slate-800 rounded-xl p-2.5 text-white focus:outline-none focus:border-indigo-500" />
+                </div>
+                <div className="space-y-1">
+                  <label className="text-slate-400">Detalle</label>
+                  <textarea value={ticketDetail} onChange={(e) => setTicketDetail(e.target.value)}
+                    className="w-full bg-slate-900 border border-slate-800 rounded-xl p-2.5 h-16 text-white focus:outline-none focus:border-indigo-500" />
+                </div>
+                <div className="border-t border-slate-900 pt-3 flex justify-end gap-2">
+                  <button onClick={() => setActionModal(null)} className="border border-slate-800 hover:bg-slate-900 text-slate-400 px-4 py-2 rounded-xl">Cancelar</button>
+                  <button id="confirm-local-ticket" onClick={() => submitLocalTicket(actionModal.client)} className="bg-indigo-600 hover:bg-indigo-500 text-white px-5 py-2 rounded-xl font-bold">Crear (local)</button>
+                </div>
+              </div>
+            )}
+
+            {(actionModal.type === 'suspend' || actionModal.type === 'reactivate') && (
+              <div className="space-y-3 text-xs">
+                <p className="rounded-xl border border-amber-500/30 bg-amber-500/10 p-3 text-amber-200">
+                  Esta acción todavía no ejecuta cambios reales. Se registrará como simulación / pendiente. No se envía ningún comando al router.
+                </p>
+                <div className="border-t border-slate-900 pt-3 flex justify-end gap-2 font-mono">
+                  <button onClick={() => setActionModal(null)} className="border border-slate-800 hover:bg-slate-900 text-slate-400 px-4 py-2 rounded-xl">Cancelar</button>
+                  <button id="confirm-simulated-status" onClick={() => confirmSimulatedStatus(actionModal.client, actionModal.type as 'suspend' | 'reactivate')}
+                    className="bg-indigo-600 hover:bg-indigo-500 text-white px-5 py-2 rounded-xl font-bold">Registrar simulación</button>
+                </div>
+              </div>
+            )}
+
+            {actionModal.type === 'change-ip' && (
+              <div className="space-y-3 text-xs font-mono">
+                <p className="text-[10px] text-slate-500">
+                  IP actual: <strong className="text-slate-300">{clientIp(actionModal.client) || 'Sin IP'}</strong>.
+                  Valida formato y duplicados localmente; la aplicación al router está pendiente de integración.
+                </p>
+                <div className="space-y-1">
+                  <label className="text-slate-400">Nueva IP</label>
+                  <input type="text" inputMode="numeric" placeholder="192.168.100.25" value={newIp}
+                    onChange={(e) => { setNewIp(e.target.value); setIpFeedback(null); }}
+                    className="w-full bg-slate-900 border border-slate-800 rounded-xl p-2.5 text-white focus:outline-none focus:border-indigo-500" />
+                </div>
+                {ipFeedback && (
+                  <p className={`rounded-xl border p-2.5 ${ipFeedback.ok ? 'border-emerald-500/30 bg-emerald-500/10 text-emerald-300' : 'border-rose-500/30 bg-rose-500/10 text-rose-300'}`}>
+                    {ipFeedback.message}
+                  </p>
+                )}
+                <div className="border-t border-slate-900 pt-3 flex justify-end gap-2">
+                  <button onClick={() => setActionModal(null)} className="border border-slate-800 hover:bg-slate-900 text-slate-400 px-4 py-2 rounded-xl">Cerrar</button>
+                  <button id="validate-change-ip" onClick={() => validateLocalIp(actionModal.client)} className="bg-indigo-600 hover:bg-indigo-500 text-white px-5 py-2 rounded-xl font-bold">Validar IP</button>
+                </div>
+              </div>
+            )}
+
+            {actionModal.type === 'pending' && (
+              <div className="space-y-4 text-xs">
+                <p className="rounded-xl border border-slate-800 bg-slate-900/60 p-3 text-slate-300">{actionModal.message}</p>
+                <div className="flex justify-end">
+                  <button onClick={() => setActionModal(null)} className="bg-indigo-600 hover:bg-indigo-500 text-white px-5 py-2 rounded-xl font-bold font-mono">Entendido</button>
+                </div>
+              </div>
+            )}
+          </div>
+        </div>
+      )}
+
+      {/* ── Toast de feedback ──────────────────────────────────────── */}
+      {toast && (
+        <div id="client-action-toast" className="fixed bottom-5 right-5 z-[60] flex items-center gap-2 rounded-xl border border-slate-700 bg-slate-900 px-4 py-2.5 text-xs text-slate-200 shadow-2xl shadow-black/40">
+          <Copy className="w-3.5 h-3.5 text-indigo-400" />
+          <span>{toast}</span>
         </div>
       )}
     </div>

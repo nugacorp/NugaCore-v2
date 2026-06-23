@@ -648,6 +648,25 @@ Worker Live, Commit Mode ni escritura RouterOS. Resultado:
 Siguiente paso gated: fuente RouterOS read-only únicamente después de aprobar
 PROD-5/CHR; persistencia DB de metadatos IPAM requiere diseño/migración separada.
 
+#### CRM-360 — Client 360 + Acciones rápidas en clientes
+
+Estado: ✅ **Code-complete local** (pendiente validación Hermes).
+
+Flujo operativo inspirado en WispHub manteniendo la identidad visual de NugaCore.
+La lista de clientes agrega una columna **Acciones** con menú `⋮` agrupado
+(Cliente · Servicio · Cobranza · Soporte · Red · Historial) y un panel **Cliente
+360** (resumen + acciones rápidas + historial local con empty state). Acciones
+seguras: navegación, modales y **simulación local**. Suspender/Reactivar son
+simulación (no tocan store ni router); Registrar pago y Crear ticket son
+mock/local; Generar factura y Cambiar plan quedan "pendiente de integración";
+Cambiar IP valida formato y duplicado local. RBAC por rol vía `clientActionCaps`.
+No activa `USE_DB_MIKROTIK`/`USE_DB_WIREGUARD`/`MIKROTIK_WORKER_LIVE`/commit mode
+ni escritura RouterOS. Resultado:
+[`docs/CLIENT_360_QUICK_ACTIONS_RESULT.md`](./docs/CLIENT_360_QUICK_ACTIONS_RESULT.md).
+
+Siguiente fase gated: conectar pago/ticket/estado de cuenta a sus backends
+seguros y suspender/reactivar al Suspension Engine en modo dry-run/manual.
+
 ### FASE 4.12 — Zero Touch Provisioning
 
 Estado: 🔄 Pendiente

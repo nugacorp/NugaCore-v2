@@ -29,6 +29,12 @@ No retomar salvo regresión documentada (ver handoff §0.A):
 - CUSTOMER-IPAM-1: asignación de IP local/mock en alta de cliente WISP.
 - WISP-CORE-1: capacidad, GPS, cobertura, reserva de equipo e IPAM providers
   con fallback mock para el alta completa de cliente.
+- Inventario ERP 5.1: persistencia (warehouses/items/movimientos/transferencias)
+  detrás de `USE_DB_INVENTORY` + UI aditiva (code-complete, pendiente Hermes).
+- Client 360 + Acciones rápidas en CRM: columna Acciones, menú `⋮`, panel
+  Cliente 360 e historial local; acciones seguras (navegación/modal/simulación),
+  sin tocar RouterOS/Worker (code-complete, pendiente Hermes). Ver
+  `docs/CLIENT_360_QUICK_ACTIONS_RESULT.md`.
 
 ## Aprobaciones formales de Hermes
 
