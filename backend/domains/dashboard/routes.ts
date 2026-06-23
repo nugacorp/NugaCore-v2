@@ -1,9 +1,11 @@
 import { Router } from 'express';
 import { store } from '../../../backend/state/store';
 import { READ_ROLES, requireRoles } from '../../common/rbac';
+import { asyncHandler } from '../../common/errors';
 import { suspensionKpis } from '../suspension/engine';
 import { ipamService } from '../ipam/service';
 import { customerEquipmentService } from '../inventory/customer-equipment/service';
+import { getBillingService } from '../billing/service';
 
 const router = Router();
 
@@ -265,6 +267,52 @@ router.get('/api/dashboard/kpi-trends', requireRoles(READ_ROLES), (req, res) => 
     revenue: buildRevenueTrend(months),
   });
 });
+
+// ────────────────────────────────────────────────────────────────────
+// GET /api/dashboard/billing-kpis  (FASE E — KPIs ejecutivos de cobranza)
+//
+// Lee a través del BillingService → respeta USE_DB_BILLING (mock o DB).
+// KPIs: facturación del mes, cobrado del mes, pendiente de cobro,
+//       clientes con adeudo, facturas vencidas y Top 10 adeudos.
+// ────────────────────────────────────────────────────────────────────
+router.get('/api/dashboard/billing-kpis', requireRoles(READ_ROLES), asyncHandler(async (_req, res) => {
+  const month = monthKey(new Date());
+  const invoices = (await getBillingService().listInvoices()).filter((inv) => inv.status !== 'canceled');
+
+  const round = (v: number) => Math.round(v * 100) / 100;
+  const issuedThisMonth = invoices.filter((inv) => String(inv.dateStr || '').startsWith(month));
+
+  const facturacionMes = round(issuedThisMonth.reduce((s, inv) => s + inv.amount, 0));
+  const cobradoMes = round(issuedThisMonth.reduce((s, inv) => s + (inv.paidAmount || 0), 0));
+  const pendienteCobro = round(invoices.reduce((s, inv) => s + (inv.pendingAmount || 0), 0));
+
+  const withDebt = new Set(invoices.filter((inv) => (inv.pendingAmount || 0) > 0).map((inv) => inv.clientId));
+  const facturasVencidas = invoices.filter((inv) => inv.status === 'overdue').length;
+
+  const topAdeudos = invoices
+    .filter((inv) => (inv.pendingAmount || 0) > 0)
+    .sort((a, b) => (b.pendingAmount || 0) - (a.pendingAmount || 0))
+    .slice(0, 10)
+    .map((inv) => ({
+      invoiceId: inv.id,
+      clientId: inv.clientId,
+      clientName: inv.clientName,
+      pendingAmount: round(inv.pendingAmount || 0),
+      dueDateStr: inv.dueDateStr,
+      status: inv.status,
+    }));
+
+  res.json({
+    generatedAt: nowStamp(),
+    month,
+    facturacionMes,
+    cobradoMes,
+    pendienteCobro,
+    clientesConAdeudo: withDebt.size,
+    facturasVencidas,
+    topAdeudos,
+  });
+}));
 
 router.get('/api/notifications/settings', requireRoles(READ_ROLES), (_req, res) => {
   res.json(store.NOTIFICATION_SETTINGS);

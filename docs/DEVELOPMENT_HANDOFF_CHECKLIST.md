@@ -28,6 +28,12 @@ Estas fases están implementadas y mergeadas en `main`. **No retomarlas salvo qu
 - Inventario ERP 5.1 (persistencia tras `USE_DB_INVENTORY` + UI aditiva; pendiente Hermes).
 - Client 360 + Acciones rápidas en CRM (acciones seguras: navegación/modal/simulación;
   sin RouterOS/Worker; pendiente Hermes). Ver `docs/CLIENT_360_QUICK_ACTIONS_RESULT.md`.
+- Billing & Collections Foundation (extensión aditiva del dominio `billing`:
+  invoice/:id, cancel, balance, payments, run-cycle simulado, dashboard
+  billing-kpis; Client 360 cobranza + Cobranza Ejecutiva; RBAC read(6)/write(3),
+  Bearer JWT, secret scan). Mock local, sin SAT/CFDI/Stripe/MercadoPago; motor
+  MikroTik intacto. Pendiente Hermes. Ver
+  `docs/BILLING_COLLECTIONS_FOUNDATION_RESULT.md`.
 
 > ✅ Aprobación staging (4.9.2 / 4.9.2.1): **APROBADA por Hermes** sobre el commit
 > `a0c9b55`. Persistencia real Supabase con restart demostrada para `pcc_5wan` y

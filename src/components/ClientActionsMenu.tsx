@@ -21,6 +21,7 @@ export type ClientQuickAction =
   | 'change-ip'
   | 'register-payment'
   | 'generate-invoice'
+  | 'view-invoices'
   | 'account-statement'
   | 'create-ticket'
   | 'view-tickets'

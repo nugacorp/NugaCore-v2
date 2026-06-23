@@ -84,6 +84,14 @@ class FakeRepo implements BillingRepository {
     return inv;
   }
 
+  async cancelInvoice(id: string): Promise<EnrichedInvoice | null> {
+    const inv = this.byId(id);
+    if (!inv) return null;
+    inv.status = 'canceled';
+    inv.cfdiStatus = 'canceled';
+    return inv;
+  }
+
   async generateInvoiceId(): Promise<string> {
     this.seq += 1;
     return `fac-${this.seq}`;
@@ -264,5 +272,110 @@ describe('BillingService — delegaciones', () => {
     const state = await service.getAccountState('fac-1');
     expect(state).not.toBeNull();
     expect(state!.invoice.id).toBe('fac-1');
+  });
+});
+
+describe('BillingService — cancelInvoice', () => {
+  let service: BillingService;
+  let repo: FakeRepo;
+  beforeEach(() => {
+    repo = new FakeRepo();
+    repo.invoices = [makeInvoice()];
+    service = new BillingService(repo);
+  });
+
+  it('cancela una factura existente', async () => {
+    const r = await service.cancelInvoice('fac-1', 'duplicada');
+    expect(r?.status).toBe('canceled');
+  });
+
+  it('devuelve null para factura inexistente', async () => {
+    expect(await service.cancelInvoice('fac-nope')).toBeNull();
+  });
+});
+
+describe('BillingService — getCustomerBalance', () => {
+  let service: BillingService;
+  let repo: FakeRepo;
+  beforeEach(() => {
+    repo = new FakeRepo();
+    repo.invoices = [
+      makeInvoice({ id: 'fac-1', clientId: 'c-1', amount: 449, pendingAmount: 449, status: 'overdue' }),
+      makeInvoice({ id: 'fac-2', clientId: 'c-1', amount: 299, pendingAmount: 0, paidAmount: 299, status: 'paid', payments: [{ date: '2026-06-10 09:00', amount: 299, method: 'SPEI' }] }),
+      makeInvoice({ id: 'fac-3', clientId: 'c-1', amount: 500, pendingAmount: 500, status: 'canceled' }),
+      makeInvoice({ id: 'fac-9', clientId: 'c-2', amount: 100, pendingAmount: 100, status: 'unpaid' }),
+    ];
+    service = new BillingService(repo);
+  });
+
+  it('suma saldo actual y vencido del cliente, excluye canceladas', async () => {
+    const bal = await service.getCustomerBalance('c-1');
+    expect(bal.currentBalance).toBe(449);
+    expect(bal.overdueBalance).toBe(449);
+    expect(bal.totalBalance).toBe(449);
+    expect(bal.pendingInvoices).toBe(1);
+    expect(bal.overdueInvoices).toBe(1);
+  });
+
+  it('reporta el último pago del cliente', async () => {
+    const bal = await service.getCustomerBalance('c-1');
+    expect(bal.lastPaymentAmount).toBe(299);
+    expect(bal.lastPaymentDate).toBe('2026-06-10 09:00');
+  });
+
+  it('cliente sin facturas → saldo cero y fallbackName', async () => {
+    const bal = await service.getCustomerBalance('c-404', 'Cliente Fantasma');
+    expect(bal.currentBalance).toBe(0);
+    expect(bal.customerName).toBe('Cliente Fantasma');
+    expect(bal.lastPaymentDate).toBeNull();
+  });
+});
+
+describe('BillingService — listPayments + createPayment', () => {
+  let service: BillingService;
+  let repo: FakeRepo;
+  beforeEach(() => {
+    repo = new FakeRepo();
+    repo.invoices = [
+      makeInvoice({ id: 'fac-1', clientId: 'c-1', payments: [{ date: '2026-06-01 10:00', amount: 449, method: 'SPEI', transactionId: 'T1' }], paidAmount: 449, pendingAmount: 0, status: 'paid' }),
+      makeInvoice({ id: 'fac-2', clientId: 'c-2', amount: 299, pendingAmount: 299 }),
+    ];
+    service = new BillingService(repo);
+  });
+
+  it('listPayments aplana los pagos en PaymentRecord', async () => {
+    const pays = await service.listPayments();
+    expect(pays).toHaveLength(1);
+    expect(pays[0]).toMatchObject({ invoiceId: 'fac-1', customerId: 'c-1', amount: 449, reference: 'T1' });
+  });
+
+  it('listPayments filtra por customerId', async () => {
+    expect(await service.listPayments({ customerId: 'c-2' })).toHaveLength(0);
+  });
+
+  it('createPayment rechaza sin invoiceId', async () => {
+    await expect(service.createPayment({})).rejects.toThrow('invoiceId');
+  });
+
+  it('createPayment rechaza factura inexistente', async () => {
+    await expect(service.createPayment({ invoiceId: 'fac-nope', amount: 10 })).rejects.toThrow('not found');
+  });
+
+  it('createPayment registra el pago y normaliza alias paymentMethod/reference', async () => {
+    const { payment, invoice } = await service.createPayment({
+      invoiceId: 'fac-2',
+      amount: 299,
+      paymentMethod: 'Efectivo',
+      reference: 'REF-9',
+    });
+    expect(payment.amount).toBe(299);
+    expect(payment.paymentMethod).toBe('Efectivo');
+    expect(invoice.pendingAmount).toBe(0);
+    expect(invoice.status).toBe('paid');
+  });
+
+  it('createPayment rechaza factura cancelada', async () => {
+    await service.cancelInvoice('fac-2');
+    await expect(service.createPayment({ invoiceId: 'fac-2', amount: 10 })).rejects.toThrow('canceled');
   });
 });

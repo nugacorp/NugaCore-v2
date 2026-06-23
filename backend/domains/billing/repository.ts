@@ -88,6 +88,7 @@ export interface BillingRepository {
   getRevenueReport(): Promise<RevenueReportResult>;
   createInvoice(input: InvoiceCreateInput): Promise<EnrichedInvoice>;
   updateInvoice(id: string, input: InvoiceUpdateInput): Promise<EnrichedInvoice | null>;
+  cancelInvoice(id: string, reason?: string): Promise<EnrichedInvoice | null>;
   recordPayment(invoiceId: string, input: PaymentRecordInput): Promise<EnrichedInvoice>;
   generateInvoiceId(): Promise<string>;
 }
@@ -103,6 +104,11 @@ const invoicePendingAmount = (inv: Invoice): number =>
   roundMoney(Math.max(inv.amount - invoicePaidAmount(inv), 0));
 
 const syncStatus = (inv: Invoice): void => {
+  // 'canceled' es terminal: nunca se recalcula a partir de pagos/vencimiento.
+  if (inv.status === 'canceled') {
+    inv.cfdiStatus = 'canceled';
+    return;
+  }
   const pending = invoicePendingAmount(inv);
   const pastDue = new Date(inv.dueDateStr).getTime() < Date.now();
   if (pending <= 0) {
@@ -165,6 +171,7 @@ export class StoreBillingRepository implements BillingRepository {
     store.INVOICES.forEach(syncStatus);
     return store.INVOICES.reduce(
       (acc, inv) => {
+        if (inv.status === 'canceled') return acc; // canceladas no cuentan en cobranza
         const paid = invoicePaidAmount(inv);
         const pending = invoicePendingAmount(inv);
         acc.totalInvoiced += inv.amount;
@@ -231,6 +238,14 @@ export class StoreBillingRepository implements BillingRepository {
     if (input.items !== undefined) inv.items = input.items;
     if (input.status !== undefined) inv.status = input.status;
     syncStatus(inv);
+    return enrich(inv);
+  }
+
+  async cancelInvoice(id: string, _reason?: string): Promise<EnrichedInvoice | null> {
+    const inv = store.INVOICES.find((i) => i.id === id);
+    if (!inv) return null;
+    inv.status = 'canceled';
+    inv.cfdiStatus = 'canceled';
     return enrich(inv);
   }
 
@@ -359,6 +374,7 @@ export class SupabaseBillingRepository implements BillingRepository {
     const invoices = await this.listInvoices();
     return invoices.reduce(
       (acc, inv) => {
+        if (inv.status === 'canceled') return acc; // canceladas no cuentan en cobranza
         acc.totalInvoiced += inv.amount;
         acc.totalCollected += inv.paidAmount;
         acc.totalPending += inv.pendingAmount;
@@ -445,6 +461,22 @@ export class SupabaseBillingRepository implements BillingRepository {
       }
     }
 
+    return this.findInvoiceById(id);
+  }
+
+  async cancelInvoice(id: string, reason?: string): Promise<EnrichedInvoice | null> {
+    const existing = await this.findInvoiceById(id);
+    if (!existing) return null;
+    const { error } = await this.client
+      .from('invoices')
+      .update({
+        status: 'canceled',
+        cfdi_status: 'canceled',
+        canceled_at: new Date().toISOString(),
+        cancel_reason: reason ?? null,
+      })
+      .eq('id', id);
+    if (error) throw new Error(`cancel invoice: ${error.message}`);
     return this.findInvoiceById(id);
   }
 

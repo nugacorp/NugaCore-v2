@@ -198,3 +198,112 @@ describe('API v1 — Billing (escritura + RBAC)', () => {
     expect(res.status).toBe(404);
   });
 });
+
+// ====================================================================
+// Billing Foundation — endpoints nuevos (FASE B/C)
+// ====================================================================
+describe('API v1 — Billing Foundation (invoice/:id, cancel, balance, payments, run-cycle)', () => {
+  let app: Express;
+  beforeAll(() => { app = createApp(); });
+
+  it('GET /api/billing/invoices/:id → EnrichedInvoice', async () => {
+    const res = await request(app).get('/api/billing/invoices/fac-101').set(READER);
+    expect(res.status).toBe(200);
+    expectKeys(res.body, INVOICE_KEYS);
+    expect(res.body.id).toBe('fac-101');
+  });
+
+  it('GET /api/billing/invoices/:id inexistente → 404', async () => {
+    const res = await request(app).get('/api/billing/invoices/fac-noexiste').set(READER);
+    expect(res.status).toBe(404);
+  });
+
+  it('GET /api/billing/payments → arreglo de PaymentRecord', async () => {
+    const res = await request(app).get('/api/billing/payments').set(READER);
+    expect(res.status).toBe(200);
+    expect(Array.isArray(res.body)).toBe(true);
+    expect(res.body.length).toBeGreaterThan(0);
+    expectKeys(res.body[0], ['id', 'invoiceId', 'customerId', 'customerName', 'amount', 'paymentDate', 'paymentMethod', 'reference']);
+  });
+
+  it('GET /api/billing/payments?customerId= filtra', async () => {
+    const res = await request(app).get('/api/billing/payments?customerId=c-1').set(READER);
+    expect(res.status).toBe(200);
+    expect(res.body.every((p: { customerId: string }) => p.customerId === 'c-1')).toBe(true);
+  });
+
+  it('GET /api/billing/customers/:customerId/balance → AccountBalance', async () => {
+    const res = await request(app).get('/api/billing/customers/c-1/balance').set(READER);
+    expect(res.status).toBe(200);
+    expectKeys(res.body, ['customerId', 'customerName', 'currentBalance', 'overdueBalance', 'totalBalance', 'pendingInvoices', 'overdueInvoices', 'lastPaymentAmount', 'lastPaymentDate']);
+    expect(res.body.customerId).toBe('c-1');
+  });
+
+  it('POST /api/billing/payments registra pago como recurso → 201', async () => {
+    const create = await request(app).post('/api/billing/invoices').set(ADMIN).send({ clientId: 'c-1', amount: 199 });
+    const id: string = create.body.id;
+    const res = await request(app)
+      .post('/api/billing/payments')
+      .set(COBR)
+      .send({ invoiceId: id, amount: 199, paymentMethod: 'Efectivo', reference: 'REF-1' });
+    expect(res.status).toBe(201);
+    expect(res.body.payment.amount).toBe(199);
+    expect(res.body.payment.paymentMethod).toBe('Efectivo');
+    expect(res.body.invoice.status).toBe('paid');
+  });
+
+  it('POST /api/billing/payments sin invoiceId → 400', async () => {
+    const res = await request(app).post('/api/billing/payments').set(COBR).send({ amount: 10 });
+    expect(res.status).toBe(400);
+  });
+
+  it('POST /api/billing/payments con rol lectura → 403', async () => {
+    const res = await request(app).post('/api/billing/payments').set(READER).send({ invoiceId: 'fac-101', amount: 10 });
+    expect(res.status).toBe(403);
+  });
+
+  it('POST /api/billing/invoices/:id/cancel marca canceled', async () => {
+    const create = await request(app).post('/api/billing/invoices').set(ADMIN).send({ clientId: 'c-1', amount: 250 });
+    const id: string = create.body.id;
+    const res = await request(app).post(`/api/billing/invoices/${id}/cancel`).set(ADMIN).send({ reason: 'duplicada' });
+    expect(res.status).toBe(200);
+    expect(res.body.status).toBe('canceled');
+
+    // la factura cancelada sigue cancelada al releerla
+    const reread = await request(app).get(`/api/billing/invoices/${id}`).set(READER);
+    expect(reread.body.status).toBe('canceled');
+  });
+
+  it('POST /api/billing/invoices/:id/cancel inexistente → 404', async () => {
+    const res = await request(app).post('/api/billing/invoices/fac-noexiste/cancel').set(ADMIN).send({});
+    expect(res.status).toBe(404);
+  });
+
+  it('POST /api/billing/invoices/:id/cancel con rol lectura → 403', async () => {
+    const res = await request(app).post('/api/billing/invoices/fac-101/cancel').set(READER).send({});
+    expect(res.status).toBe(403);
+  });
+
+  it('POST /api/billing/run-cycle simula y responde contadores', async () => {
+    const res = await request(app).post('/api/billing/run-cycle').set(ADMIN).send({ period: 'monthly' });
+    expect(res.status).toBe(200);
+    expect(res.body).toHaveProperty('wouldGenerate');
+    expect(res.body).toHaveProperty('generatedCount');
+    expect(res.body).toHaveProperty('customersProcessed');
+    expect(res.body.period).toBe('monthly');
+    expect(res.body.committed).toBe(false);
+    expect(res.body.generatedCount).toBe(0);
+    expect(res.body.wouldGenerate).toBeGreaterThan(0);
+  });
+
+  it('POST /api/billing/run-cycle period inválido → normaliza a monthly', async () => {
+    const res = await request(app).post('/api/billing/run-cycle').set(COBR).send({ period: 'anual' });
+    expect(res.status).toBe(200);
+    expect(res.body.period).toBe('monthly');
+  });
+
+  it('POST /api/billing/run-cycle con rol lectura → 403', async () => {
+    const res = await request(app).post('/api/billing/run-cycle').set(READER).send({});
+    expect(res.status).toBe(403);
+  });
+});

@@ -147,6 +147,24 @@ Incluye:
 - Billing settings.
 - PostgreSQL / Supabase / RLS.
 
+#### Billing & Collections Foundation (2026-06-23)
+
+Estado funcional: 🟡 Code-complete, pendiente validación de Hermes
+Estado producción: 🔴 Mock local (sin SAT/CFDI/Stripe/MercadoPago/CoDi/Dimo)
+
+Extensión aditiva del dominio `billing` como fuente de facturación/cobranza:
+
+- Endpoints: `GET /invoices/:id`, `POST /invoices/:id/cancel`,
+  `GET /customers/:id/balance`, `GET/POST /payments`, `POST /run-cycle`
+  (simulación de facturación automática mensual/quincenal/semanal),
+  `GET /api/dashboard/billing-kpis`.
+- UI: Client 360 → Cobranza; Dashboard → Cobranza Ejecutiva (Top 10 adeudos).
+- RBAC: lectura 6 roles, escritura super admin/administrador/cobranza; Bearer JWT.
+- Tests: contract, service, ui, customer360, dashboard, rbac y secret scan.
+- Sin tocar RouterOS Write / Worker Live / MikroTik Runtime / NOC.
+
+Detalle: `docs/BILLING_COLLECTIONS_FOUNDATION_RESULT.md`.
+
 Gate producción:
 
 - Saldos reales auditados.

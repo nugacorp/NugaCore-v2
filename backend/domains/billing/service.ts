@@ -28,6 +28,22 @@ import {
   StoreBillingRepository,
   SupabaseBillingRepository,
 } from './repository';
+import { AccountBalance, CreatePaymentBody, PaymentRecord } from './types';
+
+const roundMoney = (v: number): number => Math.round(v * 100) / 100;
+
+/** Aplana los pagos de una factura enriquecida a la forma de recurso PaymentRecord. */
+const invoiceToPaymentRecords = (inv: EnrichedInvoice): PaymentRecord[] =>
+  inv.payments.map((p, i) => ({
+    id: `${inv.id}-p${i + 1}`,
+    invoiceId: inv.id,
+    customerId: inv.clientId,
+    customerName: inv.clientName,
+    amount: roundMoney(Number(p.amount || 0)),
+    paymentDate: p.date,
+    paymentMethod: p.method || 'Transferencia',
+    reference: p.transactionId ?? null,
+  }));
 
 const DEFAULT_DUE_DAYS = 10;
 
@@ -204,8 +220,79 @@ export class BillingService {
     return this.repo.recordPayment(invoiceId, input);
   }
 
+  cancelInvoice(id: string, reason?: string): Promise<EnrichedInvoice | null> {
+    return this.repo.cancelInvoice(id, reason);
+  }
+
   generateInvoiceId(): Promise<string> {
     return this.repo.generateInvoiceId();
+  }
+
+  // ── Foundation: balance, pagos como recurso y ciclo ─────────────────
+
+  /** Estado de cuenta consolidado de un cliente (saldo actual, vencido, último pago). */
+  async getCustomerBalance(customerId: string, fallbackName?: string): Promise<AccountBalance> {
+    const invoices = (await this.repo.listInvoices()).filter((i) => i.clientId === customerId);
+    const active = invoices.filter((i) => i.status !== 'canceled');
+
+    const currentBalance = roundMoney(active.reduce((s, i) => s + i.pendingAmount, 0));
+    const overdue = active.filter((i) => i.status === 'overdue');
+    const overdueBalance = roundMoney(overdue.reduce((s, i) => s + i.pendingAmount, 0));
+
+    const payments = invoices
+      .flatMap(invoiceToPaymentRecords)
+      .sort((a, b) => b.paymentDate.localeCompare(a.paymentDate));
+    const lastPayment = payments[0] ?? null;
+
+    return {
+      customerId,
+      customerName: invoices[0]?.clientName ?? fallbackName ?? customerId,
+      currentBalance,
+      overdueBalance,
+      totalBalance: currentBalance,
+      pendingInvoices: active.filter((i) => i.pendingAmount > 0).length,
+      overdueInvoices: overdue.length,
+      lastPaymentAmount: lastPayment ? lastPayment.amount : null,
+      lastPaymentDate: lastPayment ? lastPayment.paymentDate : null,
+    };
+  }
+
+  /** Lista de pagos como recurso (proyección de las aplicaciones de pago). */
+  async listPayments(filter?: { customerId?: string; invoiceId?: string }): Promise<PaymentRecord[]> {
+    const invoices = await this.repo.listInvoices();
+    let records = invoices.flatMap(invoiceToPaymentRecords);
+    if (filter?.customerId) records = records.filter((p) => p.customerId === filter.customerId);
+    if (filter?.invoiceId) records = records.filter((p) => p.invoiceId === filter.invoiceId);
+    return records.sort((a, b) => b.paymentDate.localeCompare(a.paymentDate));
+  }
+
+  /**
+   * Registra un pago como recurso (POST /api/billing/payments).
+   * Valida, delega en recordPayment y devuelve el PaymentRecord + la factura.
+   */
+  async createPayment(body: CreatePaymentBody): Promise<{ payment: PaymentRecord; invoice: EnrichedInvoice }> {
+    if (!body.invoiceId || typeof body.invoiceId !== 'string') {
+      throw new BadRequestError('Missing required field: invoiceId', 'MISSING_FIELD');
+    }
+    const invoice = await this.repo.findInvoiceById(body.invoiceId);
+    if (!invoice) {
+      throw new BadRequestError('Invoice not found', 'INVOICE_NOT_FOUND');
+    }
+    if (invoice.status === 'canceled') {
+      throw new BadRequestError('Cannot pay a canceled invoice', 'INVOICE_CANCELED');
+    }
+
+    // Normaliza alias de la spec (paymentMethod/reference) al contrato interno.
+    const paymentInput = this.validatePayment(invoice, {
+      amount: body.amount,
+      method: (typeof body.paymentMethod === 'string' && body.paymentMethod) || body.method,
+      transactionId: (typeof body.reference === 'string' && body.reference) || body.transactionId,
+    });
+
+    const updated = await this.repo.recordPayment(invoice.id, paymentInput);
+    const records = invoiceToPaymentRecords(updated);
+    const payment = records[records.length - 1];
+    return { payment, invoice: updated };
   }
 }
 

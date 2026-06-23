@@ -28,7 +28,7 @@ import { Client, Plan } from '../types';
 import type { UserRole } from '../lib/supabase';
 import { clientActionCaps } from '../lib/rbac';
 import ClientActionsMenu, { ClientQuickAction } from './ClientActionsMenu';
-import Client360Panel, { ClientHistoryEntry } from './Client360Panel';
+import Client360Panel, { ClientHistoryEntry, ClientBillingSummary } from './Client360Panel';
 import {
   canSubmitCustomerOnboarding,
   IpAssignmentValidation,
@@ -175,6 +175,8 @@ export default function CrmModule({
   const caps = clientActionCaps(userRole);
   const [actionsMenuFor, setActionsMenuFor] = useState<string | null>(null);
   const [client360, setClient360] = useState<Client | null>(null);
+  // Resumen de cobranza del cliente abierto en Client 360 (FASE D).
+  const [client360Billing, setClient360Billing] = useState<ClientBillingSummary | null>(null);
   const [toast, setToast] = useState<string | null>(null);
   // Historial mock/local por cliente (pagos/tickets/eventos simulados desde acciones rápidas).
   const [localHistory, setLocalHistory] = useState<Record<string, ClientHistoryEntry[]>>({});
@@ -257,6 +259,14 @@ export default function CrmModule({
           setActionModal({ type: 'pending', client, title: 'Estado de cuenta', message: 'Estado de cuenta disponible en el módulo Facturación.' });
         }
         break;
+      case 'view-invoices':
+        if (onNavigate) {
+          onNavigate('billing');
+          showToast(`Abriendo facturas de ${client.name}.`);
+        } else {
+          setActionModal({ type: 'pending', client, title: 'Facturas', message: 'Facturas disponibles en el módulo Facturación.' });
+        }
+        break;
       case 'create-ticket':
         setTicketSubject('');
         setTicketDetail('');
@@ -301,6 +311,29 @@ export default function CrmModule({
         break;
     }
   }, [onNavigate, showToast]);
+
+  // Carga el resumen de cobranza del cliente abierto en Client 360 (FASE D).
+  // Read-only: GET /api/billing/customers/:customerId/balance vía Bearer JWT.
+  useEffect(() => {
+    if (!client360) {
+      setClient360Billing(null);
+      return;
+    }
+    let cancelled = false;
+    const customerId = client360.id;
+    (async () => {
+      try {
+        const headers = await getAuthHeaders();
+        const res = await fetch(`/api/billing/customers/${customerId}/balance`, { headers });
+        if (!res.ok) throw new Error(`HTTP ${res.status}`);
+        const data = (await res.json()) as ClientBillingSummary;
+        if (!cancelled) setClient360Billing(data);
+      } catch {
+        if (!cancelled) setClient360Billing(null);
+      }
+    })();
+    return () => { cancelled = true; };
+  }, [client360, getAuthHeaders]);
 
   const submitLocalPayment = (client: Client) => {
     const amount = Number(payAmount);
@@ -1711,6 +1744,7 @@ export default function CrmModule({
           planName={plans.find((p) => p.id === client360.planId)?.name || 'Sin plan'}
           caps={caps}
           history={localHistory[client360.id] || []}
+          billing={client360Billing}
           onAction={handleQuickAction}
           onClose={() => setClient360(null)}
         />

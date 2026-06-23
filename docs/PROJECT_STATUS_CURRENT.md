@@ -35,6 +35,13 @@ No retomar salvo regresión documentada (ver handoff §0.A):
   Cliente 360 e historial local; acciones seguras (navegación/modal/simulación),
   sin tocar RouterOS/Worker (code-complete, pendiente Hermes). Ver
   `docs/CLIENT_360_QUICK_ACTIONS_RESULT.md`.
+- Billing & Collections Foundation (2026-06-23): extensión aditiva del dominio
+  `billing` — `GET /invoices/:id`, `POST /invoices/:id/cancel`,
+  `GET /customers/:id/balance`, `GET/POST /payments`, `POST /run-cycle`
+  (simulación) y `GET /api/dashboard/billing-kpis`; Client 360 cobranza +
+  Cobranza Ejecutiva en Dashboard; RBAC read(6)/write(3) y secret scan. Mock
+  local (sin SAT/CFDI/Stripe/MercadoPago); motor MikroTik intacto. Code-complete,
+  pendiente Hermes. Ver `docs/BILLING_COLLECTIONS_FOUNDATION_RESULT.md`.
 
 ## Aprobaciones formales de Hermes
 

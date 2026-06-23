@@ -63,6 +63,9 @@ export default function Dashboard({ stats, alerts, onAcknowledgeAlerts, onRefres
   // In-App floating toasts
   const [inAppToasts, setInAppToasts] = useState<any[]>([]);
 
+  // KPIs ejecutivos de cobranza (FASE E — Billing Foundation).
+  const [billingKpis, setBillingKpis] = useState<any | null>(null);
+
   const loadNotificationSettings = useCallback(async () => {
     try {
       setFetchingSettings(true);
@@ -93,14 +96,25 @@ export default function Dashboard({ stats, alerts, onAcknowledgeAlerts, onRefres
     }
   }, [getAuthHeaders]);
 
+  const loadBillingKpis = useCallback(async () => {
+    try {
+      const headers = await getAuthHeaders();
+      const res = await fetchWithRateLimitBackoff('/api/dashboard/billing-kpis', { headers });
+      if (res.ok) setBillingKpis(await res.json());
+    } catch {
+      // Read-only: si falla, el dashboard cae a los KPIs derivados de `stats`.
+    }
+  }, [getAuthHeaders]);
+
   useEffect(() => {
     void loadNotificationSettings();
+    void loadBillingKpis();
 
     // Check browser permission status if supported
     if (typeof window !== 'undefined' && 'Notification' in window) {
       setNotificationPermission(Notification.permission);
     }
-  }, [loadNotificationSettings]);
+  }, [loadNotificationSettings, loadBillingKpis]);
 
   const saveSettings = async (updated: typeof pushSettings) => {
     setSavingSettings(true);
@@ -527,6 +541,58 @@ export default function Dashboard({ stats, alerts, onAcknowledgeAlerts, onRefres
           <div className="absolute right-[-10px] bottom-[-10px] w-14 h-14 bg-rose-500/5 rounded-full blur-xl group-hover:bg-rose-500/10 transition"></div>
         </div>
       </div>
+
+      {/* ── Cobranza Ejecutiva (FASE E — Billing Foundation) ──────────── */}
+      <section id="dashboard-billing-kpis" aria-label="Cobranza ejecutiva" className="space-y-3">
+        <div className="flex items-center justify-between">
+          <h3 className="text-xs font-mono font-semibold uppercase tracking-widest text-slate-400 flex items-center gap-2">
+            <CreditCard className="w-4 h-4 text-yellow-400" /> Cobranza Ejecutiva
+          </h3>
+          <button
+            onClick={go('billing')}
+            className="text-[10px] font-mono uppercase tracking-wide text-indigo-400 hover:text-indigo-300"
+          >
+            Ver facturación →
+          </button>
+        </div>
+        <div className="grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-5 gap-3">
+          {[
+            { label: 'Facturación del mes', value: formatMXN(billingKpis?.facturacionMes ?? stats.facturacionMes ?? 0), tone: 'text-emerald-400' },
+            { label: 'Cobrado del mes', value: formatMXN(billingKpis?.cobradoMes ?? stats.cobranzaMes ?? 0), tone: 'text-yellow-400' },
+            { label: 'Pendiente de cobro', value: formatMXN(billingKpis?.pendienteCobro ?? pendingToCollect), tone: 'text-amber-400' },
+            { label: 'Clientes con adeudo', value: String(billingKpis?.clientesConAdeudo ?? 0), tone: 'text-orange-400' },
+            { label: 'Facturas vencidas', value: String(billingKpis?.facturasVencidas ?? 0), tone: 'text-rose-400' },
+          ].map((kpi) => (
+            <div key={kpi.label} className="bg-slate-950 border border-slate-800 rounded-xl p-4 hover:border-slate-700 transition">
+              <span className="text-[10px] text-slate-400 font-mono font-semibold uppercase block">{kpi.label}</span>
+              <span className={`mt-2 block text-2xl font-extrabold tracking-tight ${kpi.tone}`}>{kpi.value}</span>
+            </div>
+          ))}
+        </div>
+
+        {/* Top 10 adeudos */}
+        <div className="bg-slate-950 border border-slate-800 rounded-xl p-5">
+          <h4 className="text-[10px] font-mono uppercase tracking-widest text-slate-500 mb-3">Top 10 Adeudos</h4>
+          {Array.isArray(billingKpis?.topAdeudos) && billingKpis.topAdeudos.length > 0 ? (
+            <ul className="divide-y divide-slate-900">
+              {billingKpis.topAdeudos.map((row: any, i: number) => (
+                <li key={row.invoiceId} className="flex items-center justify-between gap-3 py-2">
+                  <div className="flex items-center gap-2 min-w-0">
+                    <span className="text-[10px] font-mono text-slate-600 w-5 shrink-0">{i + 1}.</span>
+                    <span className="text-[12px] text-slate-200 truncate">{row.clientName}</span>
+                    {row.status === 'overdue' && (
+                      <span className="text-[9px] font-mono uppercase bg-rose-500/10 text-rose-400 border border-rose-500/20 px-1.5 py-0.5 rounded shrink-0">Vencida</span>
+                    )}
+                  </div>
+                  <span className="text-[12px] font-mono font-bold text-amber-400 shrink-0">{formatMXN(row.pendingAmount)}</span>
+                </li>
+              ))}
+            </ul>
+          ) : (
+            <p id="dashboard-billing-empty" className="text-[12px] text-slate-500 text-center py-4">Sin adeudos registrados.</p>
+          )}
+        </div>
+      </section>
 
       {/* Main Panel grid: NOC monitoring feed & Quick tools */}
       <div className="grid grid-cols-1 lg:grid-cols-12 gap-6">

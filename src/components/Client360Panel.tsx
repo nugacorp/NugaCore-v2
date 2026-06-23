@@ -2,10 +2,23 @@ import React from 'react';
 import {
   X, MapPin, Phone, Mail, Wifi, Router as RouterIcon, CalendarClock,
   CreditCard, Ticket, UserMinus, CheckCircle, Pencil, Network, Navigation, History,
+  Wallet, Receipt, FileText, AlertTriangle,
 } from 'lucide-react';
 import { Client } from '../types';
 import { ClientActionCaps } from '../lib/rbac';
 import { ClientQuickAction } from './ClientActionsMenu';
+
+// Resumen de cobranza del cliente (FASE D — Billing Foundation).
+// Proyección de GET /api/billing/customers/:customerId/balance. Opcional:
+// el panel funciona aunque no haya datos de billing cargados.
+export interface ClientBillingSummary {
+  currentBalance: number;
+  overdueBalance: number;
+  pendingInvoices: number;
+  overdueInvoices: number;
+  lastPaymentAmount: number | null;
+  lastPaymentDate: string | null;
+}
 
 // ====================================================================
 // Client 360 — Panel integral del cliente (slide-over derecho).
@@ -58,16 +71,29 @@ interface Props {
   planName: string;
   caps: ClientActionCaps;
   history: ClientHistoryEntry[];
+  billing?: ClientBillingSummary | null;
   onAction: (action: ClientQuickAction, client: Client) => void;
   onClose: () => void;
 }
 
-export default function Client360Panel({ client, planName, caps, history, onAction, onClose }: Props) {
+const money = (v: number): string =>
+  `$${(Number.isFinite(v) ? v : 0).toLocaleString('es-MX', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`;
+
+// Acciones de cobranza del panel (FASE D). Read-only / navegación / modal mock.
+// NO incluye suspender ni reactivar (esas viven en QUICK_ACTIONS generales).
+const BILLING_ACTIONS: { key: ClientQuickAction; label: string; cap: keyof ClientActionCaps; icon: React.ReactNode }[] = [
+  { key: 'view-invoices', label: 'Ver facturas', cap: 'accountStatement', icon: <Receipt className="w-3.5 h-3.5" /> },
+  { key: 'register-payment', label: 'Registrar pago', cap: 'registerPayment', icon: <CreditCard className="w-3.5 h-3.5" /> },
+  { key: 'account-statement', label: 'Ver estado de cuenta', cap: 'accountStatement', icon: <FileText className="w-3.5 h-3.5" /> },
+];
+
+export default function Client360Panel({ client, planName, caps, history, billing, onAction, onClose }: Props) {
   const ip = client.assignedIp || client.ip;
   const hasIp = ip && ip !== '0.0.0.0';
   const hasGps = Number.isFinite(client.lat) && Number.isFinite(client.lng) && !(client.lat === 0 && client.lng === 0);
 
   const actions = QUICK_ACTIONS.filter((a) => caps[a.cap] && (!a.show || a.show(client)));
+  const billingActions = BILLING_ACTIONS.filter((a) => caps[a.cap]);
 
   const row = (label: string, value: React.ReactNode, icon?: React.ReactNode) => (
     <div className="flex items-start justify-between gap-3 py-1.5">
@@ -119,6 +145,47 @@ export default function Client360Panel({ client, planName, caps, history, onActi
             {row('Fecha instalación', client.installationDate, <CalendarClock className="w-3 h-3" />)}
             {row('GPS', hasGps ? <span className="font-mono">{client.lat}, {client.lng}</span> : 'Sin coordenadas')}
           </div>
+        </section>
+
+        {/* Cobranza (FASE D — Billing Foundation) */}
+        <section aria-label="Cobranza">
+          <h4 className="mb-1 flex items-center gap-1.5 text-[10px] font-mono uppercase tracking-widest text-slate-500">
+            <Wallet className="w-3 h-3" /> Cobranza
+          </h4>
+          <div id="client360-billing" className="rounded-2xl border border-slate-900 bg-slate-900/40 px-4 py-2 divide-y divide-slate-900/70">
+            {row(
+              'Saldo actual',
+              <span className={`font-mono ${billing && billing.currentBalance > 0 ? 'text-amber-400' : 'text-emerald-400'}`}>
+                {billing ? money(billing.currentBalance) : '—'}
+              </span>,
+              <Wallet className="w-3 h-3" />,
+            )}
+            {row(
+              'Saldo vencido',
+              <span className={`font-mono ${billing && billing.overdueBalance > 0 ? 'text-rose-400' : 'text-slate-200'}`}>
+                {billing ? money(billing.overdueBalance) : '—'}
+              </span>,
+              <AlertTriangle className="w-3 h-3" />,
+            )}
+            {row('Facturas pendientes', billing ? String(billing.pendingInvoices) : '—', <Receipt className="w-3 h-3" />)}
+            {row('Facturas vencidas', billing ? String(billing.overdueInvoices) : '—', <AlertTriangle className="w-3 h-3" />)}
+            {row('Último pago', billing && billing.lastPaymentAmount != null ? money(billing.lastPaymentAmount) : 'Sin pagos', <CreditCard className="w-3 h-3" />)}
+            {row('Fecha último pago', billing?.lastPaymentDate || '—', <CalendarClock className="w-3 h-3" />)}
+          </div>
+          {billingActions.length > 0 && (
+            <div className="mt-2 grid grid-cols-2 gap-2">
+              {billingActions.map((a) => (
+                <button
+                  key={a.key}
+                  id={`client360-billing-${a.key}`}
+                  onClick={() => onAction(a.key, client)}
+                  className="inline-flex items-center justify-center gap-1.5 rounded-xl border border-slate-800 bg-slate-900 px-3 py-2 text-[11px] font-semibold text-slate-300 transition hover:bg-slate-800"
+                >
+                  {a.icon}<span>{a.label}</span>
+                </button>
+              ))}
+            </div>
+          )}
         </section>
 
         {/* Acciones rápidas */}
