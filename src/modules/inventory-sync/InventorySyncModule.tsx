@@ -142,7 +142,7 @@ export default function InventorySyncModule({ getAuthHeaders }: Props) {
             className="inline-flex items-center space-x-1.5 px-2.5 py-1 rounded-lg bg-slate-800 border border-slate-700 text-xs text-slate-300 hover:bg-slate-700 transition"
           >
             <RefreshCw className="w-3.5 h-3.5" />
-            <span>Sincronizar</span>
+            <span>Actualizar lectura</span>
           </button>
         </div>
       </div>
