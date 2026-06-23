@@ -127,6 +127,17 @@ describe('Templates Library — POST /api/routeros-templates/generate', () => {
     expect(res.body).toHaveProperty('securityNotice');
   });
 
+  it('WireGuard sin datos reales genera placeholder + warnings, no 400 de UI', async () => {
+    const res = await request(app)
+      .post('/api/routeros-templates/generate')
+      .set(ADMIN)
+      .send({ templateId: 'router_base_wireguard', routerName: 'router-placeholder', routerosVersion: '7' });
+    expect(res.status).toBe(200);
+    expect(res.body.script).toContain('<PEGAR_PUBLIC_KEY_DEL_SERVIDOR>');
+    expect(res.body.script).toContain('<IP_PEER>/32');
+    expect(res.body.warnings.length).toBeGreaterThan(0);
+  });
+
   it('Administrador puede generar (200)', async () => {
     const res = await request(app)
       .post('/api/routeros-templates/generate')

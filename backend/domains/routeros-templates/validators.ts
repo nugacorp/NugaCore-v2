@@ -48,18 +48,15 @@ export function validateTemplateParams(params: Partial<TemplateLibraryParams>): 
 
   const id = params.templateId as TemplateLibraryId;
 
-  // WireGuard templates (router_base_wireguard, wireguard_client, tower_wisp)
+  // WireGuard templates (router_base_wireguard, wireguard_client, tower_wisp).
+  // Los campos WG pueden faltar: el generador produce placeholders explícitos
+  // y warnings para que el técnico complete el .rsc sin provocar 400 en la UI.
   if (WG_TEMPLATES.has(id)) {
-    if (!params.wgServerPublicKey) {
-      errors.push('wgServerPublicKey es requerido para plantillas WireGuard');
-    }
-    if (!params.wgEndpoint) {
-      errors.push('wgEndpoint es requerido (ej: vpn.miempresa.com:13231)');
-    }
     if (params.wgRouterIp && !isValidCidr(params.wgRouterIp)) {
       errors.push('wgRouterIp debe ser un CIDR válido (ej: 10.0.0.2/24)');
     }
   }
+
 
   // WireGuard server
   if (id === 'wireguard_server') {
@@ -68,11 +65,10 @@ export function validateTemplateParams(params: Partial<TemplateLibraryParams>): 
     }
   }
 
-  // SSTP
+  // SSTP también permite placeholders explícitos cuando falta el host, igual que
+  // el generador. Si el usuario provee host, sí validamos el formato.
   if (id === 'router_base_sstp') {
-    if (!params.sstpHost) {
-      errors.push('sstpHost es requerido para la plantilla SSTP');
-    } else if (!isValidHostname(params.sstpHost) && !isValidIp(params.sstpHost)) {
+    if (params.sstpHost && !isValidHostname(params.sstpHost) && !isValidIp(params.sstpHost)) {
       errors.push('sstpHost debe ser un hostname o IP válidos');
     }
   }

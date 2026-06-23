@@ -57,18 +57,22 @@ export const validateParams = (p: Partial<ResourceGeneratorParams>): ValidationR
     errors.push('apiPort debe ser un número entre 1 y 65535');
 
   if (p.templateId === 'base_wisp_wireguard') {
-    if (!p.wgEndpoint?.trim()) errors.push('wgEndpoint es requerido para la plantilla WireGuard');
-    if (!p.wgRouterIp?.trim()) errors.push('wgRouterIp es requerido para la plantilla WireGuard');
-    if (!p.wgManagementCidr?.trim())
-      errors.push('wgManagementCidr es requerido para la plantilla WireGuard');
+    // El generador sabe producir placeholders y warnings cuando aún no hay
+    // datos WireGuard reales. No bloqueamos la generación con 400; solo
+    // validamos formato cuando el campo viene informado.
+    if (p.wgRouterIp && !isValidCidr(p.wgRouterIp))
+      errors.push('wgRouterIp no es un CIDR válido');
+    if (p.wgManagementCidr && !isValidCidr(p.wgManagementCidr))
+      errors.push('wgManagementCidr no es un CIDR válido');
     if (p.wgVpnCidr && !isValidCidr(p.wgVpnCidr))
       errors.push('wgVpnCidr no es un CIDR válido');
   }
 
   if (p.templateId === 'base_wisp_sstp') {
-    if (!p.sstpHost?.trim()) errors.push('sstpHost es requerido para la plantilla SSTP');
-    if (!p.sstpManagementCidr?.trim())
-      errors.push('sstpManagementCidr es requerido para la plantilla SSTP');
+    // Igual que WireGuard: el script puede salir con placeholder del host.
+    // Si se informa CIDR de gestión, debe ser válido.
+    if (p.sstpManagementCidr && !isValidCidr(p.sstpManagementCidr))
+      errors.push('sstpManagementCidr no es un CIDR válido');
   }
 
   return { valid: errors.length === 0, errors };

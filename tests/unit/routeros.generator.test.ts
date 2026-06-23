@@ -237,22 +237,21 @@ describe('Validators — validateParams', () => {
     expect(errors.some((e) => e.includes('lanCidr'))).toBe(true);
   });
 
-  it('reporta error si faltan campos WireGuard para base_wisp_wireguard', () => {
+  it('permite omitir campos WireGuard para generar placeholders y warnings', () => {
     const { valid, errors } = validateParams({ ...BASE_PARAMS, wgEndpoint: '', wgRouterIp: '' });
-    expect(valid).toBe(false);
-    expect(errors.some((e) => e.includes('wgEndpoint'))).toBe(true);
-    expect(errors.some((e) => e.includes('wgRouterIp'))).toBe(true);
+    expect(valid).toBe(true);
+    expect(errors).toHaveLength(0);
   });
 
-  it('reporta error si falta sstpHost para base_wisp_sstp', () => {
+  it('permite omitir sstpHost para generar placeholder y warning', () => {
     const { valid, errors } = validateParams({
       ...BASE_PARAMS,
       templateId: 'base_wisp_sstp',
       sstpHost: '',
       sstpManagementCidr: '10.10.0.0/24',
     });
-    expect(valid).toBe(false);
-    expect(errors.some((e) => e.includes('sstpHost'))).toBe(true);
+    expect(valid).toBe(true);
+    expect(errors).toHaveLength(0);
   });
 });
 

@@ -418,16 +418,16 @@ describe('Validators', () => {
     expect(result.errors).toHaveLength(0);
   });
 
-  it('requiere wgServerPublicKey para router_base_wireguard', () => {
+  it('permite router_base_wireguard sin datos WG para generar placeholders', () => {
     const result = validateTemplateParams({ templateId: 'router_base_wireguard', routerName: 'r1', routerosVersion: '7' });
-    expect(result.valid).toBe(false);
-    expect(result.errors.some((e) => e.includes('wgServerPublicKey'))).toBe(true);
+    expect(result.valid).toBe(true);
+    expect(result.errors).toHaveLength(0);
   });
 
-  it('requiere sstpHost para router_base_sstp', () => {
+  it('permite router_base_sstp sin host para generar placeholder', () => {
     const result = validateTemplateParams({ templateId: 'router_base_sstp', routerName: 'r1', routerosVersion: '7' });
-    expect(result.valid).toBe(false);
-    expect(result.errors.some((e) => e.includes('sstpHost'))).toBe(true);
+    expect(result.valid).toBe(true);
+    expect(result.errors).toHaveLength(0);
   });
 
   it('requiere wanInterfaces y wanGateways para pcc_3wan', () => {
