@@ -26,6 +26,7 @@ import routerEnrollmentRoutes from './domains/router-enrollment/routes';
 import safeCommandQueueRoutes from './domains/safe-command-queue/routes';
 import securityRoutes from './domains/security/routes';
 import suspensionRoutes from './domains/suspension/routes';
+import systemRoutes from './domains/system/routes';
 import ticketsRoutes from './domains/tickets/routes';
 import wireguardRoutes from './domains/wireguard/routes';
 
@@ -40,6 +41,7 @@ export function registerRoutes(app: Express): void {
   app.use(automationsRoutes);
   app.use(securityRoutes);
   app.use(suspensionRoutes);
+  app.use(systemRoutes);
   app.use(networkRoutes);
   app.use(mikrotikRoutes);
   app.use(wireguardRoutes);

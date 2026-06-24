@@ -3,9 +3,11 @@ import { store } from '../../../backend/state/store';
 import { READ_ROLES, requireRoles } from '../../common/rbac';
 import { asyncHandler } from '../../common/errors';
 import { suspensionKpis } from '../suspension/engine';
-import { ipamService } from '../ipam/service';
-import { customerEquipmentService } from '../inventory/customer-equipment/service';
-import { getBillingService } from '../billing/service';
+import {
+  getBillingMetrics,
+  getMetricsSnapshot,
+  type MetricsSnapshot,
+} from '../system/metrics';
 
 const router = Router();
 
@@ -13,41 +15,24 @@ const nowStamp = () => new Date().toISOString().replace('T', ' ').substring(0, 1
 
 const monthKey = (date: Date) => `${date.getFullYear()}-${String(date.getMonth() + 1).padStart(2, '0')}`;
 
-const buildExecutiveKpis = () => {
+// Ingresos del mes previo derivados del histórico de facturas (para el
+// cálculo de crecimiento). El mes en curso viene de Billing (SSOT).
+const monthRevenueFromStore = (key: string): number =>
+  store.INVOICES
+    .filter((inv) => String(inv.dateStr || '').startsWith(key))
+    .reduce((acc, inv) => acc + inv.amount, 0);
+
+// Deriva los KPIs ejecutivos (tasas y tendencias) a partir del snapshot SSOT.
+// Los conteos base (clientes, MRR, tickets, torres, cobranza del mes) NO se
+// recalculan aquí: provienen de systemMetrics (fuente oficial por dominio).
+const buildExecutiveKpis = (snapshot: MetricsSnapshot) => {
   const now = new Date();
   const currentMonth = monthKey(now);
-  const prev = new Date(now.getFullYear(), now.getMonth() - 1, 1);
-  const previousMonth = monthKey(prev);
+  const previousMonth = monthKey(new Date(now.getFullYear(), now.getMonth() - 1, 1));
 
-  const activeCount = store.CLIENTS.filter((c) => c.status === 'active').length;
-  const suspendedCount = store.CLIENTS.filter((c) => c.status === 'suspended').length;
-  const leadsCount = store.CLIENTS.filter((c) => c.status === 'lead').length;
-  const offlineClients = suspendedCount + store.CLIENTS.filter((c) => c.status === 'baja').length;
-
-  const totalMrr = store.CLIENTS.reduce((acc, c) => {
-    if (c.status === 'active' || c.status === 'suspended') {
-      const plan = store.PLANS.find((p) => p.id === c.planId);
-      return acc + (plan ? plan.price : 0);
-    }
-    return acc;
-  }, 0);
-
-  const invoicesByMonth = store.INVOICES.reduce<Record<string, { facturado: number; cobrado: number }>>((acc, invoice) => {
-    const key = String(invoice.dateStr || '').substring(0, 7);
-    if (!key) return acc;
-    if (!acc[key]) {
-      acc[key] = { facturado: 0, cobrado: 0 };
-    }
-    acc[key].facturado += invoice.amount;
-    if (invoice.status === 'paid') {
-      acc[key].cobrado += invoice.amount;
-    }
-    return acc;
-  }, {});
-
-  const currentRevenue = invoicesByMonth[currentMonth]?.facturado || 0;
-  const previousRevenue = invoicesByMonth[previousMonth]?.facturado || 0;
-  const currentCollection = invoicesByMonth[currentMonth]?.cobrado || 0;
+  const currentRevenue = snapshot.billing.facturacionMes;
+  const previousRevenue = monthRevenueFromStore(previousMonth);
+  const currentCollection = snapshot.billing.cobradoMes;
 
   const monthlyGrowthPct = previousRevenue > 0
     ? Number((((currentRevenue - previousRevenue) / previousRevenue) * 100).toFixed(2))
@@ -64,33 +49,25 @@ const buildExecutiveKpis = () => {
     ? Number((((leadConversionsCurrentMonth - leadConversionsPreviousMonth) / leadConversionsPreviousMonth) * 100).toFixed(2))
     : leadConversionsCurrentMonth > 0 ? 100 : 0;
 
-  const activeTickets = store.TICKETS.filter((t) => t.status !== 'resolved' && t.status !== 'closed').length;
-  const resolvedTickets = store.TICKETS.filter((t) => t.status === 'resolved' || t.status === 'closed').length;
-  const totalTickets = activeTickets + resolvedTickets;
-  const ticketResolutionPct = totalTickets > 0 ? Number(((resolvedTickets / totalTickets) * 100).toFixed(2)) : 100;
-
-  const towersOnline = store.TOWERS.filter((t) => t.status === 'online').length;
-  const towersWarning = store.TOWERS.filter((t) => t.status === 'warning').length;
-  const towersOffline = store.TOWERS.filter((t) => t.status === 'offline').length;
-  const towerAvailabilityPct = store.TOWERS.length > 0
-    ? Number((((towersOnline + towersWarning * 0.5) / store.TOWERS.length) * 100).toFixed(2))
+  const ticketResolutionPct = snapshot.tickets.total > 0
+    ? Number(((snapshot.tickets.resolved / snapshot.tickets.total) * 100).toFixed(2))
     : 100;
 
   const monitoring = calculateMonitoringOverview();
-  const totalNetworkOffline = monitoring.onlineOffline.offlineTargets + towersOffline + store.ONUS.filter((o) => o.status !== 'online').length;
+  const totalNetworkOffline = monitoring.onlineOffline.offlineTargets + snapshot.towers.offline + store.ONUS.filter((o) => o.status !== 'online').length;
 
   return {
-    generatedAt: nowStamp(),
+    generatedAt: snapshot.generatedAt,
     customers: {
-      active: activeCount,
-      suspended: suspendedCount,
-      leads: leadsCount,
-      offline: offlineClients,
+      active: snapshot.customers.active,
+      suspended: snapshot.customers.suspended,
+      leads: snapshot.customers.leads,
+      offline: snapshot.customers.offline,
       growthPct: clientGrowthPct,
       leadConversionsCurrentMonth,
     },
     revenue: {
-      mrr: totalMrr,
+      mrr: snapshot.billing.mrr,
       currentMonth: currentRevenue,
       previousMonth: previousRevenue,
       collectionCurrentMonth: currentCollection,
@@ -98,16 +75,16 @@ const buildExecutiveKpis = () => {
       collectionRatePct: currentRevenue > 0 ? Number(((currentCollection / currentRevenue) * 100).toFixed(2)) : 0,
     },
     tickets: {
-      active: activeTickets,
-      resolved: resolvedTickets,
-      total: totalTickets,
+      active: snapshot.tickets.active,
+      resolved: snapshot.tickets.resolved,
+      total: snapshot.tickets.total,
       resolutionPct: ticketResolutionPct,
     },
     towers: {
-      online: towersOnline,
-      warning: towersWarning,
-      offline: towersOffline,
-      availabilityPct: towerAvailabilityPct,
+      online: snapshot.towers.online,
+      warning: snapshot.towers.warning,
+      offline: snapshot.towers.offline,
+      availabilityPct: snapshot.towers.availabilityPct,
     },
     network: {
       totalOffline: totalNetworkOffline,
@@ -185,31 +162,29 @@ const calculateMonitoringOverview = () => {
   };
 };
 
-router.get('/api/dashboard-stats', requireRoles(READ_ROLES), async (_req, res) => {
-  const kpis = buildExecutiveKpis();
-  const monthCobranza = store.INVOICES.filter((f) => f.status === 'paid').reduce((acc, f) => acc + f.amount, 0);
-  const monthFacturacion = store.INVOICES.reduce((acc, f) => acc + f.amount, 0);
+// ────────────────────────────────────────────────────────────────────
+// buildDashboardStats — payload de /api/dashboard-stats.
+//
+// Todos los KPIs se sirven desde systemMetrics (SSOT). En particular,
+// `cobranzaMes` y `facturacionMes` son AHORA los del mes en curso vía Billing
+// (antes sumaban el histórico completo, inconsistentes con billing-kpis).
+// Exportado para que el auditor de consistencia valide el cableado real.
+// ────────────────────────────────────────────────────────────────────
+export async function buildDashboardStats() {
+  const snapshot = await getMetricsSnapshot();
+  const kpis = buildExecutiveKpis(snapshot);
+  // Motor de Suspensiones (Fase 4.5/4.5.1) — read-only, sin efectos.
   const suspension = await suspensionKpis();
-  const ipamRouters = await ipamService.listRouters();
-  const capacities = (
-    await Promise.all(ipamRouters.map((item) => ipamService.capacity(item.id)))
-  ).filter((item): item is NonNullable<typeof item> => item !== null);
-  const reservedEquipment = customerEquipmentService.countReservations();
-  const pendingInstallations = (
-    store.WORK_ORDERS.filter(
-      (order) => order.type === 'installation' && order.status !== 'canceled' && order.status !== 'completed',
-    ).length + reservedEquipment
-  );
 
-  res.json({
-    activeClients: kpis.customers.active,
-    suspendedClients: kpis.customers.suspended,
-    leadsCount: kpis.customers.leads,
-    mrr: kpis.revenue.mrr,
-    cobranzaMes: monthCobranza,
-    facturacionMes: monthFacturacion,
-    activeTickets: kpis.tickets.active,
-    towers: { online: kpis.towers.online, warning: kpis.towers.warning, offline: kpis.towers.offline },
+  return {
+    activeClients: snapshot.customers.active,
+    suspendedClients: snapshot.customers.suspended,
+    leadsCount: snapshot.customers.leads,
+    mrr: snapshot.billing.mrr,
+    cobranzaMes: snapshot.billing.cobradoMes,
+    facturacionMes: snapshot.billing.facturacionMes,
+    activeTickets: snapshot.tickets.active,
+    towers: { online: snapshot.towers.online, warning: snapshot.towers.warning, offline: snapshot.towers.offline },
     oltStats: { connected: store.ONUS.filter((o) => o.status === 'online').length, offlineOnus: store.ONUS.filter((o) => o.status !== 'online').length },
     growth: {
       revenueMonthlyPct: kpis.revenue.monthlyGrowthPct,
@@ -221,30 +196,23 @@ router.get('/api/dashboard-stats', requireRoles(READ_ROLES), async (_req, res) =
       towerAvailabilityPct: kpis.towers.availabilityPct,
       collectionRatePct: kpis.revenue.collectionRatePct,
     },
-    // Motor de Suspensiones (Fase 4.5/4.5.1) — read-only, sin efectos.
     suspension,
     wispOperations: {
-      clientsByTower: capacities.map((capacity) => ({
-        routerId: capacity.routerId,
-        routerName: capacity.routerName,
-        activeClients: capacity.activeClients,
-      })),
-      capacityUtilizationPercent: capacities.length > 0
-        ? Number(
-            (
-              capacities.reduce((sum, item) => sum + item.utilizationPercent, 0) /
-              capacities.length
-            ).toFixed(2),
-          )
-        : 0,
-      reservedEquipment,
-      pendingInstallations,
+      clientsByTower: snapshot.capacity.clientsByTower,
+      capacityUtilizationPercent: snapshot.capacity.capacityUtilizationPercent,
+      reservedEquipment: snapshot.inventory.reservedEquipment,
+      pendingInstallations: snapshot.inventory.pendingInstallations,
     },
-  });
-});
+  };
+}
 
-router.get('/api/dashboard/executive-summary', requireRoles(READ_ROLES), (_req, res) => {
-  const kpis = buildExecutiveKpis();
+router.get('/api/dashboard-stats', requireRoles(READ_ROLES), asyncHandler(async (_req, res) => {
+  res.json(await buildDashboardStats());
+}));
+
+router.get('/api/dashboard/executive-summary', requireRoles(READ_ROLES), asyncHandler(async (_req, res) => {
+  const snapshot = await getMetricsSnapshot();
+  const kpis = buildExecutiveKpis(snapshot);
   const trend = buildRevenueTrend(6);
 
   res.json({
@@ -257,7 +225,7 @@ router.get('/api/dashboard/executive-summary', requireRoles(READ_ROLES), (_req, 
       `Nodos/servicios fuera de linea: ${kpis.network.totalOffline}`,
     ],
   });
-});
+}));
 
 router.get('/api/dashboard/kpi-trends', requireRoles(READ_ROLES), (req, res) => {
   const months = Math.max(3, Math.min(12, Number(req.query.months) || 6));
@@ -269,49 +237,28 @@ router.get('/api/dashboard/kpi-trends', requireRoles(READ_ROLES), (req, res) => 
 });
 
 // ────────────────────────────────────────────────────────────────────
-// GET /api/dashboard/billing-kpis  (FASE E — KPIs ejecutivos de cobranza)
+// GET /api/dashboard/billing-kpis  (KPIs ejecutivos de cobranza)
 //
-// Lee a través del BillingService → respeta USE_DB_BILLING (mock o DB).
-// KPIs: facturación del mes, cobrado del mes, pendiente de cobro,
-//       clientes con adeudo, facturas vencidas y Top 10 adeudos.
+// Lee a través de systemMetrics.billing() (BillingService, SSOT) → respeta
+// USE_DB_BILLING. La MISMA lógica que alimenta `cobranzaMes`/`facturacionMes`
+// del dashboard: una sola fuente, sin recálculos divergentes.
 // ────────────────────────────────────────────────────────────────────
-router.get('/api/dashboard/billing-kpis', requireRoles(READ_ROLES), asyncHandler(async (_req, res) => {
-  const month = monthKey(new Date());
-  const invoices = (await getBillingService().listInvoices()).filter((inv) => inv.status !== 'canceled');
-
-  const round = (v: number) => Math.round(v * 100) / 100;
-  const issuedThisMonth = invoices.filter((inv) => String(inv.dateStr || '').startsWith(month));
-
-  const facturacionMes = round(issuedThisMonth.reduce((s, inv) => s + inv.amount, 0));
-  const cobradoMes = round(issuedThisMonth.reduce((s, inv) => s + (inv.paidAmount || 0), 0));
-  const pendienteCobro = round(invoices.reduce((s, inv) => s + (inv.pendingAmount || 0), 0));
-
-  const withDebt = new Set(invoices.filter((inv) => (inv.pendingAmount || 0) > 0).map((inv) => inv.clientId));
-  const facturasVencidas = invoices.filter((inv) => inv.status === 'overdue').length;
-
-  const topAdeudos = invoices
-    .filter((inv) => (inv.pendingAmount || 0) > 0)
-    .sort((a, b) => (b.pendingAmount || 0) - (a.pendingAmount || 0))
-    .slice(0, 10)
-    .map((inv) => ({
-      invoiceId: inv.id,
-      clientId: inv.clientId,
-      clientName: inv.clientName,
-      pendingAmount: round(inv.pendingAmount || 0),
-      dueDateStr: inv.dueDateStr,
-      status: inv.status,
-    }));
-
-  res.json({
+export async function buildBillingKpis() {
+  const m = await getBillingMetrics();
+  return {
     generatedAt: nowStamp(),
-    month,
-    facturacionMes,
-    cobradoMes,
-    pendienteCobro,
-    clientesConAdeudo: withDebt.size,
-    facturasVencidas,
-    topAdeudos,
-  });
+    month: m.month,
+    facturacionMes: m.facturacionMes,
+    cobradoMes: m.cobradoMes,
+    pendienteCobro: m.pendienteCobro,
+    clientesConAdeudo: m.clientesConAdeudo,
+    facturasVencidas: m.facturasVencidas,
+    topAdeudos: m.topAdeudos,
+  };
+}
+
+router.get('/api/dashboard/billing-kpis', requireRoles(READ_ROLES), asyncHandler(async (_req, res) => {
+  res.json(await buildBillingKpis());
 }));
 
 router.get('/api/notifications/settings', requireRoles(READ_ROLES), (_req, res) => {
