@@ -107,6 +107,31 @@ dashboard KPIs, auth JWT/RBAC y secret scan.
 - `npm test` (hermético): **PASS** — 1554 passed, 49 skipped (opt-in db/auth).
 - `npm run build`: ver sección de entrega.
 
+### Validation gate (importante para Hermes)
+
+> **Billing Foundation se valida con `npm run test:db:billing`.** Ese gate ejecuta
+> únicamente las suites DB de Billing + sus dependencias (Customers, Plans) más la
+> cobertura hermética de billing. **El gate global `npm run test:db` cubre otros
+> dominios y puede fallar por pendientes NO relacionados** (p.ej.
+> `router-enrollment.db.contract.test.ts` requiere `AUTH_TRUST_HEADERS`,
+> `inventory.db.contract.test.ts` con errores propios). Esos fallos NO bloquean la
+> aprobación de Billing: usar el gate enfocado.
+
+Suites incluidas en `test:db:billing` (solo DB, diseñadas para Supabase real):
+
+- `tests/contract/billing.schema.db.test.ts`
+- `tests/contract/billing.db.contract.test.ts`
+- `tests/contract/customers.db.contract.test.ts`
+- `tests/contract/plans.db.contract.test.ts`
+
+> La cobertura **hermética** de billing (contract, dashboard-kpis, rbac,
+> secret-scan, unit) vive en `npm test`: esas suites asumen store-mode +
+> `AUTH_TRUST_HEADERS=true` y NO deben correr bajo `RUN_DB_TESTS` (en staging
+> `USE_DB_BILLING=true` no tiene el seed mock `fac-101`). Así se evita la misma
+> contaminación cruzada que tumbó a router-enrollment.
+
+NO incluye router-enrollment, inventory, routeros, mikrotik ni wireguard.
+
 ## 8. Reglas críticas respetadas
 
 - No se tocó RouterOS Write, Worker Live, MikroTik Runtime, Inventory Sync,

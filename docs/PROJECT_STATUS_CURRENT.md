@@ -41,7 +41,9 @@ No retomar salvo regresión documentada (ver handoff §0.A):
   (simulación) y `GET /api/dashboard/billing-kpis`; Client 360 cobranza +
   Cobranza Ejecutiva en Dashboard; RBAC read(6)/write(3) y secret scan. Mock
   local (sin SAT/CFDI/Stripe/MercadoPago); motor MikroTik intacto. Code-complete,
-  pendiente Hermes. Ver `docs/BILLING_COLLECTIONS_FOUNDATION_RESULT.md`.
+  pendiente Hermes. Gate de validación enfocado: `npm run test:db:billing`
+  (el `test:db` global puede fallar por dominios ajenos y no bloquea Billing).
+  Ver `docs/BILLING_COLLECTIONS_FOUNDATION_RESULT.md`.
 
 ## Aprobaciones formales de Hermes
 

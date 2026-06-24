@@ -33,10 +33,17 @@ La solución **no** cambia el runtime de la app: solo el entorno de pruebas.
 | Comando | Qué corre | Red / Supabase | Cuándo |
 |---|---|---|---|
 | `npm test` | Suite **hermética** (store en memoria) | ❌ Nunca | Siempre (default, CI, pre-commit) |
-| `npm run test:db` | `customers.db.contract.test.ts` contra Supabase real | ✅ Sí | Validar persistencia DB |
+| `npm run test:db` | Gate **global** DB (customers, plans, billing, router-enrollment, inventory) contra Supabase real | ✅ Sí | Validar persistencia DB de todos los dominios |
+| `npm run test:db:billing` | Gate **enfocado** de Billing Foundation (billing + customers + plans) | ✅ Sí | Validar/aprobar Billing sin depender de dominios ajenos |
 | `npm run test:auth` | `auth.db.contract.test.ts` contra Supabase Auth real | ✅ Sí | Validar auth/JWT/RBAC de staging |
 
 `npm run test:watch` es el modo interactivo de la suite hermética.
+
+> **Por qué existe `test:db:billing`:** el gate global `test:db` puede fallar por
+> dominios con pendientes propios no relacionados con Billing (p.ej.
+> `router-enrollment.db.contract.test.ts` exige `AUTH_TRUST_HEADERS`,
+> `inventory.db.contract.test.ts` con errores propios). El gate enfocado permite
+> aprobar la Billing & Collections Foundation sin arrastrar esos pendientes.
 
 ### `npm test` — hermético (default)
 - Un `setupFile` (`tests/setup/test-env.ts`) fuerza, **antes** de cargar el

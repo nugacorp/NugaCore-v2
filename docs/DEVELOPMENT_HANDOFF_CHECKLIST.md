@@ -34,6 +34,11 @@ Estas fases están implementadas y mergeadas en `main`. **No retomarlas salvo qu
   Bearer JWT, secret scan). Mock local, sin SAT/CFDI/Stripe/MercadoPago; motor
   MikroTik intacto. Pendiente Hermes. Ver
   `docs/BILLING_COLLECTIONS_FOUNDATION_RESULT.md`.
+  - **Gate de validación:** `npm run test:db:billing` (enfocado: billing + customers
+    + plans). El gate global `npm run test:db` puede fallar por dominios ajenos
+    (router-enrollment exige `AUTH_TRUST_HEADERS`; inventory con errores propios) y
+    NO debe bloquear la aprobación de Billing. Inventory DB queda como pendiente
+    separado.
 
 > ✅ Aprobación staging (4.9.2 / 4.9.2.1): **APROBADA por Hermes** sobre el commit
 > `a0c9b55`. Persistencia real Supabase con restart demostrada para `pcc_5wan` y
