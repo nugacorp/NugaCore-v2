@@ -44,6 +44,12 @@ No retomar salvo regresión documentada (ver handoff §0.A):
   pendiente Hermes. Gate de validación enfocado: `npm run test:db:billing`
   (el `test:db` global puede fallar por dominios ajenos y no bloquea Billing).
   Ver `docs/BILLING_COLLECTIONS_FOUNDATION_RESULT.md`.
+- Dashboard Ejecutivo V3 (2026-06-24): dashboard desaturado a pantalla de decisión
+  rápida — 8 KPIs clickeables, Alertas Importantes (máx. 5) y 5 Acciones Rápidas en
+  el primer viewport. El tooling NOC (alertas RT, ping, simulador, umbrales/push,
+  bot) se movió a `NocOperationsPanel` bajo el tab NOC (no se eliminó del sistema).
+  Solo UX/UI; sin cambios de tema/branding. Code-complete, pendiente Hermes.
+  Ver `docs/DASHBOARD_EXECUTIVE_V3_RESULT.md`.
 
 ## Aprobaciones formales de Hermes
 

@@ -39,6 +39,11 @@ Estas fases están implementadas y mergeadas en `main`. **No retomarlas salvo qu
     (router-enrollment exige `AUTH_TRUST_HEADERS`; inventory con errores propios) y
     NO debe bloquear la aprobación de Billing. Inventory DB queda como pendiente
     separado.
+- Dashboard Ejecutivo V3 (UX/UI): dashboard reducido a 8 KPIs clickeables, Alertas
+  Importantes (máx. 5) y 5 Acciones Rápidas en el primer viewport; sin duplicados.
+  El tooling NOC (alertas RT, ping, simulador, umbrales/push, bot) se movió a
+  `NocOperationsPanel` bajo el tab NOC (no se eliminó del sistema). Sin cambios de
+  tema/branding. Pendiente Hermes. Ver `docs/DASHBOARD_EXECUTIVE_V3_RESULT.md`.
 
 > ✅ Aprobación staging (4.9.2 / 4.9.2.1): **APROBADA por Hermes** sobre el commit
 > `a0c9b55`. Persistencia real Supabase con restart demostrada para `pcc_5wan` y

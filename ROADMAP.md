@@ -165,6 +165,18 @@ Extensión aditiva del dominio `billing` como fuente de facturación/cobranza:
 
 Detalle: `docs/BILLING_COLLECTIONS_FOUNDATION_RESULT.md`.
 
+#### Dashboard Ejecutivo V3 (2026-06-24)
+
+Estado funcional: 🟡 Code-complete, pendiente validación de Hermes
+
+Desaturación y enfoque: dashboard del dueño reducido a 8 KPIs clickeables,
+Alertas Importantes (máx. 5, priorizadas) y 5 Acciones Rápidas en el primer
+viewport. Sin duplicados. El tooling NOC (alertas en tiempo real, ping,
+simulador, umbrales/push, bot) se movió a `NocOperationsPanel` bajo el tab NOC
+(no se eliminó del sistema). Solo UX/UI; tema/branding sin cambios.
+
+Detalle: `docs/DASHBOARD_EXECUTIVE_V3_RESULT.md`.
+
 Gate producción:
 
 - Saldos reales auditados.

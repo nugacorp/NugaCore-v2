@@ -12,6 +12,7 @@ import InventoryTransfersModule from './components/InventoryTransfersModule';
 import InventoryRoutersModule from './components/InventoryRoutersModule';
 import NocReadOnlyModule from './components/NocReadOnlyModule';
 import NocTelemetryModule from './components/NocTelemetryModule';
+import NocOperationsPanel from './components/NocOperationsPanel';
 import ManualSafeModeModule from './modules/manual-safe-mode/ManualSafeModeModule';
 import SafeCommandQueueModule from './modules/safe-command-queue/SafeCommandQueueModule';
 import RouterOSReadOnlyModule from './modules/routeros-readonly/RouterOSReadOnlyModule';
@@ -1070,9 +1071,7 @@ export default function App() {
               <Dashboard
                 stats={stats}
                 alerts={alerts}
-                onAcknowledgeAlerts={handleAcknowledgeAlerts}
                 onRefresh={handleRefresh}
-                onPostAlert={handlePostAlert}
                 getAuthHeaders={getAuthHeaders}
                 onNavigate={setActiveTab}
               />
@@ -1082,6 +1081,16 @@ export default function App() {
               <>
                 <NocReadOnlyModule getAuthHeaders={getAuthHeaders} />
                 <NocTelemetryModule getAuthHeaders={getAuthHeaders} />
+                {/* Tooling operativo movido desde el Dashboard Ejecutivo V3
+                    (alertas en tiempo real, ping, simulador, umbrales/push, bot). */}
+                <NocOperationsPanel
+                  stats={stats}
+                  alerts={alerts}
+                  onAcknowledgeAlerts={handleAcknowledgeAlerts}
+                  onRefresh={handleRefresh}
+                  onPostAlert={handlePostAlert}
+                  getAuthHeaders={getAuthHeaders}
+                />
               </>
             )}
 
