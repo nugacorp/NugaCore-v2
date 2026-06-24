@@ -46,6 +46,8 @@ Estados usados:
 | Billing | ✅ Operativa | 🟡 Validar saldos reales/backups | No cargar seeds/mock a producción. |
 | Payment Engine | ✅ Operativa | 🟡 Validar proveedor real/webhooks | Requiere conciliación real e idempotencia validada. |
 | Suspension Engine | ✅ Operativa | 🔴 No activar contra routers reales | Mantener dry-run/lógico hasta Worker seguro. |
+| Service Status SSOT | ✅ Operativa (Pre-PROD-7) | 🟢 Read-only + dryRun seguro | Fuente oficial de `serviceStatus`; KPI "Suspendidos". No ejecuta nada real. Ver `docs/SERVICE_STATUS_SSOT_RESULT.md`. |
+| Data Consistency (SSOT KPIs) | ✅ Operativa | 🟢 Auditor read-only | `systemMetrics` + `/api/system/data-consistency`. Ver `docs/DATA_CONSISTENCY_AUDIT_RESULT.md`. |
 | WireGuard Manager | 🟡 Avanzada | 🟢 Re-download post-restart resuelto vía `wireguard_snapshot` cifrado (4.9.2.1) | `USE_DB_WIREGUARD` opcional; snapshot aprobado como alternativa. |
 | Router Enrollment | ✅ Operativa | 🟢 Download post-restart APROBADO (4.9.2.1) | Snapshot router+WG; sin depender de stores en memoria. |
 | Template Engine | 🟡 Avanzada | 🟡 Seguro como generador manual | No implica provisioning live. |

@@ -23,6 +23,15 @@ Estas fases están implementadas y mergeadas en `main`. **No retomarlas salvo qu
 - `wireguard_snapshot` persistence.
 - Payment Engine.
 - Suspension Engine (lógico, sin tocar routers reales).
+- Data Consistency Audit (Pre-PROD-7): `systemMetrics` SSOT por KPI + auditor
+  `GET /api/system/data-consistency`; dashboard normalizado (cobranza/facturación
+  del mes). Ver `docs/DATA_CONSISTENCY_AUDIT_RESULT.md`. Pendiente Hermes.
+- Service Status SSOT (Pre-PROD-7): dominio `service-status` como fuente oficial de
+  `serviceStatus` (ACTIVE/PENDING_INSTALL/SUSPENSION_PENDING/SUSPENDED/
+  REACTIVATION_PENDING/CANCELLED). Read-only + solicitudes `dryRun` (no ejecuta
+  RouterOS/Worker/MikroTik). KPI "Suspendidos" desde Service Status; Client 360
+  muestra las 4 dimensiones. Static-safety guard activo. Pendiente Hermes. Ver
+  `docs/SERVICE_STATUS_SSOT_RESULT.md`.
 - HTTP Security (helmet + CORS allowlist + rate-limit).
 - Observability básica (correlation ID, métricas in-memory, access log).
 - Inventario ERP 5.1 (persistencia tras `USE_DB_INVENTORY` + UI aditiva; pendiente Hermes).

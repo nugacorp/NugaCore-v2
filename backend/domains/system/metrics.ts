@@ -25,6 +25,7 @@ import { getCustomersService } from '../customers/service';
 import { getBillingService } from '../billing/service';
 import { ipamService } from '../ipam/service';
 import { customerEquipmentService } from '../inventory/customer-equipment/service';
+import { getServiceStatusSummary } from '../service-status/service';
 
 const round = (v: number): number => Math.round(v * 100) / 100;
 
@@ -85,6 +86,16 @@ export interface InventoryMetrics {
   pendingInstallations: number;
 }
 
+/** Conteos por estado operativo oficial — FUENTE: Service Status (SSOT). */
+export interface ServiceStatusMetrics {
+  active: number;
+  pendingInstall: number;
+  suspensionPending: number;
+  suspended: number;
+  reactivationPending: number;
+  cancelled: number;
+}
+
 export interface MetricsSnapshot {
   generatedAt: string;
   customers: CustomerMetrics;
@@ -93,6 +104,7 @@ export interface MetricsSnapshot {
   towers: TowerMetrics;
   capacity: CapacityMetrics;
   inventory: InventoryMetrics;
+  serviceStatus: ServiceStatusMetrics;
 }
 
 // ── Cálculos puros por fuente oficial ─────────────────────────────────
@@ -216,15 +228,30 @@ export function getInventoryMetrics(): InventoryMetrics {
   };
 }
 
+/** Estado operativo oficial por cliente — FUENTE OFICIAL: Service Status.
+ *  El KPI "Suspendidos" consume `suspended` (no el customerStatus del CRM). */
+export async function getServiceStatusMetrics(): Promise<ServiceStatusMetrics> {
+  const summary = await getServiceStatusSummary();
+  return {
+    active: summary.byStatus.ACTIVE,
+    pendingInstall: summary.byStatus.PENDING_INSTALL,
+    suspensionPending: summary.byStatus.SUSPENSION_PENDING,
+    suspended: summary.byStatus.SUSPENDED,
+    reactivationPending: summary.byStatus.REACTIVATION_PENDING,
+    cancelled: summary.byStatus.CANCELLED,
+  };
+}
+
 // ── Snapshot agregado (lo consume el Dashboard) ───────────────────────
 
 const nowStamp = () => new Date().toISOString().replace('T', ' ').substring(0, 16);
 
 export async function getMetricsSnapshot(): Promise<MetricsSnapshot> {
-  const [customers, billing, capacity] = await Promise.all([
+  const [customers, billing, capacity, serviceStatus] = await Promise.all([
     getCustomerMetrics(),
     getBillingMetrics(),
     getCapacityMetrics(),
+    getServiceStatusMetrics(),
   ]);
   return {
     generatedAt: nowStamp(),
@@ -234,6 +261,7 @@ export async function getMetricsSnapshot(): Promise<MetricsSnapshot> {
     towers: getTowerMetrics(),
     capacity,
     inventory: getInventoryMetrics(),
+    serviceStatus,
   };
 }
 
@@ -245,5 +273,6 @@ export const systemMetrics = {
   towers: getTowerMetrics,
   capacity: getCapacityMetrics,
   inventory: getInventoryMetrics,
+  serviceStatus: getServiceStatusMetrics,
   snapshot: getMetricsSnapshot,
 };

@@ -178,7 +178,9 @@ export async function buildDashboardStats() {
 
   return {
     activeClients: snapshot.customers.active,
-    suspendedClients: snapshot.customers.suspended,
+    // KPI "Suspendidos" — FUENTE OFICIAL: Service Status (serviceStatus
+    // SUSPENDED), NO el customerStatus del CRM. Ver service-status domain.
+    suspendedClients: snapshot.serviceStatus.suspended,
     leadsCount: snapshot.customers.leads,
     mrr: snapshot.billing.mrr,
     cobranzaMes: snapshot.billing.cobradoMes,

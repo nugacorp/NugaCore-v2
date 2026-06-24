@@ -18,6 +18,7 @@
 import { store } from '../../state/store';
 import { getCustomersService } from '../customers/service';
 import { getBillingService } from '../billing/service';
+import { countSuspended } from '../service-status/service';
 import { buildDashboardStats, buildBillingKpis } from '../dashboard/routes';
 
 const MONEY_EPSILON = 0.01;
@@ -66,7 +67,9 @@ async function officialValues() {
 
   return {
     activeCustomers: clients.filter((c) => c.status === 'active').length,
-    suspendedCustomers: clients.filter((c) => c.status === 'suspended').length,
+    // Suspendidos: FUENTE OFICIAL Service Status (serviceStatus SUSPENDED),
+    // recalculado de forma independiente desde su SSOT.
+    suspendedCustomers: await countSuspended(),
     leads: clients.filter((c) => c.status === 'lead').length,
     mrr: round(
       clients.reduce(
@@ -113,7 +116,7 @@ export async function runDataConsistencyCheck(): Promise<DataConsistencyReport> 
     buildCheck('activeCustomers', 'CRM', official.activeCustomers, {
       dashboard: dashboard.activeClients,
     }),
-    buildCheck('suspendedCustomers', 'CRM', official.suspendedCustomers, {
+    buildCheck('suspendedCustomers', 'ServiceStatus', official.suspendedCustomers, {
       dashboard: dashboard.suspendedClients,
     }),
     buildCheck('leads', 'CRM', official.leads, {
@@ -160,7 +163,7 @@ export async function runDataConsistencyCheck(): Promise<DataConsistencyReport> 
   return {
     healthy: mismatches.length === 0,
     checkedAt: new Date().toISOString(),
-    modules: ['CRM', 'Billing', 'Support', 'Network', 'IPAM', 'Inventory'],
+    modules: ['CRM', 'ServiceStatus', 'Billing', 'Support', 'Network', 'IPAM', 'Inventory'],
     checks,
     mismatches,
   };

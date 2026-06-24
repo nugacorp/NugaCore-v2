@@ -36,6 +36,16 @@ export interface ClientHistoryEntry {
   date: string;
 }
 
+// Estado oficial de servicio (Pre-PROD-7). Proyección de
+// GET /api/service-status/customers/:customerId. Las 4 dimensiones se muestran
+// SIN mezclarse: administrativo (CRM), financiero, operativo y de red.
+export interface ClientServiceStatusView {
+  customerStatus: string;
+  billingStatus: string;
+  serviceStatus: string;
+  routerStatus: string | null;
+}
+
 interface QuickActionButton {
   key: ClientQuickAction;
   label: string;
@@ -72,6 +82,7 @@ interface Props {
   caps: ClientActionCaps;
   history: ClientHistoryEntry[];
   billing?: ClientBillingSummary | null;
+  serviceStatus?: ClientServiceStatusView | null;
   onAction: (action: ClientQuickAction, client: Client) => void;
   onClose: () => void;
 }
@@ -87,7 +98,7 @@ const BILLING_ACTIONS: { key: ClientQuickAction; label: string; cap: keyof Clien
   { key: 'account-statement', label: 'Ver estado de cuenta', cap: 'accountStatement', icon: <FileText className="w-3.5 h-3.5" /> },
 ];
 
-export default function Client360Panel({ client, planName, caps, history, billing, onAction, onClose }: Props) {
+export default function Client360Panel({ client, planName, caps, history, billing, serviceStatus, onAction, onClose }: Props) {
   const ip = client.assignedIp || client.ip;
   const hasIp = ip && ip !== '0.0.0.0';
   const hasGps = Number.isFinite(client.lat) && Number.isFinite(client.lng) && !(client.lat === 0 && client.lng === 0);
@@ -146,6 +157,21 @@ export default function Client360Panel({ client, planName, caps, history, billin
             {row('GPS', hasGps ? <span className="font-mono">{client.lat}, {client.lng}</span> : 'Sin coordenadas')}
           </div>
         </section>
+
+        {/* Estado de servicio (Pre-PROD-7 — Service Status SSOT) */}
+        {serviceStatus && (
+          <section aria-label="Estado de servicio">
+            <h4 className="mb-1 flex items-center gap-1.5 text-[10px] font-mono uppercase tracking-widest text-slate-500">
+              <Wifi className="w-3 h-3" /> Estado de servicio
+            </h4>
+            <div id="client360-service-status" className="rounded-2xl border border-slate-900 bg-slate-900/40 px-4 py-2 divide-y divide-slate-900/70">
+              {row('Estado CRM', <span className="font-mono uppercase">{serviceStatus.customerStatus}</span>)}
+              {row('Estado cobranza', <span className="font-mono uppercase">{serviceStatus.billingStatus}</span>)}
+              {row('Estado de servicio', <span className="font-mono uppercase text-indigo-300">{serviceStatus.serviceStatus}</span>)}
+              {row('Estado en red (router)', serviceStatus.routerStatus || 'No disponible')}
+            </div>
+          </section>
+        )}
 
         {/* Cobranza (FASE D — Billing Foundation) */}
         <section aria-label="Cobranza">

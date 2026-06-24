@@ -42,7 +42,8 @@ Regla: **cada KPI tiene una sola fuente oficial**; el resto de módulos la
 
 | KPI | Fuente Oficial | Consumidores | Regla |
 | --- | --- | --- | --- |
-| Clientes Activos / Suspendidos / Leads | **CRM** (`CustomersService`) | Dashboard, Client 360 | Billing NO recalcula clientes |
+| Clientes Activos / Leads | **CRM** (`CustomersService`) | Dashboard, Client 360 | Billing NO recalcula clientes |
+| **Suspendidos** | **Service Status** (`serviceStatus === SUSPENDED`) | Dashboard, Client 360 | CRM `status` ya NO es la fuente del KPI — ver [SERVICE_STATUS_SSOT_RESULT.md](./SERVICE_STATUS_SSOT_RESULT.md) |
 | MRR | **Billing/Revenue** (`systemMetrics.mrr`) | Dashboard, Client 360 | CRM NO recalcula MRR |
 | Facturación / Cobrado / Pendiente / Vencidas / Adeudo | **Billing** (`BillingService`) | Dashboard, Cobranza | Dashboard NO recalcula cobranza |
 | Tickets | **Support** (store.TICKETS) | Dashboard, NOC | NOC deriva alertas, no el conteo oficial |

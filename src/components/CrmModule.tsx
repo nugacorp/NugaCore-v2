@@ -28,7 +28,7 @@ import { Client, Plan } from '../types';
 import type { UserRole } from '../lib/supabase';
 import { clientActionCaps } from '../lib/rbac';
 import ClientActionsMenu, { ClientQuickAction } from './ClientActionsMenu';
-import Client360Panel, { ClientHistoryEntry, ClientBillingSummary } from './Client360Panel';
+import Client360Panel, { ClientHistoryEntry, ClientBillingSummary, ClientServiceStatusView } from './Client360Panel';
 import {
   canSubmitCustomerOnboarding,
   IpAssignmentValidation,
@@ -177,6 +177,7 @@ export default function CrmModule({
   const [client360, setClient360] = useState<Client | null>(null);
   // Resumen de cobranza del cliente abierto en Client 360 (FASE D).
   const [client360Billing, setClient360Billing] = useState<ClientBillingSummary | null>(null);
+  const [client360ServiceStatus, setClient360ServiceStatus] = useState<ClientServiceStatusView | null>(null);
   const [toast, setToast] = useState<string | null>(null);
   // Historial mock/local por cliente (pagos/tickets/eventos simulados desde acciones rápidas).
   const [localHistory, setLocalHistory] = useState<Record<string, ClientHistoryEntry[]>>({});
@@ -335,6 +336,28 @@ export default function CrmModule({
     return () => { cancelled = true; };
   }, [client360, getAuthHeaders]);
 
+  // Estado oficial de servicio del cliente abierto (Pre-PROD-7, read-only).
+  useEffect(() => {
+    if (!client360) {
+      setClient360ServiceStatus(null);
+      return;
+    }
+    let cancelled = false;
+    const customerId = client360.id;
+    (async () => {
+      try {
+        const headers = await getAuthHeaders();
+        const res = await fetch(`/api/service-status/customers/${customerId}`, { headers });
+        if (!res.ok) throw new Error(`HTTP ${res.status}`);
+        const data = (await res.json()) as ClientServiceStatusView;
+        if (!cancelled) setClient360ServiceStatus(data);
+      } catch {
+        if (!cancelled) setClient360ServiceStatus(null);
+      }
+    })();
+    return () => { cancelled = true; };
+  }, [client360, getAuthHeaders]);
+
   const submitLocalPayment = (client: Client) => {
     const amount = Number(payAmount);
     if (!Number.isFinite(amount) || amount <= 0) {
@@ -364,16 +387,33 @@ export default function CrmModule({
     showToast('Ticket registrado localmente (mock).');
   };
 
-  const confirmSimulatedStatus = (client: Client, kind: 'suspend' | 'reactivate') => {
+  const confirmSimulatedStatus = async (client: Client, kind: 'suspend' | 'reactivate') => {
+    // Service Status SSOT (Pre-PROD-7): marca el estado como pendiente (dryRun).
+    // No ejecuta cambios reales: no se aplicó al router ni en MikroTik.
+    try {
+      const headers = { 'Content-Type': 'application/json', ...(await getAuthHeaders()) };
+      const path = kind === 'suspend' ? 'request-suspension' : 'request-reactivation';
+      await fetch(`/api/service-status/customers/${client.id}/${path}`, {
+        method: 'POST',
+        headers,
+        body: JSON.stringify({
+          reason: kind === 'suspend'
+            ? 'Suspensión solicitada desde Client 360.'
+            : 'Reactivación solicitada desde Client 360.',
+        }),
+      });
+    } catch {
+      // Aunque falle la red no se aplicó ningún cambio real (mock / dryRun).
+    }
     pushHistory(client.id, {
       kind: 'evento',
-      label: kind === 'suspend' ? 'Suspensión (simulación)' : 'Reactivación (simulación)',
-      detail: 'Simulación local — no se aplicó ningún cambio en el router.',
+      label: kind === 'suspend' ? 'Suspensión (pendiente)' : 'Reactivación (pendiente)',
+      detail: 'No se ejecutan cambios en MikroTik. Estado marcado como pendiente; no se aplicó al router.',
     });
     setActionModal(null);
     showToast(kind === 'suspend'
-      ? 'Suspensión registrada como simulación (no se aplicó al router).'
-      : 'Reactivación registrada como simulación (no se aplicó al router).');
+      ? 'Suspensión marcada como pendiente. No se ejecutan cambios en MikroTik.'
+      : 'Reactivación marcada como pendiente. No se ejecutan cambios en MikroTik.');
   };
 
   const validateLocalIp = (client: Client) => {
@@ -1745,6 +1785,7 @@ export default function CrmModule({
           caps={caps}
           history={localHistory[client360.id] || []}
           billing={client360Billing}
+          serviceStatus={client360ServiceStatus}
           onAction={handleQuickAction}
           onClose={() => setClient360(null)}
         />
@@ -1811,12 +1852,12 @@ export default function CrmModule({
             {(actionModal.type === 'suspend' || actionModal.type === 'reactivate') && (
               <div className="space-y-3 text-xs">
                 <p className="rounded-xl border border-amber-500/30 bg-amber-500/10 p-3 text-amber-200">
-                  Esta acción todavía no ejecuta cambios reales. Se registrará como simulación / pendiente. No se envía ningún comando al router.
+                  Esta acción todavía no ejecuta cambios reales. No se ejecutan cambios en MikroTik. Estado marcado como pendiente.
                 </p>
                 <div className="border-t border-slate-900 pt-3 flex justify-end gap-2 font-mono">
                   <button onClick={() => setActionModal(null)} className="border border-slate-800 hover:bg-slate-900 text-slate-400 px-4 py-2 rounded-xl">Cancelar</button>
                   <button id="confirm-simulated-status" onClick={() => confirmSimulatedStatus(actionModal.client, actionModal.type as 'suspend' | 'reactivate')}
-                    className="bg-indigo-600 hover:bg-indigo-500 text-white px-5 py-2 rounded-xl font-bold">Registrar simulación</button>
+                    className="bg-indigo-600 hover:bg-indigo-500 text-white px-5 py-2 rounded-xl font-bold">Marcar pendiente</button>
                 </div>
               </div>
             )}

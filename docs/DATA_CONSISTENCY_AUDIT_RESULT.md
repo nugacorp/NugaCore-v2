@@ -140,7 +140,9 @@ UI, navegación ni branding.
 4. **El auditor compara contra los builders en memoria, no por HTTP.** Cubre el
    cableado de datos; no sustituye un smoke E2E de los endpoints en staging
    (lo valida Hermes).
-5. **PROD-7 introducirá `serviceStatus` (motor de suspensiones) como posible 3ª
-   noción de "suspendido"** junto a CRM (`status`) y el conteo del dashboard.
-   Antes de PROD-7 hay que decidir la fuente oficial de "Suspendidos" (CRM
-   `status` vs motor `serviceStatus`) y reflejarla en `systemMetrics`.
+5. ~~**PROD-7 introducirá `serviceStatus` como posible 3ª noción de "suspendido"**~~
+   ✅ **RESUELTO** (Pre-PROD-7, Service Status SSOT): se creó el dominio
+   `service-status` como fuente oficial de `serviceStatus`. El KPI "Suspendidos"
+   (`dashboard-stats.suspendedClients`) y el auditor (`suspendedCustomers`, source
+   `ServiceStatus`) ya consumen `serviceStatus === SUSPENDED`. Ver
+   [SERVICE_STATUS_SSOT_RESULT.md](./SERVICE_STATUS_SSOT_RESULT.md).

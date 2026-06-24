@@ -17,6 +17,10 @@
 
 No retomar salvo regresión documentada (ver handoff §0.A):
 
+- Data Consistency Audit + Service Status SSOT (Pre-PROD-7): fuente única de KPIs
+  (`systemMetrics`), auditor `/api/system/data-consistency`, y dominio
+  `service-status` como fuente oficial de `serviceStatus` (KPI "Suspendidos").
+  Read-only + `dryRun`; sin RouterOS/Worker. Ver `docs/SERVICE_STATUS_SSOT_RESULT.md`.
 - WireGuard Auto Enrollment.
 - Router Onboarding Wizard.
 - Advanced Template Engine.
