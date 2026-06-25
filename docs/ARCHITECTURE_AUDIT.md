@@ -161,3 +161,12 @@ y limpiar lo que marque (backlog, esfuerzo S).
 - Static-safety tests garantizan que automation/provisioning/routeros-readonly
   no contienen primitivas de ejecución/escritura live.
 - ARCH-1 no reduce ninguna protección: los refactors son additive/delegación.
+
+## 11. Artefactos de build (`dist/`) — ARCH-1.1
+
+`dist/` **no se versiona** y nunca estuvo trackeado: está en `.gitignore` y
+`git ls-files dist/` devuelve 0. El despliegue construye desde fuente
+(Dockerfile multistage: `npm ci` + `npm run build`; Coolify usa el `Dockerfile`
+del repo). Por tanto no se requirió `git rm --cached`. Política completa en
+`docs/BUILD_ARTIFACT_POLICY.md`. (Corrige la mención errónea en mensajes de
+commit previos sobre `dist/` "versionado").
