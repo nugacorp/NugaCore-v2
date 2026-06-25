@@ -15,6 +15,7 @@ import NocTelemetryModule from './components/NocTelemetryModule';
 import NocOperationsPanel from './components/NocOperationsPanel';
 import ManualSafeModeModule from './modules/manual-safe-mode/ManualSafeModeModule';
 import SafeCommandQueueModule from './modules/safe-command-queue/SafeCommandQueueModule';
+import ProvisioningCenterModule from './modules/provisioning/ProvisioningCenterModule';
 import RouterOSReadOnlyModule from './modules/routeros-readonly/RouterOSReadOnlyModule';
 import UserManualModule from './modules/user-manual/UserManualModule';
 import InventorySyncModule from './modules/inventory-sync/InventorySyncModule';
@@ -1100,6 +1101,10 @@ export default function App() {
 
             {activeTab === 'safe-command-queue' && (
               <SafeCommandQueueModule getAuthHeaders={getAuthHeaders} />
+            )}
+
+            {activeTab === 'provisioning' && (
+              <ProvisioningCenterModule userRole={userSession.role} getAuthHeaders={getAuthHeaders} />
             )}
 
             {activeTab === 'routeros-readonly' && (

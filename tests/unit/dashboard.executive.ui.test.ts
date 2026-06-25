@@ -4,7 +4,7 @@ import { describe, it, expect } from 'vitest';
 // ====================================================================
 // Dashboard Ejecutivo V3 — contrato de UI (desaturación y enfoque).
 //
-// Valida la pantalla de decisión rápida del dueño: exactamente 8 KPIs
+// Valida la pantalla de decisión rápida del dueño: KPIs principales
 // clickeables, sin widgets duplicados, navegación correcta, máximo 5 alertas
 // importantes, 5 acciones rápidas y layout responsive. El tooling NOC quedó
 // movido a NocOperationsPanel. Sin tema nuevo (slate/indigo).
@@ -13,10 +13,10 @@ import { describe, it, expect } from 'vitest';
 const dash = readFileSync('src/components/Dashboard.tsx', 'utf8');
 const app = readFileSync('src/App.tsx', 'utf8');
 
-describe('Dashboard V3 — 8 KPIs principales', () => {
-  it('define exactamente 8 KPIs', () => {
+describe('Dashboard V3 — 9 KPIs principales', () => {
+  it('define exactamente 9 KPIs', () => {
     const count = (dash.match(/id: 'kpi-/g) || []).length;
-    expect(count).toBe(8);
+    expect(count).toBe(9);
   });
 
   it('muestra los 8 KPIs solicitados (fila 1 + fila 2)', () => {
@@ -29,6 +29,7 @@ describe('Dashboard V3 — 8 KPIs principales', () => {
       'Torres Online',
       'Capacidad Promedio',
       'Facturas Vencidas',
+      'Provisioning Pendiente',
     ]) {
       expect(dash, `falta KPI "${label}"`).toContain(label);
     }
@@ -51,6 +52,7 @@ describe('Dashboard V3 — navegación por KPI (FASE G)', () => {
     ['kpi-torres', 'network'],
     ['kpi-capacidad', 'inventory'],
     ['kpi-facturas-vencidas', 'billing'],
+    ['kpi-provisioning-pendiente', 'provisioning'],
   ];
 
   for (const [id, tab] of NAV) {

@@ -2,7 +2,7 @@ import React from 'react';
 import {
   X, MapPin, Phone, Mail, Wifi, Router as RouterIcon, CalendarClock,
   CreditCard, Ticket, UserMinus, CheckCircle, Pencil, Network, Navigation, History,
-  Wallet, Receipt, FileText, AlertTriangle,
+  Wallet, Receipt, FileText, AlertTriangle, ClipboardList,
 } from 'lucide-react';
 import { Client } from '../types';
 import { ClientActionCaps } from '../lib/rbac';
@@ -46,6 +46,13 @@ export interface ClientServiceStatusView {
   routerStatus: string | null;
 }
 
+export interface ClientProvisioningView {
+  lastAction: string;
+  status: string;
+  date: string;
+  simulationResult?: string;
+}
+
 interface QuickActionButton {
   key: ClientQuickAction;
   label: string;
@@ -83,6 +90,7 @@ interface Props {
   history: ClientHistoryEntry[];
   billing?: ClientBillingSummary | null;
   serviceStatus?: ClientServiceStatusView | null;
+  provisioning?: ClientProvisioningView | null;
   onAction: (action: ClientQuickAction, client: Client) => void;
   onClose: () => void;
 }
@@ -98,7 +106,7 @@ const BILLING_ACTIONS: { key: ClientQuickAction; label: string; cap: keyof Clien
   { key: 'account-statement', label: 'Ver estado de cuenta', cap: 'accountStatement', icon: <FileText className="w-3.5 h-3.5" /> },
 ];
 
-export default function Client360Panel({ client, planName, caps, history, billing, serviceStatus, onAction, onClose }: Props) {
+export default function Client360Panel({ client, planName, caps, history, billing, serviceStatus, provisioning, onAction, onClose }: Props) {
   const ip = client.assignedIp || client.ip;
   const hasIp = ip && ip !== '0.0.0.0';
   const hasGps = Number.isFinite(client.lat) && Number.isFinite(client.lng) && !(client.lat === 0 && client.lng === 0);
@@ -172,6 +180,28 @@ export default function Client360Panel({ client, planName, caps, history, billin
             </div>
           </section>
         )}
+
+        {/* Provisioning (PROD-7 foundation, dry-run) */}
+        <section aria-label="Provisioning">
+          <h4 className="mb-1 flex items-center gap-1.5 text-[10px] font-mono uppercase tracking-widest text-slate-500">
+            <ClipboardList className="w-3 h-3" /> Provisioning
+          </h4>
+          <div id="client360-provisioning" className="rounded-2xl border border-slate-900 bg-slate-900/40 px-4 py-2 divide-y divide-slate-900/70">
+            {row('Última acción', provisioning?.lastAction || 'Sin acciones registradas')}
+            {row('Estado', provisioning ? <span className="font-mono uppercase text-indigo-300">{provisioning.status}</span> : '—')}
+            {row('Fecha', provisioning?.date || '—')}
+            {row('Resultado simulación', provisioning?.simulationResult || 'Pendiente')}
+          </div>
+          <button
+            type="button"
+            id="client360-provisioning-history"
+            onClick={() => onAction('view-history', client)}
+            className="mt-2 inline-flex w-full items-center justify-center gap-1.5 rounded-xl border border-slate-800 bg-slate-900 px-3 py-2 text-[11px] font-semibold text-slate-300 transition hover:bg-slate-800"
+          >
+            <History className="w-3.5 h-3.5" />
+            <span>Ver historial</span>
+          </button>
+        </section>
 
         {/* Cobranza (FASE D — Billing Foundation) */}
         <section aria-label="Cobranza">

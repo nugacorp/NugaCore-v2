@@ -8,6 +8,7 @@ import customersRoutes from './domains/customers/routes';
 import coverageRoutes from './domains/coverage/routes';
 import dashboardRoutes from './domains/dashboard/routes';
 import gisRoutes from './domains/gis/routes';
+import provisioningRoutes from './domains/provisioning/routes';
 import inventoryRoutes from './domains/inventory/routes';
 import inventorySyncRoutes from './domains/inventory-sync/routes';
 import ipamRoutes from './domains/ipam/routes';
@@ -42,6 +43,7 @@ export function registerRoutes(app: Express): void {
   app.use(automationsRoutes);
   app.use(securityRoutes);
   app.use(serviceStatusRoutes);
+  app.use(provisioningRoutes);
   app.use(suspensionRoutes);
   app.use(systemRoutes);
   app.use(networkRoutes);

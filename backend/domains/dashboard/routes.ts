@@ -3,6 +3,7 @@ import { store } from '../../../backend/state/store';
 import { READ_ROLES, requireRoles } from '../../common/rbac';
 import { asyncHandler } from '../../common/errors';
 import { suspensionKpis } from '../suspension/engine';
+import { provisioningService } from '../provisioning/service';
 import {
   getBillingMetrics,
   getMetricsSnapshot,
@@ -175,6 +176,7 @@ export async function buildDashboardStats() {
   const kpis = buildExecutiveKpis(snapshot);
   // Motor de Suspensiones (Fase 4.5/4.5.1) — read-only, sin efectos.
   const suspension = await suspensionKpis();
+  const provisioning = provisioningService.summary();
 
   return {
     activeClients: snapshot.customers.active,
@@ -186,6 +188,7 @@ export async function buildDashboardStats() {
     cobranzaMes: snapshot.billing.cobradoMes,
     facturacionMes: snapshot.billing.facturacionMes,
     activeTickets: snapshot.tickets.active,
+    provisioningPending: provisioning.pending + provisioning.validated + provisioning.simulated,
     towers: { online: snapshot.towers.online, warning: snapshot.towers.warning, offline: snapshot.towers.offline },
     oltStats: { connected: store.ONUS.filter((o) => o.status === 'online').length, offlineOnus: store.ONUS.filter((o) => o.status !== 'online').length },
     growth: {

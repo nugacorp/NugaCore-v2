@@ -53,6 +53,12 @@ Estas fases están implementadas y mergeadas en `main`. **No retomarlas salvo qu
   El tooling NOC (alertas RT, ping, simulador, umbrales/push, bot) se movió a
   `NocOperationsPanel` bajo el tab NOC (no se eliminó del sistema). Sin cambios de
   tema/branding. Pendiente Hermes. Ver `docs/DASHBOARD_EXECUTIVE_V3_RESULT.md`.
+- PROD-7 Provisioning Engine Foundation: dominio `provisioning` dry-run con acciones
+  de suspension, reactivacion, cambio de plan, alta y baja; estados
+  PENDING/VALIDATED/SIMULATED/APPROVED/REJECTED/CANCELLED; endpoints
+  `/api/provisioning/*`; RBAC read(6)/write(3); UI `Provisioning Center` bajo
+  MikroTik, Client 360 y KPI `Provisioning Pendiente`. No RouterOS/Worker Live.
+  Pendiente Hermes. Ver `docs/PROVISIONING_ENGINE_FOUNDATION_RESULT.md`.
 
 > ✅ Aprobación staging (4.9.2 / 4.9.2.1): **APROBADA por Hermes** sobre el commit
 > `a0c9b55`. Persistencia real Supabase con restart demostrada para `pcc_5wan` y

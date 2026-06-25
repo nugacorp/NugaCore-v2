@@ -54,6 +54,12 @@ No retomar salvo regresión documentada (ver handoff §0.A):
   bot) se movió a `NocOperationsPanel` bajo el tab NOC (no se eliminó del sistema).
   Solo UX/UI; sin cambios de tema/branding. Code-complete, pendiente Hermes.
   Ver `docs/DASHBOARD_EXECUTIVE_V3_RESULT.md`.
+- PROD-7 Provisioning Engine Foundation (2026-06-24): dominio dry-run
+  `backend/domains/provisioning`, endpoints `/api/provisioning/*`, RBAC
+  read(6)/write(3), auditoria de transiciones, `Provisioning Center` bajo MikroTik,
+  seccion Provisioning en Client 360 y KPI `Provisioning Pendiente`. No RouterOS,
+  no Worker Live, no cambios reales. Code-complete, pendiente Hermes. Ver
+  `docs/PROVISIONING_ENGINE_FOUNDATION_RESULT.md`.
 
 ## Aprobaciones formales de Hermes
 
