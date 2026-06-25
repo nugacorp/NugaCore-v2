@@ -2,7 +2,7 @@ import React from 'react';
 import {
   X, MapPin, Phone, Mail, Wifi, Router as RouterIcon, CalendarClock,
   CreditCard, Ticket, UserMinus, CheckCircle, Pencil, Network, Navigation, History,
-  Wallet, Receipt, FileText, AlertTriangle, ClipboardList, Brain,
+  Wallet, Receipt, FileText, AlertTriangle, ClipboardList, Brain, Bell,
 } from 'lucide-react';
 import { Client } from '../types';
 import { ClientActionCaps } from '../lib/rbac';
@@ -62,6 +62,16 @@ export interface ClientAutomationView {
   lastSimulation: string;
 }
 
+// Notificaciones del cliente (PROD-9 / FASE L). Proyección descriptiva del
+// Notification Engine: últimos previews, último recordatorio, canal y estado.
+// Todo dry-run: nunca representa un envío real.
+export interface ClientNotificationsView {
+  lastPreviews: string[];
+  lastReminder: string;
+  channel: string;
+  status: string;
+}
+
 interface QuickActionButton {
   key: ClientQuickAction;
   label: string;
@@ -101,6 +111,7 @@ interface Props {
   serviceStatus?: ClientServiceStatusView | null;
   provisioning?: ClientProvisioningView | null;
   automation?: ClientAutomationView | null;
+  notifications?: ClientNotificationsView | null;
   onAction: (action: ClientQuickAction, client: Client) => void;
   onClose: () => void;
 }
@@ -116,7 +127,7 @@ const BILLING_ACTIONS: { key: ClientQuickAction; label: string; cap: keyof Clien
   { key: 'account-statement', label: 'Ver estado de cuenta', cap: 'accountStatement', icon: <FileText className="w-3.5 h-3.5" /> },
 ];
 
-export default function Client360Panel({ client, planName, caps, history, billing, serviceStatus, provisioning, automation, onAction, onClose }: Props) {
+export default function Client360Panel({ client, planName, caps, history, billing, serviceStatus, provisioning, automation, notifications, onAction, onClose }: Props) {
   const ip = client.assignedIp || client.ip;
   const hasIp = ip && ip !== '0.0.0.0';
   const hasGps = Number.isFinite(client.lat) && Number.isFinite(client.lng) && !(client.lat === 0 && client.lng === 0);
@@ -228,6 +239,31 @@ export default function Client360Panel({ client, planName, caps, history, billin
             {row('Última simulación', automation?.lastSimulation || 'Pendiente')}
           </div>
           <p className="mt-1 text-[10px] text-slate-500">El motor solo propone decisiones (dry-run). No ejecuta acciones.</p>
+        </section>
+
+        {/* Notificaciones (PROD-9 / FASE L, dry-run) */}
+        <section aria-label="Notificaciones">
+          <h4 className="mb-1 flex items-center gap-1.5 text-[10px] font-mono uppercase tracking-widest text-slate-500">
+            <Bell className="w-3 h-3" /> Notificaciones
+          </h4>
+          <div id="client360-notifications" className="rounded-2xl border border-slate-900 bg-slate-900/40 px-4 py-2 divide-y divide-slate-900/70">
+            {row('Último recordatorio', notifications?.lastReminder || 'Sin recordatorios')}
+            {row('Canal', notifications?.channel ? <span className="font-mono uppercase text-indigo-300">{notifications.channel}</span> : '—')}
+            {row('Estado', notifications?.status ? <span className="font-mono uppercase text-indigo-300">{notifications.status}</span> : '—')}
+            {row('Últimos previews', notifications?.lastPreviews?.length
+              ? <span className="font-mono text-[10px] text-slate-300">{notifications.lastPreviews.join(', ')}</span>
+              : 'Sin previews')}
+          </div>
+          <button
+            type="button"
+            id="client360-create-payment-reminder"
+            onClick={() => onAction('create-payment-reminder', client)}
+            className="mt-2 inline-flex w-full items-center justify-center gap-1.5 rounded-xl border border-slate-800 bg-slate-900 px-3 py-2 text-[11px] font-semibold text-slate-300 transition hover:bg-slate-800"
+          >
+            <Bell className="w-3.5 h-3.5" />
+            <span>Crear recordatorio de pago</span>
+          </button>
+          <p className="mt-1 text-[10px] text-slate-500">Crea una simulación dry-run. No se envían mensajes reales.</p>
         </section>
 
         {/* Cobranza (FASE D — Billing Foundation) */}

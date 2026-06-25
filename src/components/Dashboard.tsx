@@ -16,6 +16,7 @@ import {
   Activity,
   ClipboardList,
   Brain,
+  Bell,
   ChevronRight,
 } from 'lucide-react';
 import { NocAlert } from '../types';
@@ -104,6 +105,7 @@ export default function Dashboard({ stats, alerts, onRefresh, getAuthHeaders, on
   const cobradoMes = billingKpis?.cobradoMes ?? stats.cobranzaMes ?? 0;
   const provisioningPending = Number(stats.provisioningPending ?? 0);
   const automationQueue = Number(stats.automationQueue ?? 0);
+  const notificationsPending = Number(stats.notificationsPending ?? 0);
 
   // ── 8 KPIs principales (clickeables → módulo) ─────────────────────────
   const KPIS: Array<{ id: string; label: string; value: string; icon: typeof Users; tone: string; tab: string }> = [
@@ -119,6 +121,7 @@ export default function Dashboard({ stats, alerts, onRefresh, getAuthHeaders, on
     { id: 'kpi-facturas-vencidas', label: 'Facturas Vencidas', value: String(facturasVencidas), icon: Receipt, tone: 'text-rose-400', tab: 'billing' },
     { id: 'kpi-provisioning-pendiente', label: 'Provisioning Pendiente', value: String(provisioningPending), icon: ClipboardList, tone: 'text-indigo-400', tab: 'provisioning' },
     { id: 'kpi-automation-queue', label: 'Automation Queue', value: String(automationQueue), icon: Brain, tone: 'text-indigo-400', tab: 'automation' },
+    { id: 'kpi-notifications-pending', label: 'Notificaciones Pendientes', value: String(notificationsPending), icon: Bell, tone: 'text-indigo-400', tab: 'notifications' },
   ];
 
   // ── Alertas importantes (curado, máx. 5, prioridad crit > high > warn) ──

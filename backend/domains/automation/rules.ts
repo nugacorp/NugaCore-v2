@@ -283,6 +283,7 @@ export const buildExecutionPreview = (
       return preview([
         `Preparar notificacion${target} (descriptiva).`,
         'Seleccionar plantilla de comunicacion sugerida.',
+        'Notification would be created (dry-run, sin envio real).',
         'Esperar envio manual o integracion futura.',
       ]);
     case 'REQUEST_REVIEW':

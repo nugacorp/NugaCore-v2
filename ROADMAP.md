@@ -50,6 +50,7 @@ Estados usados:
 | Provisioning Engine Foundation | ✅ Operativa (PROD-7) | 🟢 Dry-run seguro | Calcula y audita acciones; no toca RouterOS ni Worker Live. Ver `docs/PROVISIONING_ENGINE_FOUNDATION_RESULT.md`. |
 | Automation Engine Foundation | ✅ Operativa (PROD-8) | 🟢 Decisión / dry-run | El cerebro: recibe eventos, evalúa reglas y devuelve decisiones + executionPreview. No ejecuta nada. Ver `docs/AUTOMATION_ENGINE_FOUNDATION_RESULT.md`. |
 | Architecture Hardening | ✅ Completada (ARCH-1) | 🟢 Sin cambio de comportamiento | Auditoría + dedup (`common/time`) + flags centralizadas. Backlog priorizado en `docs/TECHNICAL_DEBT.md`. Ver `docs/ARCH1_ARCHITECTURE_HARDENING_RESULT.md`, `docs/ARCHITECTURE_AUDIT.md`, `docs/ARCHITECTURE_OVERVIEW.md`. |
+| Notification Engine Foundation | ✅ Operativa (PROD-9) | 🟢 DRY RUN / mock provider | Motor central de notificaciones; solo preview/simulación, providers mock, `sent=false`. No envía nada real. Ver `docs/NOTIFICATION_ENGINE_FOUNDATION_RESULT.md`. |
 | Data Consistency (SSOT KPIs) | ✅ Operativa | 🟢 Auditor read-only | `systemMetrics` + `/api/system/data-consistency`. Ver `docs/DATA_CONSISTENCY_AUDIT_RESULT.md`. |
 | WireGuard Manager | 🟡 Avanzada | 🟢 Re-download post-restart resuelto vía `wireguard_snapshot` cifrado (4.9.2.1) | `USE_DB_WIREGUARD` opcional; snapshot aprobado como alternativa. |
 | Router Enrollment | ✅ Operativa | 🟢 Download post-restart APROBADO (4.9.2.1) | Snapshot router+WG; sin depender de stores en memoria. |

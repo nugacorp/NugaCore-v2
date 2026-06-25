@@ -28,7 +28,8 @@ export type ClientQuickAction =
   | 'view-router'
   | 'view-location'
   | 'copy-ip'
-  | 'view-history';
+  | 'view-history'
+  | 'create-payment-reminder';
 
 interface MenuItem {
   key: ClientQuickAction;

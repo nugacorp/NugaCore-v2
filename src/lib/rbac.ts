@@ -25,6 +25,7 @@ export type AppTab =
   | 'safe-command-queue'
   | 'routeros-readonly'
   | 'automation'
+  | 'notifications'
   | 'user-manual';
 
 // ====================================================================
@@ -34,12 +35,12 @@ export type AppTab =
 // la VISIBILIDAD del módulo.
 // ====================================================================
 const roleTabs: Record<UserRole, AppTab[]> = {
-  'Super Admin':  ['dashboard', 'noc', 'crm', 'billing', 'finance', 'suspension', 'payments', 'network', 'mikrotik', 'wireguard', 'routeros-resources', 'routeros-templates', 'router-enrollment', 'support', 'inventory', 'inventory-routers', 'gis', 'owner', 'manual-safe-mode', 'safe-command-queue', 'routeros-readonly', 'inventory-sync', 'provisioning', 'automation', 'user-manual'],
-  'Administrador':['dashboard', 'noc', 'crm', 'billing', 'suspension', 'payments', 'network', 'wireguard', 'routeros-resources', 'routeros-templates', 'router-enrollment', 'support', 'inventory', 'inventory-routers', 'gis', 'manual-safe-mode', 'safe-command-queue', 'routeros-readonly', 'inventory-sync', 'provisioning', 'automation', 'user-manual'],
-  'Cobranza':     ['dashboard', 'crm', 'billing', 'finance', 'suspension', 'payments', 'provisioning', 'automation', 'user-manual'],
-  'Técnico':      ['dashboard', 'noc', 'crm', 'suspension', 'network', 'mikrotik', 'routeros-resources', 'routeros-templates', 'router-enrollment', 'support', 'inventory', 'inventory-routers', 'gis', 'manual-safe-mode', 'safe-command-queue', 'routeros-readonly', 'inventory-sync', 'provisioning', 'automation', 'user-manual'],
-  'Soporte':      ['dashboard', 'noc', 'crm', 'support', 'inventory-routers', 'gis', 'manual-safe-mode', 'safe-command-queue', 'routeros-readonly', 'inventory-sync', 'provisioning', 'automation', 'user-manual'],
-  'Solo lectura': ['dashboard', 'noc', 'crm', 'billing', 'suspension', 'network', 'inventory-routers', 'gis', 'manual-safe-mode', 'safe-command-queue', 'routeros-readonly', 'inventory-sync', 'provisioning', 'automation', 'user-manual'],
+  'Super Admin':  ['dashboard', 'noc', 'crm', 'billing', 'finance', 'suspension', 'payments', 'network', 'mikrotik', 'wireguard', 'routeros-resources', 'routeros-templates', 'router-enrollment', 'support', 'inventory', 'inventory-routers', 'gis', 'owner', 'manual-safe-mode', 'safe-command-queue', 'routeros-readonly', 'inventory-sync', 'provisioning', 'automation', 'notifications', 'user-manual'],
+  'Administrador':['dashboard', 'noc', 'crm', 'billing', 'suspension', 'payments', 'network', 'wireguard', 'routeros-resources', 'routeros-templates', 'router-enrollment', 'support', 'inventory', 'inventory-routers', 'gis', 'manual-safe-mode', 'safe-command-queue', 'routeros-readonly', 'inventory-sync', 'provisioning', 'automation', 'notifications', 'user-manual'],
+  'Cobranza':     ['dashboard', 'crm', 'billing', 'finance', 'suspension', 'payments', 'provisioning', 'automation', 'notifications', 'user-manual'],
+  'Técnico':      ['dashboard', 'noc', 'crm', 'suspension', 'network', 'mikrotik', 'routeros-resources', 'routeros-templates', 'router-enrollment', 'support', 'inventory', 'inventory-routers', 'gis', 'manual-safe-mode', 'safe-command-queue', 'routeros-readonly', 'inventory-sync', 'provisioning', 'automation', 'notifications', 'user-manual'],
+  'Soporte':      ['dashboard', 'noc', 'crm', 'support', 'inventory-routers', 'gis', 'manual-safe-mode', 'safe-command-queue', 'routeros-readonly', 'inventory-sync', 'provisioning', 'automation', 'notifications', 'user-manual'],
+  'Solo lectura': ['dashboard', 'noc', 'crm', 'billing', 'suspension', 'network', 'inventory-routers', 'gis', 'manual-safe-mode', 'safe-command-queue', 'routeros-readonly', 'inventory-sync', 'provisioning', 'automation', 'notifications', 'user-manual'],
 };
 
 // ====================================================================
@@ -114,6 +115,7 @@ export const MODULE_LABELS: Record<AppTab, string> = {
   'safe-command-queue': 'Cola de Comandos (Dry-Run)',
   'routeros-readonly': 'RouterOS Read-Only Lab',
   automation: 'Automation Center',
+  notifications: 'Notification Center',
   'user-manual': 'Manual de Usuario',
 };
 

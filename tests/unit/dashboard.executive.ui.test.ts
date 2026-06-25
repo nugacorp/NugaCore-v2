@@ -13,13 +13,13 @@ import { describe, it, expect } from 'vitest';
 const dash = readFileSync('src/components/Dashboard.tsx', 'utf8');
 const app = readFileSync('src/App.tsx', 'utf8');
 
-describe('Dashboard V3 — 10 KPIs principales', () => {
-  it('define exactamente 10 KPIs', () => {
+describe('Dashboard V3 — 11 KPIs principales', () => {
+  it('define exactamente 11 KPIs', () => {
     const count = (dash.match(/id: 'kpi-/g) || []).length;
-    expect(count).toBe(10);
+    expect(count).toBe(11);
   });
 
-  it('muestra los 10 KPIs solicitados (fila 1 + fila 2 + automation)', () => {
+  it('muestra los 11 KPIs solicitados (fila 1 + fila 2 + automation + notifications)', () => {
     for (const label of [
       'Clientes Activos',
       'Suspendidos',
@@ -31,6 +31,7 @@ describe('Dashboard V3 — 10 KPIs principales', () => {
       'Facturas Vencidas',
       'Provisioning Pendiente',
       'Automation Queue',
+      'Notificaciones Pendientes',
     ]) {
       expect(dash, `falta KPI "${label}"`).toContain(label);
     }
@@ -55,6 +56,7 @@ describe('Dashboard V3 — navegación por KPI (FASE G)', () => {
     ['kpi-facturas-vencidas', 'billing'],
     ['kpi-provisioning-pendiente', 'provisioning'],
     ['kpi-automation-queue', 'automation'],
+    ['kpi-notifications-pending', 'notifications'],
   ];
 
   for (const [id, tab] of NAV) {

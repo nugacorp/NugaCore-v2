@@ -75,6 +75,16 @@ Estas fases están implementadas y mergeadas en `main`. **No retomarlas salvo qu
   `TECHNICAL_DEBT.md`. Sin cambios de endpoints/payloads/RBAC/UX/tests.
   División de God Components queda como backlog (rompería tests de string).
   Pendiente Hermes. Ver `docs/ARCH1_ARCHITECTURE_HARDENING_RESULT.md`.
+- PROD-9 Notification Engine Foundation: dominio `notifications` (DRY RUN /
+  mock provider). 9 tipos, 5 canales, 6 estados (nunca SENT real), 8 plantillas
+  con variables, 5 providers mock (`sent=false`); endpoints
+  `/api/notifications/*` (preview/create/simulate/cancel — sin /send ni
+  /dispatch); auditoría sin secretos; static-safety test. UI `Notification
+  Center` bajo Automation Center (badge DRY RUN, sin botón Enviar), KPI
+  `Notificaciones Pendientes`, sección en Client 360 y paso de preview en
+  Automation. RBAC: lectura todos; escribir Super Admin/Administrador/Cobranza/
+  Soporte. No envía nada real. Pendiente Hermes. Ver
+  `docs/NOTIFICATION_ENGINE_FOUNDATION_RESULT.md`.
 
 > ✅ Aprobación staging (4.9.2 / 4.9.2.1): **APROBADA por Hermes** sobre el commit
 > `a0c9b55`. Persistencia real Supabase con restart demostrada para `pcc_5wan` y

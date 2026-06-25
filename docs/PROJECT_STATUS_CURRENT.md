@@ -77,6 +77,17 @@ No retomar salvo regresión documentada (ver handoff §0.A):
   (Critical/High/Medium/Low + esfuerzo) en `docs/TECHNICAL_DEBT.md`. Sin tocar
   endpoints, payloads, RBAC, UX ni RouterOS/Worker Live. typecheck/test(1712)/
   build en verde. Ver `docs/ARCH1_ARCHITECTURE_HARDENING_RESULT.md`.
+- PROD-9 Notification Engine Foundation (2026-06-24): dominio DRY RUN
+  `backend/domains/notifications`, endpoints `/api/notifications/*` (templates,
+  messages, summary, preview, simulate, cancel — sin /send ni /dispatch),
+  9 tipos, 5 canales, 6 estados (nunca SENT real), 8 plantillas, 5 providers
+  mock (`wouldSend=true, sent=false`), auditoría sin secretos. `Notification
+  Center` bajo Automation Center (badge DRY RUN), KPI `Notificaciones
+  Pendientes`, sección Notificaciones en Client 360 y paso "Notification would
+  be created" en el preview de Automation. RBAC: lectura todos; crear/simular/
+  cancelar Super Admin/Administrador/Cobranza/Soporte (Técnico y Solo lectura
+  bloqueados). No envía nada real, no APIs externas, no tokens. Code-complete,
+  pendiente Hermes. Ver `docs/NOTIFICATION_ENGINE_FOUNDATION_RESULT.md`.
 
 ## Aprobaciones formales de Hermes
 

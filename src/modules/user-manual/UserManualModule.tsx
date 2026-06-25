@@ -15,6 +15,7 @@ import {
   Server,
   Box,
   Brain,
+  Bell,
   HelpCircle,
   Info,
   ChevronDown,
@@ -210,6 +211,18 @@ const SECTIONS: ManualSection[] = [
       'Revisa el Resumen, los Eventos soportados, las Reglas y las Decisiones simuladas.',
       'Simula un evento (dry-run) para ver qué decisiones propone el motor y su Execution Preview descriptivo.',
       'El motor nunca ejecuta nada: solo decide qué debería hacerse y deja todo como propuesta dry-run.',
+    ],
+  },
+  {
+    id: 'notifications',
+    title: 'Notification Center',
+    icon: Bell,
+    summary: 'Las notificaciones están en modo simulación. No se envían mensajes reales.',
+    steps: [
+      'Entra a "Sistema → Notification Center".',
+      'Revisa el Resumen, las Plantillas, los Mensajes, las Simulaciones y los Canales.',
+      'Usa "Vista previa" para ver cómo quedaría un mensaje, o "Crear borrador" y "Simular" para registrar una simulación dry-run.',
+      'No hay botón de envío: en esta fase el motor nunca envía WhatsApp, Telegram, Email ni Push reales.',
     ],
   },
   {

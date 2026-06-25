@@ -17,6 +17,7 @@ import ManualSafeModeModule from './modules/manual-safe-mode/ManualSafeModeModul
 import SafeCommandQueueModule from './modules/safe-command-queue/SafeCommandQueueModule';
 import ProvisioningCenterModule from './modules/provisioning/ProvisioningCenterModule';
 import AutomationCenterModule from './modules/automation/AutomationCenterModule';
+import NotificationCenterModule from './modules/notifications/NotificationCenterModule';
 import RouterOSReadOnlyModule from './modules/routeros-readonly/RouterOSReadOnlyModule';
 import UserManualModule from './modules/user-manual/UserManualModule';
 import InventorySyncModule from './modules/inventory-sync/InventorySyncModule';
@@ -1110,6 +1111,10 @@ export default function App() {
 
             {activeTab === 'automation' && (
               <AutomationCenterModule userRole={userSession.role} getAuthHeaders={getAuthHeaders} />
+            )}
+
+            {activeTab === 'notifications' && (
+              <NotificationCenterModule userRole={userSession.role} getAuthHeaders={getAuthHeaders} />
             )}
 
             {activeTab === 'routeros-readonly' && (

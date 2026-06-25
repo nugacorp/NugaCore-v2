@@ -5,6 +5,7 @@ import { asyncHandler } from '../../common/errors';
 import { suspensionKpis } from '../suspension/engine';
 import { provisioningService } from '../provisioning/service';
 import { automationService } from '../automation/service';
+import { notificationService } from '../notifications/service';
 import {
   getBillingMetrics,
   getMetricsSnapshot,
@@ -180,6 +181,8 @@ export async function buildDashboardStats() {
   const provisioning = provisioningService.summary();
   // Automation Engine (PROD-8) — read-only: cuenta decisiones pendientes.
   const automationQueue = automationService.pendingDecisionsCount();
+  // Notification Engine (PROD-9) — read-only: DRAFT+QUEUED+SIMULATED (dry-run).
+  const notificationsPending = notificationService.pendingCount();
 
   return {
     activeClients: snapshot.customers.active,
@@ -193,6 +196,7 @@ export async function buildDashboardStats() {
     activeTickets: snapshot.tickets.active,
     provisioningPending: provisioning.pending + provisioning.validated + provisioning.simulated,
     automationQueue,
+    notificationsPending,
     towers: { online: snapshot.towers.online, warning: snapshot.towers.warning, offline: snapshot.towers.offline },
     oltStats: { connected: store.ONUS.filter((o) => o.status === 'online').length, offlineOnus: store.ONUS.filter((o) => o.status !== 'online').length },
     growth: {
