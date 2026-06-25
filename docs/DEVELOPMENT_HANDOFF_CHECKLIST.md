@@ -68,6 +68,13 @@ Estas fases están implementadas y mergeadas en `main`. **No retomarlas salvo qu
   Automation en Client 360 y `Decision Source` en Provisioning; static-safety
   test. No ejecuta nada, no RouterOS/Worker Live. Pendiente Hermes. Ver
   `docs/AUTOMATION_ENGINE_FOUNDATION_RESULT.md`.
+- ARCH-1 Architecture Hardening: auditoría + hardening sin cambio de
+  comportamiento. Dedup `nowIso` ×12 → `backend/common/time.ts`; flags
+  centralizadas (`useDbWireguard()`); docs nuevos `ARCHITECTURE_AUDIT.md`,
+  `ARCHITECTURE_OVERVIEW.md`, `FEATURE_FLAGS.md`, backlog priorizado en
+  `TECHNICAL_DEBT.md`. Sin cambios de endpoints/payloads/RBAC/UX/tests.
+  División de God Components queda como backlog (rompería tests de string).
+  Pendiente Hermes. Ver `docs/ARCH1_ARCHITECTURE_HARDENING_RESULT.md`.
 
 > ✅ Aprobación staging (4.9.2 / 4.9.2.1): **APROBADA por Hermes** sobre el commit
 > `a0c9b55`. Persistencia real Supabase con restart demostrada para `pcc_5wan` y

@@ -16,7 +16,7 @@ import { getRouterConnector, isLiveWorkerEnabled } from './connector';
 import { workerStore } from './store';
 import { OrderProcessResult, RouterSnapshot, WorkerRun } from './types';
 
-const nowIso = () => new Date().toISOString();
+import { nowIso } from '../../../common/time';
 
 // Plan de comandos (dry-run). NO se envían. Sin secretos.
 const planFor = (

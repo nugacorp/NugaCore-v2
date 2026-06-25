@@ -69,6 +69,14 @@ No retomar salvo regresión documentada (ver handoff §0.A):
   roles; nadie modifica reglas todavía. No ejecuta nada, no RouterOS, no Worker
   Live, no cambios reales. Code-complete, pendiente Hermes. Ver
   `docs/AUTOMATION_ENGINE_FOUNDATION_RESULT.md`.
+- ARCH-1 Architecture Hardening (2026-06-24): fase de fortalecimiento sin
+  cambio de comportamiento. Auditoría completa (`docs/ARCHITECTURE_AUDIT.md`,
+  `docs/ARCHITECTURE_OVERVIEW.md`), dedup de `nowIso` ×12 →
+  `backend/common/time.ts`, centralización de feature flags
+  (`useDbWireguard()` + `docs/FEATURE_FLAGS.md`), y backlog priorizado
+  (Critical/High/Medium/Low + esfuerzo) en `docs/TECHNICAL_DEBT.md`. Sin tocar
+  endpoints, payloads, RBAC, UX ni RouterOS/Worker Live. typecheck/test(1712)/
+  build en verde. Ver `docs/ARCH1_ARCHITECTURE_HARDENING_RESULT.md`.
 
 ## Aprobaciones formales de Hermes
 

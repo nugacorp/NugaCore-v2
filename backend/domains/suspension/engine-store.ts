@@ -16,7 +16,7 @@ import {
   SuspensionPolicyV2,
 } from './types';
 
-const nowIso = () => new Date().toISOString();
+import { nowIso } from '../../common/time';
 let eventSeq = 1;
 let orderSeq = 1;
 

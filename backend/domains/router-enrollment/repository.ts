@@ -29,7 +29,7 @@ const TABLE = 'router_enrollment';
 const RECORDS: RouterEnrollmentRecord[] = [];
 let _counter = 0;
 
-const nowIso = () => new Date().toISOString();
+import { nowIso } from '../../common/time';
 
 function nextId(): string {
   _counter++;

@@ -17,7 +17,7 @@ import {
   SafeActionStatus,
 } from './types';
 
-const nowIso = (): string => new Date().toISOString();
+import { nowIso } from '../../common/time';
 
 const requireString = (value: unknown, field: string): string => {
   if (typeof value !== 'string' || value.trim() === '') {

@@ -79,3 +79,14 @@ export const domainsOnDb = (): DomainKey[] =>
 // puedan alternarlo reconstruyendo el repositorio con resetEnrollmentRepository().
 export const useDbRouterEnrollment = (): boolean =>
   asBool(process.env.USE_DB_ROUTER_ENROLLMENT);
+
+// ── WireGuard Manager (Fase 4.9.2.1) ───────────────────────────────────
+// Flag independiente del mapa DomainKey (la persistencia de WireGuard no es
+// un dominio de negocio del health check). Mismo patrón directo que
+// router-enrollment. Centralizado aquí (ARCH-1) como única fuente de verdad;
+// el servicio WireGuard delega en este helper. Comportamiento idéntico.
+//
+//   false (default) → store en memoria
+//   true            → SupabaseWireguardRepository
+export const useDbWireguard = (): boolean =>
+  asBool(process.env.USE_DB_WIREGUARD);

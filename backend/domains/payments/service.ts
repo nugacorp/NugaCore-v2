@@ -42,7 +42,7 @@ import {
   paymentOrderToView,
 } from './mappers';
 
-const nowIso = () => new Date().toISOString();
+import { nowIso } from '../../common/time';
 
 // ── Helpers ───────────────────────────────────────────────────────────
 

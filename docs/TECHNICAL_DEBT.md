@@ -1,8 +1,49 @@
 # NugaCore — Deuda Técnica (TECHNICAL_DEBT)
 
-> Última actualización: 2026-06-01
+> Última actualización: 2026-06-24 (ARCH-1)
 > Inventario de deuda: código duplicado, archivos grandes, `any`, acoplamientos, riesgos de mantenimiento.
 > Impacto: 🔴 alto · 🟡 medio · 🟢 bajo. Esfuerzo: S (pequeño) · M (medio) · L (grande).
+
+---
+
+## 0. Clasificación ARCH-1 (priorizada con esfuerzo)
+
+Refresco de números y backlog priorizado tras la auditoría ARCH-1. Lo resuelto
+en ARCH-1 está marcado ✅; el resto queda como backlog (no se ejecuta en esta
+fase para no romper el contrato de tests — FASE M/N).
+
+### Critical
+| ID | Deuda | Esfuerzo | Estado |
+| --- | --- | --- | --- |
+| C-1 | Persistencia en memoria (`state/store.ts`, 889 líneas) como fuente raíz | L | Backlog (TD-01) |
+| C-2 | Lógica de negocio en `routes.ts` (falta capa repository/service consistente) | L | Backlog (TD-02) |
+
+### High
+| ID | Deuda | Esfuerzo | Estado |
+| --- | --- | --- | --- |
+| H-1 | `App.tsx` God Container (1337 líneas, fetch total + polling) | M | Backlog — protegido por 18 tests de string; requiere plan de extracción que preserve aserciones |
+| H-2 | `CrmModule.tsx` (1910 líneas) | M | Backlog — 5 tests de string |
+| H-3 | Sin lazy loading de módulos pesados en `App.tsx` (bundle 1.07 MB) | M | Backlog (FASE H/I) |
+
+### Medium
+| ID | Deuda | Esfuerzo | Estado |
+| --- | --- | --- | --- |
+| M-1 | Duplicación `nowIso` ×12 dominios | S | ✅ Resuelto → `backend/common/time.ts` |
+| M-2 | Lectura local de `USE_DB_WIREGUARD` fuera del módulo central de flags | S | ✅ Resuelto → delega en `useDbWireguard()` |
+| M-3 | Otros God Components > 600 líneas (RouterOsResources, FinanceOwner, Gis, wizards…) | M | Backlog (FASE B) |
+| M-4 | `noUnusedLocals`/`noUnusedParameters` desactivados en `tsconfig` | S | Backlog (FASE I) |
+
+### Low
+| ID | Deuda | Esfuerzo | Estado |
+| --- | --- | --- | --- |
+| L-1 | `nowStamp` (`YYYY-MM-DD HH:mm`) con variantes no idénticas | S | Backlog — unificar tras normalizar formato |
+| L-2 | Helpers de formato de moneda repetidos en frontend | S | Backlog |
+| L-3 | Providers con dos formas (mock/real vs por-pasarela) | S | Backlog — estandarizar solo dominios con backend externo |
+
+> **Nota de seguridad/calidad (FASE M):** ARCH-1 no cambió endpoints, payloads,
+> RBAC, feature flags ni tests existentes. Los refactors fueron additive
+> (`time.ts`) o por delegación (flag WireGuard), con `typecheck`, `npm test`
+> (1712 passed) y `build` en verde.
 
 ---
 

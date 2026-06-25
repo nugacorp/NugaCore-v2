@@ -45,7 +45,7 @@ export interface ProvisioningAuditRecord {
   createdAt: string;
 }
 
-const nowIso = () => new Date().toISOString();
+import { nowIso } from '../../../common/time';
 let tokenSeq = 1;
 let scriptSeq = 1;
 let auditSeq = 1;

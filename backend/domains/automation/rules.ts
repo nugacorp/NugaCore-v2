@@ -19,7 +19,7 @@ import {
   ExecutionPreviewStep,
 } from './types';
 
-const nowIso = (): string => new Date().toISOString();
+import { nowIso } from '../../common/time';
 
 // Helpers de lectura segura del payload (nunca lanzan).
 const flag = (context: AutomationContext, key: string): boolean =>

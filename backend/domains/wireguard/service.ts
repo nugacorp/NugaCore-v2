@@ -8,6 +8,7 @@
 
 import { encryptSecret, decryptSecret } from '../../services/crypto';
 import { logger } from '../../common/logger';
+import { useDbWireguard } from '../../config/feature-flags';
 import { NotFoundError } from '../../common/errors';
 import { isSupabaseAdminConfigured, supabaseAdmin } from '../../services/supabase-admin';
 import { generatePresharedKey, generateWgKeyPair } from './keys';
@@ -27,7 +28,7 @@ import {
   WireguardServerView,
 } from './types';
 
-const nowIso = () => new Date().toISOString();
+import { nowIso } from '../../common/time';
 const mgmtCidr = () => process.env.MIKROTIK_MGMT_CIDR || '10.0.0.0/24';
 
 export interface CreateServerInput {
@@ -208,7 +209,8 @@ export class WireguardService {
 // ── Factoría ────────────────────────────────────────────────────────────
 let singleton: WireguardService | null = null;
 
-const useDb = (): boolean => (process.env.USE_DB_WIREGUARD || 'false').trim().toLowerCase() === 'true';
+// Delegado a la fuente central de feature flags (ARCH-1). Comportamiento idéntico.
+const useDb = (): boolean => useDbWireguard();
 
 const build = (): WireguardService => {
   if (useDb()) {

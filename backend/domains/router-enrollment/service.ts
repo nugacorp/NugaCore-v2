@@ -44,7 +44,7 @@ import {
   StartEnrollmentResult,
 } from './types';
 
-const nowIso = () => new Date().toISOString();
+import { nowIso } from '../../common/time';
 const MAX_CHECK_ATTEMPTS = 10;
 
 const toView = (rec: RouterEnrollmentRecord): RouterEnrollmentView => {

@@ -33,7 +33,7 @@ import {
   SimulationResult,
 } from './types';
 
-const nowIso = (): string => new Date().toISOString();
+import { nowIso } from '../../common/time';
 
 const normalizeEvent = (value: unknown): AutomationEvent => {
   if (typeof value === 'string' && (AUTOMATION_EVENTS as readonly string[]).includes(value)) {
