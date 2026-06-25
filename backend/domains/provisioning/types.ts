@@ -7,6 +7,18 @@ export const PROVISIONING_ACTION_TYPES = [
 ] as const;
 export type ProvisioningActionType = (typeof PROVISIONING_ACTION_TYPES)[number];
 
+// Origen de la decision que motiva una accion de provisioning (PROD-8 / FASE L).
+// Permite trazar si la propuso el Automation Engine o un dominio/operador.
+export const PROVISIONING_DECISION_SOURCES = [
+  'Automation',
+  'Manual',
+  'Billing',
+  'CRM',
+  'NOC',
+  'Inventory',
+] as const;
+export type ProvisioningDecisionSource = (typeof PROVISIONING_DECISION_SOURCES)[number];
+
 export const PROVISIONING_STATUSES = [
   'PENDING',
   'VALIDATED',
@@ -29,6 +41,7 @@ export interface ProvisioningAction {
   customerName?: string;
   targetPlanId?: string;
   targetPlanName?: string;
+  decisionSource: ProvisioningDecisionSource;
   executionPlan: ProvisioningPlanStep[];
   previousState: ProvisioningStatus | null;
   nextState: ProvisioningStatus;
@@ -66,6 +79,7 @@ export interface CreateProvisioningActionInput {
   customerName?: unknown;
   targetPlanId?: unknown;
   targetPlanName?: unknown;
+  decisionSource?: unknown;
   notes?: unknown;
 }
 

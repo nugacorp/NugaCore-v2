@@ -24,7 +24,8 @@ import {
   Server,
   BookText,
   GitCompare,
-  ClipboardList
+  ClipboardList,
+  Brain
 } from 'lucide-react';
 import { UserSessionProfile } from '../lib/supabase';
 import { isVisibleInSidebar } from '../lib/rbac';
@@ -134,6 +135,7 @@ export default function Sidebar({
       title: 'Sistema',
       items: [
         { id: 'owner', name: 'Configuración', icon: Shield },
+        { id: 'automation', name: 'Automation Center', icon: Brain },
         { id: 'user-manual', name: 'Manual de Usuario', icon: BookText },
       ],
     },

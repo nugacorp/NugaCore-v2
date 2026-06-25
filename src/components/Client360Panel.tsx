@@ -2,7 +2,7 @@ import React from 'react';
 import {
   X, MapPin, Phone, Mail, Wifi, Router as RouterIcon, CalendarClock,
   CreditCard, Ticket, UserMinus, CheckCircle, Pencil, Network, Navigation, History,
-  Wallet, Receipt, FileText, AlertTriangle, ClipboardList,
+  Wallet, Receipt, FileText, AlertTriangle, ClipboardList, Brain,
 } from 'lucide-react';
 import { Client } from '../types';
 import { ClientActionCaps } from '../lib/rbac';
@@ -53,6 +53,15 @@ export interface ClientProvisioningView {
   simulationResult?: string;
 }
 
+// Historial de Automation (PROD-8 / FASE K). Proyección descriptiva del
+// Automation Engine para el cliente: últimos eventos, decisiones propuestas
+// y última simulación. NO contiene acciones reales (todo es dry-run).
+export interface ClientAutomationView {
+  lastEvents: string[];
+  lastDecisions: string[];
+  lastSimulation: string;
+}
+
 interface QuickActionButton {
   key: ClientQuickAction;
   label: string;
@@ -91,6 +100,7 @@ interface Props {
   billing?: ClientBillingSummary | null;
   serviceStatus?: ClientServiceStatusView | null;
   provisioning?: ClientProvisioningView | null;
+  automation?: ClientAutomationView | null;
   onAction: (action: ClientQuickAction, client: Client) => void;
   onClose: () => void;
 }
@@ -106,7 +116,7 @@ const BILLING_ACTIONS: { key: ClientQuickAction; label: string; cap: keyof Clien
   { key: 'account-statement', label: 'Ver estado de cuenta', cap: 'accountStatement', icon: <FileText className="w-3.5 h-3.5" /> },
 ];
 
-export default function Client360Panel({ client, planName, caps, history, billing, serviceStatus, provisioning, onAction, onClose }: Props) {
+export default function Client360Panel({ client, planName, caps, history, billing, serviceStatus, provisioning, automation, onAction, onClose }: Props) {
   const ip = client.assignedIp || client.ip;
   const hasIp = ip && ip !== '0.0.0.0';
   const hasGps = Number.isFinite(client.lat) && Number.isFinite(client.lng) && !(client.lat === 0 && client.lng === 0);
@@ -201,6 +211,23 @@ export default function Client360Panel({ client, planName, caps, history, billin
             <History className="w-3.5 h-3.5" />
             <span>Ver historial</span>
           </button>
+        </section>
+
+        {/* Automation History (PROD-8 / FASE K, dry-run) */}
+        <section aria-label="Automation">
+          <h4 className="mb-1 flex items-center gap-1.5 text-[10px] font-mono uppercase tracking-widest text-slate-500">
+            <Brain className="w-3 h-3" /> Automation
+          </h4>
+          <div id="client360-automation" className="rounded-2xl border border-slate-900 bg-slate-900/40 px-4 py-2 divide-y divide-slate-900/70">
+            {row('Últimos eventos', automation?.lastEvents?.length
+              ? <span className="font-mono text-[10px] text-slate-300">{automation.lastEvents.join(', ')}</span>
+              : 'Sin eventos')}
+            {row('Últimas decisiones', automation?.lastDecisions?.length
+              ? <span className="font-mono text-[10px] text-indigo-300">{automation.lastDecisions.join(', ')}</span>
+              : 'Sin decisiones')}
+            {row('Última simulación', automation?.lastSimulation || 'Pendiente')}
+          </div>
+          <p className="mt-1 text-[10px] text-slate-500">El motor solo propone decisiones (dry-run). No ejecuta acciones.</p>
         </section>
 
         {/* Cobranza (FASE D — Billing Foundation) */}

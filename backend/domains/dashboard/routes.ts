@@ -4,6 +4,7 @@ import { READ_ROLES, requireRoles } from '../../common/rbac';
 import { asyncHandler } from '../../common/errors';
 import { suspensionKpis } from '../suspension/engine';
 import { provisioningService } from '../provisioning/service';
+import { automationService } from '../automation/service';
 import {
   getBillingMetrics,
   getMetricsSnapshot,
@@ -177,6 +178,8 @@ export async function buildDashboardStats() {
   // Motor de Suspensiones (Fase 4.5/4.5.1) — read-only, sin efectos.
   const suspension = await suspensionKpis();
   const provisioning = provisioningService.summary();
+  // Automation Engine (PROD-8) — read-only: cuenta decisiones pendientes.
+  const automationQueue = automationService.pendingDecisionsCount();
 
   return {
     activeClients: snapshot.customers.active,
@@ -189,6 +192,7 @@ export async function buildDashboardStats() {
     facturacionMes: snapshot.billing.facturacionMes,
     activeTickets: snapshot.tickets.active,
     provisioningPending: provisioning.pending + provisioning.validated + provisioning.simulated,
+    automationQueue,
     towers: { online: snapshot.towers.online, warning: snapshot.towers.warning, offline: snapshot.towers.offline },
     oltStats: { connected: store.ONUS.filter((o) => o.status === 'online').length, offlineOnus: store.ONUS.filter((o) => o.status !== 'online').length },
     growth: {

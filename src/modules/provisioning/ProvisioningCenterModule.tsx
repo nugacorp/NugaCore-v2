@@ -11,12 +11,15 @@ interface ProvisioningPlanStep {
   description: string;
 }
 
+type DecisionSource = 'Automation' | 'Manual' | 'Billing' | 'CRM' | 'NOC' | 'Inventory';
+
 interface ProvisioningAction {
   id: string;
   actionType: ProvisioningActionType;
   customerId: string;
   customerName?: string;
   status: ProvisioningStatus;
+  decisionSource?: DecisionSource;
   createdAt: string;
   dryRun: true;
   executionPlan: ProvisioningPlanStep[];
@@ -189,6 +192,9 @@ export default function ProvisioningCenterModule({ userRole, getAuthHeaders }: P
                 </ol>
                 <div className="mt-3 rounded-lg border border-indigo-500/20 bg-indigo-500/10 px-3 py-2 text-xs text-indigo-200">
                   Resultado simulación: {selected.simulationResult || 'Pendiente'}
+                </div>
+                <div className="mt-2 rounded-lg border border-slate-800 bg-slate-900/50 px-3 py-2 text-xs text-slate-300">
+                  Decision Source: <span className="font-mono text-indigo-300">{selected.decisionSource || 'Manual'}</span>
                 </div>
                 <div className="mt-4 grid grid-cols-2 gap-2">
                   {(['validate', 'simulate', 'approve', 'reject', 'cancel'] as const).map((op) => (

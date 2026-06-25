@@ -59,6 +59,15 @@ Estas fases están implementadas y mergeadas en `main`. **No retomarlas salvo qu
   `/api/provisioning/*`; RBAC read(6)/write(3); UI `Provisioning Center` bajo
   MikroTik, Client 360 y KPI `Provisioning Pendiente`. No RouterOS/Worker Live.
   Pendiente Hermes. Ver `docs/PROVISIONING_ENGINE_FOUNDATION_RESULT.md`.
+- PROD-8 Automation Engine Foundation: dominio `automation` (decisión/dry-run).
+  16 eventos, 9 decisiones, motor de reglas con `condition` puras + prioridad y
+  `executionPreview` descriptivo; endpoints `/api/automation/*` (read-only +
+  `POST /simulate`); auditoría sin secretos; RBAC lectura+simulación para todos
+  los roles (nadie modifica reglas todavía); UI `Automation Center` bajo
+  Configuración (badge DRY RUN + banner), KPI `Automation Queue`, sección
+  Automation en Client 360 y `Decision Source` en Provisioning; static-safety
+  test. No ejecuta nada, no RouterOS/Worker Live. Pendiente Hermes. Ver
+  `docs/AUTOMATION_ENGINE_FOUNDATION_RESULT.md`.
 
 > ✅ Aprobación staging (4.9.2 / 4.9.2.1): **APROBADA por Hermes** sobre el commit
 > `a0c9b55`. Persistencia real Supabase con restart demostrada para `pcc_5wan` y

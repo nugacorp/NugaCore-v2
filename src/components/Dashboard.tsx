@@ -15,6 +15,7 @@ import {
   Router as RouterIcon,
   Activity,
   ClipboardList,
+  Brain,
   ChevronRight,
 } from 'lucide-react';
 import { NocAlert } from '../types';
@@ -102,6 +103,7 @@ export default function Dashboard({ stats, alerts, onRefresh, getAuthHeaders, on
   const facturasVencidas = Number(billingKpis?.facturasVencidas ?? 0);
   const cobradoMes = billingKpis?.cobradoMes ?? stats.cobranzaMes ?? 0;
   const provisioningPending = Number(stats.provisioningPending ?? 0);
+  const automationQueue = Number(stats.automationQueue ?? 0);
 
   // ── 8 KPIs principales (clickeables → módulo) ─────────────────────────
   const KPIS: Array<{ id: string; label: string; value: string; icon: typeof Users; tone: string; tab: string }> = [
@@ -116,6 +118,7 @@ export default function Dashboard({ stats, alerts, onRefresh, getAuthHeaders, on
     { id: 'kpi-capacidad', label: 'Capacidad Promedio', value: `${capacityPct.toFixed(1)}%`, icon: Layers, tone: 'text-sky-400', tab: 'inventory' },
     { id: 'kpi-facturas-vencidas', label: 'Facturas Vencidas', value: String(facturasVencidas), icon: Receipt, tone: 'text-rose-400', tab: 'billing' },
     { id: 'kpi-provisioning-pendiente', label: 'Provisioning Pendiente', value: String(provisioningPending), icon: ClipboardList, tone: 'text-indigo-400', tab: 'provisioning' },
+    { id: 'kpi-automation-queue', label: 'Automation Queue', value: String(automationQueue), icon: Brain, tone: 'text-indigo-400', tab: 'automation' },
   ];
 
   // ── Alertas importantes (curado, máx. 5, prioridad crit > high > warn) ──

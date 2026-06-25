@@ -4,7 +4,9 @@ import { provisioningStore } from './store';
 import {
   CreateProvisioningActionInput,
   PROVISIONING_ACTION_TYPES,
+  PROVISIONING_DECISION_SOURCES,
   ProvisioningAction,
+  ProvisioningDecisionSource,
   ProvisioningActionDetail,
   ProvisioningActionType,
   ProvisioningPlanStep,
@@ -29,6 +31,13 @@ const normalizeActionType = (value: unknown): ProvisioningActionType => {
     return value as ProvisioningActionType;
   }
   throw new BadRequestError(`actionType invalido. Permitidos: ${PROVISIONING_ACTION_TYPES.join(', ')}`, 'INVALID_ACTION_TYPE');
+};
+
+const normalizeDecisionSource = (value: unknown): ProvisioningDecisionSource => {
+  if (typeof value === 'string' && (PROVISIONING_DECISION_SOURCES as readonly string[]).includes(value)) {
+    return value as ProvisioningDecisionSource;
+  }
+  return 'Manual';
 };
 
 const plan = (items: string[]): ProvisioningPlanStep[] =>
@@ -141,6 +150,7 @@ export const provisioningService = {
       customerName,
       targetPlanId,
       targetPlanName,
+      decisionSource: normalizeDecisionSource(input.decisionSource),
       executionPlan: buildExecutionPlan(actionType, customerId, targetPlanName),
       previousState: null,
       nextState: 'PENDING',

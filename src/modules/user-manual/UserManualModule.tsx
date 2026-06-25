@@ -14,6 +14,7 @@ import {
   FileCode,
   Server,
   Box,
+  Brain,
   HelpCircle,
   Info,
   ChevronDown,
@@ -197,6 +198,18 @@ const SECTIONS: ManualSection[] = [
       'Entra a "MikroTik → Laboratorio MikroTik".',
       'Consulta identidad, sistema, interfaces, rutas y WireGuard del equipo de laboratorio.',
       'Es estrictamente de lectura: no ejecuta ni modifica nada en RouterOS.',
+    ],
+  },
+  {
+    id: 'automation',
+    title: 'Automation Center',
+    icon: Brain,
+    summary: 'El cerebro de NugaCore: el motor de automatización únicamente toma decisiones. No ejecuta acciones reales.',
+    steps: [
+      'Entra a "Sistema → Automation Center".',
+      'Revisa el Resumen, los Eventos soportados, las Reglas y las Decisiones simuladas.',
+      'Simula un evento (dry-run) para ver qué decisiones propone el motor y su Execution Preview descriptivo.',
+      'El motor nunca ejecuta nada: solo decide qué debería hacerse y deja todo como propuesta dry-run.',
     ],
   },
   {
