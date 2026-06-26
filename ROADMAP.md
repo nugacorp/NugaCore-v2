@@ -47,16 +47,16 @@ Estados usados:
 | Payment Engine | ✅ Operativa | 🟡 Validar proveedor real/webhooks | Requiere conciliación real e idempotencia validada. |
 | Suspension Engine | ✅ Operativa | 🔴 No activar contra routers reales | Mantener dry-run/lógico hasta Worker seguro. |
 | Service Status SSOT | ✅ Operativa (Pre-PROD-7) | 🟢 Read-only + dryRun seguro | Fuente oficial de `serviceStatus`; KPI "Suspendidos". No ejecuta nada real. Ver `docs/SERVICE_STATUS_SSOT_RESULT.md`. |
-| Provisioning Engine Foundation | ✅ Operativa (PROD-7) | 🟢 Dry-run seguro | Calcula y audita acciones; no toca RouterOS ni Worker Live. Ver `docs/PROVISIONING_ENGINE_FOUNDATION_RESULT.md`. |
-| Automation Engine Foundation | ✅ Operativa (PROD-8) | 🟢 Decisión / dry-run | El cerebro: recibe eventos, evalúa reglas y devuelve decisiones + executionPreview. No ejecuta nada. Ver `docs/AUTOMATION_ENGINE_FOUNDATION_RESULT.md`. |
-| Architecture Hardening | ✅ Completada (ARCH-1) | 🟢 Sin cambio de comportamiento | Auditoría + dedup (`common/time`) + flags centralizadas. Backlog priorizado en `docs/TECHNICAL_DEBT.md`. Ver `docs/ARCH1_ARCHITECTURE_HARDENING_RESULT.md`, `docs/ARCHITECTURE_AUDIT.md`, `docs/ARCHITECTURE_OVERVIEW.md`. |
-| Notification Engine Foundation | ✅ Operativa (PROD-9) | 🟢 DRY RUN / mock provider | Motor central de notificaciones; solo preview/simulación, providers mock, `sent=false`. No envía nada real. Ver `docs/NOTIFICATION_ENGINE_FOUNDATION_RESULT.md`. |
+| Provisioning Engine Foundation | ✅ Operativa (PROD-7) · Hermes ✅ | 🟢 Dry-run seguro | Calcula y audita acciones; no toca RouterOS ni Worker Live. Validada en staging. Ver `docs/PROVISIONING_ENGINE_FOUNDATION_RESULT.md`, `docs/PROVISIONING_ENGINE_FOUNDATION_STAGING_RESULT.md`. |
+| Automation Engine Foundation | ✅ Operativa (PROD-8) · 🟡 pendiente Hermes | 🟢 Decisión / dry-run | El cerebro: recibe eventos, evalúa reglas y devuelve decisiones + executionPreview. No ejecuta nada. Falta `STAGING_RESULT`. Ver `docs/AUTOMATION_ENGINE_FOUNDATION_RESULT.md`. |
+| Architecture Hardening | ✅ Completada (ARCH-1) · Hermes ✅ | 🟢 Sin cambio de comportamiento | Auditoría + dedup (`common/time`) + flags centralizadas. Validada en staging. Backlog priorizado en `docs/TECHNICAL_DEBT.md`. Ver `docs/ARCH1_ARCHITECTURE_HARDENING_RESULT.md`, `docs/ARCH1_STAGING_RESULT.md`, `docs/ARCHITECTURE_AUDIT.md`, `docs/ARCHITECTURE_OVERVIEW.md`. |
+| Notification Engine Foundation | ✅ Operativa (PROD-9) · Hermes ✅ | 🟢 DRY RUN / mock provider | Motor central de notificaciones; solo preview/simulación, providers mock, `sent=false`. No envía nada real. Validada en staging. Ver `docs/NOTIFICATION_ENGINE_FOUNDATION_RESULT.md`, `docs/NOTIFICATION_ENGINE_FOUNDATION_STAGING_RESULT.md`. |
 | Data Consistency (SSOT KPIs) | ✅ Operativa | 🟢 Auditor read-only | `systemMetrics` + `/api/system/data-consistency`. Ver `docs/DATA_CONSISTENCY_AUDIT_RESULT.md`. |
 | WireGuard Manager | 🟡 Avanzada | 🟢 Re-download post-restart resuelto vía `wireguard_snapshot` cifrado (4.9.2.1) | `USE_DB_WIREGUARD` opcional; snapshot aprobado como alternativa. |
 | Router Enrollment | ✅ Operativa | 🟢 Download post-restart APROBADO (4.9.2.1) | Snapshot router+WG; sin depender de stores en memoria. |
 | Template Engine | 🟡 Avanzada | 🟡 Seguro como generador manual | No implica provisioning live. |
 | Dynamic Parameters | 🟡 En progreso | 🔴 Bloqueado por persistencia total | Falta independencia total de stores en memoria. |
-| MikroTik Worker | 🔄 Pendiente | 🔴 No producción | No activar `MIKROTIK_WORKER_LIVE`. |
+| MikroTik Worker | 🔄 Pendiente — propuesta PROD-10 Worker Engine **Dry-Run** | 🔴 No producción | Siguiente fase recomendada tras PROD-9: motor de ejecución en simulación (plan → preview de comandos → resultado mock), **gated**, sin activar `MIKROTIK_WORKER_LIVE` ni RouterOS Write. Requiere autorización explícita de Ramiro. |
 | NOC | 🔄 Pendiente | 🔴 No producción | Primero read-only. |
 | Inventario | 🔄 Pendiente | 🔴 No producción | Falta modelo/operación real. |
 | Tickets | 🔄 Pendiente | 🔴 No producción | Falta trazabilidad completa. |

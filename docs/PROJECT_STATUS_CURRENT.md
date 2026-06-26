@@ -1,17 +1,21 @@
 # NugaCore — Estado actual del proyecto
 
 > Resumen de arranque en frío para cualquier técnico, Hermes, Jarvis o Claude Code.
-> Última actualización: 2026-06-22. Fuente canónica de tareas:
-> `docs/DEVELOPMENT_HANDOFF_CHECKLIST.md` (§0). Sin secretos en este documento.
+> Última actualización: 2026-06-25 (reconciliación post-PROD-9). Fuente canónica de
+> tareas: `docs/DEVELOPMENT_HANDOFF_CHECKLIST.md` (§0). Sin secretos en este documento.
 
 ## Rama y commits
 
-- Rama de trabajo: `main`.
-- Últimos commits relevantes:
-  - `bf438ed` — persist router snapshot para downloads DB.
-  - `a0c9b55` — download sin depender del store de WireGuard.
-  - `e61198b` — sync de migraciones Supabase documentado.
-  - `e10d5e6` — prerequisito de reconciliación `mikrotik_routers` en roadmap/handoff.
+- Rama de trabajo: `main`. HEAD = `8880c7b`, sincronizado con `origin/main`.
+- Últimos commits relevantes (más reciente primero):
+  - `8880c7b` — docs(prod9): validate notification engine dry-run staging (Hermes ✅).
+  - `6911c25` — feat(prod9): add notification engine dry-run foundation.
+  - `fb84edf` — docs(arch1): validate architecture hardening staging (Hermes ✅).
+  - `24fb067` — chore(repo): document build artifact policy.
+  - `2cb3427` — refactor(arch1): harden architecture and eliminate technical debt.
+  - `eb4ea0a` — feat(prod8): add automation engine foundation.
+  - `bb3a4b9` — docs(prod7): validate provisioning dry-run staging (Hermes ✅).
+  - `0f1457c` — feat(prod7): add provisioning engine dry-run foundation.
 
 ## Fases implementadas y mergeadas en `main`
 
@@ -58,8 +62,9 @@ No retomar salvo regresión documentada (ver handoff §0.A):
   `backend/domains/provisioning`, endpoints `/api/provisioning/*`, RBAC
   read(6)/write(3), auditoria de transiciones, `Provisioning Center` bajo MikroTik,
   seccion Provisioning en Client 360 y KPI `Provisioning Pendiente`. No RouterOS,
-  no Worker Live, no cambios reales. Code-complete, pendiente Hermes. Ver
-  `docs/PROVISIONING_ENGINE_FOUNDATION_RESULT.md`.
+  no Worker Live, no cambios reales. ✅ **Validada por Hermes en staging** (commit
+  `0f1457c`). Ver `docs/PROVISIONING_ENGINE_FOUNDATION_RESULT.md` y
+  `docs/PROVISIONING_ENGINE_FOUNDATION_STAGING_RESULT.md`.
 - PROD-8 Automation Engine Foundation (2026-06-24): dominio decisión/dry-run
   `backend/domains/automation`, endpoints `/api/automation/*` (read-only +
   `simulate`), 16 eventos, 9 decisiones, motor de reglas con executionPreview,
@@ -67,7 +72,8 @@ No retomar salvo regresión documentada (ver handoff §0.A):
   RUN), KPI `Automation Queue`, sección Automation en Client 360 y referencia
   `Decision Source` en Provisioning. RBAC: lectura+simulación para todos los
   roles; nadie modifica reglas todavía. No ejecuta nada, no RouterOS, no Worker
-  Live, no cambios reales. Code-complete, pendiente Hermes. Ver
+  Live, no cambios reales. 🟡 **Code-complete, pendiente Hermes** (aún sin
+  `docs/AUTOMATION_ENGINE_FOUNDATION_STAGING_RESULT.md`). Ver
   `docs/AUTOMATION_ENGINE_FOUNDATION_RESULT.md`.
 - ARCH-1 Architecture Hardening (2026-06-24): fase de fortalecimiento sin
   cambio de comportamiento. Auditoría completa (`docs/ARCHITECTURE_AUDIT.md`,
@@ -76,7 +82,8 @@ No retomar salvo regresión documentada (ver handoff §0.A):
   (`useDbWireguard()` + `docs/FEATURE_FLAGS.md`), y backlog priorizado
   (Critical/High/Medium/Low + esfuerzo) en `docs/TECHNICAL_DEBT.md`. Sin tocar
   endpoints, payloads, RBAC, UX ni RouterOS/Worker Live. typecheck/test(1712)/
-  build en verde. Ver `docs/ARCH1_ARCHITECTURE_HARDENING_RESULT.md`.
+  build en verde. ✅ **Validada por Hermes en staging** (ARCH-1 + ARCH-1.1). Ver
+  `docs/ARCH1_ARCHITECTURE_HARDENING_RESULT.md` y `docs/ARCH1_STAGING_RESULT.md`.
 - PROD-9 Notification Engine Foundation (2026-06-24): dominio DRY RUN
   `backend/domains/notifications`, endpoints `/api/notifications/*` (templates,
   messages, summary, preview, simulate, cancel — sin /send ni /dispatch),
@@ -86,11 +93,26 @@ No retomar salvo regresión documentada (ver handoff §0.A):
   Pendientes`, sección Notificaciones en Client 360 y paso "Notification would
   be created" en el preview de Automation. RBAC: lectura todos; crear/simular/
   cancelar Super Admin/Administrador/Cobranza/Soporte (Técnico y Solo lectura
-  bloqueados). No envía nada real, no APIs externas, no tokens. Code-complete,
-  pendiente Hermes. Ver `docs/NOTIFICATION_ENGINE_FOUNDATION_RESULT.md`.
+  bloqueados). No envía nada real, no APIs externas, no tokens. ✅ **Validada por
+  Hermes en staging** (commit `6911c25`). Ver
+  `docs/NOTIFICATION_ENGINE_FOUNDATION_RESULT.md` y
+  `docs/NOTIFICATION_ENGINE_FOUNDATION_STAGING_RESULT.md`.
 
 ## Aprobaciones formales de Hermes
 
+- **PROD-9 Notification Engine Foundation:** ✅ **APROBADA** en staging sobre el
+  commit `6911c25` (validación `8880c7b`). DRY RUN/mock confirmado: `sent=false`,
+  sin `/send` ni `/dispatch`, RBAC y static-safety OK. Ver
+  `docs/NOTIFICATION_ENGINE_FOUNDATION_STAGING_RESULT.md`.
+- **ARCH-1 + ARCH-1.1 Architecture Hardening:** ✅ **APROBADAS** en staging
+  (validación `fb84edf`). Sin cambio de comportamiento; `dist/` no versionado. Ver
+  `docs/ARCH1_STAGING_RESULT.md`.
+- **PROD-7 Provisioning Engine Foundation:** ✅ **APROBADA** en staging sobre el
+  commit `0f1457c` (validación `bb3a4b9`). Dry-run/auditoría confirmados; sin
+  estados de ejecución, sin RouterOS/Worker. Ver
+  `docs/PROVISIONING_ENGINE_FOUNDATION_STAGING_RESULT.md`.
+- **PROD-8 Automation Engine Foundation:** 🟡 **PENDIENTE de validación Hermes**
+  (commit `eb4ea0a`, sin `STAGING_RESULT` todavía).
 - **4.9.2 / 4.9.2.1:** ✅ **APROBADA** sobre el commit `a0c9b55`. Persistencia real
   Supabase con restart demostrada para `pcc_5wan` y `router_base_wireguard`
   (download post-restart = 200; `wireguardSnapshot` saneado). Evidencia formal:
@@ -101,11 +123,20 @@ No retomar salvo regresión documentada (ver handoff §0.A):
   PostgREST, y ya fue resuelto/reconciliado (ver `docs/SUPABASE_MIGRATIONS_SYNC.md`).
 - No retomar 4.9.2 salvo regresión nueva documentada.
 
-## Bloqueador / prioridad inmediata
+## Siguiente fase recomendada (post-PROD-9)
 
-**DB-1 — Reconciliar el schema de `mikrotik_routers` antes de activar `USE_DB_MIKROTIK`.**
+Con PROD-9 ✅ validada por Hermes, la **propuesta** de siguiente fase es
+**PROD-10 — Worker Engine Dry-Run**: motor de ejecución en modo simulación
+(plan → preview de comandos → resultado mock), **sin** activar `MIKROTIK_WORKER_LIVE`,
+sin RouterOS Write y sin tocar routers reales. **NO implementar todavía**: es una
+propuesta gated que requiere autorización explícita de Ramiro. Pendiente lateral:
+cerrar la validación Hermes de **PROD-8 Automation** (sin `STAGING_RESULT`).
 
-Hay dos definiciones contradictorias de `public.mikrotik_routers` en el repo:
+## Bloqueador histórico (resuelto) — DB-1
+
+**DB-1 — Reconciliar el schema de `mikrotik_routers`** ya fue reconciliado (ver
+"Orden de trabajo" más abajo, DB-1 ✅). Contexto para no reabrirlo sin regresión:
+había dos definiciones contradictorias de `public.mikrotik_routers` en el repo:
 
 - `20260531000000_init_schema.sql` (modelo de monitoreo) — **es la tabla aplicada en la DB**.
 - `20260605000000_mikrotik_provisioning_schema.sql` (modelo de provisioning) — **NO aplicada**;

@@ -58,7 +58,9 @@ Estas fases están implementadas y mergeadas en `main`. **No retomarlas salvo qu
   PENDING/VALIDATED/SIMULATED/APPROVED/REJECTED/CANCELLED; endpoints
   `/api/provisioning/*`; RBAC read(6)/write(3); UI `Provisioning Center` bajo
   MikroTik, Client 360 y KPI `Provisioning Pendiente`. No RouterOS/Worker Live.
-  Pendiente Hermes. Ver `docs/PROVISIONING_ENGINE_FOUNDATION_RESULT.md`.
+  ✅ Validada por Hermes en staging (commit `0f1457c`). Ver
+  `docs/PROVISIONING_ENGINE_FOUNDATION_RESULT.md` y
+  `docs/PROVISIONING_ENGINE_FOUNDATION_STAGING_RESULT.md`.
 - PROD-8 Automation Engine Foundation: dominio `automation` (decisión/dry-run).
   16 eventos, 9 decisiones, motor de reglas con `condition` puras + prioridad y
   `executionPreview` descriptivo; endpoints `/api/automation/*` (read-only +
@@ -66,7 +68,8 @@ Estas fases están implementadas y mergeadas en `main`. **No retomarlas salvo qu
   los roles (nadie modifica reglas todavía); UI `Automation Center` bajo
   Configuración (badge DRY RUN + banner), KPI `Automation Queue`, sección
   Automation en Client 360 y `Decision Source` en Provisioning; static-safety
-  test. No ejecuta nada, no RouterOS/Worker Live. Pendiente Hermes. Ver
+  test. No ejecuta nada, no RouterOS/Worker Live. 🟡 Code-complete, **pendiente
+  Hermes** (commit `eb4ea0a`, aún sin `STAGING_RESULT`). Ver
   `docs/AUTOMATION_ENGINE_FOUNDATION_RESULT.md`.
 - ARCH-1 Architecture Hardening: auditoría + hardening sin cambio de
   comportamiento. Dedup `nowIso` ×12 → `backend/common/time.ts`; flags
@@ -74,7 +77,8 @@ Estas fases están implementadas y mergeadas en `main`. **No retomarlas salvo qu
   `ARCHITECTURE_OVERVIEW.md`, `FEATURE_FLAGS.md`, backlog priorizado en
   `TECHNICAL_DEBT.md`. Sin cambios de endpoints/payloads/RBAC/UX/tests.
   División de God Components queda como backlog (rompería tests de string).
-  Pendiente Hermes. Ver `docs/ARCH1_ARCHITECTURE_HARDENING_RESULT.md`.
+  ✅ Validada por Hermes en staging (ARCH-1 + ARCH-1.1). Ver
+  `docs/ARCH1_ARCHITECTURE_HARDENING_RESULT.md` y `docs/ARCH1_STAGING_RESULT.md`.
 - PROD-9 Notification Engine Foundation: dominio `notifications` (DRY RUN /
   mock provider). 9 tipos, 5 canales, 6 estados (nunca SENT real), 8 plantillas
   con variables, 5 providers mock (`sent=false`); endpoints
@@ -83,8 +87,9 @@ Estas fases están implementadas y mergeadas en `main`. **No retomarlas salvo qu
   Center` bajo Automation Center (badge DRY RUN, sin botón Enviar), KPI
   `Notificaciones Pendientes`, sección en Client 360 y paso de preview en
   Automation. RBAC: lectura todos; escribir Super Admin/Administrador/Cobranza/
-  Soporte. No envía nada real. Pendiente Hermes. Ver
-  `docs/NOTIFICATION_ENGINE_FOUNDATION_RESULT.md`.
+  Soporte. No envía nada real. ✅ Validada por Hermes en staging (commit
+  `6911c25`). Ver `docs/NOTIFICATION_ENGINE_FOUNDATION_RESULT.md` y
+  `docs/NOTIFICATION_ENGINE_FOUNDATION_STAGING_RESULT.md`.
 
 > ✅ Aprobación staging (4.9.2 / 4.9.2.1): **APROBADA por Hermes** sobre el commit
 > `a0c9b55`. Persistencia real Supabase con restart demostrada para `pcc_5wan` y
@@ -100,6 +105,14 @@ Si este checklist contradice un documento de aprobación más reciente en `docs/
 manda sobre la memoria, el roadmap y este checklist.
 
 ### C. Prioridad inmediata (absoluta)
+
+> **Reconciliación 2026-06-25 (post-PROD-9):** la pista de *foundations dry-run*
+> avanzó hasta PROD-9. Estado de validación Hermes: PROD-7 ✅, ARCH-1 ✅, PROD-9 ✅;
+> **PROD-8 Automation queda pendiente de Hermes** (sin `STAGING_RESULT`). Siguiente
+> fase recomendada en esa pista = **PROD-10 Worker Engine Dry-Run** (propuesta
+> gated; NO implementar sin autorización explícita de Ramiro; no activar
+> `MIKROTIK_WORKER_LIVE`, sin RouterOS Write). La prioridad de la **pista RouterOS**
+> sigue siendo PROD-4 (abajo), también gated. Ninguna se inicia sin aprobación.
 
 **PROD-4 — CHR Real Read-Only Integration (abstracción de providers; PREPARADO,
 NO CONECTADO).**
