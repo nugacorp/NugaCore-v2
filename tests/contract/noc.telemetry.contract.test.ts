@@ -28,7 +28,6 @@ const setRouters = (rows: MikrotikRouterRegistryItem[]) =>
   store.MIKROTIK_ROUTERS.splice(0, store.MIKROTIK_ROUTERS.length, ...rows);
 
 const mockRouter = (over: Partial<MikrotikRouterRegistryItem> & { id: string }): MikrotikRouterRegistryItem => ({
-  id: over.id,
   name: over.name ?? `Router ${over.id}`,
   ipAddress: over.ipAddress ?? '10.0.0.1',
   apiPort: over.apiPort ?? 8728,

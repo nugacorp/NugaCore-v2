@@ -11,7 +11,6 @@ import {
   Terminal,
   Wifi,
   BookOpen,
-  FileCode,
   Server,
   Box,
   Brain,

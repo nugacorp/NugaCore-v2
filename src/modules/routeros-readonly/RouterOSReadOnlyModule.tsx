@@ -1,4 +1,5 @@
 import React, { useCallback, useEffect, useState } from 'react';
+import { createAuthorizedApi } from '../../lib/apiClient';
 import {
   Activity,
   Cpu,
@@ -121,16 +122,10 @@ export default function RouterOSReadOnlyModule({ getAuthHeaders }: Props) {
     setLoading(true);
     setError('');
     try {
-      const headers = await getAuthHeaders();
+      const api = createAuthorizedApi(getAuthHeaders);
       const paths = ['identity', 'system', 'interfaces', 'routes', 'wireguard'];
-      const responses = await Promise.all(
-        paths.map((path) => fetch(`/api/routeros/${path}`, { headers })),
-      );
-      if (responses.some((res) => !res.ok)) {
-        throw new Error('No se pudieron cargar los datos RouterOS del laboratorio.');
-      }
       const [identity, system, interfaces, routes, wireguard] = await Promise.all(
-        responses.map((res) => res.json()),
+        paths.map((path) => api.get(`/api/routeros/${path}`)),
       );
       setData({ identity, system, interfaces, routes, wireguard });
     } catch (err) {

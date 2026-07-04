@@ -4,6 +4,7 @@
 // ====================================================================
 
 import React, { useState, useEffect, useCallback } from 'react';
+import { createAuthorizedApi } from '../lib/apiClient';
 import {
   Banknote,
   CheckCircle,
@@ -120,13 +121,15 @@ export default function PaymentsModule({ userRole, getAuthHeaders }: PaymentsMod
     setLoading(true);
     setError('');
     try {
-      const headers = await getAuthHeaders();
-      const [ordersRes, actionsRes] = await Promise.all([
-        fetch('/api/payments/orders', { headers }),
-        fetch('/api/payments/actions', { headers }),
+      const api = createAuthorizedApi(getAuthHeaders);
+      // Tolerancia parcial (comportamiento original): si un recurso falla,
+      // el otro se muestra igualmente.
+      const [ordersData, actionsData] = await Promise.allSettled([
+        api.get<typeof orders>('/api/payments/orders'),
+        api.get<typeof actions>('/api/payments/actions'),
       ]);
-      if (ordersRes.ok) setOrders(await ordersRes.json());
-      if (actionsRes.ok) setActions(await actionsRes.json());
+      if (ordersData.status === 'fulfilled') setOrders(ordersData.value);
+      if (actionsData.status === 'fulfilled') setActions(actionsData.value);
     } catch {
       setError('Error al cargar datos de pagos.');
     } finally {
@@ -141,25 +144,13 @@ export default function PaymentsModule({ userRole, getAuthHeaders }: PaymentsMod
     if (!formData.customerId || !formData.invoiceId || !formData.amountPesos) return;
     setFormLoading(true);
     try {
-      const headers = {
-        ...(await getAuthHeaders()),
-        'Content-Type': 'application/json',
-      };
-      const res = await fetch('/api/payments/orders', {
-        method: 'POST',
-        headers,
-        body: JSON.stringify({
-          customerId: formData.customerId,
-          invoiceId: formData.invoiceId,
-          provider: formData.provider,
-          amountCents: Math.round(parseFloat(formData.amountPesos) * 100),
-        }),
+      const api = createAuthorizedApi(getAuthHeaders);
+      const order = await api.post<PaymentOrderView>('/api/payments/orders', {
+        customerId: formData.customerId,
+        invoiceId: formData.invoiceId,
+        provider: formData.provider,
+        amountCents: Math.round(parseFloat(formData.amountPesos) * 100),
       });
-      if (!res.ok) {
-        const err = await res.json();
-        throw new Error(err.error || 'Error al crear orden.');
-      }
-      const order = await res.json();
       setOrders((prev) => [order, ...prev]);
       setNotice(`Orden ${order.id} creada con ${PROVIDER_LABELS[order.provider]}.`);
       setShowForm(false);
@@ -176,19 +167,10 @@ export default function PaymentsModule({ userRole, getAuthHeaders }: PaymentsMod
     setReactivating(true);
     setError('');
     try {
-      const headers = {
-        ...(await getAuthHeaders()),
-        'Content-Type': 'application/json',
-      };
-      const res = await fetch(`/api/payments/customers/${reactivateId.trim()}/reactivate`, {
-        method: 'POST',
-        headers,
-      });
-      if (!res.ok) {
-        const err = await res.json();
-        throw new Error(err.error || 'Error al reactivar.');
-      }
-      const result: ReactivationResult = await res.json();
+      const api = createAuthorizedApi(getAuthHeaders);
+      const result = await api.post<ReactivationResult>(
+        `/api/payments/customers/${reactivateId.trim()}/reactivate`,
+      );
       setNotice(result.message);
       if (result.mikrotikAction) setActions((prev) => [result.mikrotikAction!, ...prev]);
     } catch (err) {

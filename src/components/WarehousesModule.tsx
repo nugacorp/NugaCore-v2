@@ -1,4 +1,5 @@
 import React, { useCallback, useEffect, useState } from 'react';
+import { createAuthorizedApi } from '../lib/apiClient';
 import { Warehouse as WarehouseIcon, Plus, Trash2, Pencil, PackageSearch, XCircle, RefreshCw } from 'lucide-react';
 
 // ====================================================================
@@ -69,10 +70,8 @@ export default function WarehousesModule({ getAuthHeaders }: Props) {
     setLoading(true);
     setError('');
     try {
-      const headers = await getAuthHeaders();
-      const res = await fetch('/api/inventory/warehouses', { headers });
-      if (!res.ok) throw new Error('No se pudieron cargar los almacenes.');
-      setWarehouses(await res.json());
+      const api = createAuthorizedApi(getAuthHeaders);
+      setWarehouses(await api.get('/api/inventory/warehouses'));
     } catch (err) {
       setWarehouses([]);
       setError(err instanceof Error ? err.message : 'Error al cargar almacenes.');
@@ -95,13 +94,9 @@ export default function WarehousesModule({ getAuthHeaders }: Props) {
     if (!form.name.trim()) return;
     setError('');
     try {
-      const headers = { ...(await getAuthHeaders()), 'Content-Type': 'application/json' };
+      const api = createAuthorizedApi(getAuthHeaders);
       const url = editId ? `/api/inventory/warehouses/${editId}` : '/api/inventory/warehouses';
-      const res = await fetch(url, { method: editId ? 'PUT' : 'POST', headers, body: JSON.stringify(form) });
-      if (!res.ok) {
-        const body = await res.json().catch(() => ({}));
-        throw new Error(body.error || 'No se pudo guardar el almacén.');
-      }
+      await (editId ? api.put(url, form) : api.post(url, form));
       setShowModal(false);
       await load();
     } catch (err) {
@@ -112,12 +107,8 @@ export default function WarehousesModule({ getAuthHeaders }: Props) {
   const remove = async (wh: Warehouse) => {
     setError('');
     try {
-      const headers = await getAuthHeaders();
-      const res = await fetch(`/api/inventory/warehouses/${wh.id}`, { method: 'DELETE', headers });
-      if (!res.ok && res.status !== 204) {
-        const body = await res.json().catch(() => ({}));
-        throw new Error(body.error || 'No se pudo eliminar el almacén.');
-      }
+      const api = createAuthorizedApi(getAuthHeaders);
+      await api.delete(`/api/inventory/warehouses/${wh.id}`);
       if (stock?.warehouse === wh.name) setStock(null);
       await load();
     } catch (err) {
@@ -129,10 +120,8 @@ export default function WarehousesModule({ getAuthHeaders }: Props) {
     setStockLoading(true);
     setError('');
     try {
-      const headers = await getAuthHeaders();
-      const res = await fetch(`/api/inventory/warehouses/${wh.id}/stock`, { headers });
-      if (!res.ok) throw new Error('No se pudo cargar el stock del almacén.');
-      setStock(await res.json());
+      const api = createAuthorizedApi(getAuthHeaders);
+      setStock(await api.get(`/api/inventory/warehouses/${wh.id}/stock`));
     } catch (err) {
       setStock(null);
       setError(err instanceof Error ? err.message : 'Error al cargar stock.');

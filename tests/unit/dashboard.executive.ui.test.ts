@@ -152,7 +152,7 @@ describe('Dashboard V3 — responsive y tema', () => {
 
 describe('Dashboard V3 — tooling NOC reubicado', () => {
   it('App monta NocOperationsPanel en el tab NOC', () => {
-    expect(app).toContain('import NocOperationsPanel');
+    expect(app).toContain("const NocOperationsPanel = lazy(() => import('./components/NocOperationsPanel'))");
     expect(app).toContain('<NocOperationsPanel');
   });
 

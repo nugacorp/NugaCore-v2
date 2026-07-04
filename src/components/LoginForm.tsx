@@ -1,4 +1,6 @@
 import React, { useState } from 'react';
+import { getErrorMessage } from '../lib/errors';
+import { clientLog } from '../lib/clientLog';
 import { 
   Lock, 
   Mail, 
@@ -8,8 +10,6 @@ import {
   AlertCircle, 
   CheckCircle2, 
   Sparkles, 
-  HelpCircle,
-  Database,
   ArrowRight,
   ChevronLeft
 } from 'lucide-react';
@@ -94,9 +94,9 @@ export default function LoginForm({ onLoginSuccess, onBack }: LoginFormProps) {
           'No es posible iniciar sesión en este entorno.'
         );
       }
-    } catch (err: any) {
-      console.error(err);
-      setErrorMessage(err.message || 'Error en las credenciales proporcionadas.');
+    } catch (err) {
+      clientLog.error(err);
+      setErrorMessage(getErrorMessage(err, 'Error en las credenciales proporcionadas.'));
     } finally {
       setLoading(false);
     }
@@ -132,9 +132,9 @@ export default function LoginForm({ onLoginSuccess, onBack }: LoginFormProps) {
           message: `[Simulación] Correo enviado a ${recoveryEmail}. En un ambiente real con Supabase Auth configurado, este botón enviará las instrucciones de recuperación.`
         });
       }
-    } catch (err: any) {
-      console.error(err);
-      setRecoveryStatus({ type: 'error', message: err.message || 'Error al enviar correo de recuperación.' });
+    } catch (err) {
+      clientLog.error(err);
+      setRecoveryStatus({ type: 'error', message: getErrorMessage(err, 'Error al enviar correo de recuperación.') });
     } finally {
       setLoading(false);
     }

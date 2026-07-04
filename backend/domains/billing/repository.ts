@@ -26,7 +26,6 @@ import {
   PaymentApplicationRow,
   buildInvoiceInsertRow,
   buildItemInsertRow,
-  rowToItem,
   rowsToAllocations,
   rowsToEnrichedInvoice,
 } from './mappers';

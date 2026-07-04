@@ -1,4 +1,5 @@
 import React, { useCallback, useEffect, useState } from 'react';
+import { createAuthorizedApi } from '../../lib/apiClient';
 import { CheckCircle2, Lock, Play, ShieldCheck, XCircle, Ban, ClipboardList } from 'lucide-react';
 
 // ====================================================================
@@ -67,10 +68,8 @@ export default function ManualSafeModeModule({ getAuthHeaders }: Props) {
     setLoading(true);
     setError('');
     try {
-      const headers = await getAuthHeaders();
-      const res = await fetch('/api/manual-actions', { headers });
-      if (!res.ok) throw new Error('No se pudo cargar el listado de acciones manuales.');
-      setActions((await res.json()) as SafeAction[]);
+      const api = createAuthorizedApi(getAuthHeaders);
+      setActions(await api.get<SafeAction[]>('/api/manual-actions'));
     } catch (err) {
       setError(err instanceof Error ? err.message : 'Error desconocido cargando acciones.');
     } finally {
@@ -81,10 +80,8 @@ export default function ManualSafeModeModule({ getAuthHeaders }: Props) {
   const openDetail = useCallback(
     async (id: string) => {
       try {
-        const headers = await getAuthHeaders();
-        const res = await fetch(`/api/manual-actions/${id}`, { headers });
-        if (!res.ok) throw new Error('No se pudo cargar el detalle.');
-        setDetail((await res.json()) as SafeActionDetail);
+        const api = createAuthorizedApi(getAuthHeaders);
+        setDetail(await api.get<SafeActionDetail>(`/api/manual-actions/${id}`));
       } catch (err) {
         setError(err instanceof Error ? err.message : 'Error cargando detalle.');
       }
@@ -96,9 +93,8 @@ export default function ManualSafeModeModule({ getAuthHeaders }: Props) {
   const transition = useCallback(
     async (id: string, op: 'approve' | 'reject' | 'simulate' | 'cancel') => {
       try {
-        const headers = { ...(await getAuthHeaders()), 'Content-Type': 'application/json' };
-        const res = await fetch(`/api/manual-actions/${id}/${op}`, { method: 'POST', headers, body: '{}' });
-        if (!res.ok) throw new Error(`No se pudo ${op} la acción.`);
+        const api = createAuthorizedApi(getAuthHeaders);
+        await api.post(`/api/manual-actions/${id}/${op}`, {});
         await load();
         await openDetail(id);
       } catch (err) {

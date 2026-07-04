@@ -66,7 +66,7 @@ describe('UserManualModule — contrato de contenido', () => {
 
 describe('UserManualModule — integración', () => {
   it('App importa y renderiza el módulo cuando el tab está activo', () => {
-    expect(appSource).toContain("import UserManualModule from './modules/user-manual/UserManualModule'");
+    expect(appSource).toContain("const UserManualModule = lazy(() => import('./modules/user-manual/UserManualModule'))");
     expect(appSource).toContain("activeTab === 'user-manual'");
     expect(appSource).toContain('<UserManualModule');
   });

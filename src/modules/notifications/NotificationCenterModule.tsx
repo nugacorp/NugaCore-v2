@@ -1,4 +1,5 @@
 import React, { useCallback, useEffect, useMemo, useState } from 'react';
+import { createAuthorizedApi } from '../../lib/apiClient';
 import { Bell, Eye, ListChecks, MessageSquare, PlayCircle, RefreshCw, Radio, XCircle } from 'lucide-react';
 import type { UserRole } from '../../lib/supabase';
 import { canWriteNotifications } from '../../lib/notificationsRbac';
@@ -109,17 +110,15 @@ export default function NotificationCenterModule({ userRole, getAuthHeaders }: P
   const load = useCallback(async () => {
     setLoading(true);
     try {
-      const headers = await getAuthHeaders();
-      const [s, t, m] = await Promise.all([
-        fetch('/api/notifications/summary', { headers }),
-        fetch('/api/notifications/templates', { headers }),
-        fetch('/api/notifications/messages', { headers }),
+      const api = createAuthorizedApi(getAuthHeaders);
+      const [s, tpls, m] = await Promise.all([
+        api.get<typeof summary>('/api/notifications/summary'),
+        api.get<typeof templates>('/api/notifications/templates'),
+        api.get<typeof messages>('/api/notifications/messages'),
       ]);
-      if (!s.ok || !t.ok || !m.ok) throw new Error('HTTP');
-      setSummary(await s.json());
-      const tpls = await t.json();
+      setSummary(s);
       setTemplates(tpls);
-      setMessages(await m.json());
+      setMessages(m);
       if (!selectedTemplate && tpls[0]) setSelectedTemplate(tpls[0].type);
       setNotice('');
     } catch {
@@ -140,39 +139,49 @@ export default function NotificationCenterModule({ userRole, getAuthHeaders }: P
   };
 
   const doPreview = guarded(async () => {
-    const headers = await getAuthHeaders();
-    const res = await fetch('/api/notifications/preview', {
-      method: 'POST',
-      headers: { ...headers, 'Content-Type': 'application/json' },
-      body: JSON.stringify({ type: selectedTemplate, variables: { customerName: 'Cliente Demo', amount: '$500.00', dueDate: '2026-07-01' } }),
-    });
-    if (!res.ok) { setNotice('No se pudo generar la vista previa.'); return; }
-    setPreviewBody(await res.json());
+    const api = createAuthorizedApi(getAuthHeaders);
+    let preview: typeof previewBody;
+    try {
+      preview = await api.post<typeof previewBody>('/api/notifications/preview', {
+        type: selectedTemplate,
+        variables: { customerName: 'Cliente Demo', amount: '$500.00', dueDate: '2026-07-01' },
+      });
+    } catch {
+      setNotice('No se pudo generar la vista previa.');
+      return;
+    }
+    setPreviewBody(preview);
     setScreen('simulaciones');
     setNotice('');
   });
 
   const createDraft = guarded(async () => {
-    const headers = await getAuthHeaders();
-    const res = await fetch('/api/notifications/messages', {
-      method: 'POST',
-      headers: { ...headers, 'Content-Type': 'application/json' },
-      body: JSON.stringify({ type: selectedTemplate, variables: { customerName: 'Cliente Demo', amount: '$500.00', dueDate: '2026-07-01' } }),
-    });
-    if (!res.ok) { setNotice('No se pudo crear el borrador.'); return; }
+    const api = createAuthorizedApi(getAuthHeaders);
+    try {
+      await api.post('/api/notifications/messages', {
+        type: selectedTemplate,
+        variables: { customerName: 'Cliente Demo', amount: '$500.00', dueDate: '2026-07-01' },
+      });
+    } catch {
+      setNotice('No se pudo crear el borrador.');
+      return;
+    }
     setNotice('');
     void load();
   });
 
   const mutate = (id: string, op: 'simulate' | 'cancel') => guarded(async () => {
-    const headers = await getAuthHeaders();
-    const res = await fetch(`/api/notifications/messages/${id}/${op}`, {
-      method: 'POST',
-      headers: { ...headers, 'Content-Type': 'application/json' },
-      body: op === 'cancel' ? JSON.stringify({ reason: 'Cancelado desde Notification Center.' }) : '{}',
-    });
-    if (!res.ok) { setNotice('No se pudo aplicar la acción.'); return; }
-    const updated = await res.json();
+    const api = createAuthorizedApi(getAuthHeaders);
+    let updated: NotificationMessage;
+    try {
+      updated = await api.post<NotificationMessage>(
+        `/api/notifications/messages/${id}/${op}`,
+        op === 'cancel' ? { reason: 'Cancelado desde Notification Center.' } : {},
+      );
+    } catch {
+      setNotice('No se pudo aplicar la acción.');
+      return;
+    }
     setMessages((prev) => prev.map((item) => item.id === updated.id ? updated : item));
     setNotice('');
     void load();

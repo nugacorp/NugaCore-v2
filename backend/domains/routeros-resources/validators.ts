@@ -12,7 +12,7 @@ const isValidIp = (ip: string): boolean =>
   /^(\d{1,3}\.){3}\d{1,3}$/.test(ip);
 
 const isValidInterfaceName = (name: string): boolean =>
-  /^[a-zA-Z0-9_\-\.]{1,64}$/.test(name);
+  /^[a-zA-Z0-9_.-]{1,64}$/.test(name);
 
 export const validateParams = (p: Partial<ResourceGeneratorParams>): ValidationResult => {
   const errors: string[] = [];

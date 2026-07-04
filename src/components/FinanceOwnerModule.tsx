@@ -1,7 +1,7 @@
 import React, { useState } from 'react';
+import { getErrorMessage } from '../lib/errors';
 import { 
   DollarSign, 
-  Users, 
   Zap, 
   Shield, 
   Smartphone, 
@@ -10,13 +10,9 @@ import {
   Trash2, 
   Play, 
   Clock, 
-  Cpu, 
   Key, 
   CheckCircle,
-  AlertCircle,
-  FileText,
   CreditCard,
-  Send,
   Wifi,
   Ticket
 } from 'lucide-react';
@@ -35,7 +31,7 @@ interface FinanceOwnerModuleProps {
 export default function FinanceOwnerModule({ 
   clients, 
   invoices, 
-  tickets,
+  tickets: _tickets,
   onAddTicket,
   onPayInvoice,
   mode = 'owner'
@@ -87,7 +83,6 @@ export default function FinanceOwnerModule({
   const [payGateway, setPayGateway] = useState<'stripe' | 'mercadopago' | 'paypal' | 'spei'>('stripe');
 
   const clientInvoices = invoices.filter(inv => inv.clientId === selectedPortalClient?.id);
-  const clientTickets = tickets.filter(t => t.clientId === selectedPortalClient?.id);
 
   const triggerClientTicketSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
@@ -115,8 +110,8 @@ export default function FinanceOwnerModule({
         setPortalPaymentSuccess(false);
         setPortalPayingInvoice(null);
       }, 2000);
-    } catch (err: any) {
-      setPortalPayError(err?.message || 'No se pudo procesar el pago.');
+    } catch (err) {
+      setPortalPayError(getErrorMessage(err, 'No se pudo procesar el pago.'));
     }
   };
 
@@ -193,9 +188,6 @@ export default function FinanceOwnerModule({
     .filter(inv => inv.status === 'paid')
     .reduce((acc, current) => acc + current.amount, 0);
   const totalEgresosVal = egresos.reduce((acc, current) => acc + current.amount, 0);
-  const mrrTotalEstimado = clients
-    .filter(c => c.status === 'active')
-    .length * 450; // simple estimation placeholder
   const ebitda = totalIngresosPagados > 0 
     ? ((totalIngresosPagados - totalEgresosVal) / totalIngresosPagados) * 100 
     : 0;

@@ -1,4 +1,5 @@
 import React, { useCallback, useEffect, useState } from 'react';
+import { createAuthorizedApi } from '../lib/apiClient';
 import { AlertTriangle, Cpu, Lock, Server, ShieldAlert, Wifi, KeyRound } from 'lucide-react';
 
 interface NocSummary {
@@ -74,20 +75,16 @@ export default function NocReadOnlyModule({ getAuthHeaders }: Props) {
     setLoading(true);
     setError('');
     try {
-      const headers = await getAuthHeaders();
-      const [summaryRes, routersRes, alertsRes] = await Promise.all([
-        fetch('/api/noc/summary', { headers }),
-        fetch('/api/noc/routers', { headers }),
-        fetch('/api/noc/alerts', { headers }),
+      const api = createAuthorizedApi(getAuthHeaders);
+      const [summaryData, routersData, alertsData] = await Promise.all([
+        api.get<NocSummary>('/api/noc/summary'),
+        api.get<NocRouterView[]>('/api/noc/routers'),
+        api.get<NocDerivedAlert[]>('/api/noc/alerts'),
       ]);
 
-      if (!summaryRes.ok || !routersRes.ok || !alertsRes.ok) {
-        throw new Error('No se pudo cargar el tablero NOC read-only.');
-      }
-
-      setSummary((await summaryRes.json()) as NocSummary);
-      setRouters((await routersRes.json()) as NocRouterView[]);
-      setAlerts((await alertsRes.json()) as NocDerivedAlert[]);
+      setSummary(summaryData);
+      setRouters(routersData);
+      setAlerts(alertsData);
     } catch (err) {
       setError(err instanceof Error ? err.message : 'Error desconocido cargando NOC.');
     } finally {

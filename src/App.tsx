@@ -1,34 +1,35 @@
-import React, { useState, useEffect, useCallback } from 'react';
+import React, { useState, useEffect, useCallback, lazy, Suspense } from 'react';
+import { clientLog } from './lib/clientLog';
 import Sidebar from './components/Sidebar';
-import Dashboard from './components/Dashboard';
-import CrmModule from './components/CrmModule';
-import BillingModule from './components/BillingModule';
-import NetworkModule from './components/NetworkModule';
-import MikrotikModule from './components/MikrotikModule';
-import SupportModule from './components/SupportModule';
-import InventoryModule from './components/InventoryModule';
-import WarehousesModule from './components/WarehousesModule';
-import InventoryTransfersModule from './components/InventoryTransfersModule';
-import InventoryRoutersModule from './components/InventoryRoutersModule';
-import NocReadOnlyModule from './components/NocReadOnlyModule';
-import NocTelemetryModule from './components/NocTelemetryModule';
-import NocOperationsPanel from './components/NocOperationsPanel';
-import ManualSafeModeModule from './modules/manual-safe-mode/ManualSafeModeModule';
-import SafeCommandQueueModule from './modules/safe-command-queue/SafeCommandQueueModule';
-import ProvisioningCenterModule from './modules/provisioning/ProvisioningCenterModule';
-import AutomationCenterModule from './modules/automation/AutomationCenterModule';
-import NotificationCenterModule from './modules/notifications/NotificationCenterModule';
-import RouterOSReadOnlyModule from './modules/routeros-readonly/RouterOSReadOnlyModule';
-import UserManualModule from './modules/user-manual/UserManualModule';
-import InventorySyncModule from './modules/inventory-sync/InventorySyncModule';
-import GisModule from './components/GisModule';
-import FinanceOwnerModule from './components/FinanceOwnerModule';
-import SuspensionModule from './components/SuspensionModule';
-import WireguardManagerModule from './components/WireguardManagerModule';
-import RouterOsResourcesModule from './components/RouterOsResourcesModule';
-import RouterOsTemplatesModule from './components/RouterOsTemplatesModule';
-import RouterEnrollmentWizard from './components/RouterEnrollmentWizard';
-import PaymentsModule from './components/PaymentsModule';
+const Dashboard = lazy(() => import('./components/Dashboard'));
+const CrmModule = lazy(() => import('./components/CrmModule'));
+const BillingModule = lazy(() => import('./components/BillingModule'));
+const NetworkModule = lazy(() => import('./components/NetworkModule'));
+const MikrotikModule = lazy(() => import('./components/MikrotikModule'));
+const SupportModule = lazy(() => import('./components/SupportModule'));
+const InventoryModule = lazy(() => import('./components/InventoryModule'));
+const WarehousesModule = lazy(() => import('./components/WarehousesModule'));
+const InventoryTransfersModule = lazy(() => import('./components/InventoryTransfersModule'));
+const InventoryRoutersModule = lazy(() => import('./components/InventoryRoutersModule'));
+const NocReadOnlyModule = lazy(() => import('./components/NocReadOnlyModule'));
+const NocTelemetryModule = lazy(() => import('./components/NocTelemetryModule'));
+const NocOperationsPanel = lazy(() => import('./components/NocOperationsPanel'));
+const ManualSafeModeModule = lazy(() => import('./modules/manual-safe-mode/ManualSafeModeModule'));
+const SafeCommandQueueModule = lazy(() => import('./modules/safe-command-queue/SafeCommandQueueModule'));
+const ProvisioningCenterModule = lazy(() => import('./modules/provisioning/ProvisioningCenterModule'));
+const AutomationCenterModule = lazy(() => import('./modules/automation/AutomationCenterModule'));
+const NotificationCenterModule = lazy(() => import('./modules/notifications/NotificationCenterModule'));
+const RouterOSReadOnlyModule = lazy(() => import('./modules/routeros-readonly/RouterOSReadOnlyModule'));
+const UserManualModule = lazy(() => import('./modules/user-manual/UserManualModule'));
+const InventorySyncModule = lazy(() => import('./modules/inventory-sync/InventorySyncModule'));
+const GisModule = lazy(() => import('./components/GisModule'));
+const FinanceOwnerModule = lazy(() => import('./components/FinanceOwnerModule'));
+const SuspensionModule = lazy(() => import('./components/SuspensionModule'));
+const WireguardManagerModule = lazy(() => import('./components/WireguardManagerModule'));
+const RouterOsResourcesModule = lazy(() => import('./components/RouterOsResourcesModule'));
+const RouterOsTemplatesModule = lazy(() => import('./components/RouterOsTemplatesModule'));
+const RouterEnrollmentWizard = lazy(() => import('./components/RouterEnrollmentWizard'));
+const PaymentsModule = lazy(() => import('./components/PaymentsModule'));
 import LoginForm from './components/LoginForm';
 import LandingPage from './components/LandingPage';
 import UserMenu from './components/UserMenu';
@@ -71,6 +72,15 @@ import { AlertTriangle, RefreshCw, Menu, Sparkles, ArrowRight } from 'lucide-rea
 
 const SIDEBAR_COLLAPSE_STORAGE_KEY = 'nugacore.sidebar.collapsed.v1';
 const WELCOME_BANNER_DISMISSED_KEY = 'nugacore.welcome.dismissed.v1';
+
+// Code splitting (Fase 2 production-ready): cada módulo se carga bajo
+// demanda con React.lazy; este fallback se muestra durante la descarga
+// del chunk correspondiente.
+const ModuleLoader = () => (
+  <div className="flex items-center justify-center py-24 text-slate-400 font-mono text-sm">
+    Cargando módulo…
+  </div>
+);
 
 // Reorganización UX (pre PROD-4): el "MikroTik Workspace" in-page agrupa solo
 // las funciones de router (core, enrollment, scripts y templates). WireGuard y
@@ -439,11 +449,11 @@ export default function App() {
           setWgPeers([]);
         }
       }
-    } catch (err: any) {
+    } catch (err) {
       if (isApiRateLimitError(err)) {
         setRateLimitMessage(err.retryAfterMs);
       } else {
-        console.error(err);
+        clientLog.error(err);
         setErrorStr('Error contacting full-stack back-end server REST API.');
       }
     } finally {
@@ -515,7 +525,7 @@ export default function App() {
       await fetchJson('/api/alerts/acknowledge-all', { method: 'POST' });
       await fetchData();
     } catch (err) {
-      console.error(err);
+      clientLog.error(err);
     }
   };
 
@@ -526,7 +536,7 @@ export default function App() {
     msg: string
   ) => {
     // Simulated live post notification trigger endpoint logic or local append
-    console.log("Post alert: ", type, severity, source, msg);
+    clientLog.debug("Post alert: ", type, severity, source, msg);
     await fetchData();
   };
 
@@ -540,7 +550,7 @@ export default function App() {
       });
       await fetchData();
     } catch (err) {
-      console.error(err);
+      clientLog.error(err);
     }
   };
 
@@ -553,7 +563,7 @@ export default function App() {
       });
       await fetchData();
     } catch (err) {
-      console.error(err);
+      clientLog.error(err);
     }
   };
 
@@ -746,7 +756,7 @@ export default function App() {
       });
       await fetchData();
     } catch (err) {
-      console.error(err);
+      clientLog.error(err);
     }
   };
 
@@ -759,7 +769,7 @@ export default function App() {
       });
       await fetchData();
     } catch (err) {
-      console.error(err);
+      clientLog.error(err);
     }
   };
 
@@ -791,7 +801,7 @@ export default function App() {
       });
       await fetchData();
     } catch (err) {
-      console.error(err);
+      clientLog.error(err);
     }
   };
 
@@ -822,7 +832,7 @@ export default function App() {
       });
       await fetchData();
     } catch (err) {
-      console.error(err);
+      clientLog.error(err);
     }
   };
 
@@ -835,7 +845,7 @@ export default function App() {
       });
       await fetchData();
     } catch (err) {
-      console.error(err);
+      clientLog.error(err);
     }
   };
 
@@ -848,7 +858,7 @@ export default function App() {
       });
       await fetchData();
     } catch (err) {
-      console.error(err);
+      clientLog.error(err);
     }
   };
 
@@ -862,7 +872,7 @@ export default function App() {
       });
       await fetchData();
     } catch (err) {
-      console.error(err);
+      clientLog.error(err);
     }
   };
 
@@ -875,7 +885,7 @@ export default function App() {
       });
       await fetchData();
     } catch (err) {
-      console.error(err);
+      clientLog.error(err);
     }
   };
 
@@ -1070,6 +1080,7 @@ export default function App() {
             )}
 
             {/* View Dispatcher */}
+            <Suspense fallback={<ModuleLoader />}>
             {activeTab === 'dashboard' && (
               <Dashboard
                 stats={stats}
@@ -1334,6 +1345,7 @@ export default function App() {
                 />
               </div>
             )}
+            </Suspense>
           </main>
         )}
       </div>

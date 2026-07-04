@@ -1,11 +1,11 @@
 import React, { useCallback, useEffect, useState } from 'react';
+import { createAuthorizedApi, ApiClientError } from '../lib/apiClient';
 import { 
   Users, 
   UserPlus, 
   Search, 
   MapPin, 
   CheckCircle, 
-  AlertTriangle, 
   TrendingUp, 
   UserMinus, 
   Briefcase, 
@@ -324,10 +324,8 @@ export default function CrmModule({
     const customerId = client360.id;
     (async () => {
       try {
-        const headers = await getAuthHeaders();
-        const res = await fetch(`/api/billing/customers/${customerId}/balance`, { headers });
-        if (!res.ok) throw new Error(`HTTP ${res.status}`);
-        const data = (await res.json()) as ClientBillingSummary;
+        const api = createAuthorizedApi(getAuthHeaders);
+        const data = await api.get<ClientBillingSummary>(`/api/billing/customers/${customerId}/balance`);
         if (!cancelled) setClient360Billing(data);
       } catch {
         if (!cancelled) setClient360Billing(null);
@@ -346,10 +344,8 @@ export default function CrmModule({
     const customerId = client360.id;
     (async () => {
       try {
-        const headers = await getAuthHeaders();
-        const res = await fetch(`/api/service-status/customers/${customerId}`, { headers });
-        if (!res.ok) throw new Error(`HTTP ${res.status}`);
-        const data = (await res.json()) as ClientServiceStatusView;
+        const api = createAuthorizedApi(getAuthHeaders);
+        const data = await api.get<ClientServiceStatusView>(`/api/service-status/customers/${customerId}`);
         if (!cancelled) setClient360ServiceStatus(data);
       } catch {
         if (!cancelled) setClient360ServiceStatus(null);
@@ -391,16 +387,12 @@ export default function CrmModule({
     // Service Status SSOT (Pre-PROD-7): marca el estado como pendiente (dryRun).
     // No ejecuta cambios reales: no se aplicó al router ni en MikroTik.
     try {
-      const headers = { 'Content-Type': 'application/json', ...(await getAuthHeaders()) };
+      const api = createAuthorizedApi(getAuthHeaders);
       const path = kind === 'suspend' ? 'request-suspension' : 'request-reactivation';
-      await fetch(`/api/service-status/customers/${client.id}/${path}`, {
-        method: 'POST',
-        headers,
-        body: JSON.stringify({
-          reason: kind === 'suspend'
-            ? 'Suspensión solicitada desde Client 360.'
-            : 'Reactivación solicitada desde Client 360.',
-        }),
+      await api.post(`/api/service-status/customers/${client.id}/${path}`, {
+        reason: kind === 'suspend'
+          ? 'Suspensión solicitada desde Client 360.'
+          : 'Reactivación solicitada desde Client 360.',
       });
     } catch {
       // Aunque falle la red no se aplicó ningún cambio real (mock / dryRun).
@@ -460,21 +452,24 @@ export default function CrmModule({
     setCoverageError('');
   }, []);
 
+  // Helper IPAM sobre el cliente central: conserva la firma histórica
+  // (url + RequestInit) para no tocar los call sites del módulo.
   const fetchIpamJson = useCallback(async <T,>(url: string, init?: RequestInit): Promise<T> => {
-    const authHeaders = await getAuthHeaders();
-    const response = await fetch(url, {
-      ...init,
-      headers: {
-        ...authHeaders,
-        ...(init?.body ? { 'Content-Type': 'application/json' } : {}),
-        ...(init?.headers || {}),
-      },
-    });
-    if (!response.ok) {
-      const body = await response.json().catch(() => null);
-      throw new Error(body?.error || `IPAM respondió HTTP ${response.status}`);
+    const api = createAuthorizedApi(getAuthHeaders);
+    const method = (init?.method || 'GET').toUpperCase();
+    const body = typeof init?.body === 'string' ? JSON.parse(init.body) : undefined;
+    try {
+      if (method === 'POST') return await api.post<T>(url, body);
+      if (method === 'PUT') return await api.put<T>(url, body);
+      if (method === 'PATCH') return await api.patch<T>(url, body);
+      if (method === 'DELETE') return await api.delete<T>(url, body);
+      return await api.get<T>(url);
+    } catch (err) {
+      if (err instanceof ApiClientError) {
+        throw new Error(err.message.startsWith('Request failed') ? `IPAM respondió HTTP ${err.status}` : err.message, { cause: err });
+      }
+      throw err;
     }
-    return await response.json() as T;
   }, [getAuthHeaders]);
 
   const loadIpamRouters = useCallback(async () => {

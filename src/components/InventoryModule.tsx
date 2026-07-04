@@ -1,5 +1,5 @@
 import React, { useState } from 'react';
-import { Box, Search, Plus, ArrowLeftRight, CheckCircle, PackageCheck, Truck } from 'lucide-react';
+import { Box, Search, Plus, ArrowLeftRight, Truck } from 'lucide-react';
 import { WarehouseItem } from '../types';
 
 interface InventoryModuleProps {

@@ -2,28 +2,15 @@ import React, { useState, useEffect } from 'react';
 import { 
   Cpu, 
   ArrowRight, 
-  Shield, 
   Activity, 
   Users, 
-  Zap, 
   DollarSign, 
   MapPin, 
-  CheckCircle, 
-  AlertTriangle, 
   Sparkles, 
   Wifi, 
-  Layers, 
   ClipboardCheck, 
-  Eye, 
-  Database, 
-  TrendingUp, 
-  Clock, 
-  HeartHandshake, 
-  BookOpen, 
   Server,
-  ArrowUpRight,
   Calculator,
-  Lock,
   ChevronRight
 } from 'lucide-react';
 interface LandingPageProps {

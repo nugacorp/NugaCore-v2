@@ -2,19 +2,12 @@ import React, { useState, useEffect, useRef } from 'react';
 import { 
   Map as MapIcon, 
   Radio, 
-  ZoomIn, 
-  ZoomOut, 
-  Plus, 
   Sliders, 
-  Layers, 
-  RefreshCw, 
   Cpu, 
   Database, 
-  Zap, 
   AlertTriangle, 
   Activity, 
-  Compass,
-  ArrowUpRight
+  Compass
 } from 'lucide-react';
 import { Tower, Client, NapBox, OnuFTTH, OltFTTH } from '../types';
 
@@ -31,7 +24,7 @@ export default function GisModule({
   clients = [], 
   naps = [], 
   onus = [], 
-  olts = [] 
+  olts: _olts = [] 
 }: GisModuleProps) {
   // Layer visibility toggles
   const [activeNetworkLayer, setActiveNetworkLayer] = useState<'all' | 'wisp' | 'ftth'>('all');
@@ -64,7 +57,7 @@ export default function GisModule({
   useEffect(() => {
     if (!containerRef.current) return;
     const observer = new ResizeObserver((entries) => {
-      for (let entry of entries) {
+      for (const entry of entries) {
         const { width, height } = entry.contentRect;
         setDimensions({ width: width || 680, height: height || 440 });
       }

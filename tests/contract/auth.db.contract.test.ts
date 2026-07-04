@@ -1,10 +1,8 @@
 import { describe, it, expect, beforeAll } from 'vitest';
 import request from 'supertest';
-import { createClient } from '@supabase/supabase-js';
 import { readFileSync } from 'node:fs';
 import type { Express } from 'express';
 import type { SupabaseClient } from '@supabase/supabase-js';
-import { createApp } from '../../backend/app';
 
 // ====================================================================
 // Prueba de AUTH REAL (Supabase JWT) — Fase 2.1. NO hermética.

@@ -30,7 +30,7 @@ describe('Automation Center UI', () => {
   });
 
   it('App renderiza el modulo y RBAC lo expone a todos los roles', () => {
-    expect(appSource).toContain("import AutomationCenterModule from './modules/automation/AutomationCenterModule'");
+    expect(appSource).toContain("const AutomationCenterModule = lazy(() => import('./modules/automation/AutomationCenterModule'))");
     expect(appSource).toContain("activeTab === 'automation'");
     for (const role of ["'Super Admin'", "'Administrador'", "'Cobranza'", "'Técnico'", "'Soporte'", "'Solo lectura'"]) {
       const line = rbacSource.split('\n').find((item) => item.includes(role)) ?? '';

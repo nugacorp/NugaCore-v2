@@ -1,4 +1,5 @@
 import React, { useCallback, useEffect, useState } from 'react';
+import { createAuthorizedApi } from '../lib/apiClient';
 import { ArrowLeftRight, Plus, CheckCircle, XCircle, Ban, RefreshCw, Clock } from 'lucide-react';
 
 // ====================================================================
@@ -71,16 +72,15 @@ export default function InventoryTransfersModule({ getAuthHeaders }: Props) {
     setLoading(true);
     setError('');
     try {
-      const headers = await getAuthHeaders();
-      const [trRes, itRes, whRes] = await Promise.all([
-        fetch('/api/inventory/transfers', { headers }),
-        fetch('/api/inventory', { headers }),
-        fetch('/api/inventory/warehouses', { headers }),
+      const api = createAuthorizedApi(getAuthHeaders);
+      const [trData, itData, whData] = await Promise.all([
+        api.get<typeof transfers>('/api/inventory/transfers'),
+        api.get<typeof items>('/api/inventory'),
+        api.get<typeof warehouses>('/api/inventory/warehouses'),
       ]);
-      if (!trRes.ok || !itRes.ok || !whRes.ok) throw new Error('No se pudieron cargar las transferencias.');
-      setTransfers(await trRes.json());
-      setItems(await itRes.json());
-      setWarehouses(await whRes.json());
+      setTransfers(trData);
+      setItems(itData);
+      setWarehouses(whData);
     } catch (err) {
       setError(err instanceof Error ? err.message : 'Error al cargar transferencias.');
     } finally {
@@ -105,16 +105,13 @@ export default function InventoryTransfersModule({ getAuthHeaders }: Props) {
     if (!formItemId || !formDest) return;
     setError('');
     try {
-      const headers = { ...(await getAuthHeaders()), 'Content-Type': 'application/json' };
-      const res = await fetch('/api/inventory/transfers', {
-        method: 'POST',
-        headers,
-        body: JSON.stringify({ itemId: formItemId, qty: Number(formQty), toWarehouse: formDest, reason: formReason || undefined }),
+      const api = createAuthorizedApi(getAuthHeaders);
+      await api.post('/api/inventory/transfers', {
+        itemId: formItemId,
+        qty: Number(formQty),
+        toWarehouse: formDest,
+        reason: formReason || undefined,
       });
-      if (!res.ok) {
-        const body = await res.json().catch(() => ({}));
-        throw new Error(body.error || 'No se pudo crear la transferencia.');
-      }
       setShowModal(false);
       await load();
     } catch (err) {
@@ -125,12 +122,8 @@ export default function InventoryTransfersModule({ getAuthHeaders }: Props) {
   const act = async (id: string, action: 'complete' | 'cancel') => {
     setError('');
     try {
-      const headers = await getAuthHeaders();
-      const res = await fetch(`/api/inventory/transfers/${id}/${action}`, { method: 'POST', headers });
-      if (!res.ok) {
-        const body = await res.json().catch(() => ({}));
-        throw new Error(body.error || 'No se pudo actualizar la transferencia.');
-      }
+      const api = createAuthorizedApi(getAuthHeaders);
+      await api.post(`/api/inventory/transfers/${id}/${action}`);
       await load();
     } catch (err) {
       setError(err instanceof Error ? err.message : 'Error al actualizar la transferencia.');

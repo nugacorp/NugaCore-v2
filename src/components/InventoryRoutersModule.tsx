@@ -1,4 +1,5 @@
 import React, { useState, useEffect, useCallback } from 'react';
+import { createAuthorizedApi } from '../lib/apiClient';
 import {
   Boxes,
   RefreshCw,
@@ -76,16 +77,13 @@ export default function InventoryRoutersModule({ getAuthHeaders }: Props) {
     setLoading(true);
     setError('');
     try {
-      const headers = await getAuthHeaders();
-      const [summaryRes, routersRes] = await Promise.all([
-        fetch('/api/inventory/summary', { headers }),
-        fetch('/api/inventory/routers', { headers }),
+      const api = createAuthorizedApi(getAuthHeaders);
+      const [summaryData, routersData] = await Promise.all([
+        api.get<InventorySummary>('/api/inventory/summary'),
+        api.get<InventoryRouterView[]>('/api/inventory/routers'),
       ]);
-      if (!summaryRes.ok || !routersRes.ok) {
-        throw new Error('No se pudo cargar el inventario de routers.');
-      }
-      setSummary((await summaryRes.json()) as InventorySummary);
-      setRouters((await routersRes.json()) as InventoryRouterView[]);
+      setSummary(summaryData);
+      setRouters(routersData);
     } catch (err) {
       setError(err instanceof Error ? err.message : 'Error desconocido al cargar el inventario.');
     } finally {

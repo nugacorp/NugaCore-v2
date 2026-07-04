@@ -45,7 +45,7 @@ class SentenceParser {
   push(chunk: Buffer): string[][] {
     this.buf = Buffer.concat([this.buf, chunk]);
     const sentences: string[][] = [];
-    // eslint-disable-next-line no-constant-condition
+     
     while (true) {
       const parsed = this.readWord();
       if (parsed === null) break; // datos incompletos
@@ -62,8 +62,8 @@ class SentenceParser {
   private readWord(): string | null {
     if (this.buf.length === 0) return null;
     const first = this.buf[0];
-    let len = 0;
-    let header = 0;
+    let len: number;
+    let header: number;
     if (first < 0x80) { len = first; header = 1; }
     else if (first < 0xc0) { if (this.buf.length < 2) return null; len = ((first & 0x3f) << 8) | this.buf[1]; header = 2; }
     else if (first < 0xe0) { if (this.buf.length < 3) return null; len = ((first & 0x1f) << 16) | (this.buf[1] << 8) | this.buf[2]; header = 3; }

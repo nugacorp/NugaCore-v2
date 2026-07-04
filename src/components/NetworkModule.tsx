@@ -1,21 +1,10 @@
 import React, { useState } from 'react';
 import { 
-  Network, 
-  Settings, 
-  Activity, 
   Radio, 
-  Cpu, 
-  Database, 
-  Wrench, 
   Plus, 
-  TrendingUp, 
-  AlertTriangle, 
   CheckCircle, 
-  HelpCircle,
-  RefreshCw,
   Power,
   Copy,
-  Check,
   Server
 } from 'lucide-react';
 import { Tower, OltFTTH, OnuFTTH, Client, NapBox } from '../types';
@@ -65,11 +54,11 @@ export default function NetworkModule({
   // ONU Form Wizard State
   const [showProvisionModal, setShowProvisionModal] = useState(false);
   const [formClientId, setFormClientId] = useState('');
-  const [formOltId, setFormOltId] = useState('');
+  const [formOltId] = useState('');
   const [formPort, setFormPort] = useState('1');
   const [formMac, setFormMac] = useState('');
   const [formBrand, setFormBrand] = useState('Huawei');
-  const [formModel, setFormModel] = useState('EG8145V5');
+  const [formModel] = useState('EG8145V5');
   const [formNapId, setFormNapId] = useState('');
   const [formNapPort, setFormNapPort] = useState('');
 

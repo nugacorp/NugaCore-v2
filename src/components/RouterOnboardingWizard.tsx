@@ -12,6 +12,7 @@
 // ====================================================================
 
 import React, { useState } from 'react';
+import { createAuthorizedApi } from '../lib/apiClient';
 import {
   X,
   ChevronRight,
@@ -28,7 +29,6 @@ import {
   Loader2,
   Shield,
   Copy,
-  Settings,
   SlidersHorizontal,
 } from 'lucide-react';
 import type { UserRole } from '../lib/supabase';
@@ -38,15 +38,11 @@ import {
   MODEL_OPTIONS,
   DEFAULT_ADVANCED_FORM,
   AdvancedOnboardingForm,
-  WanConfig,
   buildAdvancedEnrollmentPayload,
   getTemplateV7Warning,
   getTemplateLabel,
   setTemplateSelection,
-  isPccTemplate,
-  getWanCountForTemplate,
-  buildDefaultWanConfigs,
-} from '../lib/routerOnboardingView';
+  } from '../lib/routerOnboardingView';
 import {
   TemplateParameterSchema,
   TemplateParameterGroup,
@@ -126,7 +122,6 @@ export default function RouterOnboardingWizard({
 }: RouterOnboardingWizardProps) {
   const [step, setStep] = useState(1);
   const [form, setForm] = useState<AdvancedOnboardingForm>(freshDefaultForm);
-  const [activeWanTab, setActiveWanTab] = useState(0);
   // Fase 4.9.2: esquema y valores del formulario dinámico de parámetros.
   const [paramSchema, setParamSchema] = useState<TemplateParameterSchema | null>(null);
   const [paramValues, setParamValues] = useState<TemplateParameterValues>({});
@@ -149,17 +144,14 @@ export default function RouterOnboardingWizard({
   const loadParameters = async (templateId: string) => {
     setParamsLoading(true);
     try {
-      const headers = await getAuthHeaders();
-      const res = await fetch(`/api/router-templates/${templateId}/parameters`, { headers });
-      if (res.ok) {
-        const schema = (await res.json()) as TemplateParameterSchema;
-        setParamSchema(schema);
-        setParamValues(buildDefaultParameterValues(schema));
-      } else {
-        // Plantilla sin parámetros declarados: formulario dinámico vacío.
-        setParamSchema(null);
-        setParamValues({});
-      }
+      const api = createAuthorizedApi(getAuthHeaders);
+      // Si la plantilla no declara parámetros el backend responde error:
+      // se trata como formulario dinámico vacío (catch de abajo).
+      const schema = await api.get<TemplateParameterSchema>(
+        `/api/router-templates/${templateId}/parameters`,
+      );
+      setParamSchema(schema);
+      setParamValues(buildDefaultParameterValues(schema));
     } catch {
       setParamSchema(null);
       setParamValues({});
@@ -240,17 +232,14 @@ export default function RouterOnboardingWizard({
     setLoading(true);
     clearError();
     try {
-      const headers = await getAuthHeaders();
-      const res = await fetch('/api/wireguard/servers', { headers });
-      if (res.ok) {
-        const servers: Array<{ isDefault?: boolean; status: string }> = await res.json();
-        const hasDefault = servers.some(
-          (s) => (s.isDefault === true || s.isDefault === undefined) && s.status === 'active',
-        );
-        setWgDefaultOk(hasDefault || servers.length > 0);
-      } else {
-        setWgDefaultOk(false);
-      }
+      const api = createAuthorizedApi(getAuthHeaders);
+      const servers = await api.get<Array<{ isDefault?: boolean; status: string }>>(
+        '/api/wireguard/servers',
+      );
+      const hasDefault = servers.some(
+        (s) => (s.isDefault === true || s.isDefault === undefined) && s.status === 'active',
+      );
+      setWgDefaultOk(hasDefault || servers.length > 0);
     } catch {
       setWgDefaultOk(false);
     } finally {
@@ -264,15 +253,9 @@ export default function RouterOnboardingWizard({
     try {
       // Fase 4.9.2: adjunta los parámetros dinámicos al payload.
       const payload = { ...buildAdvancedEnrollmentPayload(form), templateParameters: paramValues };
-      const headers = await getAuthHeaders();
-      const res = await fetch('/api/router-enrollment/start', {
-        method: 'POST',
-        headers: { ...headers, 'Content-Type': 'application/json' },
-        body: JSON.stringify(payload),
-      });
-      const data = await res.json();
-      if (!res.ok) throw new Error(data.error || 'Error al generar configuración.');
-      setStartResult(data as StartResult);
+      const api = createAuthorizedApi(getAuthHeaders);
+      const data = await api.post<StartResult>('/api/router-enrollment/start', payload);
+      setStartResult(data);
       setStep(6);
     } catch (e: unknown) {
       setError(e instanceof Error ? e.message : 'Error desconocido.');
@@ -284,11 +267,10 @@ export default function RouterOnboardingWizard({
   const handleDownload = async () => {
     if (!startResult) return;
     try {
-      const headers = await getAuthHeaders();
+      const api = createAuthorizedApi(getAuthHeaders);
       const enrollmentId = startResult.enrollmentId || startResult.enrollment.id;
-      const res = await fetch(`/api/router-enrollment/${enrollmentId}/download`, { headers });
-      if (!res.ok) throw new Error('Error al descargar el script.');
-      const text = await res.text();
+      // El endpoint devuelve text/plain: apiClient entrega el cuerpo como string.
+      const text = await api.get<string>(`/api/router-enrollment/${enrollmentId}/download`);
       const blob = new Blob([text], { type: 'text/plain' });
       const url = URL.createObjectURL(blob);
       const a = document.createElement('a');
@@ -306,15 +288,12 @@ export default function RouterOnboardingWizard({
     setLoading(true);
     clearError();
     try {
-      const headers = await getAuthHeaders();
+      const api = createAuthorizedApi(getAuthHeaders);
       const enrollmentId = startResult.enrollmentId || startResult.enrollment.id;
-      const res = await fetch(`/api/router-enrollment/${enrollmentId}/check-online`, {
-        method: 'POST',
-        headers,
-      });
-      const data = await res.json();
-      if (!res.ok) throw new Error(data.error || 'Error al verificar conexión.');
-      setCheckResult(data as CheckResult);
+      const data = await api.post<CheckResult>(
+        `/api/router-enrollment/${enrollmentId}/check-online`,
+      );
+      setCheckResult(data);
     } catch (e: unknown) {
       setError(e instanceof Error ? e.message : 'Error al verificar.');
     } finally {
@@ -333,7 +312,6 @@ export default function RouterOnboardingWizard({
   const handleClose = () => {
     setStep(1);
     setForm(freshDefaultForm());
-    setActiveWanTab(0);
     setParamSchema(null);
     setParamValues({});
     setStartResult(null);
@@ -342,12 +320,6 @@ export default function RouterOnboardingWizard({
     setWgDefaultOk(null);
     onClose();
   };
-
-  const updateWan = (index: number, patch: Partial<WanConfig>) =>
-    setForm((f) => ({
-      ...f,
-      wanConfigs: f.wanConfigs.map((w, i) => (i === index ? { ...w, ...patch } : w)),
-    }));
 
   const handleFinish = () => {
     handleClose();

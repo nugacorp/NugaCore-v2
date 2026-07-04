@@ -17,7 +17,7 @@ export function createApp() {
   // Correlation ID por petición (req.requestId / req.log / X-Request-Id).
   app.use(attachRequestId);
 
-  app.use(express.json());
+  app.use(express.json({ limit: process.env.JSON_BODY_LIMIT || '100kb' }));
   app.use((req, _res, next) => {
     (req.log ?? logger).info(`${req.method} ${req.path}`);
     next();

@@ -1,6 +1,7 @@
 import React, { useState } from 'react';
+import { getErrorMessage } from '../lib/errors';
 import {
-  Shield, Plus, RefreshCw, Loader2, KeyRound, Server, Ban, Copy, Check, X,
+  Shield, Plus, RefreshCw, Loader2, Server, Ban, Copy, Check, X,
 } from 'lucide-react';
 import type {
   WireguardServerView,
@@ -53,7 +54,7 @@ export default function WireguardManagerModule({ servers, peers, onRefresh, onCr
 
   const run = async (label: string, fn: () => Promise<void>) => {
     setBusy(label);
-    try { await fn(); } catch (e: any) { flash('error', e?.message || 'Operación fallida.'); } finally { setBusy(''); }
+    try { await fn(); } catch (e) { flash('error', getErrorMessage(e, 'Operación fallida.')); } finally { setBusy(''); }
   };
 
   const createServer = async (e: React.FormEvent) => {

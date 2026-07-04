@@ -17,20 +17,16 @@ describe('PaymentsModule — Bearer auth headers', () => {
   });
 
   it('usa getAuthHeaders para cargar orders y actions', () => {
-    expect(paymentsSource).toContain('const headers = await getAuthHeaders()');
-    expect(paymentsSource).toContain(
-      "fetch('/api/payments/orders', { headers })",
-    );
-    expect(paymentsSource).toContain(
-      "fetch('/api/payments/actions', { headers })",
-    );
+    expect(paymentsSource).toContain('createAuthorizedApi(getAuthHeaders)');
+    expect(paymentsSource).toContain("'/api/payments/orders'");
+    expect(paymentsSource).toContain("'/api/payments/actions'");
   });
 
   it('usa getAuthHeaders en creación de órdenes y reactivación', () => {
-    expect(paymentsSource).toContain('...(await getAuthHeaders())');
-    expect(paymentsSource).toContain("fetch('/api/payments/orders', {");
+    expect(paymentsSource).toContain('createAuthorizedApi(getAuthHeaders)');
+    expect(paymentsSource).toContain("api.post<PaymentOrderView>('/api/payments/orders'");
     expect(paymentsSource).toContain(
-      'fetch(`/api/payments/customers/${reactivateId.trim()}/reactivate`, {',
+      '`/api/payments/customers/${reactivateId.trim()}/reactivate`',
     );
   });
 

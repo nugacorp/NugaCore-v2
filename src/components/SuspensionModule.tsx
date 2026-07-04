@@ -1,4 +1,5 @@
 import React, { useState } from 'react';
+import { getErrorMessage } from '../lib/errors';
 import {
   Ban,
   RefreshCw,
@@ -86,8 +87,8 @@ export default function SuspensionModule({
     try {
       await fn();
       flash('success', okMsg);
-    } catch (err: any) {
-      flash('error', err?.message || 'Operación fallida.');
+    } catch (err) {
+      flash('error', getErrorMessage(err, 'Operación fallida.'));
     } finally {
       setBusy('');
     }

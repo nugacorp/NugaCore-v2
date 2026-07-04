@@ -1,4 +1,6 @@
 import React, { useState, useEffect, useCallback } from 'react';
+import { createAuthorizedApi } from '../lib/apiClient';
+import { clientLog } from '../lib/clientLog';
 import {
   Signal,
   AlertTriangle,
@@ -99,7 +101,7 @@ export default function NocOperationsPanel({
         const seconds = Math.max(1, Math.ceil(err.retryAfterMs / 1000));
         setSettingsRateLimited(`Demasiadas solicitudes, reintentando en ${seconds}s.`);
       } else {
-        console.error('Error loading notification settings', err);
+        clientLog.error('Error loading notification settings', err);
       }
     } finally {
       setFetchingSettings(false);
@@ -136,7 +138,7 @@ export default function NocOperationsPanel({
         const seconds = Math.max(1, Math.ceil(err.retryAfterMs / 1000));
         setSettingsRateLimited(`Demasiadas solicitudes, reintentando en ${seconds}s.`);
       } else {
-        console.error("Error saving settings", err);
+        clientLog.error("Error saving settings", err);
       }
     } finally {
       setSavingSettings(false);
@@ -156,7 +158,7 @@ export default function NocOperationsPanel({
           triggerInAppToast("⚠️ Permiso Denegado", "El navegador bloqueó las notificaciones. Habilítalas en el candado de la barra de direcciones.", "warning");
         }
       } catch (err) {
-        console.error(err);
+        clientLog.error(err);
       }
     } else {
       triggerInAppToast("🚫 Sin Soporte HTML5", "Este navegador no soporta Web Push Notifications de forma nativa.", "warning");
@@ -176,18 +178,12 @@ export default function NocOperationsPanel({
     e.preventDefault();
     setTriggeringSimulation(true);
     try {
-      const res = await fetch('/api/notifications/trigger-simulation', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json', ...(await getAuthHeaders()) },
-        body: JSON.stringify({
-          eventType: simEventType,
-          metricValue: simLatencyValue,
-          source: simSource
-        })
-      });
-
-      if (res.ok) {
-        const data = await res.json();
+      const api = createAuthorizedApi(getAuthHeaders);
+      {
+        const data = await api.post<{ triggered: boolean; message: string; notificationPayload: { title: string; body: string; tag?: string } }>(
+          '/api/notifications/trigger-simulation',
+          { eventType: simEventType, metricValue: simLatencyValue, source: simSource },
+        );
         const stamp = new Date().toLocaleTimeString();
 
         if (data.triggered) {
@@ -209,7 +205,7 @@ export default function NocOperationsPanel({
                 tag: data.notificationPayload.tag
               });
             } catch (e) {
-              console.warn("Unable to trigger native Notification instance (often due to iframe sandboxing):", e);
+              clientLog.warn("Unable to trigger native Notification instance (often due to iframe sandboxing):", e);
             }
           }
 
@@ -220,7 +216,7 @@ export default function NocOperationsPanel({
         }
       }
     } catch (err) {
-      console.error(err);
+      clientLog.error(err);
     } finally {
       setTriggeringSimulation(false);
     }

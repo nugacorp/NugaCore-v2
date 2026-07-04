@@ -1,4 +1,5 @@
 import React, { useState, useEffect, useCallback } from 'react';
+import { createAuthorizedApi } from '../lib/apiClient';
 import {
   FileCode,
   Download,
@@ -182,18 +183,17 @@ export default function RouterOsResourcesModule({ userRole, getAuthHeaders }: Pr
   const canSeeHistory = canViewHistory(userRole);
   const canCreateWgPeer = userRole === 'Super Admin' || userRole === 'Administrador';
 
+  // Helper del módulo sobre el cliente central: conserva la firma histórica
+  // (url + RequestInit) para no tocar los call sites.
   const fetchJson = useCallback(
     async (url: string, init?: RequestInit) => {
-      const authHeaders = await getAuthHeaders();
-      const res = await fetch(url, {
-        ...init,
-        headers: { ...authHeaders, ...(init?.headers || {}) },
-      });
-      if (!res.ok) {
-        const err = await res.json().catch(() => ({ error: `HTTP ${res.status}` }));
-        throw new Error(err.error || `HTTP ${res.status}`);
-      }
-      return res.json();
+      const api = createAuthorizedApi(getAuthHeaders);
+      const method = (init?.method || 'GET').toUpperCase();
+      const body = typeof init?.body === 'string' ? JSON.parse(init.body) : undefined;
+      if (method === 'POST') return api.post(url, body);
+      if (method === 'PUT') return api.put(url, body);
+      if (method === 'DELETE') return api.delete(url, body);
+      return api.get(url);
     },
     [getAuthHeaders],
   );
@@ -207,15 +207,7 @@ export default function RouterOsResourcesModule({ userRole, getAuthHeaders }: Pr
       .catch(() => setError('No se pudieron cargar las plantillas.'));
   }, [fetchJson]);
 
-  // Cargar servidores WireGuard cuando el modo manager está activo y la plantilla es wireguard
-  useEffect(() => {
-    if (params.templateId === 'base_wisp_wireguard' && wgIntegMode === 'manager') {
-      loadWgServers();
-    }
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [params.templateId, wgIntegMode]);
-
-  const loadWgServers = async () => {
+  async function loadWgServers() {
     setLoadingWgServers(true);
     try {
       const data = await fetchJson('/api/wireguard/servers');
@@ -225,7 +217,15 @@ export default function RouterOsResourcesModule({ userRole, getAuthHeaders }: Pr
     } finally {
       setLoadingWgServers(false);
     }
-  };
+  }
+
+  // Cargar servidores WireGuard cuando el modo manager está activo y la plantilla es wireguard
+  useEffect(() => {
+    if (params.templateId === 'base_wisp_wireguard' && wgIntegMode === 'manager') {
+      loadWgServers();
+    }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [params.templateId, wgIntegMode]);
 
   const loadWgPeers = async (serverId: string) => {
     setLoadingWgPeers(true);

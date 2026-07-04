@@ -6,7 +6,6 @@ import {
   flattenParameters,
 } from '../../backend/domains/router-template-parameters/registry';
 
-const PCC = ['pcc_2wan', 'pcc_3wan', 'pcc_4wan', 'pcc_5wan'];
 const ALL = Object.keys(TEMPLATE_PARAMETER_REGISTRY);
 
 // ── Estructura general ─────────────────────────────────────────────────

@@ -1,4 +1,5 @@
 import React, { useCallback, useEffect, useState } from 'react';
+import { createAuthorizedApi } from '../../lib/apiClient';
 import {
   Activity,
   CheckCircle,
@@ -77,16 +78,11 @@ export default function InventorySyncModule({ getAuthHeaders }: Props) {
     setLoading(true);
     setError('');
     try {
-      const headers = await getAuthHeaders();
-      const [statusRes, diffRes] = await Promise.all([
-        fetch('/api/inventory-sync/status', { headers }),
-        fetch('/api/inventory-sync/differences', { headers }),
+      const api = createAuthorizedApi(getAuthHeaders);
+      const [statusBody, diffBody] = await Promise.all([
+        api.get<typeof status>('/api/inventory-sync/status'),
+        api.get<{ differences?: unknown }>('/api/inventory-sync/differences'),
       ]);
-      if (!statusRes.ok || !diffRes.ok) {
-        throw new Error('No se pudo cargar el Inventory Sync.');
-      }
-      const statusBody = await statusRes.json();
-      const diffBody = await diffRes.json();
       setStatus(statusBody);
       setDifferences(Array.isArray(diffBody.differences) ? diffBody.differences : []);
     } catch (err) {

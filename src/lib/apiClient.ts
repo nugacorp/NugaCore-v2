@@ -72,3 +72,37 @@ export const apiClient = {
   patch: <T>(url: string, body?: unknown) => request<T>(url, { method: 'PATCH', body }),
   delete: <T>(url: string, body?: unknown) => request<T>(url, { method: 'DELETE', body }),
 };
+
+// --------------------------------------------------------------------
+// API autorizada por componente (Fase 4 production-ready).
+//
+// Los módulos reciben `getAuthHeaders` como prop (puede ser async). Este
+// factory devuelve un cliente con las cabeceras de auth inyectadas en cada
+// petición, manteniendo el manejo de errores centralizado (ApiClientError
+// con el mensaje `error` del backend cuando existe).
+// --------------------------------------------------------------------
+export type AuthHeadersGetter = () =>
+  | Promise<Record<string, string>>
+  | Record<string, string>;
+
+export interface AuthorizedApi {
+  get: <T>(url: string) => Promise<T>;
+  post: <T>(url: string, body?: unknown) => Promise<T>;
+  put: <T>(url: string, body?: unknown) => Promise<T>;
+  patch: <T>(url: string, body?: unknown) => Promise<T>;
+  delete: <T>(url: string, body?: unknown) => Promise<T>;
+}
+
+export function createAuthorizedApi(getAuthHeaders: AuthHeadersGetter): AuthorizedApi {
+  const withAuth = async <T>(url: string, options: RequestOptions = {}): Promise<T> => {
+    const auth = await getAuthHeaders();
+    return request<T>(url, { ...options, headers: { ...auth, ...(options.headers || {}) } });
+  };
+  return {
+    get: <T>(url: string) => withAuth<T>(url),
+    post: <T>(url: string, body?: unknown) => withAuth<T>(url, { method: 'POST', body }),
+    put: <T>(url: string, body?: unknown) => withAuth<T>(url, { method: 'PUT', body }),
+    patch: <T>(url: string, body?: unknown) => withAuth<T>(url, { method: 'PATCH', body }),
+    delete: <T>(url: string, body?: unknown) => withAuth<T>(url, { method: 'DELETE', body }),
+  };
+}

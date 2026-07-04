@@ -15,7 +15,6 @@ import {
 const SAME_CHECK = '2026-06-18 10:00';
 
 const router = (over: Partial<MikrotikRouterRegistryItem> & { id: string }): MikrotikRouterRegistryItem => ({
-  id: over.id,
   name: over.name ?? `Router ${over.id}`,
   ipAddress: '10.0.0.1',
   apiPort: 8728,

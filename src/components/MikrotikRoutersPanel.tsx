@@ -1,4 +1,5 @@
 import React, { useState } from 'react';
+import { getErrorMessage } from '../lib/errors';
 import {
   Router as RouterIcon,
   Plus,
@@ -14,7 +15,6 @@ import {
 } from 'lucide-react';
 import type {
   MikrotikRouterView,
-  MikrotikConnectionType,
   MikrotikProvisioningMode,
   ProvisioningScriptResponse,
   MikrotikTestConnectionResponse,
@@ -124,8 +124,8 @@ export default function MikrotikRoutersPanel({
       flash('success', 'Router registrado.');
       setFName(''); setFIp(''); setFNotes('');
       setShowCreate(false);
-    } catch (err: any) {
-      flash('error', err?.message || 'No se pudo crear el router.');
+    } catch (err) {
+      flash('error', getErrorMessage(err, 'No se pudo crear el router.'));
     } finally {
       setBusy('');
     }
@@ -139,8 +139,8 @@ export default function MikrotikRoutersPanel({
       setScriptResult(resp);
       setCopied(false);
       await onRefresh();
-    } catch (err: any) {
-      flash('error', err?.message || 'No se pudo generar el script.');
+    } catch (err) {
+      flash('error', getErrorMessage(err, 'No se pudo generar el script.'));
     } finally {
       setBusy('');
     }
@@ -160,7 +160,7 @@ export default function MikrotikRoutersPanel({
         flash('success', 'Credenciales rotadas. Copia el nuevo script.');
         return onRefresh();
       })
-      .catch((err: any) => flash('error', err?.message || 'No se pudo rotar.'))
+      .catch((err: unknown) => flash('error', getErrorMessage(err, 'No se pudo rotar.')))
       .finally(() => setBusy(''));
   };
 
@@ -169,8 +169,8 @@ export default function MikrotikRoutersPanel({
     try {
       const resp = await onTestConnection(id);
       setTestResult(resp);
-    } catch (err: any) {
-      flash('error', err?.message || 'No se pudo probar la conexión.');
+    } catch (err) {
+      flash('error', getErrorMessage(err, 'No se pudo probar la conexión.'));
     } finally {
       setBusy('');
     }

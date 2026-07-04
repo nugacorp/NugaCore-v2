@@ -28,7 +28,7 @@ describe('Provisioning Center UI', () => {
   });
 
   it('App renderiza el modulo y RBAC lo expone a roles de lectura', () => {
-    expect(appSource).toContain("import ProvisioningCenterModule from './modules/provisioning/ProvisioningCenterModule'");
+    expect(appSource).toContain("const ProvisioningCenterModule = lazy(() => import('./modules/provisioning/ProvisioningCenterModule'))");
     expect(appSource).toContain("activeTab === 'provisioning'");
     for (const role of ["'Super Admin'", "'Administrador'", "'Cobranza'", "'Técnico'", "'Soporte'", "'Solo lectura'"]) {
       const line = rbacSource.split('\n').find((item) => item.includes(role)) ?? '';

@@ -1,4 +1,5 @@
 import React, { useState, useEffect, useCallback } from 'react';
+import { createAuthorizedApi } from '../lib/apiClient';
 import {
   Wifi,
   Server,
@@ -163,15 +164,15 @@ export default function RouterEnrollmentWizard({ userRole, getAuthHeaders }: Pro
 
   const loadServers = useCallback(async () => {
     try {
-      const res = await fetch('/api/wireguard/servers', { headers: await getAuthHeaders() });
-      if (res.ok) setServers(await res.json());
+      const api = createAuthorizedApi(getAuthHeaders);
+      setServers(await api.get('/api/wireguard/servers'));
     } catch { /* silently ignore */ }
   }, [getAuthHeaders]);
 
   const loadEnrollments = useCallback(async () => {
     try {
-      const res = await fetch('/api/router-enrollment', { headers: await getAuthHeaders() });
-      if (res.ok) setEnrollments(await res.json());
+      const api = createAuthorizedApi(getAuthHeaders);
+      setEnrollments(await api.get('/api/router-enrollment'));
     } catch { /* silently ignore */ }
   }, [getAuthHeaders]);
 
@@ -212,14 +213,9 @@ export default function RouterEnrollmentWizard({ userRole, getAuthHeaders }: Pro
         wanInterface: form.wanInterface || undefined,
         notes: form.notes || undefined,
       };
-      const res = await fetch('/api/router-enrollment/start', {
-        method: 'POST',
-        headers: { ...(await getAuthHeaders()), 'Content-Type': 'application/json' },
-        body: JSON.stringify(body),
-      });
-      const data = await res.json();
-      if (!res.ok) throw new Error(data.error || 'Error al generar enrollment');
-      setStartResult(data as StartResult);
+      const api = createAuthorizedApi(getAuthHeaders);
+      const data = await api.post<StartResult>('/api/router-enrollment/start', body);
+      setStartResult(data);
       setStep(5);
       loadEnrollments();
     } catch (e: unknown) {
@@ -233,11 +229,9 @@ export default function RouterEnrollmentWizard({ userRole, getAuthHeaders }: Pro
     if (!startResult) return;
     const enrollmentId = startResult.enrollment.id;
     try {
-      const res = await fetch(`/api/router-enrollment/${enrollmentId}/download`, {
-        headers: await getAuthHeaders(),
-      });
-      if (!res.ok) throw new Error('Error al descargar el script');
-      const text = await res.text();
+      const api = createAuthorizedApi(getAuthHeaders);
+      // El endpoint devuelve text/plain: apiClient entrega el cuerpo como string.
+      const text = await api.get<string>(`/api/router-enrollment/${enrollmentId}/download`);
       const blob = new Blob([text], { type: 'text/plain' });
       const url = URL.createObjectURL(blob);
       const a = document.createElement('a');
@@ -256,13 +250,11 @@ export default function RouterEnrollmentWizard({ userRole, getAuthHeaders }: Pro
     setLoading(true);
     setError('');
     try {
-      const res = await fetch(`/api/router-enrollment/${startResult.enrollment.id}/check-online`, {
-        method: 'POST',
-        headers: await getAuthHeaders(),
-      });
-      const data = await res.json();
-      if (!res.ok) throw new Error(data.error || 'Error al verificar');
-      setCheckResult(data as CheckOnlineResult);
+      const api = createAuthorizedApi(getAuthHeaders);
+      const data = await api.post<CheckOnlineResult>(
+        `/api/router-enrollment/${startResult.enrollment.id}/check-online`,
+      );
+      setCheckResult(data);
       loadEnrollments();
     } catch (e: unknown) {
       setError(e instanceof Error ? e.message : 'Error desconocido');
@@ -276,10 +268,8 @@ export default function RouterEnrollmentWizard({ userRole, getAuthHeaders }: Pro
     if (!confirm('¿Revocar este enrollment? Se revocará el peer WireGuard.')) return;
     setLoading(true);
     try {
-      await fetch(`/api/router-enrollment/${id}/revoke`, {
-        method: 'POST',
-        headers: await getAuthHeaders(),
-      });
+      const api = createAuthorizedApi(getAuthHeaders);
+      await api.post(`/api/router-enrollment/${id}/revoke`);
       loadEnrollments();
     } catch { /* silently ignore */ }
     finally { setLoading(false); }

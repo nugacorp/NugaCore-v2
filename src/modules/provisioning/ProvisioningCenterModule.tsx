@@ -1,4 +1,5 @@
 import React, { useCallback, useEffect, useMemo, useState } from 'react';
+import { createAuthorizedApi } from '../../lib/apiClient';
 import { CheckCircle, ClipboardList, RefreshCw, ShieldCheck, XCircle } from 'lucide-react';
 import type { UserRole } from '../../lib/supabase';
 import { canWriteProvisioning } from '../../lib/provisioningRbac';
@@ -72,10 +73,8 @@ export default function ProvisioningCenterModule({ userRole, getAuthHeaders }: P
   const load = useCallback(async () => {
     setLoading(true);
     try {
-      const headers = await getAuthHeaders();
-      const res = await fetch('/api/provisioning/actions', { headers });
-      if (!res.ok) throw new Error(`HTTP ${res.status}`);
-      const data = await res.json();
+      const api = createAuthorizedApi(getAuthHeaders);
+      const data = await api.get<ProvisioningAction[]>('/api/provisioning/actions');
       setActions(data);
       if (!selectedId && data[0]) setSelectedId(data[0].id);
       setNotice('');
@@ -96,14 +95,11 @@ export default function ProvisioningCenterModule({ userRole, getAuthHeaders }: P
       return;
     }
     try {
-      const headers = await getAuthHeaders();
-      const res = await fetch(`/api/provisioning/actions/${action.id}/${op}`, {
-        method: 'POST',
-        headers: { ...headers, 'Content-Type': 'application/json' },
-        body: op === 'reject' ? JSON.stringify({ reason: 'Rechazado desde Provisioning Center.' }) : '{}',
-      });
-      if (!res.ok) throw new Error(`HTTP ${res.status}`);
-      const updated = await res.json();
+      const api = createAuthorizedApi(getAuthHeaders);
+      const updated = await api.post<ProvisioningAction>(
+        `/api/provisioning/actions/${action.id}/${op}`,
+        op === 'reject' ? { reason: 'Rechazado desde Provisioning Center.' } : {},
+      );
       setActions((prev) => prev.map((item) => item.id === updated.id ? updated : item));
       setSelectedId(updated.id);
       setNotice('');

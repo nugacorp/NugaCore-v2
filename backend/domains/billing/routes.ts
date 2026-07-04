@@ -86,7 +86,7 @@ router.post(
     const service = getBillingService();
     const validated = service.validateCreateInvoice(req.body);
 
-    let clientName = '';
+    let clientName: string;
     if (!isDomainOnDb('billing')) {
       const client = store.CLIENTS.find((c) => c.id === validated.clientId);
       if (!client) {

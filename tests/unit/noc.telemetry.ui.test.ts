@@ -46,6 +46,6 @@ describe('NOC Real Telemetry App integration', () => {
   it('App renderiza NocTelemetryModule dentro del tab noc', () => {
     expect(appSource).toContain("activeTab === 'noc'");
     expect(appSource).toContain('<NocTelemetryModule');
-    expect(appSource).toContain("import NocTelemetryModule from './components/NocTelemetryModule'");
+    expect(appSource).toContain("const NocTelemetryModule = lazy(() => import('./components/NocTelemetryModule'))");
   });
 });

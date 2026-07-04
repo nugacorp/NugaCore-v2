@@ -10,6 +10,16 @@
       "DOM.Iterable"
     ],
     "skipLibCheck": true,
+    // Modo estricto incremental (Fase 1 production-ready): todos los
+    // flags de `strict` salvo noImplicitAny (~8.9k errores heredados;
+    // se migrará por carpetas en una fase posterior).
+    "strictNullChecks": true,
+    "strictFunctionTypes": true,
+    "strictBindCallApply": true,
+    "noImplicitThis": true,
+    "alwaysStrict": true,
+    "useUnknownInCatchVariables": true,
+    "noFallthroughCasesInSwitch": true,
     "moduleResolution": "bundler",
     "isolatedModules": true,
     "moduleDetection": "force",

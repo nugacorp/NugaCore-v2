@@ -10,9 +10,7 @@ import {
   Phone, 
   FileText, 
   MapPin, 
-  CheckSquare, 
-  PenTool, 
-  Maximize2
+  PenTool
 } from 'lucide-react';
 import { Ticket, TaskOrder, Client } from '../types';
 

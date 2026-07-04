@@ -1,4 +1,5 @@
 import React, { useCallback, useEffect, useState } from 'react';
+import { createAuthorizedApi } from '../lib/apiClient';
 import { Activity, AlertTriangle, Cpu, Lock, RadioTower, ShieldAlert, Wifi, WifiOff } from 'lucide-react';
 
 // ====================================================================
@@ -81,22 +82,18 @@ export default function NocTelemetryModule({ getAuthHeaders }: Props) {
     setLoading(true);
     setError('');
     try {
-      const headers = await getAuthHeaders();
-      const [healthRes, towersRes, routersRes, alertsRes] = await Promise.all([
-        fetch('/api/noc/health', { headers }),
-        fetch('/api/noc/towers', { headers }),
-        fetch('/api/noc/routers', { headers }),
-        fetch('/api/noc/alerts', { headers }),
+      const api = createAuthorizedApi(getAuthHeaders);
+      const [healthData, towersData, routersData, alertsData] = await Promise.all([
+        api.get<NocHealthSummary>('/api/noc/health'),
+        api.get<NocTowerTelemetry[]>('/api/noc/towers'),
+        api.get<NocRouterView[]>('/api/noc/routers'),
+        api.get<NocDerivedAlert[]>('/api/noc/alerts'),
       ]);
 
-      if (!healthRes.ok || !towersRes.ok || !routersRes.ok || !alertsRes.ok) {
-        throw new Error('No se pudo cargar la telemetría NOC read-only.');
-      }
-
-      setHealth((await healthRes.json()) as NocHealthSummary);
-      setTowers((await towersRes.json()) as NocTowerTelemetry[]);
-      setRouters((await routersRes.json()) as NocRouterView[]);
-      setAlerts((await alertsRes.json()) as NocDerivedAlert[]);
+      setHealth(healthData);
+      setTowers(towersData);
+      setRouters(routersData);
+      setAlerts(alertsData);
     } catch (err) {
       setError(err instanceof Error ? err.message : 'Error desconocido cargando telemetría NOC.');
     } finally {

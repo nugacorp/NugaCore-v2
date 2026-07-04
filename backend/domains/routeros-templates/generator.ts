@@ -118,7 +118,6 @@ const sectionLanIp = (d: Defaults): string => {
 };
 
 const sectionDhcp = (d: Defaults): string => {
-  const prefix = d.lanCidr.split('/')[1] || '24';
   return `
 # --- DHCP Pool ---
 :if ([:len [/ip pool find name="NugaCore-pool-LAN"]] = 0) do={
@@ -134,7 +133,7 @@ const sectionDhcp = (d: Defaults): string => {
 /ip dns set allow-remote-requests=yes servers="${d.dns.join(',')}"`;
 };
 
-const sectionNat = (d: Defaults): string => `
+const sectionNat = (_d: Defaults): string => `
 # --- NAT masquerade ---
 :if ([:len [/ip firewall nat find action=masquerade chain=srcnat comment~"NugaCore"]] = 0) do={
   /ip firewall nat add action=masquerade chain=srcnat out-interface-list=WAN comment="NugaCore NAT"
@@ -352,7 +351,7 @@ const genClientResidential = (p: TemplateLibraryParams): GenResult => {
   const warnings: string[] = [];
   const useWg = !!(p.wgServerPublicKey && p.wgEndpoint);
 
-  let wgSection = '';
+  let wgSection: string;
   if (useWg) {
     const result = sectionWireguard(p);
     wgSection = result.section;
@@ -670,7 +669,7 @@ ${watchdogSection}
 # --- Scheduler métricas del sistema ---
 :if ([:len [/system scheduler find name="NugaCore-Metrics"]] = 0) do={
   /system scheduler add name="NugaCore-Metrics" interval=00:10:00 \\
-    on-event=":log info \\"NugaCore metrics: CPU=[\$([/system resource get cpu-load])]% FreeRAM=[\$([/system resource get free-memory])]b\\"" \\
+    on-event=":log info \\"NugaCore metrics: CPU=[$([/system resource get cpu-load])]% FreeRAM=[$([/system resource get free-memory])]b\\"" \\
     comment="NugaCore system metrics"
 }
 ${backupSection}

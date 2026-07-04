@@ -151,7 +151,7 @@ export class StoreInventoryRepository implements InventoryRepository {
     const item = store.INVENTORY.find((row) => row.id === id);
     if (!item) return null;
     const state = store.getInventoryState(item.id);
-    return { itemId: item.id, itemName: item.name, ...state };
+    return { ...state, itemId: item.id, itemName: item.name };
   }
 
   async addItem(input: AddItemInput, actorId?: string): Promise<InventoryItemView> {
@@ -204,7 +204,7 @@ export class StoreInventoryRepository implements InventoryRepository {
     const state = store.getInventoryState(item.id);
     state.operationalStatus = status;
     state.updatedAt = nowStamp();
-    return { itemId: item.id, itemName: item.name, ...state };
+    return { ...state, itemId: item.id, itemName: item.name };
   }
 
   async applyMovement(input: MovementInput): Promise<InventoryItemView[]> {

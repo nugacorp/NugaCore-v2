@@ -166,7 +166,7 @@ export class PaymentService {
 
     // Buscar payment_order por providerOrderId
     const providerOrderId = this.extractProviderOrderId(provider, payload);
-    let order = providerOrderId
+    const order = providerOrderId
       ? await this.repo.findOrderByProviderOrderId(provider, providerOrderId)
       : null;
 

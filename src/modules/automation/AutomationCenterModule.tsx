@@ -1,4 +1,5 @@
 import React, { useCallback, useEffect, useMemo, useState } from 'react';
+import { createAuthorizedApi } from '../../lib/apiClient';
 import { Brain, ClipboardList, ListChecks, PlayCircle, RefreshCw, Workflow, Zap } from 'lucide-react';
 import type { UserRole } from '../../lib/supabase';
 import { canSimulateAutomation } from '../../lib/automationRbac';
@@ -95,18 +96,17 @@ export default function AutomationCenterModule({ userRole, getAuthHeaders }: Pro
   const load = useCallback(async () => {
     setLoading(true);
     try {
-      const headers = await getAuthHeaders();
+      const api = createAuthorizedApi(getAuthHeaders);
       const [s, r, e, d] = await Promise.all([
-        fetch('/api/automation/summary', { headers }),
-        fetch('/api/automation/rules', { headers }),
-        fetch('/api/automation/events', { headers }),
-        fetch('/api/automation/decisions', { headers }),
+        api.get<typeof summary>('/api/automation/summary'),
+        api.get<typeof rules>('/api/automation/rules'),
+        api.get<typeof events>('/api/automation/events'),
+        api.get<typeof decisions>('/api/automation/decisions'),
       ]);
-      if (!s.ok || !r.ok || !e.ok || !d.ok) throw new Error('HTTP');
-      setSummary(await s.json());
-      setRules(await r.json());
-      setEvents(await e.json());
-      setDecisions(await d.json());
+      setSummary(s);
+      setRules(r);
+      setEvents(e);
+      setDecisions(d);
       setNotice('');
     } catch {
       setNotice('No se pudo cargar el Automation Center.');
@@ -123,14 +123,12 @@ export default function AutomationCenterModule({ userRole, getAuthHeaders }: Pro
       return;
     }
     try {
-      const headers = await getAuthHeaders();
-      const res = await fetch('/api/automation/simulate', {
-        method: 'POST',
-        headers: { ...headers, 'Content-Type': 'application/json' },
-        body: JSON.stringify({ event: simEvent, customerId: simCustomer || undefined, payload: {} }),
+      const api = createAuthorizedApi(getAuthHeaders);
+      const result = await api.post<SimulationResult>('/api/automation/simulate', {
+        event: simEvent,
+        customerId: simCustomer || undefined,
+        payload: {},
       });
-      if (!res.ok) throw new Error('HTTP');
-      const result: SimulationResult = await res.json();
       setSimResult(result);
       setScreen('preview');
       setNotice('');

@@ -3,13 +3,6 @@ import {
   Terminal,
   Send,
   Sparkles,
-  RefreshCw,
-  ShieldAlert,
-  ExternalLink,
-  BookOpen,
-  Cpu,
-  Lock,
-  MessageSquare,
   Network,
   Plus,
 } from 'lucide-react';
@@ -196,7 +189,7 @@ export default function MikrotikModule({
     try {
       const res = await onSendCommand(cmd, activeRouter.id);
       setShellLines(prev => [...prev, res.output, `[${activeRouter.promptUser}] > `]);
-    } catch (err) {
+    } catch {
       setShellLines(prev => [...prev, "Error communicating with Core Router engine.", `[${activeRouter.promptUser}] > `]);
     } finally {
       setExecutingCommand(false);
@@ -216,7 +209,7 @@ export default function MikrotikModule({
     try {
       const res = await onAskCopilot(prompt, activeRouter);
       setCopilotMessages(prev => [...prev, { sender: 'assistant', text: res.text }]);
-    } catch (err) {
+    } catch {
       setCopilotMessages(prev => [...prev, { 
         sender: 'assistant', 
         text: 'Ocurrió un error consultando a Gemini. Por favor verifica los logs o reintenta.' 

@@ -254,7 +254,7 @@ describe('Generator — WireGuard templates', () => {
       wgVpnCidr: '10.10.0.0/24',
     });
     expect(result.script).toContain('NugaCoreWG-Server');
-    expect(result.script).toContain('pppoe' + '' === '' ? '' : '');  // no debe tener pppoe
+    expect(result.script).not.toContain('pppoe'); // no debe tener pppoe
   });
 
   it('wireguard_server tiene apiUsername', () => {

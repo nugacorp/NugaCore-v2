@@ -52,11 +52,35 @@ export function applyHttpSecurity(app: Express): void {
   if (isProd) app.set('trust proxy', 1);
 
   // ── 1. Helmet ─────────────────────────────────────────────────────
-  // CSP desactivada para no romper el SPA (se afina en una fase posterior).
+  // CSP (Fase 6 production-ready): activa salvo que se desactive por env.
+  //   - script-src 'self': el build de Vite no usa scripts inline.
+  //   - style-src incluye 'unsafe-inline': los componentes usan style={{}}
+  //     (style-src-attr) y Tailwind inyecta <style> en dev.
+  //   - connect-src: 'self' + CSP_CONNECT_SRC (p.ej. la URL de Supabase a la
+  //     que el cliente se conecta directamente; lista separada por comas).
+  //   - En dev/test se desactiva: el dev server de Vite necesita inline/eval.
   // HSTS solo en producción (no tiene efecto fuera de HTTPS y evita líos en dev).
+  const cspEnabled = isProd && isTrue(process.env.CSP_ENABLED, true);
+  const extraConnect = parseList(process.env.CSP_CONNECT_SRC);
   app.use(
     helmet({
-      contentSecurityPolicy: false,
+      contentSecurityPolicy: cspEnabled
+        ? {
+            useDefaults: false,
+            directives: {
+              'default-src': ["'self'"],
+              'script-src': ["'self'"],
+              'style-src': ["'self'", "'unsafe-inline'"],
+              'img-src': ["'self'", 'data:'],
+              'font-src': ["'self'", 'data:'],
+              'connect-src': ["'self'", ...extraConnect],
+              'object-src': ["'none'"],
+              'base-uri': ["'self'"],
+              'frame-ancestors': ["'self'"],
+              'form-action': ["'self'"],
+            },
+          }
+        : false,
       crossOriginEmbedderPolicy: false,
       hsts: isProd,
     }),

@@ -38,7 +38,7 @@ const scriptHeader = (p: ResourceGeneratorParams, templateLabel: string): string
 # ============================================================`;
 };
 
-const sectionCleanup = (p: ResourceGeneratorParams): string => `
+const sectionCleanup = (_p: ResourceGeneratorParams): string => `
 # --- 1. Limpieza idempotente de configuracion NugaCore previa ---
 /user remove [find where name~"nugacore_"]
 /user group remove [find where name~"nugacore"]
@@ -310,7 +310,7 @@ export const generateResource = (p: ResourceGeneratorParams): GeneratedResource 
   const vpnCred = generateApiCredential(`vpn_${p.routerName}`);
 
   // CIDR permitido para la API.
-  let allowedApiCidr = '10.10.0.0/24';
+  let allowedApiCidr: string;
   if (p.templateId === 'base_wisp_wireguard') {
     allowedApiCidr = p.wgVpnCidr || p.wgManagementCidr || '10.10.0.0/24';
   } else if (p.templateId === 'base_wisp_sstp') {
@@ -320,7 +320,7 @@ export const generateResource = (p: ResourceGeneratorParams): GeneratedResource 
   }
 
   // Construcción del script.
-  let vpnSection = '';
+  let vpnSection: string;
   if (p.templateId === 'base_wisp_wireguard') {
     const { section, warnings: wgWarnings } = sectionWireguard(p);
     vpnSection = section;

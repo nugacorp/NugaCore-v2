@@ -58,7 +58,7 @@ describe('Safe Command Queue — herramienta interna (no es módulo de sidebar)'
 
   it('App importa y renderiza el módulo cuando el tab está activo (acceso directo)', () => {
     expect(appSource).toContain(
-      "import SafeCommandQueueModule from './modules/safe-command-queue/SafeCommandQueueModule'",
+      "const SafeCommandQueueModule = lazy(() => import('./modules/safe-command-queue/SafeCommandQueueModule'))",
     );
     expect(appSource).toContain("activeTab === 'safe-command-queue'");
     expect(appSource).toContain('<SafeCommandQueueModule');

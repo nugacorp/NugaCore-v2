@@ -49,7 +49,7 @@ describe('Client360Panel — sección Cobranza', () => {
 describe('CrmModule — carga del balance del cliente', () => {
   it('consulta el endpoint de balance vía Bearer (getAuthHeaders)', () => {
     expect(crmSource).toContain('/api/billing/customers/${customerId}/balance');
-    expect(crmSource).toContain('await getAuthHeaders()');
+    expect(crmSource).toContain('createAuthorizedApi(getAuthHeaders)');
   });
 
   it('pasa el resumen de cobranza al panel', () => {

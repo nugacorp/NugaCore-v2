@@ -9,10 +9,8 @@
 
 import type { WarehouseItem } from '../../../src/types';
 import type {
-  InventoryAssignmentLog,
   InventoryItemState,
-  InventoryMovementLog,
-} from '../../state/store';
+  } from '../../state/store';
 
 export type {
   InventoryAssignmentLog,

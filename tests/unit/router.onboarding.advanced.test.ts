@@ -7,7 +7,6 @@ import {
   getTemplateLabel,
   setTemplateSelection,
   DEFAULT_ADVANCED_FORM,
-  DEFAULT_WAN_CONFIG,
   DEFAULT_LAN_ADVANCED,
   DEFAULT_SECURITY_CONFIG,
   AdvancedOnboardingForm,

@@ -1,4 +1,5 @@
 import React, { useState, useEffect } from 'react';
+import { getErrorMessage } from '../lib/errors';
 import {
   FileText,
   Zap,
@@ -160,8 +161,8 @@ export default function BillingModule({
       await onPayInvoice(inv.id, payGateway, payAmount.trim() ? amount : undefined);
       setToast({ kind: 'success', msg: `Pago de ${formatMXN(amount)} registrado en ${inv.id}.` });
       setPayAmount('');
-    } catch (err: any) {
-      setToast({ kind: 'error', msg: err?.message || 'No se pudo registrar el pago.' });
+    } catch (err) {
+      setToast({ kind: 'error', msg: getErrorMessage(err, 'No se pudo registrar el pago.') });
     } finally {
       setPaymentInProgress(false);
       setBusyLabel('');
@@ -191,8 +192,8 @@ export default function BillingModule({
         try {
           await onEditInvoice(inv.id, { status: 'canceled' });
           setToast({ kind: 'success', msg: `Factura ${inv.id} cancelada.` });
-        } catch (err: any) {
-          setToast({ kind: 'error', msg: err?.message || 'No se pudo cancelar la factura.' });
+        } catch (err) {
+          setToast({ kind: 'error', msg: getErrorMessage(err, 'No se pudo cancelar la factura.') });
         } finally {
           setBusyLabel('');
         }
@@ -216,8 +217,8 @@ export default function BillingModule({
       setFormConcept('Suscripción Mensual Internet Banda Ancha');
       setFormAmount('449');
       setShowCreateModal(false);
-    } catch (err: any) {
-      setToast({ kind: 'error', msg: err?.message || 'No se pudo crear la factura.' });
+    } catch (err) {
+      setToast({ kind: 'error', msg: getErrorMessage(err, 'No se pudo crear la factura.') });
     } finally {
       setBusyLabel('');
     }
@@ -234,8 +235,8 @@ export default function BillingModule({
       });
       setToast({ kind: 'success', msg: `Factura ${selectedInvoice.id} actualizada.` });
       setShowEditModal(false);
-    } catch (err: any) {
-      setToast({ kind: 'error', msg: err?.message || 'No se pudo editar la factura.' });
+    } catch (err) {
+      setToast({ kind: 'error', msg: getErrorMessage(err, 'No se pudo editar la factura.') });
     } finally {
       setBusyLabel('');
     }

@@ -10,13 +10,6 @@ export const maskSecret = (value: string): string => {
   return `${value.substring(0, 3)}${'•'.repeat(value.length - 6)}${value.substring(value.length - 3)}`;
 };
 
-// Patrones que identifican líneas con secretos en scripts RouterOS.
-const SECRET_PATTERNS: RegExp[] = [
-  /password="[^"]+"/gi,
-  /private-key="[^"]+"/gi,
-  /password=[^\s\r\n]+/gi,
-];
-
 /**
  * Genera una versión saneada del script con los secretos reemplazados por
  * marcadores de posición. Segura para mostrar en la UI como vista previa.
@@ -31,7 +24,7 @@ export const sanitizeScriptForPreview = (script: string): string => {
 
 /** Nombre de archivo seguro para el .rsc descargable. */
 export const buildFilename = (routerName: string, templateId: string): string => {
-  const safe = routerName.replace(/[^a-zA-Z0-9_\-]/g, '-').substring(0, 32);
+  const safe = routerName.replace(/[^a-zA-Z0-9_-]/g, '-').substring(0, 32);
   const date = new Date().toISOString().slice(0, 10);
   return `nugacore-${templateId.replace(/_/g, '-')}-${safe}-${date}.rsc`;
 };

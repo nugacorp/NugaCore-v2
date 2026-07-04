@@ -36,15 +36,15 @@ describe('InventorySyncModule — contrato de UI', () => {
   });
 
   it('consume solo endpoints read-only por GET (sin write)', () => {
-    expect(moduleSource).toContain("fetch('/api/inventory-sync/status'");
-    expect(moduleSource).toContain("fetch('/api/inventory-sync/differences'");
+    expect(moduleSource).toContain("api.get<typeof status>('/api/inventory-sync/status')");
+    expect(moduleSource).toContain("'/api/inventory-sync/differences'");
     expect(moduleSource).not.toMatch(/method:\s*['"](POST|PUT|DELETE|PATCH)['"]/i);
   });
 });
 
 describe('InventorySyncModule — integración', () => {
   it('App importa y renderiza el módulo cuando el tab está activo', () => {
-    expect(appSource).toContain("import InventorySyncModule from './modules/inventory-sync/InventorySyncModule'");
+    expect(appSource).toContain("const InventorySyncModule = lazy(() => import('./modules/inventory-sync/InventorySyncModule'))");
     expect(appSource).toContain("activeTab === 'inventory-sync'");
     expect(appSource).toContain('<InventorySyncModule');
   });

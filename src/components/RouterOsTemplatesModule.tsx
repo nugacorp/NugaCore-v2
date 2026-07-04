@@ -1,4 +1,5 @@
 import React, { useState, useEffect, useCallback } from 'react';
+import { createAuthorizedApi } from '../lib/apiClient';
 import {
   BookOpen,
   FileCode,
@@ -13,13 +14,11 @@ import {
   History,
   ChevronRight,
   Shield,
-  Wifi,
   Server,
   Network,
   Layers,
   Activity,
   Zap,
-  Settings,
   Terminal,
   BarChart3,
   Filter,
@@ -145,15 +144,17 @@ export default function RouterOsTemplatesModule({ userRole, getAuthHeaders }: Ro
   const [wanIfaces, setWanIfaces] = useState<string[]>(['', '']);
   const [wanGws, setWanGws] = useState<string[]>(['', '']);
 
+  // Helper del módulo sobre el cliente central: conserva la firma histórica
+  // (url + RequestInit) para no tocar los call sites.
   const fetchWithAuth = useCallback(
     async (url: string, init?: RequestInit) => {
-      const authHeaders = await getAuthHeaders();
-      const res = await fetch(url, { ...init, headers: { ...authHeaders, ...(init?.headers || {}) } });
-      if (!res.ok) {
-        const err = await res.json().catch(() => ({ error: `HTTP ${res.status}` }));
-        throw new Error(err.error || `HTTP ${res.status}`);
-      }
-      return res.json();
+      const api = createAuthorizedApi(getAuthHeaders);
+      const method = (init?.method || 'GET').toUpperCase();
+      const body = typeof init?.body === 'string' ? JSON.parse(init.body) : undefined;
+      if (method === 'POST') return api.post(url, body);
+      if (method === 'PUT') return api.put(url, body);
+      if (method === 'DELETE') return api.delete(url, body);
+      return api.get(url);
     },
     [getAuthHeaders],
   );
@@ -295,6 +296,8 @@ export default function RouterOsTemplatesModule({ userRole, getAuthHeaders }: Ro
   const handleDownload = async () => {
     if (!generated) return;
     try {
+      // fetch nativo a propósito: la descarga es binaria (blob) y apiClient
+      // está limitado al contrato JSON/text de la API.
       const headers = await getAuthHeaders();
       const res = await fetch(`/api/routeros-templates/download/${generated.scriptHash}`, { headers });
       if (!res.ok) throw new Error('Script expirado');

@@ -27,8 +27,9 @@ export const attachRequestId = (req: Request, res: Response, next: NextFunction)
   const raw = Array.isArray(incoming) ? incoming[0] : incoming;
   const requestId = raw && isSafeId(raw) ? raw : randomUUID();
 
+  const log = logger.child({ requestId });
   req.requestId = requestId;
-  req.log = logger.child({ requestId });
+  req.log = log;
   res.setHeader('X-Request-Id', requestId);
 
   const startedAt = process.hrtime.bigint();
@@ -39,7 +40,7 @@ export const attachRequestId = (req: Request, res: Response, next: NextFunction)
     if (res.statusCode >= 500) metrics.count5xx();
     else if (res.statusCode >= 400) metrics.count4xx();
 
-    req.log.info('request completed', {
+    log.info('request completed', {
       method: req.method,
       path: req.path,
       status: res.statusCode,

@@ -19,7 +19,6 @@ import {
   num,
   bool,
   ip,
-  select,
   lanCidrParam,
   dhcpEnabledParam,
   dnsServersParam,

@@ -27,7 +27,7 @@ describe('RouterOS Read-Only Lab UI contract', () => {
 
   it('usa solo endpoints GET read-only y no contiene rutas write', () => {
     expect(moduleSource).toContain("const paths = ['identity', 'system', 'interfaces', 'routes', 'wireguard']");
-    expect(moduleSource).toContain('fetch(`/api/routeros/${path}`, { headers })');
+    expect(moduleSource).toContain('api.get(`/api/routeros/${path}`)');
     expect(moduleSource).not.toContain('/execute');
     expect(moduleSource).not.toContain("method: 'POST'");
     expect(moduleSource).not.toContain("method: 'PUT'");
@@ -47,7 +47,7 @@ describe('RouterOS Read-Only Lab navigation integration', () => {
   });
 
   it('App importa y renderiza el módulo cuando el tab está activo', () => {
-    expect(appSource).toContain("import RouterOSReadOnlyModule from './modules/routeros-readonly/RouterOSReadOnlyModule'");
+    expect(appSource).toContain("const RouterOSReadOnlyModule = lazy(() => import('./modules/routeros-readonly/RouterOSReadOnlyModule'))");
     expect(appSource).toContain("activeTab === 'routeros-readonly'");
     expect(appSource).toContain('<RouterOSReadOnlyModule');
   });

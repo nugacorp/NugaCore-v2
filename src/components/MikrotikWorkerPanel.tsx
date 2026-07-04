@@ -1,4 +1,5 @@
 import React, { useState } from 'react';
+import { getErrorMessage } from '../lib/errors';
 import { Bot, Play, Eye, Loader2, ShieldCheck, X } from 'lucide-react';
 import type {
   MikrotikRouterView,
@@ -31,8 +32,8 @@ export default function MikrotikWorkerPanel({ routers, runs, userRole, onRunWork
       await onRunWorker();
       await onRefreshRuns();
       flash('Worker ejecutado en dry-run. Ninguna acción real.');
-    } catch (e: any) {
-      flash(e?.message || 'Error al ejecutar el worker.');
+    } catch (e) {
+      flash(getErrorMessage(e, 'Error al ejecutar el worker.'));
     } finally { setBusy(''); }
   };
 
@@ -40,8 +41,8 @@ export default function MikrotikWorkerPanel({ routers, runs, userRole, onRunWork
     setBusy('Leyendo router (read-only)...');
     try {
       setSnapshot(await onReadRouter(id));
-    } catch (e: any) {
-      flash(e?.message || 'Error al leer el router.');
+    } catch (e) {
+      flash(getErrorMessage(e, 'Error al leer el router.'));
     } finally { setBusy(''); }
   };
 

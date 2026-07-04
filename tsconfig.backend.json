@@ -1,0 +1,11 @@
+{
+  // Fase 5 production-ready: el backend ya cumple noImplicitAny (0 errores),
+  // este proyecto lo hace obligatorio para que no regrese. El frontend (src/)
+  // migra incrementalmente; cuando llegue a 0, subir noImplicitAny al
+  // tsconfig.json raíz y borrar este archivo.
+  "extends": "./tsconfig.json",
+  "compilerOptions": {
+    "noImplicitAny": true
+  },
+  "include": ["backend/**/*", "server.ts"]
+}
