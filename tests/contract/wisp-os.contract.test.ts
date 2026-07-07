@@ -95,12 +95,38 @@ describe('API — CFDI stub', () => {
   });
 });
 
+describe('API — Portal tickets', () => {
+  let app: Express;
+  beforeAll(() => { app = createApp(); });
+
+  it('GET /api/portal/:id/tickets', async () => {
+    const clients = await request(app).get('/api/clients').set(READER);
+    const clientId = clients.body[0]?.id;
+    if (!clientId) return;
+    const res = await request(app).get(`/api/portal/${clientId}/tickets`);
+    expect(res.status).toBe(200);
+    expect(Array.isArray(res.body)).toBe(true);
+  });
+});
+
+describe('API — GIS SSOT', () => {
+  let app: Express;
+  beforeAll(() => { app = createApp(); });
+
+  it('GET /api/gis/map-data with auth returns layers', async () => {
+    const res = await request(app).get('/api/gis/map-data').set(READER);
+    expect(res.status).toBe(200);
+    expect(res.body).toHaveProperty('towers');
+    expect(res.body).toHaveProperty('clients');
+  });
+});
+
 describe('API — GIS store-backed', () => {
   let app: Express;
   beforeAll(() => { app = createApp(); });
 
   it('GET /api/gis/health -> store-backed-v2', async () => {
-    const res = await request(app).get('/api/gis/health');
+    const res = await request(app).get('/api/gis/health').set(READER);
     expect(res.body.mode).toBe('store-backed-v2');
   });
 });

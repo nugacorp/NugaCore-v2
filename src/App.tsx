@@ -1232,6 +1232,7 @@ export default function App() {
                 tickets={tickets}
                 workOrders={workOrders}
                 clients={clients}
+                getAuthHeaders={getAuthHeaders}
                 onAddTicket={handleAddTicket}
                 onPostTicketMessage={handlePostTicketMessage}
                 onUpdateWorkOrderStatus={handleUpdateWorkOrderStatus}
@@ -1324,6 +1325,7 @@ export default function App() {
                 clients={clients}
                 invoices={invoices}
                 tickets={tickets}
+                getAuthHeaders={getAuthHeaders}
                 onAddTicket={handleAddTicket}
                 onPayInvoice={handlePayInvoice}
                 mode="finance"
@@ -1336,6 +1338,7 @@ export default function App() {
                 clients={clients}
                 invoices={invoices}
                 tickets={tickets}
+                getAuthHeaders={getAuthHeaders}
                 onAddTicket={handleAddTicket}
                 onPayInvoice={handlePayInvoice}
                 mode="owner"

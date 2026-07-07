@@ -1,0 +1,17 @@
+{
+  "name": "NugaCore Técnicos",
+  "short_name": "NugaTech",
+  "description": "App de campo para técnicos WISP — órdenes, checklist y evidencias",
+  "start_url": "/",
+  "display": "standalone",
+  "background_color": "#0f172a",
+  "theme_color": "#4f46e5",
+  "orientation": "portrait-primary",
+  "icons": [
+    {
+      "src": "/assets/favicon.png",
+      "sizes": "256x256",
+      "type": "image/png"
+    }
+  ]
+}

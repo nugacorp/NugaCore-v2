@@ -1,7 +1,11 @@
 import { Router } from 'express';
 import { OnuFTTH, Tower } from '../../../src/types';
 import { store } from '../../../backend/state/store';
+import { asyncHandler } from '../../common/errors';
 import { READ_ROLES, requireRoles } from '../../common/rbac';
+import { getNetworkService } from './service';
+import { getFtthService } from './ftth-service';
+import { getCustomersService } from '../customers/service';
 
 const router = Router();
 
@@ -49,29 +53,23 @@ const recalculateTowerStatusFromSectors = (towerId: string): void => {
   applyTowerState(tower, 'online');
 };
 
-router.get('/api/network-towers', requireRoles(READ_ROLES), (req, res) => {
+router.get('/api/network-towers', requireRoles(READ_ROLES), asyncHandler(async (req, res) => {
   const status = parseTowerStatus(req.query.status);
-  const q = String(req.query.q || '').trim().toLowerCase();
-
-  const rows = store.TOWERS.filter((tower) => {
-    const matchesStatus = !status || tower.status === status;
-    const matchesSearch =
-      !q ||
-      tower.name.toLowerCase().includes(q) ||
-      tower.ip.toLowerCase().includes(q);
-    return matchesStatus && matchesSearch;
+  const q = String(req.query.q || '').trim();
+  const rows = await getNetworkService().listTowers({
+    status: status ?? undefined,
+    q: q || undefined,
   });
-
   res.json(rows);
-});
+}));
 
-router.get('/api/network-towers/:id', requireRoles(READ_ROLES), (req, res) => {
-  const tower = store.TOWERS.find((item) => item.id === req.params.id);
+router.get('/api/network-towers/:id', requireRoles(READ_ROLES), asyncHandler(async (req, res) => {
+  const tower = await getNetworkService().getTower(req.params.id);
   if (!tower) {
     return res.status(404).json({ error: 'Tower not found' });
   }
   res.json(tower);
-});
+}));
 
 router.post('/api/network-towers', requireRoles(['super admin', 'administrador', 'tecnico']), (req, res) => {
   const { name, lat, lng, height, coverageRadiusKm, ip, equipment } = req.body;
@@ -280,13 +278,21 @@ router.delete('/api/network-sectors/:id', requireRoles(['super admin', 'administ
   res.status(204).send();
 });
 
-router.get('/api/olt', requireRoles(READ_ROLES), (_req, res) => res.json(store.OLTS));
-router.get('/api/onu', requireRoles(READ_ROLES), (_req, res) => res.json(store.ONUS));
-router.get('/api/naps', requireRoles(READ_ROLES), (_req, res) => res.json(store.NAP_BOXES));
+router.get('/api/olt', requireRoles(READ_ROLES), asyncHandler(async (_req, res) => {
+  res.json(await getFtthService().listOlts());
+}));
 
-router.post('/api/onu/provision', requireRoles(['super admin', 'administrador', 'tecnico']), (req, res) => {
+router.get('/api/onu', requireRoles(READ_ROLES), asyncHandler(async (_req, res) => {
+  res.json(await getFtthService().listOnus());
+}));
+
+router.get('/api/naps', requireRoles(READ_ROLES), asyncHandler(async (_req, res) => {
+  res.json(await getFtthService().listNaps());
+}));
+
+router.post('/api/onu/provision', requireRoles(['super admin', 'administrador', 'tecnico']), asyncHandler(async (req, res) => {
   const { clientId, oltId, port, mac, brand, model, napId, napPort } = req.body;
-  const client = store.CLIENTS.find((c) => c.id === clientId);
+  const client = clientId ? await getCustomersService().getById(String(clientId)) : null;
   if (!client) {
     return res.status(400).json({ error: 'Invalid client' });
   }
@@ -323,6 +329,6 @@ router.post('/api/onu/provision', requireRoles(['super admin', 'administrador', 
   }
 
   res.json(newOnu);
-});
+}));
 
 export default router;

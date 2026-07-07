@@ -1,6 +1,6 @@
 import React, { useCallback, useEffect, useMemo, useState } from 'react';
 import { createAuthorizedApi } from '../../lib/apiClient';
-import { Brain, ClipboardList, ListChecks, PlayCircle, RefreshCw, Workflow, Zap } from 'lucide-react';
+import { Brain, ClipboardList, ListChecks, PlayCircle, RefreshCw, Workflow, Zap, Bell } from 'lucide-react';
 import type { UserRole } from '../../lib/supabase';
 import { canSimulateAutomation } from '../../lib/automationRbac';
 
@@ -116,6 +116,27 @@ export default function AutomationCenterModule({ userRole, getAuthHeaders }: Pro
   }, [getAuthHeaders]);
 
   useEffect(() => { void load(); }, [load]);
+
+  const notifyFromDecision = async (decisionId: string) => {
+    try {
+      const api = createAuthorizedApi(getAuthHeaders);
+      await api.post(`/api/automation/decisions/${decisionId}/notify-preview`, {});
+      setNotice('Preview de notificación creado (dry-run).');
+    } catch {
+      setNotice('No se pudo generar preview de notificación.');
+    }
+  };
+
+  const notifyPendingBatch = async () => {
+    try {
+      const api = createAuthorizedApi(getAuthHeaders);
+      const result = await api.post<{ processed: number }>('/api/automation/notify-pending', { limit: 10 });
+      setNotice(`Procesadas ${result.processed} decisiones → notificaciones dry-run.`);
+      void load();
+    } catch {
+      setNotice('No se pudo procesar cola automation→notify.');
+    }
+  };
 
   const runSimulation = async () => {
     if (!canSimulate) {
@@ -293,6 +314,16 @@ export default function AutomationCenterModule({ userRole, getAuthHeaders }: Pro
 
       {screen === 'decisiones' && (
         <section className="overflow-hidden rounded-lg border border-slate-800 bg-slate-950">
+          <div className="flex items-center justify-between border-b border-slate-900 px-4 py-3">
+            <h3 className="text-sm font-bold text-white">Decisiones simuladas</h3>
+            <button
+              type="button"
+              onClick={() => void notifyPendingBatch()}
+              className="inline-flex items-center gap-1 rounded-lg border border-indigo-500/30 bg-indigo-500/10 px-3 py-1.5 text-[11px] font-semibold text-indigo-200"
+            >
+              <Bell className="h-3.5 w-3.5" /> Notify pending (dry-run)
+            </button>
+          </div>
           <table className="w-full text-left text-xs">
             <thead className="bg-slate-900 text-[10px] uppercase tracking-widest text-slate-500">
               <tr>
@@ -302,11 +333,12 @@ export default function AutomationCenterModule({ userRole, getAuthHeaders }: Pro
                 <th className="px-4 py-3">Origen</th>
                 <th className="px-4 py-3">Estado</th>
                 <th className="px-4 py-3">Fecha</th>
+                <th className="px-4 py-3">Notify</th>
               </tr>
             </thead>
             <tbody className="divide-y divide-slate-900">
               {decisions.length === 0 ? (
-                <tr><td className="px-4 py-8 text-center text-slate-500" colSpan={6}>No hay decisiones simuladas.</td></tr>
+                <tr><td className="px-4 py-8 text-center text-slate-500" colSpan={7}>No hay decisiones simuladas.</td></tr>
               ) : decisions.map((d) => (
                 <tr key={d.id} className="hover:bg-slate-900/70">
                   <td className="px-4 py-3 font-mono text-indigo-300">{d.decision}</td>
@@ -315,6 +347,11 @@ export default function AutomationCenterModule({ userRole, getAuthHeaders }: Pro
                   <td className="px-4 py-3 text-slate-400">{d.source}</td>
                   <td className="px-4 py-3"><span className="rounded border border-amber-500/30 bg-amber-500/10 px-2 py-0.5 text-[10px] font-bold text-amber-200">{d.status}</span></td>
                   <td className="px-4 py-3 font-mono text-slate-500">{new Date(d.createdAt).toLocaleString('es-MX')}</td>
+                  <td className="px-4 py-3">
+                    <button type="button" onClick={() => void notifyFromDecision(d.id)} className="text-indigo-300 hover:text-indigo-100" title="Preview notificación">
+                      <Bell className="h-3.5 w-3.5" />
+                    </button>
+                  </td>
                 </tr>
               ))}
             </tbody>

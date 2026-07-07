@@ -18,6 +18,7 @@ interface SupportModuleProps {
   tickets: Ticket[];
   workOrders: TaskOrder[];
   clients: Client[];
+  getAuthHeaders?: () => Promise<Record<string, string>>;
   onAddTicket: (ticketData: any) => Promise<void>;
   onPostTicketMessage: (id: string, text: string) => Promise<void>;
   onUpdateWorkOrderStatus: (id: string, status: string, signature?: string, checklist?: any[]) => Promise<void>;
@@ -26,12 +27,14 @@ interface SupportModuleProps {
 export default function SupportModule({ 
   tickets, 
   workOrders, 
-  clients, 
+  clients,
+  getAuthHeaders,
   onAddTicket, 
   onPostTicketMessage, 
   onUpdateWorkOrderStatus 
 }: SupportModuleProps) {
   const [activeSubView, setActiveSubView] = useState<'tickets' | 'orders'>('tickets');
+  const [slaBreaches, setSlaBreaches] = useState<number>(0);
   const [selectedTicket, setSelectedTicket] = useState<Ticket | null>(null);
   const [selectedOrder, setSelectedOrder] = useState<TaskOrder | null>(null);
 
@@ -46,6 +49,24 @@ export default function SupportModule({
   // Ticket Reply
   const [replyMessage, setReplyMessage] = useState('');
   const [ticketQuery, setTicketQuery] = useState('');
+
+  useEffect(() => {
+    if (!getAuthHeaders) return;
+    let cancelled = false;
+    (async () => {
+      try {
+        const headers = await getAuthHeaders();
+        const res = await fetch('/api/tickets/sla/breaches', { headers });
+        if (res.ok && !cancelled) {
+          const data = await res.json();
+          setSlaBreaches(Array.isArray(data.breaches) ? data.breaches.length : 0);
+        }
+      } catch {
+        if (!cancelled) setSlaBreaches(0);
+      }
+    })();
+    return () => { cancelled = true; };
+  }, [getAuthHeaders, tickets.length]);
 
   // Canvas Drawing Pad State
   const canvasRef = useRef<HTMLCanvasElement>(null);
@@ -193,6 +214,11 @@ export default function SupportModule({
           <p className="text-sm text-slate-400 font-mono mt-0.5">
             Canaliza fallas de abonados con SLAs inteligentes y despacha técnicos instaladores a terreno con bitácoras digitales.
           </p>
+          {slaBreaches > 0 && (
+            <p className="mt-2 inline-flex items-center gap-1 rounded-lg border border-rose-500/30 bg-rose-500/10 px-3 py-1 text-xs text-rose-300">
+              <AlertTriangle className="w-3.5 h-3.5" /> {slaBreaches} ticket(s) con SLA vencido
+            </p>
+          )}
         </div>
         
         <div className="flex bg-slate-950 p-1 border border-slate-800 rounded-xl space-x-1 self-start">

@@ -1,13 +1,17 @@
 import { Router } from 'express';
-import { store } from '../../state/store';
+import { asyncHandler } from '../../common/errors';
+import { READ_ROLES, requireRoles } from '../../common/rbac';
+import { getCustomersService, parseClientStatus } from '../customers/service';
+import { getNetworkService } from '../network/service';
+import { buildGisMapData } from './service';
 
 const router = Router();
 
-router.get('/api/gis/health', (_req, res) => {
-  res.json({ status: 'ok', mode: 'store-backed-v2', note: 'Datos desde store/DB según flags de dominio' });
+router.get('/api/gis/health', requireRoles(READ_ROLES), (_req, res) => {
+  res.json({ status: 'ok', mode: 'store-backed-v2', note: 'Datos SSOT vía services según USE_DB_*' });
 });
 
-router.get('/api/gis/layers', (_req, res) => {
+router.get('/api/gis/layers', requireRoles(READ_ROLES), (_req, res) => {
   res.json([
     { id: 'towers', label: 'Torres WISP', enabled: true },
     { id: 'clients', label: 'Clientes', enabled: true },
@@ -17,83 +21,28 @@ router.get('/api/gis/layers', (_req, res) => {
   ]);
 });
 
-router.get('/api/gis/map-data', (req, res) => {
-  const status = String(req.query.status || '').trim().toLowerCase();
-  const planId = String(req.query.planId || '').trim();
-  const towerId = String(req.query.towerId || '').trim();
-  const q = String(req.query.q || '').trim().toLowerCase();
-
-  const towers = store.TOWERS.filter((tower) => {
-    const matchesStatus = !status || tower.status === status;
-    const matchesTower = !towerId || tower.id === towerId;
-    const matchesQ = !q
-      || tower.name.toLowerCase().includes(q)
-      || tower.ip.toLowerCase().includes(q);
-
-    return matchesStatus && matchesTower && matchesQ;
-  });
-
-  const clients = store.CLIENTS.filter((client) => {
-    const matchesStatus = !status || client.status === status;
-    const matchesPlan = !planId || client.planId === planId;
-    const matchesQ = !q
-      || client.name.toLowerCase().includes(q)
-      || client.address.toLowerCase().includes(q)
-      || client.city.toLowerCase().includes(q);
-
-    if (!matchesStatus || !matchesPlan || !matchesQ) {
-      return false;
-    }
-
-    if (!towerId) {
-      return true;
-    }
-
-    return store.MIKROTIK_ROUTERS.some((router) => router.linkedTowerId === towerId && router.isOnline);
-  });
-
-  const plans = store.PLANS.map((plan) => ({
-    id: plan.id,
-    name: plan.name,
-    clientsCount: clients.filter((client) => client.planId === plan.id).length,
+router.get('/api/gis/map-data', requireRoles(READ_ROLES), asyncHandler(async (req, res) => {
+  res.json(await buildGisMapData({
+    status: req.query.status ? String(req.query.status) : undefined,
+    planId: req.query.planId ? String(req.query.planId) : undefined,
+    towerId: req.query.towerId ? String(req.query.towerId) : undefined,
+    q: req.query.q ? String(req.query.q) : undefined,
   }));
+}));
 
-  const towerCoverage = towers.map((tower) => ({
-    id: tower.id,
-    name: tower.name,
-    coverageRadiusKm: tower.coverageRadiusKm,
-    linkedClients: clients.length,
-  }));
-
-  res.json({
-    filtersApplied: { status: status || null, planId: planId || null, towerId: towerId || null, q: q || null },
-    towers,
-    clients,
-    naps: store.NAP_BOXES,
-    onus: store.ONUS,
-    olts: store.OLTS,
-    plans,
-    towerCoverage,
+router.get('/api/gis/customers', requireRoles(READ_ROLES), asyncHandler(async (req, res) => {
+  const rows = await getCustomersService().list({
+    status: parseClientStatus(req.query.status) ?? undefined,
+    planId: req.query.planId ? String(req.query.planId) : undefined,
   });
-});
+  res.json(rows);
+}));
 
-router.get('/api/gis/customers', (req, res) => {
-  const status = String(req.query.status || '').trim().toLowerCase();
-  const planId = String(req.query.planId || '').trim();
-
-  const rows = store.CLIENTS.filter((client) => {
-    const matchesStatus = !status || client.status === status;
-    const matchesPlan = !planId || client.planId === planId;
-    return matchesStatus && matchesPlan;
+router.get('/api/gis/towers', requireRoles(READ_ROLES), asyncHandler(async (req, res) => {
+  const rows = await getNetworkService().listTowers({
+    status: req.query.status ? String(req.query.status) : undefined,
   });
-
   res.json(rows);
-});
-
-router.get('/api/gis/towers', (req, res) => {
-  const status = String(req.query.status || '').trim().toLowerCase();
-  const rows = store.TOWERS.filter((tower) => !status || tower.status === status);
-  res.json(rows);
-});
+}));
 
 export default router;

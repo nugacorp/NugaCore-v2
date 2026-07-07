@@ -45,9 +45,9 @@ Mapeo entre la especificación WISP OS (20 módulos), código, flags y gates.
 | OLA 0 | `.env.example` flags, jobs auditoría, persistencia-status |
 | OLA 1 | Control center, Client 360, collections, commercial UI |
 | OLA 2 | Router backup/diff/preview (dry-run) |
-| OLA 3 | Network service DB-ready, GIS v2, FTTH schema exists |
-| OLA 4 | Portal + Tech PWA |
-| OLA 5 | Reports UI, SLA engine, automation→notify bridge |
+| OLA 3 | Network/FTTH SSOT, GIS RBAC + service layer | Entregado |
+| OLA 4 | Portal completo + PWA técnicos ampliada | Entregado |
+| OLA 5 | SLA support DB, Reports fix, notify UI, CFDI banner | Entregado |
 | OLA 6 | Futuro (RADIUS, SaaS) |
 
 ## Verificación

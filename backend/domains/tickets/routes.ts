@@ -3,7 +3,7 @@ import { asyncHandler } from '../../common/errors';
 import { NotFoundError } from '../../common/errors';
 import { READ_ROLES, requireRoles } from '../../common/rbac';
 import { getSupportService } from './service';
-import { getSlaRules, listSlaBreaches } from './sla';
+import { getSlaRules, listSlaBreachesFromSupport } from './sla';
 
 const router = Router();
 const svc = () => getSupportService();
@@ -17,7 +17,7 @@ router.get('/api/technicians', requireRoles(READ_ROLES), asyncHandler(async (_re
 }));
 
 router.get('/api/tickets/sla/breaches', requireRoles(READ_ROLES), asyncHandler(async (_req, res) => {
-  res.json({ rules: getSlaRules(), breaches: listSlaBreaches() });
+  res.json({ rules: getSlaRules(), breaches: await listSlaBreachesFromSupport() });
 }));
 
 router.get('/api/tickets', requireRoles(READ_ROLES), asyncHandler(async (req, res) => {

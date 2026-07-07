@@ -22,6 +22,7 @@ interface FinanceOwnerModuleProps {
   clients: Client[];
   invoices: Invoice[];
   tickets: SupportTicket[];
+  getAuthHeaders?: () => Promise<Record<string, string>>;
   onAddTicket: (ticketData: any) => Promise<void>;
   onPayInvoice: (invoiceId: string, method: string) => Promise<void>;
   mode?: 'finance' | 'owner';
@@ -32,6 +33,7 @@ export default function FinanceOwnerModule({
   clients, 
   invoices, 
   tickets: _tickets,
+  getAuthHeaders,
   onAddTicket,
   onPayInvoice,
   mode = 'owner'
@@ -39,6 +41,22 @@ export default function FinanceOwnerModule({
   const [activeSubTab, setActiveSubTab] = useState<'finance' | 'portal' | 'automations' | 'hr' | 'security'>(
     mode === 'finance' ? 'finance' : 'automations'
   );
+  const [cfdiStatus, setCfdiStatus] = useState<{ mode: string; message: string; timbrado: boolean } | null>(null);
+
+  React.useEffect(() => {
+    if (!getAuthHeaders) return;
+    let cancelled = false;
+    (async () => {
+      try {
+        const headers = await getAuthHeaders();
+        const res = await fetch('/api/finance/cfdi/status', { headers });
+        if (res.ok && !cancelled) setCfdiStatus(await res.json());
+      } catch {
+        if (!cancelled) setCfdiStatus(null);
+      }
+    })();
+    return () => { cancelled = true; };
+  }, [getAuthHeaders]);
 
   // --- Sub-Tab 1: Finance State ---
   const [egresos, setEgresos] = useState([
@@ -356,6 +374,11 @@ export default function FinanceOwnerModule({
                   <h3 className="text-sm font-bold text-white font-mono uppercase">Control de Egresos, Energía & Arrendamientos</h3>
                   <span className="text-[11px] text-slate-400 font-mono">CFDI 4.0 Comprobantes fiscales</span>
                 </div>
+                {cfdiStatus && (
+                  <p className="rounded-lg border border-amber-500/30 bg-amber-500/10 px-3 py-2 text-[11px] text-amber-200">
+                    PAC: {cfdiStatus.mode} · timbrado={cfdiStatus.timbrado ? 'sí' : 'no'} — {cfdiStatus.message}
+                  </p>
+                )}
 
                 <div className="overflow-x-auto">
                   <table className="w-full text-left text-xs border-collapse font-mono">

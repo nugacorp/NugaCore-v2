@@ -7,7 +7,8 @@ import { getSupportService } from '../tickets/service';
 import { evaluateAllCustomers } from '../suspension/engine';
 import { nocReadOnlyService } from '../noc/service';
 import { automationService } from '../automation/service';
-import { listSlaBreaches } from '../tickets/sla';
+import { listSlaBreachesFromSupport } from '../tickets/sla';
+import { getNetworkService } from '../network/service';
 
 /**
  * Cabina de mando WISP OS — agrega las 8 áreas operativas en un solo payload.
@@ -18,7 +19,7 @@ export async function buildControlCenter() {
     buildBillingKpis(),
     evaluateAllCustomers().catch(() => [] as Awaited<ReturnType<typeof evaluateAllCustomers>>),
     getCommercialService().listAppointments({ from: new Date().toISOString().substring(0, 10) }),
-    Promise.resolve(listSlaBreaches()),
+    listSlaBreachesFromSupport(),
   ]);
 
   const wouldSuspend = suspensionResults.filter((r) => r.action === 'create_suspension');
@@ -29,7 +30,8 @@ export async function buildControlCenter() {
 
   const routersOnline = store.MIKROTIK_ROUTERS.filter((r) => r.isOnline).length;
   const routersOffline = store.MIKROTIK_ROUTERS.length - routersOnline;
-  const towersByCapacity = store.TOWERS.map((t) => {
+  const towers = await getNetworkService().listTowers({});
+  const towersByCapacity = towers.map((t) => {
     const sectors = store.NETWORK_SECTORS.filter((s) => s.towerId === t.id);
     const clientsOnTower = sectors.reduce((sum, s) => sum + (s.clientsCount ?? 0), 0);
     return { towerId: t.id, towerName: t.name, clientsCount: clientsOnTower, sectorCount: sectors.length, status: t.status };

@@ -59,7 +59,7 @@ export default function ReportsModule({ getAuthHeaders }: ReportsModuleProps) {
 
       {summary && (
         <div className="grid grid-cols-2 md:grid-cols-4 gap-3">
-          {Object.entries(summary.counts ?? {}).map(([k, v]) => (
+          {Object.entries(summary.totals ?? summary.counts ?? {}).map(([k, v]) => (
             <div key={k} className="bg-slate-900 border border-slate-800 rounded-xl p-4">
               <div className="text-2xl font-bold text-white">{String(v)}</div>
               <div className="text-xs text-slate-400 uppercase">{k}</div>

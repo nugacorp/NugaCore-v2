@@ -34,6 +34,12 @@ export function listSlaBreaches(tickets: Ticket[] = store.TICKETS): Ticket[] {
   return tickets.filter((t) => isTicketSlaBreached(t));
 }
 
+export async function listSlaBreachesFromSupport(): Promise<Ticket[]> {
+  const { getSupportService } = await import('../tickets/service');
+  const tickets = await getSupportService().listTickets({});
+  return listSlaBreaches(tickets);
+}
+
 export function ticketSlaStatus(ticket: Ticket, now = Date.now()) {
   const created = new Date(ticket.created || '').getTime();
   const maxHours = getSlaDeadlineHours(ticket.priority);
