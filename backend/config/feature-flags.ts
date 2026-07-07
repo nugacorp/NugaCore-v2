@@ -24,6 +24,9 @@ export type DomainKey =
   | 'ftth'
   | 'inventory'
   | 'support'
+  | 'commercial'
+  | 'purchases'
+  | 'finance'
   | 'mikrotik'
   | 'dashboard'
   | 'gis'
@@ -42,6 +45,9 @@ const FLAG_ENV: Record<DomainKey, string> = {
   ftth: 'USE_DB_FTTH',
   inventory: 'USE_DB_INVENTORY',
   support: 'USE_DB_SUPPORT',
+  commercial: 'USE_DB_COMMERCIAL',
+  purchases: 'USE_DB_PURCHASES',
+  finance: 'USE_DB_FINANCE',
   mikrotik: 'USE_DB_MIKROTIK',
   dashboard: 'USE_DB_DASHBOARD',
   gis: 'USE_DB_GIS',

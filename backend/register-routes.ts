@@ -33,6 +33,11 @@ import suspensionRoutes from './domains/suspension/routes';
 import systemRoutes from './domains/system/routes';
 import ticketsRoutes from './domains/tickets/routes';
 import wireguardRoutes from './domains/wireguard/routes';
+import commercialRoutes from './domains/commercial/routes';
+import clientActionsRoutes from './domains/client-actions/routes';
+import financeOperationalRoutes from './domains/finance-operational/routes';
+import purchasesRoutes from './domains/purchases/routes';
+import jobsRoutes from './domains/jobs/routes';
 
 export function registerRoutes(app: Express): void {
   app.use(healthRoutes);
@@ -69,4 +74,9 @@ export function registerRoutes(app: Express): void {
   app.use(gisRoutes);
   app.use(dashboardRoutes);
   app.use(paymentsRoutes);
+  app.use(commercialRoutes);
+  app.use(purchasesRoutes);
+  app.use(financeOperationalRoutes);
+  app.use(clientActionsRoutes);
+  app.use(jobsRoutes);
 }

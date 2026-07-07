@@ -354,33 +354,53 @@ export default function CrmModule({
     return () => { cancelled = true; };
   }, [client360, getAuthHeaders]);
 
-  const submitLocalPayment = (client: Client) => {
+  const submitLocalPayment = async (client: Client) => {
     const amount = Number(payAmount);
     if (!Number.isFinite(amount) || amount <= 0) {
       showToast('Captura un monto válido.');
       return;
     }
-    pushHistory(client.id, {
-      kind: 'pago',
-      label: `Pago registrado (local): $${amount.toFixed(2)} ${payMethod}`,
-      detail: 'Registro local/mock — no aplica a facturación real.',
-    });
-    setActionModal(null);
-    showToast('Pago registrado localmente (mock).');
+    try {
+      const api = createAuthorizedApi(getAuthHeaders);
+      await api.post(`/api/client-actions/${client.id}/payment`, {
+        amount,
+        paymentMethod: payMethod,
+      });
+      pushHistory(client.id, {
+        kind: 'pago',
+        label: `Pago registrado: $${amount.toFixed(2)} ${payMethod}`,
+        detail: 'Registrado vía billing (factura pendiente del cliente).',
+      });
+      setActionModal(null);
+      showToast('Pago registrado correctamente.');
+    } catch {
+      showToast('No se pudo registrar el pago. Verifica que el cliente tenga factura pendiente.');
+    }
   };
 
-  const submitLocalTicket = (client: Client) => {
+  const submitLocalTicket = async (client: Client) => {
     if (!ticketSubject.trim()) {
       showToast('Captura el asunto del ticket.');
       return;
     }
-    pushHistory(client.id, {
-      kind: 'ticket',
-      label: `Ticket (local): ${ticketSubject.trim()}`,
-      detail: ticketDetail.trim() || 'Registro local/mock — no abre ticket real.',
-    });
-    setActionModal(null);
-    showToast('Ticket registrado localmente (mock).');
+    try {
+      const api = createAuthorizedApi(getAuthHeaders);
+      const res = await api.post<{ ticket: { id: string } }>(`/api/client-actions/${client.id}/ticket`, {
+        title: ticketSubject.trim(),
+        description: ticketDetail.trim() || undefined,
+        category: 'Internet',
+        severity: 'medium',
+      });
+      pushHistory(client.id, {
+        kind: 'ticket',
+        label: `Ticket #${res.ticket?.id ?? ''}: ${ticketSubject.trim()}`,
+        detail: 'Ticket creado vía API de soporte.',
+      });
+      setActionModal(null);
+      showToast('Ticket creado correctamente.');
+    } catch {
+      showToast('No se pudo crear el ticket.');
+    }
   };
 
   const confirmSimulatedStatus = async (client: Client, kind: 'suspend' | 'reactivate') => {

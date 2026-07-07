@@ -30,7 +30,10 @@ El servicio WireGuard (`backend/domains/wireguard/service.ts`) **delega** en
 | `USE_DB_NETWORK` | network | false | repository/DB |
 | `USE_DB_FTTH` | ftth | false | repository/DB |
 | `USE_DB_INVENTORY` | inventory | false | repository/DB |
-| `USE_DB_SUPPORT` | support | false | repository/DB |
+| `USE_DB_SUPPORT` | support | false | tickets + work orders repository/DB |
+| `USE_DB_COMMERCIAL` | commercial | false | CRM comercial (prospectos, cotizaciones, citas) |
+| `USE_DB_PURCHASES` | purchases | false | proveedores + órdenes de compra |
+| `USE_DB_FINANCE` | finance | false | gastos operativos + P&L |
 | `USE_DB_MIKROTIK` | mikrotik | false | repository/DB — **NO activar** (gated) |
 | `USE_DB_DASHBOARD` | dashboard | false | repository/DB |
 | `USE_DB_GIS` | gis | false | repository/DB |

@@ -14,6 +14,8 @@ import { Router } from 'express';
 import { env, isProduction } from '../../config/env';
 import { domainsOnDb } from '../../config/feature-flags';
 import { metrics } from '../../common/metrics';
+import { isSupabaseAdminConfigured } from '../../services/supabase-admin';
+import { listRegisteredJobs } from '../../jobs/runner';
 
 const router = Router();
 
@@ -30,6 +32,8 @@ router.get('/api/health', (_req, res) => {
     timestamp: new Date().toISOString(),
     persistence: onDb.length > 0 ? 'mixed' : 'in-memory',
     domainsOnDb: onDb,
+    supabaseConfigured: isSupabaseAdminConfigured,
+    registeredJobs: listRegisteredJobs(),
     metrics: metrics.snapshot(),
   });
 });

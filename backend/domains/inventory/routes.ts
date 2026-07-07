@@ -9,6 +9,7 @@ import {
   customerEquipmentService,
   EquipmentReservationError,
 } from './customer-equipment/service';
+import { getSerialUnitsService } from './serial-units/service';
 
 const router = Router();
 
@@ -191,6 +192,27 @@ router.get('/api/inventory/movements', requireRoles(READ_ROLES), asyncHandler(as
 router.get('/api/inventory/assignments', requireRoles(READ_ROLES), asyncHandler(async (req, res) => {
   const itemId = String(req.query.itemId || '').trim() || undefined;
   res.json(await getInventoryService().listAssignments(itemId));
+}));
+
+router.get('/api/inventory/serial-units', requireRoles(READ_ROLES), asyncHandler(async (req, res) => {
+  res.json(await getSerialUnitsService().list({
+    itemId: req.query.itemId ? String(req.query.itemId) : undefined,
+    status: req.query.status ? String(req.query.status) : undefined,
+    clientId: req.query.clientId ? String(req.query.clientId) : undefined,
+  }));
+}));
+
+router.post('/api/inventory/serial-units', requireRoles([...WRITE_ROLES]), asyncHandler(async (req, res) => {
+  const created = await getSerialUnitsService().create(req.body || {});
+  res.status(201).json(created);
+}));
+
+router.post('/api/inventory/serial-units/:id/assign-client', requireRoles([...WRITE_ROLES]), asyncHandler(async (req, res) => {
+  const clientId = String(req.body?.clientId || '').trim();
+  if (!clientId) {
+    return res.status(400).json({ error: 'Missing clientId', code: 'MISSING_FIELD' });
+  }
+  res.json(await getSerialUnitsService().assignToClient(req.params.id, clientId));
 }));
 
 router.get('/api/inventory/:id/state', requireRoles(READ_ROLES), asyncHandler(async (req, res) => {

@@ -3,6 +3,7 @@ import { Client, Invoice, OnuFTTH } from '../../../src/types';
 import { store } from '../../../backend/state/store';
 import { READ_ROLES, requireRoles } from '../../common/rbac';
 import { asyncHandler } from '../../common/errors';
+import { paginateArray, parsePaginationOptional } from '../../common/pagination';
 import { getCustomersService, parseClientStatus, parseClientType } from './service';
 import { ipamService } from '../ipam/service';
 
@@ -21,6 +22,11 @@ router.get('/api/clients', requireRoles(READ_ROLES), asyncHandler(async (req, re
   const q = String(req.query.q || '').trim().toLowerCase();
 
   const rows = await getCustomersService().list({ status, type, city, planId, q });
+  const pagination = parsePaginationOptional(req.query as Record<string, unknown>);
+  if (pagination) {
+    res.json(paginateArray(rows, pagination));
+    return;
+  }
   res.json(rows);
 }));
 
