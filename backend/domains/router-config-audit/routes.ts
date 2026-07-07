@@ -2,7 +2,7 @@ import { Router } from 'express';
 import { asyncHandler, BadRequestError } from '../../common/errors';
 import { READ_ROLES, requireRoles } from '../../common/rbac';
 import { createRouterBackup, diffRouterBackups, listRouterBackups } from './service';
-import { store } from '../../state/store';
+import { getCustomersService } from '../customers/service';
 
 const router = Router();
 const WRITE = ['super admin', 'administrador'] as const;
@@ -32,7 +32,7 @@ router.get('/api/mikrotik/backups/diff', requireRoles(READ_ROLES), asyncHandler(
 router.post('/api/mikrotik/:routerId/operations/preview', requireRoles(READ_ROLES), asyncHandler(async (req, res) => {
   const op = String(req.body?.operation || 'queue_suspend');
   const clientId = req.body?.clientId ? String(req.body.clientId) : undefined;
-  const client = clientId ? store.CLIENTS.find((c) => c.id === clientId) : undefined;
+  const client = clientId ? await getCustomersService().getById(clientId) : null;
   res.json({
     routerId: req.params.routerId,
     operation: op,

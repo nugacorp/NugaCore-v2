@@ -62,4 +62,16 @@ router.post(
   }),
 );
 
+router.post(
+  '/api/ipam/pools/:poolId/propose-allocation',
+  requireRoles(READ_ROLES),
+  asyncHandler(async (req, res) => {
+    const result = await ipamService.proposeAllocation(req.params.poolId);
+    if (!result) {
+      return res.status(404).json({ error: 'No available IP in pool', code: 'IPAM_NO_IP' });
+    }
+    res.json(result);
+  }),
+);
+
 export default router;

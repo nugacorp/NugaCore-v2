@@ -121,6 +121,36 @@ describe('API — GIS SSOT', () => {
   });
 });
 
+describe('API — OLA 6 RADIUS + Tenancy', () => {
+  let app: Express;
+  beforeAll(() => { app = createApp(); });
+
+  it('GET /api/radius/status -> design stub', async () => {
+    const res = await request(app).get('/api/radius/status').set(READER);
+    expect(res.status).toBe(200);
+    expect(res.body.mode).toBe('design');
+    expect(res.body.liveAccounting).toBe(false);
+  });
+
+  it('GET /api/tenancy/status -> single-wisp', async () => {
+    const res = await request(app).get('/api/tenancy/status').set(READER);
+    expect(res.status).toBe(200);
+    expect(res.body.mode).toBe('single-wisp');
+  });
+});
+
+describe('API — Staging readiness', () => {
+  let app: Express;
+  beforeAll(() => { app = createApp(); });
+
+  it('GET /api/system/staging-readiness', async () => {
+    const res = await request(app).get('/api/system/staging-readiness').set(READER);
+    expect(res.status).toBe(200);
+    expect(res.body).toHaveProperty('ola2MikrotikGated', true);
+    expect(res.body).toHaveProperty('checklist');
+  });
+});
+
 describe('API — GIS store-backed', () => {
   let app: Express;
   beforeAll(() => { app = createApp(); });

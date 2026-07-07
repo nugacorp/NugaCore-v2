@@ -15,9 +15,11 @@
 // suspensiones, no toca RouterOS/MikroTik.
 // ====================================================================
 
-import { store } from '../../state/store';
 import { getCustomersService } from '../customers/service';
+import { getPlansService } from '../plans/service';
 import { getBillingService } from '../billing/service';
+import { getSupportService } from '../tickets/service';
+import { getNetworkService } from '../network/service';
 import { countSuspended } from '../service-status/service';
 import { buildDashboardStats, buildBillingKpis } from '../dashboard/routes';
 
@@ -63,7 +65,11 @@ async function officialValues() {
   const invoices = allInvoices.filter((inv) => inv.status !== 'canceled');
   const month = monthKey(new Date());
   const issuedThisMonth = invoices.filter((inv) => String(inv.dateStr || '').startsWith(month));
-  const priceById = new Map(store.PLANS.map((p) => [p.id, p.price]));
+  const plans = await getPlansService().list({});
+  const priceById = new Map(plans.map((p) => [p.id, p.price]));
+
+  const tickets = await getSupportService().listTickets({});
+  const towers = await getNetworkService().listTowers({ status: 'online' });
 
   return {
     activeCustomers: clients.filter((c) => c.status === 'active').length,
@@ -84,8 +90,8 @@ async function officialValues() {
     cobradoMes: round(issuedThisMonth.reduce((s, inv) => s + (inv.paidAmount || 0), 0)),
     pendienteCobro: round(invoices.reduce((s, inv) => s + (inv.pendingAmount || 0), 0)),
     facturasVencidas: invoices.filter((inv) => inv.status === 'overdue').length,
-    openTickets: store.TICKETS.filter((t) => t.status !== 'resolved' && t.status !== 'closed').length,
-    towersOnline: store.TOWERS.filter((t) => t.status === 'online').length,
+    openTickets: tickets.filter((t) => t.status !== 'resolved' && t.status !== 'closed').length,
+    towersOnline: towers.length,
   };
 }
 

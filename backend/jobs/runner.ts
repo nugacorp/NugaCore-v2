@@ -46,11 +46,16 @@ export function listRegisteredJobs(): string[] {
 
 // Jobs por defecto (no-op seguros; extensibles)
 registerJob('persistence-audit', async () => {
-  const onDb = [
-    'customers', 'plans', 'billing', 'suspension', 'inventory', 'support',
-    'commercial', 'purchases', 'finance', 'payments',
-  ].filter((d) => isDomainOnDb(d as import('../config/feature-flags').DomainKey));
-  logger.info('persistence_audit', { domainsOnDb: onDb });
+  const critical = ['customers', 'plans', 'billing', 'suspension', 'inventory', 'support', 'payments'] as const;
+  const onDb = critical.filter((d) => isDomainOnDb(d));
+  const { runDataConsistencyCheck } = await import('../domains/system/consistency');
+  const consistency = await runDataConsistencyCheck();
+  logger.info('persistence_audit', {
+    domainsOnDb: onDb,
+    criticalClosed: onDb.length === critical.length,
+    consistencyHealthy: consistency.healthy,
+    mismatches: consistency.mismatches.length,
+  });
 });
 
 registerJob('health-ping', async () => {

@@ -36,7 +36,10 @@ Mapeo entre la especificación WISP OS (20 módulos), código, flags y gates.
 - `GET /api/tickets/sla/breaches`
 - `GET|POST /api/mikrotik/:routerId/backups` + `operations/preview` (gated)
 - `POST /api/automation/decisions/:id/notify-preview` + `POST /api/automation/notify-pending`
-- `GET /api/finance/cfdi/status` (stub PAC)
+- `GET /api/system/staging-readiness`
+- `GET /api/radius/status` + `GET /api/radius/sessions`
+- `GET /api/tenancy/status` + `GET /api/tenants`
+- `POST /api/ipam/pools/:poolId/propose-allocation` (dry-run)
 
 ## Olas implementadas
 
@@ -48,7 +51,7 @@ Mapeo entre la especificación WISP OS (20 módulos), código, flags y gates.
 | OLA 3 | Network/FTTH SSOT, GIS RBAC + service layer | Entregado |
 | OLA 4 | Portal completo + PWA técnicos ampliada | Entregado |
 | OLA 5 | SLA support DB, Reports fix, notify UI, CFDI banner | Entregado |
-| OLA 6 | Futuro (RADIUS, SaaS) |
+| OLA 6 | RADIUS stub + tenancy foundation | Entregado (diseño) |
 
 ## Verificación
 

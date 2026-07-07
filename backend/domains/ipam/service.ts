@@ -258,6 +258,19 @@ export class IpamService {
       message: 'IP disponible.',
     };
   }
+
+  async proposeAllocation(poolId: string) {
+    const available = await this.availableIps(poolId);
+    if (!available || available.ips.length === 0) return null;
+    return {
+      poolId,
+      routerId: available.routerId,
+      proposedIp: available.ips[0],
+      cidr: available.cidr,
+      dryRun: true as const,
+      note: 'Propuesta sin reserva — asignar vía CRM/provisioning.',
+    };
+  }
 }
 
 export const ipamService = new IpamService(

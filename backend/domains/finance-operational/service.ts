@@ -30,12 +30,32 @@ export class FinanceOperationalService {
   }
 
   listExpenses(filters?: { category?: string; from?: string; to?: string }) {
-    return memory.filter((e) => {
+    if (this.useDb) {
+      return this.admin.from('operational_expenses').select('*').then(({ data, error }) => {
+        if (error) throw error;
+        let rows = (data ?? []).map((row) => ({
+          id: String(row.id),
+          category: row.category as ExpenseCategory,
+          description: String(row.description),
+          amountCents: Number(row.amount_cents),
+          currency: String(row.currency ?? 'MXN'),
+          expenseDate: String(row.expense_date),
+          vendor: row.vendor ? String(row.vendor) : undefined,
+          createdBy: row.created_by ? String(row.created_by) : undefined,
+          createdAt: String(row.created_at),
+        }));
+        if (filters?.category) rows = rows.filter((e) => e.category === filters.category);
+        if (filters?.from) rows = rows.filter((e) => e.expenseDate >= filters.from!);
+        if (filters?.to) rows = rows.filter((e) => e.expenseDate <= filters.to!);
+        return rows;
+      });
+    }
+    return Promise.resolve(memory.filter((e) => {
       const matchCat = !filters?.category || e.category === filters.category;
       const matchFrom = !filters?.from || e.expenseDate >= filters.from;
       const matchTo = !filters?.to || e.expenseDate <= filters.to;
       return matchCat && matchFrom && matchTo;
-    });
+    }));
   }
 
   async createExpense(body: Record<string, unknown>, createdBy?: string) {
@@ -74,7 +94,7 @@ export class FinanceOperationalService {
   async getOperationalPnl(periodFrom?: string, periodTo?: string) {
     const from = periodFrom ?? `${new Date().getFullYear()}-${String(new Date().getMonth() + 1).padStart(2, '0')}-01`;
     const to = periodTo ?? today();
-    const expenses = this.listExpenses({ from, to });
+    const expenses = await this.listExpenses({ from, to });
     const totalExpensesCents = expenses.reduce((s, e) => s + e.amountCents, 0);
     let revenueCents = 0;
     try {

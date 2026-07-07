@@ -3,8 +3,8 @@
 // ====================================================================
 
 import { TaskOrder, Ticket } from '../../../src/types';
-import { store } from '../../state/store';
 import { BadRequestError, NotFoundError } from '../../common/errors';
+import { getCustomersService } from '../customers/service';
 import { getSupportRepository } from './repository';
 import type { SupportFilters, TicketCreateInput, TicketUpdateInput, WorkOrderCreateInput } from './types';
 
@@ -97,7 +97,7 @@ export class SupportService {
     const title = String(body.title || '').trim();
     if (!title) throw new BadRequestError('Missing required field: title', 'MISSING_FIELD');
     const clientId = body.clientId ? String(body.clientId) : undefined;
-    const client = clientId ? store.CLIENTS.find((c) => c.id === clientId) : undefined;
+    const client = clientId ? await getCustomersService().getById(clientId) : null;
     const parsedSeverity = parseTicketSeverity(body.severity) || 'medium';
     const parsedCategory = parseTicketCategory(body.category) || 'Internet';
     const parsedPriority = parseTicketPriority(body.priority) || priorityFromSeverity(parsedSeverity);
@@ -224,7 +224,7 @@ export class SupportService {
     if (!title || !clientId || !date) {
       throw new BadRequestError('Missing required fields: title, clientId, date', 'MISSING_FIELD');
     }
-    const client = store.CLIENTS.find((c) => c.id === clientId);
+    const client = await getCustomersService().getById(clientId);
     if (!client) throw new BadRequestError('Invalid clientId', 'INVALID_REFERENCE');
     const input: WorkOrderCreateInput = {
       title,

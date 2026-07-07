@@ -17,7 +17,7 @@
 | OLA 3 | Network DB, GIS v2, FTTH schema | Entregado | `USE_DB_NETWORK` ready |
 | OLA 4 | Portal cliente + PWA técnicos | Entregado (staging) | `portal/`, `TechPwaModule` |
 | OLA 5 | Reportes UI, SLA, automation→notify | Entregado (dry-run) | `notify-bridge.ts` |
-| OLA 6 | RADIUS, SaaS multi-tenant | Futuro | ROADMAP Fase 11 |
+| OLA 6 | RADIUS stub, SaaS tenancy schema | Entregado (foundation) | `radius/`, `tenancy/` |
 
 > **Nota:** las "Fases 0–16" del `MASTER_PLAN.md` describen lo ya construido. Este backlog reorganiza el trabajo hacia **producción real** (persistencia + seguridad + integraciones), respetando gates PROD-3→9.
 

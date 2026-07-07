@@ -41,6 +41,8 @@ import client360Routes from './domains/client-360/routes';
 import collectionsRoutes from './domains/collections/routes';
 import portalRoutes from './domains/portal/routes';
 import routerConfigAuditRoutes from './domains/router-config-audit/routes';
+import radiusRoutes from './domains/radius/routes';
+import tenancyRoutes from './domains/tenancy/routes';
 import jobsRoutes from './domains/jobs/routes';
 
 export function registerRoutes(app: Express): void {
@@ -86,5 +88,7 @@ export function registerRoutes(app: Express): void {
   app.use(collectionsRoutes);
   app.use(portalRoutes);
   app.use(routerConfigAuditRoutes);
+  app.use(radiusRoutes);
+  app.use(tenancyRoutes);
   app.use(jobsRoutes);
 }

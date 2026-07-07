@@ -1,7 +1,8 @@
 import { Router } from 'express';
 import * as XLSX from 'xlsx';
-import { store } from '../../state/store';
+import { asyncHandler } from '../../common/errors';
 import { requireAction } from '../../common/rbac';
+import { buildFinancialRows, buildOperationalRows, buildRowsByScope, buildSecurityRows } from './service';
 
 const router = Router();
 
@@ -88,72 +89,21 @@ const toPdfBuffer = (title: string, lines: string[]): Buffer => {
   return Buffer.from(body, 'utf8');
 };
 
-const buildFinancialRows = () => {
-  return store.INVOICES.map((invoice) => {
-    const paidAmount = invoice.payments.reduce((acc, payment) => acc + Number(payment.amount || 0), 0);
-    const pendingAmount = Math.max(invoice.amount - paidAmount, 0);
-
-    return {
-      invoiceId: invoice.id,
-      clientId: invoice.clientId,
-      clientName: invoice.clientName,
-      amount: invoice.amount,
-      paidAmount,
-      pendingAmount,
-      status: invoice.status,
-      dueDate: invoice.dueDateStr,
-      paymentsCount: invoice.payments.length,
-    };
-  });
-};
-
-const buildOperationalRows = () => {
-  return store.TOWERS.map((tower) => ({
-    towerId: tower.id,
-    towerName: tower.name,
-    towerStatus: tower.status,
-    cpuPct: tower.cpu,
-    ramPct: tower.ram,
-    pingMs: tower.pingMs,
-    sectors: store.NETWORK_SECTORS.filter((sector) => sector.towerId === tower.id).length,
-    activeTickets: store.TICKETS.filter((ticket) => ticket.status !== 'resolved' && ticket.status !== 'closed').length,
-    timestamp: nowStamp(),
-  }));
-};
-
-const buildSecurityRows = () => {
-  return store.SECURITY_AUDIT_LOGS.slice(0, 300).map((row) => ({
-    id: row.id,
-    actorId: row.actorId || 'anonymous',
-    actorRole: row.actorRole || 'unknown',
-    action: row.action,
-    resource: row.resource,
-    method: row.method,
-    statusCode: row.statusCode,
-    success: row.success,
-    source: row.source,
-    createdAt: row.createdAt,
-  }));
-};
-
-const buildRowsByScope = (scope: ReportScope): Record<string, unknown>[] => {
-  if (scope === 'financial') return buildFinancialRows();
-  if (scope === 'operational') return buildOperationalRows();
-  return buildSecurityRows();
-};
-
 router.get('/api/reports/catalog', requireAction('reports.view'), (_req, res) => {
   res.json({
     scopes: ['financial', 'operational', 'security'],
     formats: ['csv', 'xlsx', 'pdf'],
     generatedAt: nowStamp(),
+    source: 'ssot-services',
   });
 });
 
-router.get('/api/reports/summary', requireAction('reports.view'), (_req, res) => {
-  const financial = buildFinancialRows();
-  const operational = buildOperationalRows();
-  const security = buildSecurityRows();
+router.get('/api/reports/summary', requireAction('reports.view'), asyncHandler(async (_req, res) => {
+  const [financial, operational, security] = await Promise.all([
+    buildFinancialRows(),
+    buildOperationalRows(),
+    Promise.resolve(buildSecurityRows()),
+  ]);
 
   res.json({
     generatedAt: nowStamp(),
@@ -168,9 +118,9 @@ router.get('/api/reports/summary', requireAction('reports.view'), (_req, res) =>
       security: security.slice(0, 3),
     },
   });
-});
+}));
 
-router.get('/api/reports/export', requireAction('reports.export'), (req, res) => {
+router.get('/api/reports/export', requireAction('reports.export'), asyncHandler(async (req, res) => {
   const scope = parseScope(req.query.scope);
   const format = parseFormat(req.query.format);
 
@@ -181,7 +131,7 @@ router.get('/api/reports/export', requireAction('reports.export'), (req, res) =>
     return res.status(400).json({ error: 'Invalid format. Allowed: csv, xlsx, pdf.' });
   }
 
-  const rows = buildRowsByScope(scope);
+  const rows = await buildRowsByScope(scope);
   const fileBase = `nugacore-${scope}-${new Date().toISOString().substring(0, 10)}`;
 
   if (format === 'csv') {
@@ -206,6 +156,6 @@ router.get('/api/reports/export', requireAction('reports.export'), (req, res) =>
   res.setHeader('Content-Type', 'application/pdf');
   res.setHeader('Content-Disposition', `attachment; filename="${fileBase}.pdf"`);
   return res.send(pdfBuffer);
-});
+}));
 
 export default router;

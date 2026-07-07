@@ -27,8 +27,10 @@ USE_DB_FINANCE=true
 
 ## Checklist OLA 0
 
-1. Aplicar migraciones: `20260707000000_crm_erp_wisp_schema.sql`, `20260707100000_wisp_os_schema.sql`
+1. Aplicar migraciones: `20260707000000_crm_erp_wisp_schema.sql`, `20260707100000_wisp_os_schema.sql`, `20260707120000_ola6_radius_tenancy.sql`
 2. `GET /api/system/persistence-status` → `storeFallbackActive: false`
-3. `POST /api/jobs/run` → `persistence-audit` ok
-4. Backup + restore probado (checklist §14)
-5. `node scripts/validate-wisp-os-staging.mjs --local` (checklist) o `RUN_DB_TESTS=true node scripts/validate-wisp-os-staging.mjs` (tablas)
+3. `GET /api/system/staging-readiness` → `ola0PersistenceClosed: true`
+4. `POST /api/jobs/run` → `persistence-audit` ok
+5. Backup + restore probado (checklist §14)
+6. `node scripts/validate-staging-readiness.mjs`
+7. `RUN_DB_TESTS=true node scripts/validate-wisp-os-staging.mjs` (tablas)
