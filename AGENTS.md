@@ -1,10 +1,10 @@
 # NugaCore Agent Instructions
 
-This repository includes vendored agent skills under `agent/skills/`. Agents working on this repo should read the relevant skills before planning or editing.
+This repository vendors agent skills under `agent/skills/`. **Start at [`agent/README.md`](agent/README.md)** for the full catalog, sync scripts, and task bundles.
 
 ## Skill loading policy
 
-Use `agent/skills/README.md` as the index. At minimum:
+Use [`agent/skills/README.md`](agent/skills/README.md) or [`agent/skills/MANIFEST.json`](agent/skills/MANIFEST.json) as the index. At minimum:
 
 - For any WISP/NOC/SaaS work: read `agent/skills/software-development/wisp-noc-saas-development/SKILL.md`.
 - For Supabase, Postgres, auth, RLS, REST, migrations, or database security: read:
@@ -13,9 +13,19 @@ Use `agent/skills/README.md` as the index. At minimum:
 - For frontend UI, React, Vite, or Tailwind work: read:
   - `agent/skills/software-development/vercel-react-best-practices/SKILL.md`
   - `agent/skills/software-development/tailwind-4-docs/SKILL.md`
+  - `agent/skills/software-development/web-design-guidelines/SKILL.md`
+- For new features and bug fixes: read `agent/skills/software-development/test-driven-development/SKILL.md`.
 - For debugging: read `agent/skills/software-development/systematic-debugging/SKILL.md`.
 - For PRs, branches, commits, or GitHub workflow: read `agent/skills/github/github-pr-workflow/SKILL.md`.
 - For handoff docs: read `agent/skills/productivity/document-workflows/SKILL.md` and keep public docs sanitized.
+
+## Cursor auto-discovery
+
+`.agents/skills/` contains symlinks to `agent/skills/`. Regenerate after clone with:
+
+```bash
+./agent/scripts/link-agent-skills.sh
+```
 
 ## Project guardrails
 

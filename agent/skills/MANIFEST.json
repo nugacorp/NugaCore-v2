@@ -1,0 +1,153 @@
+{
+  "version": 1,
+  "project": "nugacore",
+  "standard": "https://agentskills.io/",
+  "entryPoints": {
+    "agentsMd": "AGENTS.md",
+    "readme": "agent/README.md",
+    "index": "agent/skills/README.md"
+  },
+  "skillCount": 20,
+  "skills": [
+    {
+      "name": "supabase",
+      "category": "data-platform",
+      "path": "agent/skills/data-platform/supabase",
+      "skillFile": "agent/skills/data-platform/supabase/SKILL.md",
+      "description": "Connect to Supabase for database operations, vector search, and storage. Use for storing data, running SQL queries, similarity search with pgvector, and managing tables. Triggers on requests involving databases, vector stores, embeddings, or Supabase specifically."
+    },
+    {
+      "name": "kanban-multi-agent-workflows",
+      "category": "devops",
+      "path": "agent/skills/devops/kanban-multi-agent-workflows",
+      "skillFile": "agent/skills/devops/kanban-multi-agent-workflows/SKILL.md",
+      "description": "Use when routing work through Hermes Kanban: worker lifecycle, orchestrator decomposition, and optional external implementation lanes."
+    },
+    {
+      "name": "mikrotik-routeros-rsc",
+      "category": "devops",
+      "path": "agent/skills/devops/mikrotik-routeros-rsc",
+      "skillFile": "agent/skills/devops/mikrotik-routeros-rsc/SKILL.md",
+      "description": "Creation, editing, and review of RouterOS scripts (.rsc) with focus on idempotency, security, and best practices. Use when you need to generate, adjust, or import .rsc files for MikroTik: (1) create new configurations via script, (2) edit existing scripts with safe corrections, (3) review risks and execution policies, (4) validate with import dry-run and error handling."
+    },
+    {
+      "name": "tailscale-service-exposure",
+      "category": "devops",
+      "path": "agent/skills/devops/tailscale-service-exposure",
+      "skillFile": "agent/skills/devops/tailscale-service-exposure/SKILL.md",
+      "description": "Expose local admin dashboards and internal web services safely over Tailscale using interface-specific binds, systemd, authentication, and verification."
+    },
+    {
+      "name": "webhook-subscriptions",
+      "category": "devops",
+      "path": "agent/skills/devops/webhook-subscriptions",
+      "skillFile": "agent/skills/devops/webhook-subscriptions/SKILL.md",
+      "description": "Webhook subscriptions: event-driven agent runs."
+    },
+    {
+      "name": "github-pr-workflow",
+      "category": "github",
+      "path": "agent/skills/github/github-pr-workflow",
+      "skillFile": "agent/skills/github/github-pr-workflow/SKILL.md",
+      "description": "Use when working with GitHub repos end-to-end: auth, repo setup, issues, reviews, PR lifecycle, and codebase inspection."
+    },
+    {
+      "name": "document-workflows",
+      "category": "productivity",
+      "path": "agent/skills/productivity/document-workflows",
+      "skillFile": "agent/skills/productivity/document-workflows/SKILL.md",
+      "description": "Use when extracting, editing, or transforming office documents and PDFs across OCR, PDF patching, and document-processing workflows."
+    },
+    {
+      "name": "workspace-databases",
+      "category": "productivity",
+      "path": "agent/skills/productivity/workspace-databases",
+      "skillFile": "agent/skills/productivity/workspace-databases/SKILL.md",
+      "description": "Use when working with API-driven workspace databases such as Airtable and Notion, including schema discovery, CRUD, search, and content automation."
+    },
+    {
+      "name": "development-workflows",
+      "category": "software-development",
+      "path": "agent/skills/software-development/development-workflows",
+      "skillFile": "agent/skills/software-development/development-workflows/SKILL.md",
+      "description": "Use when choosing or executing a software-development workflow such as spikes, TDD, cleanup passes, or debug-led implementation."
+    },
+    {
+      "name": "plan",
+      "category": "software-development",
+      "path": "agent/skills/software-development/plan",
+      "skillFile": "agent/skills/software-development/plan/SKILL.md",
+      "description": "Plan mode: write an actionable markdown plan to .hermes/plans/, no execution. Bite-sized tasks, exact paths, complete code."
+    },
+    {
+      "name": "subagent-driven-development",
+      "category": "software-development",
+      "path": "agent/skills/software-development/subagent-driven-development",
+      "skillFile": "agent/skills/software-development/subagent-driven-development/SKILL.md",
+      "description": "Execute plans via delegate_task subagents (2-stage review)."
+    },
+    {
+      "name": "supabase-postgres-best-practices",
+      "category": "software-development",
+      "path": "agent/skills/software-development/supabase-postgres-best-practices",
+      "skillFile": "agent/skills/software-development/supabase-postgres-best-practices/SKILL.md",
+      "description": "Postgres performance optimization and best practices from Supabase. Use this skill when writing, reviewing, or optimizing Postgres queries, schema designs, or database configurations."
+    },
+    {
+      "name": "systematic-debugging",
+      "category": "software-development",
+      "path": "agent/skills/software-development/systematic-debugging",
+      "skillFile": "agent/skills/software-development/systematic-debugging/SKILL.md",
+      "description": "Use when debugging technical problems systematically, including Python, Node, and Hermes-specific tool/CLI failures."
+    },
+    {
+      "name": "tailwind-4-docs",
+      "category": "software-development",
+      "path": "agent/skills/software-development/tailwind-4-docs",
+      "skillFile": "agent/skills/software-development/tailwind-4-docs/SKILL.md",
+      "description": "Comprehensive Tailwind CSS v4 documentation snapshot and workflow guidance. Use when answering Tailwind v4 questions, selecting utilities/variants, configuring Tailwind v4, or migrating projects from v3 to v4 with official docs and gotcha checks."
+    },
+    {
+      "name": "test-driven-development",
+      "category": "software-development",
+      "path": "agent/skills/software-development/test-driven-development",
+      "skillFile": "agent/skills/software-development/test-driven-development/SKILL.md",
+      "description": "Use when implementing features, fixing bugs, or refactoring. Enforces strict red-green-refactor: write a failing test first, watch it fail, write minimal code to pass, then refactor."
+    },
+    {
+      "name": "vercel-composition-patterns",
+      "category": "software-development",
+      "path": "agent/skills/software-development/vercel-composition-patterns",
+      "skillFile": "agent/skills/software-development/vercel-composition-patterns/SKILL.md",
+      "description": "React composition patterns that scale. Use when refactoring components with"
+    },
+    {
+      "name": "vercel-react-best-practices",
+      "category": "software-development",
+      "path": "agent/skills/software-development/vercel-react-best-practices",
+      "skillFile": "agent/skills/software-development/vercel-react-best-practices/SKILL.md",
+      "description": "React and Next.js performance optimization guidelines from Vercel Engineering. This skill should be used when writing, reviewing, or refactoring React/Next.js code to ensure optimal performance patterns. Triggers on tasks involving React components, Next.js pages, data fetching, bundle optimization, or performance improvements."
+    },
+    {
+      "name": "web-design-guidelines",
+      "category": "software-development",
+      "path": "agent/skills/software-development/web-design-guidelines",
+      "skillFile": "agent/skills/software-development/web-design-guidelines/SKILL.md",
+      "description": "Review UI code for Web Interface Guidelines compliance. Use when asked to \"review my UI\", \"check accessibility\", \"audit design\", \"review UX\", or \"check my site against best practices\"."
+    },
+    {
+      "name": "wisp-noc-saas-development",
+      "category": "software-development",
+      "path": "agent/skills/software-development/wisp-noc-saas-development",
+      "skillFile": "agent/skills/software-development/wisp-noc-saas-development/SKILL.md",
+      "description": "Use when planning, implementing, validating, or documenting NugaCore WISP/NOC/SaaS work: billing, clients, plans, NOC dashboards, RouterOS/MikroTik read-only integrations, Supabase-backed data flows, staging validation, and production-readiness gates."
+    },
+    {
+      "name": "writing-plans",
+      "category": "software-development",
+      "path": "agent/skills/software-development/writing-plans",
+      "skillFile": "agent/skills/software-development/writing-plans/SKILL.md",
+      "description": "Write implementation plans: bite-sized tasks, paths, code."
+    }
+  ]
+}
