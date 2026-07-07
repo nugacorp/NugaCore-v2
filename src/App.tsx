@@ -30,6 +30,10 @@ const RouterOsResourcesModule = lazy(() => import('./components/RouterOsResource
 const RouterOsTemplatesModule = lazy(() => import('./components/RouterOsTemplatesModule'));
 const RouterEnrollmentWizard = lazy(() => import('./components/RouterEnrollmentWizard'));
 const PaymentsModule = lazy(() => import('./components/PaymentsModule'));
+const CommercialModule = lazy(() => import('./components/CommercialModule'));
+const ReportsModule = lazy(() => import('./components/ReportsModule'));
+const PortalModule = lazy(() => import('./components/PortalModule'));
+const TechPwaModule = lazy(() => import('./modules/tech-pwa/TechPwaModule'));
 import LoginForm from './components/LoginForm';
 import LandingPage from './components/LandingPage';
 import UserMenu from './components/UserMenu';
@@ -1335,6 +1339,22 @@ export default function App() {
                 onPayInvoice={handlePayInvoice}
                 mode="owner"
               />
+            )}
+
+            {activeTab === 'commercial' && (
+              <CommercialModule getAuthHeaders={getAuthHeaders} />
+            )}
+
+            {activeTab === 'reports' && (
+              <ReportsModule getAuthHeaders={getAuthHeaders} />
+            )}
+
+            {activeTab === 'portal' && (
+              <PortalModule clients={clients} getAuthHeaders={getAuthHeaders} />
+            )}
+
+            {activeTab === 'tech-pwa' && (
+              <TechPwaModule getAuthHeaders={getAuthHeaders} />
             )}
 
             {activeTab === 'payments' && (

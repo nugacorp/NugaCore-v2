@@ -24,9 +24,8 @@ La buena noticia: el trabajo de diseño "invisible" pesado **ya está hecho** (e
 | Dimensión | Avance | Comentario |
 |-----------|:------:|------------|
 | **Interfaz de usuario (frontend)** | ~90% | Completa y pulida; no requiere rediseño |
-| **API / lógica de negocio** | ~70% | ~80 endpoints funcionando sobre datos demo |
-| **Diseño de base de datos** | ~85% | Esquema y reglas listos, **falta conectarlos** |
-| **Persistencia real (datos que perduran)** | ~5% | **El gran pendiente** |
+| **Persistencia real (datos que perduran)** | ~45–55% | Repos + flags por dominio; default memoria hasta activar `USE_DB_*` |
+| **API / lógica de negocio** | ~75% | 40+ dominios; motores billing/suspension/provisioning |
 | **Seguridad / acceso** | ~40% | Estructura buena, pero el control de acceso es burlable hoy |
 | **Integración MikroTik (red real)** | ~10% | Todo simulado; falta la conexión real |
 | **Pagos y facturación fiscal (CFDI) reales** | ~10% | Se registran a mano; sin cobro en línea ni timbrado |

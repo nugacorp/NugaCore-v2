@@ -4,7 +4,7 @@ import { store } from '../../state/store';
 const router = Router();
 
 router.get('/api/gis/health', (_req, res) => {
-  res.json({ status: 'ok', mode: 'mock-gis-v1' });
+  res.json({ status: 'ok', mode: 'store-backed-v2', note: 'Datos desde store/DB según flags de dominio' });
 });
 
 router.get('/api/gis/layers', (_req, res) => {

@@ -26,6 +26,10 @@ export type AppTab =
   | 'routeros-readonly'
   | 'automation'
   | 'notifications'
+  | 'commercial'
+  | 'reports'
+  | 'portal'
+  | 'tech-pwa'
   | 'user-manual';
 
 // ====================================================================
@@ -35,12 +39,12 @@ export type AppTab =
 // la VISIBILIDAD del módulo.
 // ====================================================================
 const roleTabs: Record<UserRole, AppTab[]> = {
-  'Super Admin':  ['dashboard', 'noc', 'crm', 'billing', 'finance', 'suspension', 'payments', 'network', 'mikrotik', 'wireguard', 'routeros-resources', 'routeros-templates', 'router-enrollment', 'support', 'inventory', 'inventory-routers', 'gis', 'owner', 'manual-safe-mode', 'safe-command-queue', 'routeros-readonly', 'inventory-sync', 'provisioning', 'automation', 'notifications', 'user-manual'],
-  'Administrador':['dashboard', 'noc', 'crm', 'billing', 'suspension', 'payments', 'network', 'wireguard', 'routeros-resources', 'routeros-templates', 'router-enrollment', 'support', 'inventory', 'inventory-routers', 'gis', 'manual-safe-mode', 'safe-command-queue', 'routeros-readonly', 'inventory-sync', 'provisioning', 'automation', 'notifications', 'user-manual'],
-  'Cobranza':     ['dashboard', 'crm', 'billing', 'finance', 'suspension', 'payments', 'provisioning', 'automation', 'notifications', 'user-manual'],
-  'Técnico':      ['dashboard', 'noc', 'crm', 'suspension', 'network', 'mikrotik', 'routeros-resources', 'routeros-templates', 'router-enrollment', 'support', 'inventory', 'inventory-routers', 'gis', 'manual-safe-mode', 'safe-command-queue', 'routeros-readonly', 'inventory-sync', 'provisioning', 'automation', 'notifications', 'user-manual'],
-  'Soporte':      ['dashboard', 'noc', 'crm', 'support', 'inventory-routers', 'gis', 'manual-safe-mode', 'safe-command-queue', 'routeros-readonly', 'inventory-sync', 'provisioning', 'automation', 'notifications', 'user-manual'],
-  'Solo lectura': ['dashboard', 'noc', 'crm', 'billing', 'suspension', 'network', 'inventory-routers', 'gis', 'manual-safe-mode', 'safe-command-queue', 'routeros-readonly', 'inventory-sync', 'provisioning', 'automation', 'notifications', 'user-manual'],
+  'Super Admin':  ['dashboard', 'noc', 'crm', 'commercial', 'billing', 'finance', 'suspension', 'payments', 'network', 'mikrotik', 'wireguard', 'routeros-resources', 'routeros-templates', 'router-enrollment', 'support', 'tech-pwa', 'inventory', 'inventory-routers', 'gis', 'owner', 'reports', 'portal', 'manual-safe-mode', 'safe-command-queue', 'routeros-readonly', 'inventory-sync', 'provisioning', 'automation', 'notifications', 'user-manual'],
+  'Administrador':['dashboard', 'noc', 'crm', 'commercial', 'billing', 'suspension', 'payments', 'network', 'wireguard', 'routeros-resources', 'routeros-templates', 'router-enrollment', 'support', 'tech-pwa', 'inventory', 'inventory-routers', 'gis', 'reports', 'portal', 'manual-safe-mode', 'safe-command-queue', 'routeros-readonly', 'inventory-sync', 'provisioning', 'automation', 'notifications', 'user-manual'],
+  'Cobranza':     ['dashboard', 'crm', 'commercial', 'billing', 'finance', 'suspension', 'payments', 'reports', 'portal', 'provisioning', 'automation', 'notifications', 'user-manual'],
+  'Técnico':      ['dashboard', 'noc', 'crm', 'suspension', 'network', 'mikrotik', 'routeros-resources', 'routeros-templates', 'router-enrollment', 'support', 'tech-pwa', 'inventory', 'inventory-routers', 'gis', 'portal', 'manual-safe-mode', 'safe-command-queue', 'routeros-readonly', 'inventory-sync', 'provisioning', 'automation', 'notifications', 'user-manual'],
+  'Soporte':      ['dashboard', 'noc', 'crm', 'commercial', 'support', 'tech-pwa', 'inventory-routers', 'gis', 'portal', 'manual-safe-mode', 'safe-command-queue', 'routeros-readonly', 'inventory-sync', 'provisioning', 'automation', 'notifications', 'user-manual'],
+  'Solo lectura': ['dashboard', 'noc', 'crm', 'commercial', 'billing', 'suspension', 'network', 'inventory-routers', 'gis', 'reports', 'portal', 'manual-safe-mode', 'safe-command-queue', 'routeros-readonly', 'inventory-sync', 'provisioning', 'automation', 'notifications', 'user-manual'],
 };
 
 // ====================================================================
@@ -117,6 +121,10 @@ export const MODULE_LABELS: Record<AppTab, string> = {
   automation: 'Automation Center',
   notifications: 'Notification Center',
   'user-manual': 'Manual de Usuario',
+  commercial: 'CRM Comercial / Ventas',
+  reports: 'Centro de Reportes',
+  portal: 'Portal del Cliente',
+  'tech-pwa': 'App Técnicos (PWA)',
 };
 
 export const getModuleLabel = (tab: string): string => MODULE_LABELS[tab as AppTab] || tab;

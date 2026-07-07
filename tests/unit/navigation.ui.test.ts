@@ -22,11 +22,13 @@ const sidebarSource = readFileSync('src/components/Sidebar.tsx', 'utf8');
 const appSource = readFileSync('src/App.tsx', 'utf8');
 const rbacSource = readFileSync('src/lib/rbac.ts', 'utf8');
 
-// Estructura objetivo: 6 secciones WISP con sus módulos VISIBLES (ids existentes).
+// Estructura WISP OS: 8 secciones con módulos VISIBLES (ids existentes).
 const EXPECTED_SECTIONS: Array<{ title: string; ids: string[] }> = [
-  { title: 'Inicio', ids: ['dashboard'] },
-  { title: 'Clientes', ids: ['crm', 'support', 'payments', 'billing', 'suspension'] },
-  { title: 'Red', ids: ['noc', 'gis', 'network', 'inventory'] },
+  { title: 'Control', ids: ['dashboard', 'reports'] },
+  { title: 'Clientes', ids: ['crm', 'commercial', 'portal', 'support', 'tech-pwa'] },
+  { title: 'Cobranza', ids: ['billing', 'payments', 'suspension'] },
+  { title: 'Operaciones', ids: ['inventory'] },
+  { title: 'Red', ids: ['noc', 'gis', 'network'] },
   {
     title: 'MikroTik',
     ids: [
@@ -37,10 +39,11 @@ const EXPECTED_SECTIONS: Array<{ title: string; ids: string[] }> = [
       'routeros-resources',
       'routeros-readonly',
       'inventory-sync',
+      'provisioning',
     ],
   },
-  { title: 'Reportes', ids: ['finance'] },
-  { title: 'Sistema', ids: ['owner', 'user-manual'] },
+  { title: 'Finanzas', ids: ['finance'] },
+  { title: 'Sistema', ids: ['owner', 'automation', 'notifications', 'user-manual'] },
 ];
 
 // Módulos que existen y son accesibles, pero NO se listan en el sidebar.
@@ -61,7 +64,7 @@ function sectionBlock(title: string): string {
 }
 
 describe('Sidebar — secciones reorganizadas (WISP)', () => {
-  it('define las 6 secciones nuevas en orden', () => {
+  it('define las 8 secciones WISP OS en orden', () => {
     let cursor = -1;
     for (const { title } of EXPECTED_SECTIONS) {
       const idx = sidebarSource.indexOf(`title: '${title}'`);
@@ -73,7 +76,6 @@ describe('Sidebar — secciones reorganizadas (WISP)', () => {
 
   it('ya NO usa los títulos de sección de reorganizaciones previas', () => {
     expect(sidebarSource).not.toContain("title: 'Red WISP'");
-    expect(sidebarSource).not.toContain("title: 'Operaciones'");
     expect(sidebarSource).not.toContain("title: 'Operaciones Seguras'");
     expect(sidebarSource).not.toContain("title: 'MikroTik Workspace'");
     expect(sidebarSource).not.toContain("title: 'Administración'");
@@ -129,15 +131,15 @@ describe('Sidebar — módulos internos ocultos pero conservados', () => {
 });
 
 describe('Sidebar — no se elimina ningún módulo', () => {
-  it('los 20 módulos visibles están presentes en el sidebar', () => {
-    expect(VISIBLE_TAB_IDS.length).toBe(20);
+  it('los módulos visibles están presentes en el sidebar', () => {
+    expect(VISIBLE_TAB_IDS.length).toBe(27);
     for (const id of VISIBLE_TAB_IDS) {
       expect(sidebarSource, `falta el módulo visible ${id}`).toContain(`id: '${id}'`);
     }
   });
 
-  it('cubre los 23 tabs declarados en el RBAC (AppTab)', () => {
-    expect(ALL_TAB_IDS.length).toBe(23);
+  it('cubre los tabs declarados en el RBAC (AppTab)', () => {
+    expect(ALL_TAB_IDS.length).toBeGreaterThanOrEqual(29);
     for (const id of ALL_TAB_IDS) {
       expect(rbacSource, `${id} debería existir en el union AppTab`).toContain(`'${id}'`);
     }

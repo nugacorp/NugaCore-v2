@@ -56,3 +56,13 @@ registerJob('persistence-audit', async () => {
 registerJob('health-ping', async () => {
   logger.info('job_health_ping', { ts: new Date().toISOString() });
 });
+
+registerJob('router-backup-audit', async () => {
+  logger.info('router_backup_audit', { mode: 'dry-run', note: 'Scheduled backup gated by MIKROTIK_WORKER_LIVE' });
+});
+
+registerJob('daily-collections-report', async () => {
+  const { getCollectionsService } = await import('../domains/collections/service');
+  const summary = await getCollectionsService().getCashRegisterSummary();
+  logger.info('daily_collections_report', { totalCents: summary.totalCents, entries: summary.entryCount });
+});

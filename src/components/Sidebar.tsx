@@ -26,7 +26,10 @@ import {
   GitCompare,
   ClipboardList,
   Brain,
-  Bell
+  Bell,
+  TrendingUp,
+  Globe,
+  Smartphone,
 } from 'lucide-react';
 import { UserSessionProfile } from '../lib/supabase';
 import { isVisibleInSidebar } from '../lib/rbac';
@@ -84,9 +87,10 @@ export default function Sidebar({
   const menuSections: MenuSection[] = [
     {
       id: 'inicio',
-      title: 'Inicio',
+      title: 'Control',
       items: [
         { id: 'dashboard', name: 'Dashboard', icon: Activity },
+        { id: 'reports', name: 'Reportes', icon: ClipboardList },
       ],
     },
     {
@@ -94,10 +98,26 @@ export default function Sidebar({
       title: 'Clientes',
       items: [
         { id: 'crm', name: 'Clientes', icon: Users },
+        { id: 'commercial', name: 'Ventas / Prospectos', icon: TrendingUp },
+        { id: 'portal', name: 'Portal Cliente', icon: Globe },
         { id: 'support', name: 'Tickets', icon: Wrench },
-        { id: 'payments', name: 'Pagos', icon: Banknote },
+        { id: 'tech-pwa', name: 'App Técnicos', icon: Smartphone },
+      ],
+    },
+    {
+      id: 'cobranza',
+      title: 'Cobranza',
+      items: [
         { id: 'billing', name: 'Facturación / Planes', icon: CreditCard },
+        { id: 'payments', name: 'Pagos', icon: Banknote },
         { id: 'suspension', name: 'Suspensiones', icon: Ban },
+      ],
+    },
+    {
+      id: 'operaciones',
+      title: 'Operaciones',
+      items: [
+        { id: 'inventory', name: 'Inventario', icon: Box },
       ],
     },
     {
@@ -107,7 +127,6 @@ export default function Sidebar({
         { id: 'noc', name: 'NOC', icon: ShieldAlert },
         { id: 'gis', name: 'Mapa / Infraestructura', icon: Map },
         { id: 'network', name: 'Torres y Sitios', icon: Network },
-        { id: 'inventory', name: 'Inventario', icon: Box },
       ],
     },
     {
@@ -126,7 +145,7 @@ export default function Sidebar({
     },
     {
       id: 'reportes',
-      title: 'Reportes',
+      title: 'Finanzas',
       items: [
         { id: 'finance', name: 'Analytics', icon: DollarSign },
       ],

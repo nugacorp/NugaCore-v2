@@ -73,12 +73,17 @@ const SEVERITY_STYLES: Record<ImportantSeverity, { box: string; label: string; i
 export default function Dashboard({ stats, alerts, onRefresh, getAuthHeaders, onNavigate }: DashboardProps) {
   // KPIs ejecutivos de cobranza (cobranza del mes + facturas vencidas).
   const [billingKpis, setBillingKpis] = useState<any | null>(null);
+  const [controlCenter, setControlCenter] = useState<any | null>(null);
 
   const loadBillingKpis = useCallback(async () => {
     try {
       const headers = await getAuthHeaders();
-      const res = await fetchWithRateLimitBackoff('/api/dashboard/billing-kpis', { headers });
-      if (res.ok) setBillingKpis(await res.json());
+      const [billingRes, ccRes] = await Promise.all([
+        fetchWithRateLimitBackoff('/api/dashboard/billing-kpis', { headers }),
+        fetchWithRateLimitBackoff('/api/dashboard/control-center', { headers }),
+      ]);
+      if (billingRes.ok) setBillingKpis(await billingRes.json());
+      if (ccRes.ok) setControlCenter(await ccRes.json());
     } catch {
       // Read-only: si falla, el dashboard cae a los KPIs derivados de `stats`.
     }
@@ -212,6 +217,47 @@ export default function Dashboard({ stats, alerts, onRefresh, getAuthHeaders, on
           );
         })}
       </section>
+
+      {controlCenter && (
+        <section id="dashboard-control-center" aria-label="Cabina de mando WISP" className="bg-slate-950 border border-slate-800 rounded-xl p-4">
+          <h3 className="text-xs text-slate-400 font-mono uppercase tracking-widest mb-3">Cabina de Mando WISP OS</h3>
+          <div className="grid grid-cols-2 md:grid-cols-4 gap-3 text-sm">
+            <button type="button" onClick={go('crm')} className="text-left p-3 rounded-lg bg-slate-900 border border-slate-800 hover:border-slate-600">
+              <div className="text-slate-400 text-xs">Clientes</div>
+              <div className="text-white font-semibold">{controlCenter.clients?.active} activos · {controlCenter.clients?.suspended} suspendidos</div>
+              <div className="text-rose-400 text-xs">{controlCenter.clients?.morosos} morosos</div>
+            </button>
+            <button type="button" onClick={go('billing')} className="text-left p-3 rounded-lg bg-slate-900 border border-slate-800 hover:border-slate-600">
+              <div className="text-slate-400 text-xs">Finanzas mes</div>
+              <div className="text-emerald-400 font-semibold">{formatMXN((controlCenter.finance?.revenueMonthCents ?? 0) / 100)}</div>
+              <div className="text-amber-400 text-xs">{controlCenter.finance?.activePaymentPromises} promesas activas</div>
+            </button>
+            <button type="button" onClick={go('noc')} className="text-left p-3 rounded-lg bg-slate-900 border border-slate-800 hover:border-slate-600">
+              <div className="text-slate-400 text-xs">Red</div>
+              <div className="text-white font-semibold">{controlCenter.network?.routersOnline}/{controlCenter.network?.routersOnline + controlCenter.network?.routersOffline} routers</div>
+              <div className="text-slate-400 text-xs">{controlCenter.alerts?.nocOpen} alertas NOC</div>
+            </button>
+            <button type="button" onClick={go('support')} className="text-left p-3 rounded-lg bg-slate-900 border border-slate-800 hover:border-slate-600">
+              <div className="text-slate-400 text-xs">Tickets / Instalaciones</div>
+              <div className="text-white font-semibold">{controlCenter.tickets?.open} abiertos</div>
+              <div className="text-amber-400 text-xs">{controlCenter.installations?.pending} instalaciones pendientes</div>
+            </button>
+            <button type="button" onClick={go('suspension')} className="text-left p-3 rounded-lg bg-slate-900 border border-slate-800 hover:border-slate-600">
+              <div className="text-slate-400 text-xs">Cobranza / Cortes</div>
+              <div className="text-rose-400 font-semibold">{controlCenter.collections?.clientsToSuspend} a cortar</div>
+              <div className="text-emerald-400 text-xs">{controlCenter.collections?.clientsToReactivate} a reactivar</div>
+            </button>
+            <button type="button" onClick={go('commercial')} className="text-left p-3 rounded-lg bg-slate-900 border border-slate-800 hover:border-slate-600">
+              <div className="text-slate-400 text-xs">Agenda hoy</div>
+              <div className="text-indigo-300 font-semibold">{controlCenter.installations?.scheduledToday} citas</div>
+            </button>
+            <button type="button" onClick={go('network')} className="text-left p-3 rounded-lg bg-slate-900 border border-slate-800 hover:border-slate-600 col-span-2">
+              <div className="text-slate-400 text-xs">Capacidad red</div>
+              <div className="text-white font-semibold">{controlCenter.capacity?.utilizationPct}% utilización</div>
+            </button>
+          </div>
+        </section>
+      )}
 
       {/* ═══ ALERTAS IMPORTANTES (máx. 5, priorizadas) ═══ */}
       <section id="dashboard-important-alerts" aria-label="Alertas importantes" className="space-y-2">

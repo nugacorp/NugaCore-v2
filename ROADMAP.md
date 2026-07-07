@@ -18,6 +18,20 @@ Objetivos estratégicos:
 - Convertirse en SaaS multiempresa en fases futuras.
 - Incorporar agentes especializados: NUGA-JARVIS, NUGA-NOC, NUGA-BILLING y NUGA-OPS.
 
+## WISP OS — Plan Maestro (Olas 0–6)
+
+NugaCore se posiciona como **sistema operativo WISP/ISP** (no solo CRM). Mapa completo: [`docs/WISP_OS_MODULE_MAP.md`](docs/WISP_OS_MODULE_MAP.md).
+
+| Ola | Enfoque | Gate |
+| --- | --- | --- |
+| OLA 0 | Persistencia SSOT, staging flags | `storeFallbackActive: false` |
+| OLA 1 | Control center, Client 360, cobranza, commercial UI | Billing/support DB |
+| OLA 2 | MikroTik profesional (backup, diff, preview) | PROD-5→7, §11 |
+| OLA 3 | Network DB, GIS v2, FTTH persistente | `USE_DB_NETWORK` |
+| OLA 4 | Portal cliente, PWA técnicos | Auth portal |
+| OLA 5 | Reportes UI, SLA, notificaciones reales | PROD-9 |
+| OLA 6 | RADIUS, SaaS multi-tenant | Fase 11 |
+
 ## Principio de madurez
 
 Cada módulo tiene dos estados diferentes:

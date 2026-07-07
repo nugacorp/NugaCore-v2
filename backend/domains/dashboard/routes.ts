@@ -11,6 +11,7 @@ import {
   getMetricsSnapshot,
   type MetricsSnapshot,
 } from '../system/metrics';
+import { buildControlCenter } from './control-center';
 
 const router = Router();
 
@@ -464,5 +465,9 @@ router.post('/api/alerts/acknowledge-all', requireRoles(['super admin', 'adminis
   });
   res.json(store.NOC_ALERTS);
 });
+
+router.get('/api/dashboard/control-center', requireRoles(READ_ROLES), asyncHandler(async (_req, res) => {
+  res.json(await buildControlCenter());
+}));
 
 export default router;

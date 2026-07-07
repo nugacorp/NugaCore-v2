@@ -37,6 +37,10 @@ import commercialRoutes from './domains/commercial/routes';
 import clientActionsRoutes from './domains/client-actions/routes';
 import financeOperationalRoutes from './domains/finance-operational/routes';
 import purchasesRoutes from './domains/purchases/routes';
+import client360Routes from './domains/client-360/routes';
+import collectionsRoutes from './domains/collections/routes';
+import portalRoutes from './domains/portal/routes';
+import routerConfigAuditRoutes from './domains/router-config-audit/routes';
 import jobsRoutes from './domains/jobs/routes';
 
 export function registerRoutes(app: Express): void {
@@ -78,5 +82,9 @@ export function registerRoutes(app: Express): void {
   app.use(purchasesRoutes);
   app.use(financeOperationalRoutes);
   app.use(clientActionsRoutes);
+  app.use(client360Routes);
+  app.use(collectionsRoutes);
+  app.use(portalRoutes);
+  app.use(routerConfigAuditRoutes);
   app.use(jobsRoutes);
 }
