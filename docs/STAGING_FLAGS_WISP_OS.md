@@ -31,3 +31,4 @@ USE_DB_FINANCE=true
 2. `GET /api/system/persistence-status` → `storeFallbackActive: false`
 3. `POST /api/jobs/run` → `persistence-audit` ok
 4. Backup + restore probado (checklist §14)
+5. `node scripts/validate-wisp-os-staging.mjs --local` (checklist) o `RUN_DB_TESTS=true node scripts/validate-wisp-os-staging.mjs` (tablas)

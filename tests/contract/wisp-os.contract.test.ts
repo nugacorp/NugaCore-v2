@@ -71,6 +71,30 @@ describe('API — Tickets SLA', () => {
   });
 });
 
+describe('API — Automation notify bridge', () => {
+  let app: Express;
+  beforeAll(() => { app = createApp(); });
+
+  it('POST /api/automation/notify-pending -> dry-run batch', async () => {
+    const res = await request(app).post('/api/automation/notify-pending').set(ADMIN).send({ limit: 5 });
+    expect(res.status).toBe(200);
+    expect(res.body).toHaveProperty('dryRun', true);
+    expect(res.body).toHaveProperty('processed');
+  });
+});
+
+describe('API — CFDI stub', () => {
+  let app: Express;
+  beforeAll(() => { app = createApp(); });
+
+  it('GET /api/finance/cfdi/status -> stub', async () => {
+    const res = await request(app).get('/api/finance/cfdi/status').set(READER);
+    expect(res.status).toBe(200);
+    expect(res.body.mode).toBe('stub');
+    expect(res.body.timbrado).toBe(false);
+  });
+});
+
 describe('API — GIS store-backed', () => {
   let app: Express;
   beforeAll(() => { app = createApp(); });

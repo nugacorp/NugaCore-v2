@@ -1,5 +1,6 @@
 import React, { useState, useEffect } from 'react';
 import { getErrorMessage } from '../lib/errors';
+import { createAuthorizedApi } from '../lib/apiClient';
 import {
   FileText,
   Zap,
@@ -12,6 +13,9 @@ import {
   CheckCircle,
   AlertTriangle,
   BarChart3,
+  Wallet,
+  HandCoins,
+  Calendar,
 } from 'lucide-react';
 import {
   Invoice,
@@ -39,10 +43,27 @@ interface BillingModuleProps {
   summary: BillingAccountSummary | null;
   revenueReport: BillingRevenueReport | null;
   userRole: UserRole;
+  getAuthHeaders: () => Promise<Record<string, string>>;
   onPayInvoice: (id: string, method: string, amount?: number) => Promise<void>;
   onCreateInvoice: (invoiceData: any) => Promise<void>;
   onEditInvoice: (id: string, invoiceData: any) => Promise<void>;
   onFetchAccountState: (id: string) => Promise<AccountStateResponse>;
+}
+
+interface PaymentPromiseRow {
+  id: string;
+  clientId: string;
+  promisedDate: string;
+  amountCents: number;
+  status: string;
+  blocksSuspension: boolean;
+  notes?: string;
+}
+
+interface CashRegisterSummary {
+  date: string;
+  totalCents: number;
+  entries: { id: string; amountCents: number; paymentMethod: string; clientName?: string; notes?: string }[];
 }
 
 const BADGE_CLASS: Record<BillingBadgeTone, string> = {
@@ -62,12 +83,27 @@ export default function BillingModule({
   summary,
   revenueReport,
   userRole,
+  getAuthHeaders,
   onPayInvoice,
   onCreateInvoice,
   onEditInvoice,
   onFetchAccountState,
 }: BillingModuleProps) {
   const canManage = canManageBilling(userRole);
+
+  const [billingTab, setBillingTab] = useState<'invoices' | 'collections'>('invoices');
+  const [promises, setPromises] = useState<PaymentPromiseRow[]>([]);
+  const [cashRegister, setCashRegister] = useState<CashRegisterSummary | null>(null);
+  const [promiseClientId, setPromiseClientId] = useState('');
+  const [promiseDate, setPromiseDate] = useState(() => {
+    const d = new Date();
+    d.setDate(d.getDate() + 3);
+    return d.toISOString().split('T')[0];
+  });
+  const [promiseAmount, setPromiseAmount] = useState('');
+  const [cashAmount, setCashAmount] = useState('');
+  const [cashMethod, setCashMethod] = useState('Efectivo');
+  const [cyclePreview, setCyclePreview] = useState<{ wouldGenerate: number; customersProcessed: number } | null>(null);
 
   const [searchTerm, setSearchTerm] = useState('');
   const [filterStatus, setFilterStatus] = useState<string>('all');
@@ -112,6 +148,82 @@ export default function BillingModule({
     const t = setTimeout(() => setToast(null), 4000);
     return () => clearTimeout(t);
   }, [toast]);
+
+  const loadCollections = async () => {
+    try {
+      const api = createAuthorizedApi(getAuthHeaders);
+      const [promRes, cashRes] = await Promise.all([
+        api.get<PaymentPromiseRow[]>('/api/collections/promises?status=active'),
+        api.get<CashRegisterSummary>('/api/collections/cash-register'),
+      ]);
+      setPromises(promRes);
+      setCashRegister(cashRes);
+    } catch {
+      setPromises([]);
+      setCashRegister(null);
+    }
+  };
+
+  useEffect(() => {
+    if (billingTab === 'collections') void loadCollections();
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [billingTab]);
+
+  const submitPromise = async () => {
+    if (!promiseClientId || !promiseAmount) return;
+    setBusyLabel('Registrando promesa...');
+    try {
+      const api = createAuthorizedApi(getAuthHeaders);
+      await api.post('/api/collections/promises', {
+        clientId: promiseClientId,
+        promisedDate: promiseDate,
+        amount: Number(promiseAmount),
+        blocksSuspension: true,
+      });
+      setToast({ kind: 'success', msg: 'Promesa de pago registrada.' });
+      setPromiseAmount('');
+      await loadCollections();
+    } catch (err) {
+      setToast({ kind: 'error', msg: getErrorMessage(err, 'No se pudo registrar la promesa.') });
+    } finally {
+      setBusyLabel('');
+    }
+  };
+
+  const submitCashEntry = async () => {
+    const amount = Number(cashAmount);
+    if (!Number.isFinite(amount) || amount <= 0) return;
+    setBusyLabel('Registrando en caja...');
+    try {
+      const api = createAuthorizedApi(getAuthHeaders);
+      await api.post('/api/collections/cash-register/entries', {
+        amountCents: Math.round(amount * 100),
+        paymentMethod: cashMethod,
+        notes: 'Caja del día',
+      });
+      setToast({ kind: 'success', msg: 'Entrada registrada en caja.' });
+      setCashAmount('');
+      await loadCollections();
+    } catch (err) {
+      setToast({ kind: 'error', msg: getErrorMessage(err, 'No se pudo registrar en caja.') });
+    } finally {
+      setBusyLabel('');
+    }
+  };
+
+  const runBillingCyclePreview = async () => {
+    setBusyLabel('Simulando ciclo...');
+    try {
+      const api = createAuthorizedApi(getAuthHeaders);
+      const res = await api.post<{ wouldGenerate: number; customersProcessed: number }>('/api/billing/run-cycle', { period: 'monthly' });
+      setCyclePreview(res);
+      setToast({ kind: 'success', msg: `Ciclo simulado: ${res.wouldGenerate} facturas proyectadas.` });
+    } catch (err) {
+      setToast({ kind: 'error', msg: getErrorMessage(err, 'No se pudo simular el ciclo.') });
+    } finally {
+      setBusyLabel('');
+    }
+  };
 
   // Keep the selected invoice in sync with refreshed data; reload account state.
   useEffect(() => {
@@ -261,7 +373,89 @@ export default function BillingModule({
 
   return (
     <div className="space-y-6 text-slate-200 p-6 bg-slate-900 min-h-screen font-sans">
-      {/* Toast / notice */}
+      {/* Tab bar: Facturas | Cobranza operativa */}
+      <div className="flex gap-2 border-b border-slate-800 pb-2">
+        <button
+          type="button"
+          id="billing-tab-invoices"
+          onClick={() => setBillingTab('invoices')}
+          className={`px-4 py-2 rounded-t-xl text-xs font-mono uppercase ${billingTab === 'invoices' ? 'bg-slate-950 text-indigo-300 border border-b-0 border-slate-800' : 'text-slate-500'}`}
+        >
+          Facturas
+        </button>
+        <button
+          type="button"
+          id="billing-tab-collections"
+          onClick={() => setBillingTab('collections')}
+          className={`px-4 py-2 rounded-t-xl text-xs font-mono uppercase flex items-center gap-1 ${billingTab === 'collections' ? 'bg-slate-950 text-indigo-300 border border-b-0 border-slate-800' : 'text-slate-500'}`}
+        >
+          <Wallet className="w-3.5 h-3.5" /> Cobranza
+        </button>
+      </div>
+
+      {billingTab === 'collections' && (
+        <div id="billing-collections-panel" className="grid grid-cols-1 lg:grid-cols-2 gap-6">
+          <section className="bg-slate-950 border border-slate-800 rounded-xl p-4 space-y-3">
+            <h3 className="text-sm font-bold text-white flex items-center gap-2"><HandCoins className="w-4 h-4 text-amber-400" /> Promesas de pago activas</h3>
+            {promises.length === 0 ? (
+              <p className="text-xs text-slate-500">No hay promesas activas.</p>
+            ) : (
+              <ul className="space-y-2 text-xs">
+                {promises.map((p) => (
+                  <li key={p.id} className="flex justify-between border border-slate-800 rounded-lg px-3 py-2">
+                    <span>{clients.find((c) => c.id === p.clientId)?.name || p.clientId}</span>
+                    <span className="text-amber-300 font-mono">{formatMXN(p.amountCents / 100)} · {p.promisedDate}</span>
+                  </li>
+                ))}
+              </ul>
+            )}
+            {canManage && (
+              <div className="border-t border-slate-800 pt-3 space-y-2 text-xs">
+                <p className="text-slate-500 font-mono uppercase text-[10px]">Nueva promesa</p>
+                <select value={promiseClientId} onChange={(e) => setPromiseClientId(e.target.value)} className="w-full bg-slate-900 border border-slate-800 rounded-lg p-2">
+                  <option value="">Cliente...</option>
+                  {clients.map((c) => <option key={c.id} value={c.id}>{c.name}</option>)}
+                </select>
+                <div className="flex gap-2">
+                  <input type="date" value={promiseDate} onChange={(e) => setPromiseDate(e.target.value)} className="flex-1 bg-slate-900 border border-slate-800 rounded-lg p-2" />
+                  <input type="number" placeholder="Monto" value={promiseAmount} onChange={(e) => setPromiseAmount(e.target.value)} className="w-28 bg-slate-900 border border-slate-800 rounded-lg p-2" />
+                </div>
+                <button type="button" disabled={!!busyLabel} onClick={() => void submitPromise()} className="w-full bg-indigo-600 hover:bg-indigo-500 text-white py-2 rounded-lg font-semibold">Registrar promesa</button>
+              </div>
+            )}
+          </section>
+          <section className="bg-slate-950 border border-slate-800 rounded-xl p-4 space-y-3">
+            <h3 className="text-sm font-bold text-white flex items-center gap-2"><Calendar className="w-4 h-4 text-emerald-400" /> Caja del día</h3>
+            <p className="text-2xl font-mono text-emerald-400">{formatMXN((cashRegister?.totalCents ?? 0) / 100)}</p>
+            <p className="text-[10px] text-slate-500 font-mono">{cashRegister?.date ?? '—'} · {(cashRegister?.entries ?? []).length} movimientos</p>
+            {canManage && (
+              <div className="border-t border-slate-800 pt-3 space-y-2 text-xs">
+                <div className="flex gap-2">
+                  <input type="number" placeholder="Monto" value={cashAmount} onChange={(e) => setCashAmount(e.target.value)} className="flex-1 bg-slate-900 border border-slate-800 rounded-lg p-2" />
+                  <select value={cashMethod} onChange={(e) => setCashMethod(e.target.value)} className="bg-slate-900 border border-slate-800 rounded-lg p-2">
+                    <option>Efectivo</option><option>Transferencia</option><option>Tarjeta</option>
+                  </select>
+                </div>
+                <button type="button" disabled={!!busyLabel} onClick={() => void submitCashEntry()} className="w-full bg-emerald-600/20 text-emerald-300 border border-emerald-500/30 py-2 rounded-lg font-semibold">Agregar a caja</button>
+              </div>
+            )}
+            {canManage && (
+              <div className="border-t border-slate-800 pt-3">
+                <button type="button" disabled={!!busyLabel} onClick={() => void runBillingCyclePreview()} className="w-full flex items-center justify-center gap-2 bg-slate-900 border border-slate-800 py-2 rounded-lg text-xs text-slate-300">
+                  <Zap className="w-3.5 h-3.5" /> Simular ciclo de facturación
+                </button>
+                {cyclePreview && (
+                  <p className="text-[10px] text-slate-500 mt-2 font-mono">
+                    Proyección: {cyclePreview.wouldGenerate} facturas / {cyclePreview.customersProcessed} clientes
+                  </p>
+                )}
+              </div>
+            )}
+          </section>
+        </div>
+      )}
+
+      {/* Toast / notice — global */}
       {toast && (
         <div
           id="billing-toast"
@@ -279,6 +473,9 @@ export default function BillingModule({
           <span>{toast.msg}</span>
         </div>
       )}
+
+      {billingTab === 'invoices' && (
+    <>
 
       {/* Global busy banner */}
       {busyLabel && (
@@ -881,6 +1078,8 @@ export default function BillingModule({
             </form>
           </div>
         </div>
+      )}
+    </>
       )}
     </div>
   );

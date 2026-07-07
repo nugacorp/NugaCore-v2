@@ -1801,6 +1801,7 @@ export default function CrmModule({
           history={localHistory[client360.id] || []}
           billing={client360Billing}
           serviceStatus={client360ServiceStatus}
+          getAuthHeaders={getAuthHeaders}
           onAction={handleQuickAction}
           onClose={() => setClient360(null)}
         />

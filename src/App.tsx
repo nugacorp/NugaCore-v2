@@ -1165,6 +1165,7 @@ export default function App() {
                 summary={billingSummary}
                 revenueReport={revenueReport}
                 userRole={userSession.role}
+                getAuthHeaders={getAuthHeaders}
                 onPayInvoice={handlePayInvoice}
                 onCreateInvoice={handleCreateInvoice}
                 onEditInvoice={handleEditInvoice}

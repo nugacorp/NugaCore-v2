@@ -1,6 +1,6 @@
 # NugaCore — Resumen Ejecutivo (EXECUTIVE_SUMMARY)
 
-> Para: Dueño del proyecto (NugaCorp) · Fecha: 2026-06-01
+> Para: Dueño del proyecto (NugaCorp) · Fecha: 2026-07-07
 > Documento no técnico. Detalle en los demás archivos de `docs/`.
 
 ---

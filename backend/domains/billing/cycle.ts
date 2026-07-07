@@ -2,22 +2,19 @@
 // BillingCycleService — Facturación automática (FASE C, Billing Foundation).
 //
 // SIMULACIÓN PURA. No ejecuta cron real, no usa workers, no toca RouterOS.
-// Proyecta qué facturas se generarían para los suscriptores activos según
-// la periodicidad (mensual / quincenal / semanal) usando el catálogo mock
-// (store.CLIENTS + store.PLANS).
+// Proyecta qué facturas se generarían usando customers + plans (SSOT).
 //
 // POST /api/billing/run-cycle responde con:
 //   wouldGenerate       — cuántas facturas se generarían (proyección)
-//   generatedCount      — cuántas se generaron realmente (0 salvo commit en mock)
+//   generatedCount      — cuántas se generaron realmente (0 salvo commit explícito)
 //   customersProcessed  — suscriptores evaluados
 //
-// `commit: true` SOLO surte efecto en modo mock (USE_DB_BILLING=false): crea
-// las facturas en el store. En modo DB la simulación nunca escribe (controlado).
+// `commit: true` crea facturas vía BillingService (mock o DB según flags).
 // ====================================================================
 
-import { store } from '../../state/store';
-import { isDomainOnDb } from '../../config/feature-flags';
 import { logger } from '../../common/logger';
+import { getCustomersService } from '../customers/service';
+import { getPlansService } from '../plans/service';
 import { BillingService, getBillingService } from './service';
 import {
   BILLING_PERIOD_DAYS,
@@ -41,14 +38,19 @@ export const normalizeBillingPeriod = (value: unknown): BillingPeriod => {
 export class BillingCycleService {
   constructor(private readonly billing: BillingService) {}
 
-  /** Proyecta las facturas que generaría el ciclo para la periodicidad dada. */
-  plan(period: BillingPeriod): BillingCyclePlannedInvoice[] {
+  /** Proyecta las facturas que generaría el ciclo para la periodicidad dada (SSOT customers + plans). */
+  async plan(period: BillingPeriod): Promise<BillingCyclePlannedInvoice[]> {
     const dueDate = todayPlus(BILLING_PERIOD_DAYS[period]);
     const planned: BillingCyclePlannedInvoice[] = [];
 
-    for (const client of store.CLIENTS) {
+    const [clients, plans] = await Promise.all([
+      getCustomersService().list({}),
+      getPlansService().list({}),
+    ]);
+
+    for (const client of clients) {
       if (!BILLABLE_STATUSES.has(client.status)) continue;
-      const plan = store.PLANS.find((p) => p.id === client.planId);
+      const plan = plans.find((p) => p.id === client.planId);
       if (!plan || !(plan.price > 0)) continue;
 
       planned.push({
@@ -64,18 +66,17 @@ export class BillingCycleService {
     return planned;
   }
 
-  /** Ejecuta (simula) un ciclo de facturación. */
+  /** Ejecuta un ciclo de facturación (simulación o commit explícito). */
   async runCycle(opts: { period?: unknown; commit?: unknown } = {}): Promise<BillingCycleResult> {
     const period = normalizeBillingPeriod(opts.period);
-    const planned = this.plan(period);
-    const customersProcessed = store.CLIENTS.filter((c) => BILLABLE_STATUSES.has(c.status)).length;
+    const planned = await this.plan(period);
+    const customersProcessed = (await getCustomersService().list({}))
+      .filter((c) => BILLABLE_STATUSES.has(c.status)).length;
 
-    // commit solo en modo mock: nunca escribe contra la DB desde la simulación.
     const wantsCommit = opts.commit === true || opts.commit === 'true';
-    const canCommit = wantsCommit && !isDomainOnDb('billing');
 
     let generatedCount = 0;
-    if (canCommit) {
+    if (wantsCommit) {
       for (const item of planned) {
         await this.billing.createInvoice({
           clientId: item.customerId,
@@ -86,7 +87,7 @@ export class BillingCycleService {
         });
         generatedCount += 1;
       }
-      logger.info(`BillingCycle: ${generatedCount} facturas creadas (mock, commit) periodo=${period}`);
+      logger.info(`BillingCycle: ${generatedCount} facturas creadas (commit) periodo=${period}`);
     } else {
       logger.info(`BillingCycle: simulación periodo=${period}, wouldGenerate=${planned.length}`);
     }
@@ -94,7 +95,7 @@ export class BillingCycleService {
     return {
       period,
       generatedAt: new Date().toISOString(),
-      committed: canCommit,
+      committed: wantsCommit,
       customersProcessed,
       wouldGenerate: planned.length,
       generatedCount,

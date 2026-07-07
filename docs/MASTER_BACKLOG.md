@@ -1,10 +1,25 @@
 # NugaCore — Backlog Maestro (MASTER_BACKLOG)
 
-> Última actualización: 2026-06-01
+> Última actualización: 2026-07-07
 > Backlog accionable por fases. Cada tarea: **prioridad · complejidad · dependencias.**
 > Prioridad: P0 (bloqueante) · P1 (alta) · P2 (media) · P3 (baja). Complejidad: 🟢 S · 🟡 M · 🟠 L · 🔴 XL.
 
-> **Nota:** las "Fases 0–16" del `MASTER_PLAN.md` describen lo ya construido **sobre el mock**. Este backlog reorganiza el trabajo hacia **producción real** (persistencia + seguridad + integraciones), respetando el congelamiento del frontend.
+> **WISP OS Olas 0–6** (Plan Maestro jul 2026) — epics principales:
+
+| Ola | Epic | Estado | PR/Branch |
+|-----|------|--------|-----------|
+| OLA 0 | Persistencia SSOT + staging flags + restore | Entregado (código) | `cursor/wisp-os-full-plan-0ffb` |
+| OLA 1A | Client 360 expediente (tags/docs/auditoría) | Entregado | API + UI Client360Panel |
+| OLA 1B | Cobranza operativa (promesas, caja, ciclo) | Entregado | `collections/`, BillingModule |
+| OLA 1F | Dashboard cabina de mando (8 áreas) | Entregado | `control-center.ts` |
+| OLA 1 | CommercialModule UI | Entregado | `CommercialModule.tsx` |
+| OLA 2 | MikroTik backup/diff/preview (gated) | Entregado | `router-config-audit/` |
+| OLA 3 | Network DB, GIS v2, FTTH schema | Entregado | `USE_DB_NETWORK` ready |
+| OLA 4 | Portal cliente + PWA técnicos | Entregado (staging) | `portal/`, `TechPwaModule` |
+| OLA 5 | Reportes UI, SLA, automation→notify | Entregado (dry-run) | `notify-bridge.ts` |
+| OLA 6 | RADIUS, SaaS multi-tenant | Futuro | ROADMAP Fase 11 |
+
+> **Nota:** las "Fases 0–16" del `MASTER_PLAN.md` describen lo ya construido. Este backlog reorganiza el trabajo hacia **producción real** (persistencia + seguridad + integraciones), respetando gates PROD-3→9.
 
 ---
 

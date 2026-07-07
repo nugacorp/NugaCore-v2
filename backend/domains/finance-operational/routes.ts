@@ -26,4 +26,15 @@ router.get('/api/finance/operational/pnl', requireRoles(READ_ROLES), asyncHandle
   ));
 }));
 
+router.get('/api/finance/cfdi/status', requireRoles(READ_ROLES), asyncHandler(async (_req, res) => {
+  res.json({
+    enabled: false,
+    provider: null,
+    mode: 'stub',
+    message: 'Integración PAC CFDI pendiente — ver ROADMAP Fase 4.9.',
+    supportedReceipts: ['pdf', 'spei_reference'],
+    timbrado: false,
+  });
+}));
+
 export default router;

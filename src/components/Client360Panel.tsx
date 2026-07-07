@@ -1,12 +1,14 @@
-import React from 'react';
+import React, { useState, useEffect, useCallback } from 'react';
 import {
   X, MapPin, Phone, Mail, Wifi, Router as RouterIcon, CalendarClock,
   CreditCard, Ticket, UserMinus, CheckCircle, Pencil, Network, Navigation, History,
   Wallet, Receipt, FileText, AlertTriangle, ClipboardList, Brain, Bell,
+  Tag, Users, Paperclip, Loader2, Plus,
 } from 'lucide-react';
 import { Client } from '../types';
 import { ClientActionCaps } from '../lib/rbac';
 import { ClientQuickAction } from './ClientActionsMenu';
+import { createAuthorizedApi } from '../lib/apiClient';
 
 // Resumen de cobranza del cliente (FASE D — Billing Foundation).
 // Proyección de GET /api/billing/customers/:customerId/balance. Opcional:
@@ -72,6 +74,46 @@ export interface ClientNotificationsView {
   status: string;
 }
 
+export interface Client360Tag {
+  id: string;
+  label: string;
+  color: string;
+  createdAt: string;
+}
+
+export interface Client360Contact {
+  id: string;
+  name?: string;
+  phone?: string;
+  email?: string;
+  channel: string;
+  isPrimary: boolean;
+}
+
+export interface Client360Document {
+  id: string;
+  docType: string;
+  fileName: string;
+  createdAt: string;
+}
+
+export interface Client360Activity {
+  id: string;
+  action: string;
+  fieldName?: string;
+  oldValue?: string;
+  newValue?: string;
+  actorRole?: string;
+  createdAt: string;
+}
+
+export interface Client360Expediente {
+  tags: Client360Tag[];
+  contacts: Client360Contact[];
+  documents: Client360Document[];
+  activity: Client360Activity[];
+}
+
 interface QuickActionButton {
   key: ClientQuickAction;
   label: string;
@@ -112,6 +154,7 @@ interface Props {
   provisioning?: ClientProvisioningView | null;
   automation?: ClientAutomationView | null;
   notifications?: ClientNotificationsView | null;
+  getAuthHeaders: () => Promise<Record<string, string>>;
   onAction: (action: ClientQuickAction, client: Client) => void;
   onClose: () => void;
 }
@@ -127,10 +170,64 @@ const BILLING_ACTIONS: { key: ClientQuickAction; label: string; cap: keyof Clien
   { key: 'account-statement', label: 'Ver estado de cuenta', cap: 'accountStatement', icon: <FileText className="w-3.5 h-3.5" /> },
 ];
 
-export default function Client360Panel({ client, planName, caps, history, billing, serviceStatus, provisioning, automation, notifications, onAction, onClose }: Props) {
+export default function Client360Panel({
+  client, planName, caps, history, billing, serviceStatus, provisioning, automation, notifications,
+  getAuthHeaders, onAction, onClose,
+}: Props) {
   const ip = client.assignedIp || client.ip;
   const hasIp = ip && ip !== '0.0.0.0';
   const hasGps = Number.isFinite(client.lat) && Number.isFinite(client.lng) && !(client.lat === 0 && client.lng === 0);
+
+  const [expediente, setExpediente] = useState<Client360Expediente | null>(null);
+  const [expedienteLoading, setExpedienteLoading] = useState(false);
+  const [newTag, setNewTag] = useState('');
+  const [newDocName, setNewDocName] = useState('');
+  const [busy, setBusy] = useState(false);
+
+  const loadExpediente = useCallback(async () => {
+    setExpedienteLoading(true);
+    try {
+      const api = createAuthorizedApi(getAuthHeaders);
+      const data = await api.get<Client360Expediente>(`/api/clients/${client.id}/expediente`);
+      setExpediente(data);
+    } catch {
+      setExpediente(null);
+    } finally {
+      setExpedienteLoading(false);
+    }
+  }, [client.id, getAuthHeaders]);
+
+  useEffect(() => {
+    void loadExpediente();
+  }, [loadExpediente]);
+
+  const addTag = async () => {
+    const label = newTag.trim();
+    if (!label) return;
+    setBusy(true);
+    try {
+      const api = createAuthorizedApi(getAuthHeaders);
+      await api.post(`/api/clients/${client.id}/tags`, { label });
+      setNewTag('');
+      await loadExpediente();
+    } finally {
+      setBusy(false);
+    }
+  };
+
+  const addDocument = async () => {
+    const fileName = newDocName.trim();
+    if (!fileName) return;
+    setBusy(true);
+    try {
+      const api = createAuthorizedApi(getAuthHeaders);
+      await api.post(`/api/clients/${client.id}/documents`, { fileName, docType: 'contract' });
+      setNewDocName('');
+      await loadExpediente();
+    } finally {
+      setBusy(false);
+    }
+  };
 
   const actions = QUICK_ACTIONS.filter((a) => caps[a.cap] && (!a.show || a.show(client)));
   const billingActions = BILLING_ACTIONS.filter((a) => caps[a.cap]);
@@ -158,11 +255,16 @@ export default function Client360Panel({ client, planName, caps, history, billin
               Cliente 360
             </span>
             <h3 className="mt-2 text-lg font-bold leading-tight text-white">{client.name}</h3>
-            <div className="mt-1.5 flex items-center gap-2">
+            <div className="mt-1.5 flex items-center gap-2 flex-wrap">
               <span className={`px-2 py-0.5 rounded border text-[10px] font-mono font-bold uppercase ${STATUS_BADGE[client.status]}`}>
                 {STATUS_LABEL[client.status]}
               </span>
               <span className="text-[10px] font-mono text-slate-500 uppercase">ID: {client.id}</span>
+              {expediente?.tags.map((t) => (
+                <span key={t.id} className="px-2 py-0.5 rounded text-[10px] font-mono border" style={{ borderColor: t.color, color: t.color }}>
+                  {t.label}
+                </span>
+              ))}
             </div>
           </div>
           <button onClick={onClose} aria-label="Cerrar Cliente 360" className="text-slate-500 hover:text-white">
@@ -184,6 +286,77 @@ export default function Client360Panel({ client, planName, caps, history, billin
             {row('Email', client.email, <Mail className="w-3 h-3" />)}
             {row('Fecha instalación', client.installationDate, <CalendarClock className="w-3 h-3" />)}
             {row('GPS', hasGps ? <span className="font-mono">{client.lat}, {client.lng}</span> : 'Sin coordenadas')}
+          </div>
+        </section>
+
+        {/* Expediente — etiquetas, contactos, documentos, auditoría */}
+        <section aria-label="Expediente">
+          <h4 className="mb-1 flex items-center gap-1.5 text-[10px] font-mono uppercase tracking-widest text-slate-500">
+            <ClipboardList className="w-3 h-3" /> Expediente
+            {expedienteLoading && <Loader2 className="w-3 h-3 animate-spin text-indigo-400" />}
+          </h4>
+          <div id="client360-expediente" className="rounded-2xl border border-slate-900 bg-slate-900/40 px-4 py-3 space-y-3">
+            <div>
+              <p className="text-[10px] font-mono uppercase text-slate-500 mb-1 flex items-center gap-1"><Tag className="w-3 h-3" /> Etiquetas</p>
+              <div className="flex flex-wrap gap-1 mb-2">
+                {(expediente?.tags ?? []).map((t) => (
+                  <span key={t.id} className="px-2 py-0.5 rounded text-[10px] font-mono" style={{ backgroundColor: `${t.color}22`, color: t.color }}>{t.label}</span>
+                ))}
+                {(!expediente?.tags || expediente.tags.length === 0) && <span className="text-[11px] text-slate-500">Sin etiquetas</span>}
+              </div>
+              {caps.editClient && (
+                <div className="flex gap-2">
+                  <input value={newTag} onChange={(e) => setNewTag(e.target.value)} placeholder="Nueva etiqueta" className="flex-1 bg-slate-950 border border-slate-800 rounded-lg px-2 py-1 text-[11px]" />
+                  <button type="button" disabled={busy} onClick={() => void addTag()} className="px-2 py-1 rounded-lg bg-indigo-600/20 text-indigo-300 text-[10px]"><Plus className="w-3 h-3" /></button>
+                </div>
+              )}
+            </div>
+            <div>
+              <p className="text-[10px] font-mono uppercase text-slate-500 mb-1 flex items-center gap-1"><Users className="w-3 h-3" /> Contactos alternos</p>
+              {(expediente?.contacts ?? []).length === 0 ? (
+                <p className="text-[11px] text-slate-500">Sin contactos alternos</p>
+              ) : (
+                <ul className="space-y-1">
+                  {expediente!.contacts.map((c) => (
+                    <li key={c.id} className="text-[11px] text-slate-300">{c.name || 'Contacto'} · {c.phone || c.email} ({c.channel})</li>
+                  ))}
+                </ul>
+              )}
+            </div>
+            <div>
+              <p className="text-[10px] font-mono uppercase text-slate-500 mb-1 flex items-center gap-1"><Paperclip className="w-3 h-3" /> Documentos</p>
+              {(expediente?.documents ?? []).length === 0 ? (
+                <p className="text-[11px] text-slate-500">Sin documentos</p>
+              ) : (
+                <ul className="space-y-1">
+                  {expediente!.documents.map((d) => (
+                    <li key={d.id} className="text-[11px] text-slate-300">{d.fileName} <span className="text-slate-500">({d.docType})</span></li>
+                  ))}
+                </ul>
+              )}
+              {caps.editClient && (
+                <div className="flex gap-2 mt-2">
+                  <input value={newDocName} onChange={(e) => setNewDocName(e.target.value)} placeholder="Nombre archivo (metadato)" className="flex-1 bg-slate-950 border border-slate-800 rounded-lg px-2 py-1 text-[11px]" />
+                  <button type="button" disabled={busy} onClick={() => void addDocument()} className="px-2 py-1 rounded-lg bg-indigo-600/20 text-indigo-300 text-[10px]"><Plus className="w-3 h-3" /></button>
+                </div>
+              )}
+            </div>
+            <div>
+              <p className="text-[10px] font-mono uppercase text-slate-500 mb-1 flex items-center gap-1"><History className="w-3 h-3" /> Actividad auditada</p>
+              {(expediente?.activity ?? []).length === 0 ? (
+                <p className="text-[11px] text-slate-500">Sin actividad registrada</p>
+              ) : (
+                <ul className="space-y-1 max-h-32 overflow-y-auto">
+                  {expediente!.activity.slice(0, 8).map((a) => (
+                    <li key={a.id} className="text-[10px] text-slate-400">
+                      <span className="text-slate-300">{a.action}</span>
+                      {a.newValue && <> → {a.newValue}</>}
+                      <span className="text-slate-600 ml-1">{a.createdAt.substring(0, 10)}</span>
+                    </li>
+                  ))}
+                </ul>
+              )}
+            </div>
           </div>
         </section>
 
@@ -337,13 +510,25 @@ export default function Client360Panel({ client, planName, caps, history, billin
           <h4 className="mb-2 flex items-center gap-1.5 text-[10px] font-mono uppercase tracking-widest text-slate-500">
             <History className="w-3 h-3" /> Historial reciente
           </h4>
-          {history.length === 0 ? (
+          {(() => {
+            const auditHistory = (expediente?.activity ?? []).map((a) => ({
+              id: a.id,
+              kind: 'evento' as const,
+              label: a.action,
+              detail: a.newValue || a.oldValue,
+              date: a.createdAt.substring(0, 16).replace('T', ' '),
+            }));
+            const merged = [...auditHistory, ...history].slice(0, 12);
+            if (merged.length === 0) {
+              return (
             <div id="client360-history-empty" className="rounded-2xl border border-slate-900 bg-slate-900/40 px-4 py-6 text-center text-[12px] text-slate-500">
               No hay historial reciente para este cliente.
             </div>
-          ) : (
+              );
+            }
+            return (
             <ul className="space-y-1.5">
-              {history.map((h) => (
+              {merged.map((h) => (
                 <li key={h.id} className="flex items-start justify-between gap-3 rounded-xl border border-slate-900 bg-slate-900/40 px-3 py-2">
                   <div className="min-w-0">
                     <p className="text-[12px] text-slate-200">{h.label}</p>
@@ -353,7 +538,8 @@ export default function Client360Panel({ client, planName, caps, history, billin
                 </li>
               ))}
             </ul>
-          )}
+            );
+          })()}
         </section>
       </div>
     </div>

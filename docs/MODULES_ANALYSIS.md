@@ -1,10 +1,22 @@
 # NugaCore — Análisis de Módulos (MODULES_ANALYSIS)
 
-> Última actualización: 2026-06-01
+> Última actualización: 2026-07-07 (WISP OS Olas 0–5)
 > Para cada módulo: **qué existe · qué falta · riesgos · complejidad · dependencias.**
 > Leyenda complejidad: 🟢 baja · 🟡 media · 🟠 alta · 🔴 muy alta.
 
-> **Realidad transversal a todos los módulos:** el frontend está completo y funcional, pero **toda la data es mock en memoria** (`backend/state/store.ts`). "Qué falta" siempre incluye, de forma implícita, *persistencia real*. Aquí se detallan los huecos específicos de cada módulo.
+> **WISP OS (jul 2026):** ver [`WISP_OS_MODULE_MAP.md`](WISP_OS_MODULE_MAP.md) para el mapa código↔flags↔gates. Cobertura promedio ~2.8/5 tras Olas 0–5; persistencia crítica activable vía `USE_DB_*` (ver `STAGING_FLAGS_WISP_OS.md`).
+
+| # | Módulo | Cobertura | Gap principal restante |
+|---|--------|:---------:|------------------------|
+| 1 | Dashboard / Control | 3.5 | Telemetría NOC real |
+| 2 | CRM / Client 360 | 3.5 | Storage documentos (Supabase), contrato PDF |
+| 3 | Planes | 3 | Cambio masivo MikroTik por tecnología |
+| 4 | Facturación / Cobranza | 3.5 | CFDI PAC real; conciliación bancaria |
+| 5 | Cortes | 2.5 | Live MikroTik (PROD-5→7) |
+| 6 | MikroTik | 2.5 | Write live; torch; multi-WAN |
+| 7–20 | Ver WISP_OS_MODULE_MAP | 2–3 | Telemetría, portal auth, app campo |
+
+> **Realidad transversal:** el frontend está completo; persistencia real depende de flags `USE_DB_*`. Dominios críticos tienen repository+service; `store.ts` sigue como fallback hasta cerrar OLA 0 en staging.
 
 ---
 
