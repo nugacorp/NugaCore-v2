@@ -1,39 +1,40 @@
-import React, { useState, useEffect, useCallback, lazy, Suspense } from 'react';
+import React, { useState, useEffect, useCallback, Suspense } from 'react';
 import { clientLog } from './lib/clientLog';
+import { lazyWithRetry } from './lib/lazyWithRetry';
 import Sidebar from './components/Sidebar';
-const Dashboard = lazy(() => import('./components/Dashboard'));
-const CrmModule = lazy(() => import('./components/CrmModule'));
-const BillingModule = lazy(() => import('./components/BillingModule'));
-const NetworkModule = lazy(() => import('./components/NetworkModule'));
-const MikrotikModule = lazy(() => import('./components/MikrotikModule'));
-const SupportModule = lazy(() => import('./components/SupportModule'));
-const InventoryModule = lazy(() => import('./components/InventoryModule'));
-const WarehousesModule = lazy(() => import('./components/WarehousesModule'));
-const InventoryTransfersModule = lazy(() => import('./components/InventoryTransfersModule'));
-const InventoryRoutersModule = lazy(() => import('./components/InventoryRoutersModule'));
-const NocReadOnlyModule = lazy(() => import('./components/NocReadOnlyModule'));
-const NocTelemetryModule = lazy(() => import('./components/NocTelemetryModule'));
-const NocOperationsPanel = lazy(() => import('./components/NocOperationsPanel'));
-const ManualSafeModeModule = lazy(() => import('./modules/manual-safe-mode/ManualSafeModeModule'));
-const SafeCommandQueueModule = lazy(() => import('./modules/safe-command-queue/SafeCommandQueueModule'));
-const ProvisioningCenterModule = lazy(() => import('./modules/provisioning/ProvisioningCenterModule'));
-const AutomationCenterModule = lazy(() => import('./modules/automation/AutomationCenterModule'));
-const NotificationCenterModule = lazy(() => import('./modules/notifications/NotificationCenterModule'));
-const RouterOSReadOnlyModule = lazy(() => import('./modules/routeros-readonly/RouterOSReadOnlyModule'));
-const UserManualModule = lazy(() => import('./modules/user-manual/UserManualModule'));
-const InventorySyncModule = lazy(() => import('./modules/inventory-sync/InventorySyncModule'));
-const GisModule = lazy(() => import('./components/GisModule'));
-const FinanceOwnerModule = lazy(() => import('./components/FinanceOwnerModule'));
-const SuspensionModule = lazy(() => import('./components/SuspensionModule'));
-const WireguardManagerModule = lazy(() => import('./components/WireguardManagerModule'));
-const RouterOsResourcesModule = lazy(() => import('./components/RouterOsResourcesModule'));
-const RouterOsTemplatesModule = lazy(() => import('./components/RouterOsTemplatesModule'));
-const RouterEnrollmentWizard = lazy(() => import('./components/RouterEnrollmentWizard'));
-const PaymentsModule = lazy(() => import('./components/PaymentsModule'));
-const CommercialModule = lazy(() => import('./components/CommercialModule'));
-const ReportsModule = lazy(() => import('./components/ReportsModule'));
-const PortalModule = lazy(() => import('./components/PortalModule'));
-const TechPwaModule = lazy(() => import('./modules/tech-pwa/TechPwaModule'));
+const Dashboard = lazyWithRetry(() => import('./components/Dashboard'));
+const CrmModule = lazyWithRetry(() => import('./components/CrmModule'));
+const BillingModule = lazyWithRetry(() => import('./components/BillingModule'));
+const NetworkModule = lazyWithRetry(() => import('./components/NetworkModule'));
+const MikrotikModule = lazyWithRetry(() => import('./components/MikrotikModule'));
+const SupportModule = lazyWithRetry(() => import('./components/SupportModule'));
+const InventoryModule = lazyWithRetry(() => import('./components/InventoryModule'));
+const WarehousesModule = lazyWithRetry(() => import('./components/WarehousesModule'));
+const InventoryTransfersModule = lazyWithRetry(() => import('./components/InventoryTransfersModule'));
+const InventoryRoutersModule = lazyWithRetry(() => import('./components/InventoryRoutersModule'));
+const NocReadOnlyModule = lazyWithRetry(() => import('./components/NocReadOnlyModule'));
+const NocTelemetryModule = lazyWithRetry(() => import('./components/NocTelemetryModule'));
+const NocOperationsPanel = lazyWithRetry(() => import('./components/NocOperationsPanel'));
+const ManualSafeModeModule = lazyWithRetry(() => import('./modules/manual-safe-mode/ManualSafeModeModule'));
+const SafeCommandQueueModule = lazyWithRetry(() => import('./modules/safe-command-queue/SafeCommandQueueModule'));
+const ProvisioningCenterModule = lazyWithRetry(() => import('./modules/provisioning/ProvisioningCenterModule'));
+const AutomationCenterModule = lazyWithRetry(() => import('./modules/automation/AutomationCenterModule'));
+const NotificationCenterModule = lazyWithRetry(() => import('./modules/notifications/NotificationCenterModule'));
+const RouterOSReadOnlyModule = lazyWithRetry(() => import('./modules/routeros-readonly/RouterOSReadOnlyModule'));
+const UserManualModule = lazyWithRetry(() => import('./modules/user-manual/UserManualModule'));
+const InventorySyncModule = lazyWithRetry(() => import('./modules/inventory-sync/InventorySyncModule'));
+const GisModule = lazyWithRetry(() => import('./components/GisModule'));
+const FinanceOwnerModule = lazyWithRetry(() => import('./components/FinanceOwnerModule'));
+const SuspensionModule = lazyWithRetry(() => import('./components/SuspensionModule'));
+const WireguardManagerModule = lazyWithRetry(() => import('./components/WireguardManagerModule'));
+const RouterOsResourcesModule = lazyWithRetry(() => import('./components/RouterOsResourcesModule'));
+const RouterOsTemplatesModule = lazyWithRetry(() => import('./components/RouterOsTemplatesModule'));
+const RouterEnrollmentWizard = lazyWithRetry(() => import('./components/RouterEnrollmentWizard'));
+const PaymentsModule = lazyWithRetry(() => import('./components/PaymentsModule'));
+const CommercialModule = lazyWithRetry(() => import('./components/CommercialModule'));
+const ReportsModule = lazyWithRetry(() => import('./components/ReportsModule'));
+const PortalModule = lazyWithRetry(() => import('./components/PortalModule'));
+const TechPwaModule = lazyWithRetry(() => import('./modules/tech-pwa/TechPwaModule'));
 import LoginForm from './components/LoginForm';
 import LandingPage from './components/LandingPage';
 import UserMenu from './components/UserMenu';
@@ -323,6 +324,7 @@ export default function App() {
       return;
     }
 
+    let attemptedFetch = false;
     try {
       setLoading(true);
 
@@ -330,6 +332,7 @@ export default function App() {
       // disparaba ~15 endpoints globales en cada navegación/poll; al abrir varios
       // módulos eso agotaba el rate-limit y producía spam de 429 en consola.
       if (activeTab === 'dashboard') {
+        attemptedFetch = true;
         const [resStats, resAlerts] = await Promise.all([
           fetchJson('/api/dashboard-stats'),
           fetchJson('/api/alerts'),
@@ -337,6 +340,7 @@ export default function App() {
         setStats(resStats);
         setAlerts(resAlerts);
       } else if (activeTab === 'crm') {
+        attemptedFetch = true;
         const [resClients, resPlans] = await Promise.all([
           fetchJson('/api/clients'),
           fetchJson('/api/plans'),
@@ -344,6 +348,7 @@ export default function App() {
         setClients(resClients);
         setPlans(resPlans);
       } else if (activeTab === 'billing') {
+        attemptedFetch = true;
         const [resClients, resInvoices, resBillingSummary, resRevenueReport] = await Promise.all([
           fetchJson('/api/clients'),
           fetchJson('/api/billing/invoices'),
@@ -355,6 +360,7 @@ export default function App() {
         setBillingSummary(resBillingSummary);
         setRevenueReport(resRevenueReport);
       } else if (activeTab === 'network') {
+        attemptedFetch = true;
         const [resClients, resTowers, resOlts, resOnus, resNaps] = await Promise.all([
           fetchJson('/api/clients'),
           fetchJson('/api/network-towers'),
@@ -368,6 +374,7 @@ export default function App() {
         setOnus(resOnus);
         setNaps(resNaps);
       } else if (activeTab === 'support') {
+        attemptedFetch = true;
         const [resClients, resTickets, resWorkOrders] = await Promise.all([
           fetchJson('/api/clients'),
           fetchJson('/api/tickets'),
@@ -377,8 +384,10 @@ export default function App() {
         setTickets(resTickets);
         setWorkOrders(resWorkOrders);
       } else if (activeTab === 'inventory') {
+        attemptedFetch = true;
         setInventory(await fetchJson('/api/inventory'));
       } else if (activeTab === 'gis') {
+        attemptedFetch = true;
         const mapData = await fetchJson('/api/gis/map-data');
         setClients(mapData.clients ?? []);
         setTowers(mapData.towers ?? []);
@@ -386,6 +395,7 @@ export default function App() {
         setOnus(mapData.onus ?? []);
         setNaps(mapData.naps ?? []);
       } else if (activeTab === 'finance' || activeTab === 'owner') {
+        attemptedFetch = true;
         const [resClients, resInvoices, resTickets] = await Promise.all([
           fetchJson('/api/clients'),
           fetchJson('/api/billing/invoices'),
@@ -395,6 +405,7 @@ export default function App() {
         setInvoices(resInvoices);
         setTickets(resTickets);
       } else if (isMikrotikWorkspaceTab(activeTab)) {
+        attemptedFetch = true;
         try {
           setMikrotikLogs(await fetchJson('/api/mikrotik/logs'));
         } catch {
@@ -416,6 +427,7 @@ export default function App() {
       setRateLimitNotice('');
 
       if (activeTab === 'suspension') {
+        attemptedFetch = true;
         try {
           const [customers, orders, events, policy] = await Promise.all([
             fetchJson('/api/suspension/customers'),
@@ -435,6 +447,7 @@ export default function App() {
         }
       }
       if (activeTab === 'wireguard' || activeTab === 'router-enrollment') {
+        attemptedFetch = true;
         try {
           const [servers, peers] = await Promise.all([
             fetchJson('/api/wireguard/servers'),
@@ -450,7 +463,7 @@ export default function App() {
     } catch (err) {
       if (isApiRateLimitError(err)) {
         setRateLimitMessage(err.retryAfterMs);
-      } else {
+      } else if (attemptedFetch) {
         clientLog.error(err);
         setErrorStr('Error contacting full-stack back-end server REST API.');
       }

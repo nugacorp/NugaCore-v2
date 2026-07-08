@@ -33,7 +33,7 @@ describe('Notification Center UI', () => {
   });
 
   it('App renderiza el módulo y RBAC lo expone a todos los roles', () => {
-    expect(appSource).toContain("const NotificationCenterModule = lazy(() => import('./modules/notifications/NotificationCenterModule'))");
+    expect(appSource).toContain("const NotificationCenterModule = lazyWithRetry(() => import('./modules/notifications/NotificationCenterModule'))");
     expect(appSource).toContain("activeTab === 'notifications'");
     for (const role of ["'Super Admin'", "'Administrador'", "'Cobranza'", "'Técnico'", "'Soporte'", "'Solo lectura'"]) {
       const line = rbacSource.split('\n').find((item) => item.includes(role)) ?? '';

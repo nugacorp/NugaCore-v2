@@ -10,5 +10,10 @@ createRoot(document.getElementById('root')!).render(
 );
 
 if ('serviceWorker' in navigator && import.meta.env.PROD) {
-  void navigator.serviceWorker.register('/sw.js').catch(() => undefined);
+  void navigator.serviceWorker
+    .register('/sw.js')
+    .then((registration) => {
+      void registration.update();
+    })
+    .catch(() => undefined);
 }

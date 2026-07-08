@@ -189,7 +189,7 @@ describe('App — MikroTik Workspace in-page desacoplado', () => {
 describe('App — Manual de Usuario integrado', () => {
   it('importa y renderiza UserManualModule cuando el tab está activo', () => {
     expect(appSource).toContain(
-      "const UserManualModule = lazy(() => import('./modules/user-manual/UserManualModule'))",
+      "const UserManualModule = lazyWithRetry(() => import('./modules/user-manual/UserManualModule'))",
     );
     expect(appSource).toContain("activeTab === 'user-manual'");
     expect(appSource).toContain('<UserManualModule');
