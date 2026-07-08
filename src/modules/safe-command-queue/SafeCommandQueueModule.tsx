@@ -1,6 +1,7 @@
 import React, { useCallback, useEffect, useState } from 'react';
 import { createAuthorizedApi } from '../../lib/apiClient';
-import { CheckCircle2, ClipboardList, Lock, Play, ShieldCheck, XCircle, Ban, ListChecks } from 'lucide-react';
+import ProductionGateBadge from '../../components/ProductionGateBadge';
+import { CheckCircle2, ClipboardList, Play, ShieldCheck, XCircle, Ban, ListChecks } from 'lucide-react';
 
 // ====================================================================
 // FAST-1 — Safe Command Queue (Dry-Run) — vista DRY RUN.
@@ -127,10 +128,7 @@ export default function SafeCommandQueueModule({ getAuthHeaders }: Props) {
           <p className="text-sm text-slate-400 mt-1">Cola de comandos en dry-run. Sin ejecución real.</p>
         </div>
 
-        <span className="inline-flex items-center space-x-1.5 px-2.5 py-1 rounded-lg bg-slate-900 border border-indigo-800 text-xs text-indigo-300 font-mono">
-          <Lock className="w-3.5 h-3.5" />
-          <span>DRY RUN</span>
-        </span>
+        <ProductionGateBadge getAuthHeaders={getAuthHeaders} gate="safeCommandQueueLive" label="SAFE QUEUE" />
       </div>
 
       <div className="p-3 rounded-lg bg-indigo-950/30 border border-indigo-900 text-indigo-200 text-sm">

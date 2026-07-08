@@ -71,7 +71,7 @@ export const engineStore = {
     customerId: string;
     invoiceId?: string;
     orderType: SuspensionOrder['orderType'];
-    source: 'engine' | 'manual';
+    source: 'engine' | 'manual' | 'payment-engine' | 'provisioning-center' | 'service-status';
     reason?: string;
   }): SuspensionOrder {
     const order: SuspensionOrder = {

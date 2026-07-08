@@ -113,4 +113,24 @@ router.post('/api/workorders/:id/evidences', requireRoles([...TECH_ROLES]), asyn
   res.json(await svc().addWorkOrderEvidence(req.params.id, req.body || {}));
 }));
 
+router.post('/api/workorders/sync-batch', requireRoles([...TECH_ROLES]), asyncHandler(async (req, res) => {
+  const items = Array.isArray(req.body?.items) ? req.body.items as Array<{ orderId: string; action: string; payload?: Record<string, unknown> }> : [];
+  const results: Array<{ orderId: string; action: string; ok: boolean }> = [];
+  for (const item of items) {
+    try {
+      if (item.action === 'status') {
+        await svc().updateWorkOrderStatus(item.orderId, item.payload || {});
+      } else if (item.action === 'evidence') {
+        await svc().addWorkOrderEvidence(item.orderId, item.payload || {});
+      } else if (item.action === 'checklist') {
+        await svc().toggleChecklistItem(item.orderId, Number(item.payload?.index ?? 0));
+      }
+      results.push({ orderId: item.orderId, action: item.action, ok: true });
+    } catch {
+      results.push({ orderId: item.orderId, action: item.action, ok: false });
+    }
+  }
+  res.json({ synced: results.filter((r) => r.ok).length, failed: results.filter((r) => !r.ok).length, results });
+}));
+
 export default router;

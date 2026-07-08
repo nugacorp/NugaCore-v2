@@ -6,6 +6,7 @@
 // ====================================================================
 
 import { BadRequestError, ConflictError } from '../../common/errors';
+import { productionGates } from '../../config/production-gates';
 import { sanitizeSensitiveData, sanitizeText } from '../../common/security/sanitize-sensitive-data';
 import { describePlannedCommands, planRouterOsCommands } from './command-planner';
 import { analyzeLockoutRisk, readManagementPostureFromEnv } from './lockout-guard';
@@ -106,6 +107,7 @@ export const buildSafeCommand = (
   const targetId = sanitizeText(requireString(input.targetId, 'targetId'));
   const description = sanitizeText(requireString(input.description, 'description'));
   const payload = sanitizeSensitiveData(normalizePayload(input.payload));
+  const live = productionGates.safeCommandQueueLive();
   const preview = buildDryRunPreview(commandType, targetId, payload);
 
   return {
@@ -117,8 +119,8 @@ export const buildSafeCommand = (
     description,
     payload,
     status: 'PENDING',
-    dryRun: true,
-    wouldExecute: false,
+    dryRun: !live,
+    wouldExecute: live,
     riskLevel: preview.riskLevel,
     simulatedCommands: preview.simulatedCommands,
     plannedRouterOsCommands: preview.plannedRouterOsCommands,

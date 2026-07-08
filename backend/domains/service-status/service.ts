@@ -9,6 +9,8 @@
 // ====================================================================
 
 import type { Client } from '../../../src/types';
+import { productionGates } from '../../config/production-gates';
+import { dispatchNetworkOrder } from '../../bridges/network-order-dispatch';
 import type { EnrichedInvoice } from '../billing/repository';
 import { getBillingService } from '../billing/service';
 import { getCustomersService } from '../customers/service';
@@ -182,9 +184,21 @@ async function requestTransition(
     reason,
     actorRole,
     createdAt: updatedAt,
-    dryRun: true,
+    dryRun: !productionGates.serviceStatusLive(),
   };
   serviceStatusStore.appendAudit(event);
+
+  if (productionGates.serviceStatusLive()) {
+    const orderType = pendingRequest === 'suspension' ? 'suspension' : 'reactivation';
+    await dispatchNetworkOrder({
+      customerId,
+      orderType,
+      source: 'service-status',
+      reason,
+      actor: actorRole,
+    });
+  }
+
   return { event, view };
 }
 

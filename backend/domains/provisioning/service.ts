@@ -1,4 +1,6 @@
 import { BadRequestError, ConflictError, NotFoundError } from '../../common/errors';
+import { productionGates } from '../../config/production-gates';
+import { applyApprovedProvisioningLive, applyProvisioningCustomerStatus } from './executor';
 import { sanitizeText } from '../../common/security/sanitize-sensitive-data';
 import { provisioningStore } from './store';
 import {
@@ -123,7 +125,7 @@ const transition = (
     nextState,
     actor,
     createdAt: nowIso(),
-    dryRun: true,
+    dryRun: !productionGates.provisioningExecute(),
   });
 
   return updated;
@@ -158,7 +160,7 @@ export const provisioningService = {
       actor,
       createdAt,
       updatedAt: createdAt,
-      dryRun: true,
+      dryRun: !productionGates.provisioningExecute(),
       notes: optionalString(input.notes),
     };
 
@@ -173,7 +175,7 @@ export const provisioningService = {
       nextState: 'PENDING',
       actor,
       createdAt,
-      dryRun: true,
+      dryRun: !productionGates.provisioningExecute(),
     });
     return action;
   },
@@ -202,7 +204,12 @@ export const provisioningService = {
   },
 
   approveAction(id: string, actor: string): ProvisioningAction {
-    return transition(requireAction(id), 'APPROVED', actor);
+    const approved = transition(requireAction(id), 'APPROVED', actor);
+    if (productionGates.provisioningExecute()) {
+      void applyProvisioningCustomerStatus(approved);
+      void applyApprovedProvisioningLive(approved, actor);
+    }
+    return approved;
   },
 
   rejectAction(id: string, actor: string, reason?: unknown): ProvisioningAction {

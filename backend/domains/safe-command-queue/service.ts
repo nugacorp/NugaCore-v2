@@ -8,6 +8,9 @@
 // ====================================================================
 
 import { NotFoundError } from '../../common/errors';
+import { productionGates } from '../../config/production-gates';
+import { store } from '../../state/store';
+import { executePlannedCommands } from '../mikrotik/worker/command-executor';
 import { sanitizeText } from '../../common/security/sanitize-sensitive-data';
 import { assertNotLockoutBlocked, buildAudit, buildSafeCommand, resolveTransition } from './mappers';
 import { safeCommandQueueRepository as repo } from './repository';
@@ -83,8 +86,30 @@ export const safeCommandQueueService = {
     const command = requireCommand(id);
     assertNotLockoutBlocked(command, 'aprobar');
     const status = resolveTransition(command.status, 'APPROVED');
-    const updated = repo.update(id, { status, approvedBy: actor, approvedAt: new Date().toISOString() })!;
-    audit(id, actor, 'APPROVED', 'Comando aprobado (sin ejecución; queda en cola dry-run).');
+    const live = productionGates.safeCommandQueueLive();
+    const updated = repo.update(id, {
+      status,
+      approvedBy: actor,
+      approvedAt: new Date().toISOString(),
+      dryRun: !live,
+      wouldExecute: live,
+    })!;
+    if (live && command.plannedRouterOsCommands.length > 0) {
+      const router = store.MIKROTIK_ROUTERS.find((r) => r.encryptedPassword) ?? store.MIKROTIK_ROUTERS[0];
+      if (router) {
+        void executePlannedCommands(router, command.plannedRouterOsCommands).then((result) => {
+          audit(
+            id,
+            actor,
+            'APPROVED',
+            result.ok
+              ? `Comando ejecutado en router (${result.executed} cmds).`
+              : `Ejecución falló: ${result.errors.join('; ')}`,
+          );
+        });
+      }
+    }
+    audit(id, actor, 'APPROVED', live ? 'Comando aprobado y encolado para ejecución live.' : 'Comando aprobado (sin ejecución; queda en cola dry-run).');
     return updated;
   },
 

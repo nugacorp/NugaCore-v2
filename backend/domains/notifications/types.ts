@@ -64,13 +64,12 @@ export interface NotificationTemplate {
   variables: TemplateVariable[];
 }
 
-// Resultado de un provider mock. Nunca envia: solo describe que enviaria.
 export interface ProviderPreviewResult {
   channel: NotificationChannel;
-  provider: 'mock';
-  dryRun: true;
-  wouldSend: true;
-  sent: false;
+  provider: 'mock' | 'live';
+  dryRun: boolean;
+  wouldSend: boolean;
+  sent: boolean;
   renderedBody: string;
   note: string;
 }
@@ -86,9 +85,9 @@ export interface NotificationMessage {
   variables: Record<string, string>;
   status: NotificationStatus;
   source: string;
-  provider: 'mock';
-  dryRun: true;
-  sent: false;
+  provider: 'mock' | 'live';
+  dryRun: boolean;
+  sent: boolean;
   createdAt: string;
   updatedAt: string;
   simulationResult?: string;
@@ -104,8 +103,8 @@ export interface NotificationAuditEntry {
   previousStatus: NotificationStatus | null;
   nextStatus: NotificationStatus;
   actor: string;
-  dryRun: true;
-  sent: false;
+  dryRun: boolean;
+  sent: boolean;
   createdAt: string;
 }
 
@@ -128,10 +127,10 @@ export interface PreviewResult {
   templateId: string;
   renderedBody: string;
   variables: Record<string, string>;
-  provider: 'mock';
-  dryRun: true;
-  wouldSend: true;
-  sent: false;
+  provider: 'mock' | 'live';
+  dryRun: boolean;
+  wouldSend: boolean;
+  sent: boolean;
 }
 
 export interface NotificationSummary {
@@ -145,5 +144,5 @@ export interface NotificationSummary {
   supportedTypes: number;
   supportedChannels: number;
   templates: number;
-  dryRun: true;
+  dryRun: boolean;
 }

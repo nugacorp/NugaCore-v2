@@ -31,12 +31,12 @@ describe('notifications service', () => {
     expect(msg.customerId).toBe('cust-1');
   });
 
-  it('simulateMessage pasa a SIMULATED y nunca a SENT', () => {
+  it('simulateMessage pasa a SIMULATED y nunca a SENT sin gate live', () => {
     const msg = notificationService.createMessage(input, 'tester');
     const sim = notificationService.simulateMessage(msg.id, 'tester');
     expect(sim.status).toBe('SIMULATED');
     expect(sim.sent).toBe(false);
-    expect(sim.simulationResult).toContain('sent=false');
+    expect(sim.simulationResult).toContain('simulacion');
   });
 
   it('no permite simular un mensaje ya simulado', () => {

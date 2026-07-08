@@ -132,7 +132,7 @@ export interface OrderRow {
   customer_id: string;
   invoice_id: string | null;
   status: OrderStatus;
-  source: 'engine' | 'manual';
+  source: 'engine' | 'manual' | 'payment-engine' | 'provisioning-center' | 'service-status';
   reason: string | null;
   scheduled_for: string | null;
   executed_at: string | null;

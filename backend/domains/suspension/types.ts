@@ -91,7 +91,7 @@ export interface SuspensionOrder {
   invoiceId?: string;
   orderType: OrderType;
   status: OrderStatus;
-  source: 'engine' | 'manual';
+  source: 'engine' | 'manual' | 'payment-engine' | 'provisioning-center' | 'service-status';
   reason?: string;
   scheduledFor?: string;
   executedAt?: string;

@@ -205,8 +205,8 @@ describe('API — GIS store-backed', () => {
   let app: Express;
   beforeAll(() => { app = createApp(); });
 
-  it('GET /api/gis/health -> store-backed-v2', async () => {
+  it('GET /api/gis/health -> ssot-services', async () => {
     const res = await request(app).get('/api/gis/health').set(READER);
-    expect(res.body.mode).toBe('store-backed-v2');
+    expect(res.body.mode).toBe('ssot-services');
   });
 });

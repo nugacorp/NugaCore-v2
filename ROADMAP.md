@@ -29,8 +29,10 @@ NugaCore se posiciona como **sistema operativo WISP/ISP** (no solo CRM). Mapa co
 | OLA 2 | MikroTik profesional (backup, diff, preview) | PROD-5→7, §11 |
 | OLA 3 | Network DB, GIS v2, FTTH persistente | `USE_DB_NETWORK` |
 | OLA 4 | Portal cliente, PWA técnicos | Auth portal |
-| OLA 5 | Reportes UI, SLA, notificaciones reales | PROD-9 |
+| OLA 5 | Reportes UI, SLA, notificaciones reales | `NOTIFICATIONS_LIVE` / PROD-9 |
 | OLA 6 | RADIUS, SaaS multi-tenant | Fase 11 |
+
+**Production gates** (`backend/config/production-gates.ts`): `NUGACORE_LIVE_MODE` master + flags por subsistema. API `GET /api/system/production-gates`. Por defecto dry-run; activar en staging solo tras checklist §11 y routers de lab.
 
 ## Principio de madurez
 

@@ -67,6 +67,7 @@ describe('Service Status safety guard', () => {
     expect(routes).toContain('router.get(');
     expect(routes).toContain('request-suspension');
     expect(routes).toContain('request-reactivation');
-    expect(source).toContain('dryRun: true');
+    expect(source).toContain('dryRun');
+    expect(source).toContain('productionGates.serviceStatusLive');
   });
 });

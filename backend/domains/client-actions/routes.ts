@@ -2,8 +2,8 @@ import { Router } from 'express';
 import { asyncHandler, BadRequestError, NotFoundError } from '../../common/errors';
 import { requireRoles } from '../../common/rbac';
 import { getBillingService } from '../billing/service';
+import { getCustomersService } from '../customers/service';
 import { getSupportService } from '../tickets/service';
-import { store } from '../../state/store';
 
 const router = Router();
 const WRITE = ['super admin', 'administrador', 'cobranza', 'soporte'] as const;
@@ -15,7 +15,7 @@ const WRITE = ['super admin', 'administrador', 'cobranza', 'soporte'] as const;
 
 router.post('/api/client-actions/:clientId/payment', requireRoles([...WRITE]), asyncHandler(async (req, res) => {
   const clientId = req.params.clientId;
-  const client = store.CLIENTS.find((c) => c.id === clientId);
+  const client = await getCustomersService().getById(clientId);
   if (!client) throw new NotFoundError('Client not found', 'NOT_FOUND');
   const amount = Number(req.body?.amount);
   if (!Number.isFinite(amount) || amount <= 0) {
@@ -40,7 +40,7 @@ router.post('/api/client-actions/:clientId/payment', requireRoles([...WRITE]), a
 
 router.post('/api/client-actions/:clientId/ticket', requireRoles([...WRITE]), asyncHandler(async (req, res) => {
   const clientId = req.params.clientId;
-  const client = store.CLIENTS.find((c) => c.id === clientId);
+  const client = await getCustomersService().getById(clientId);
   if (!client) throw new NotFoundError('Client not found', 'NOT_FOUND');
   const title = String(req.body?.title || req.body?.subject || '').trim();
   if (!title) throw new BadRequestError('Missing title/subject', 'MISSING_FIELD');
