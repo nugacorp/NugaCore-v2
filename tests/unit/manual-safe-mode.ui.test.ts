@@ -61,7 +61,7 @@ describe('Manual Safe Mode — herramienta interna (no es módulo de sidebar)', 
   });
 
   it('App importa y renderiza el módulo cuando el tab está activo (acceso directo)', () => {
-    expect(appSource).toContain("const ManualSafeModeModule = lazy(() => import('./modules/manual-safe-mode/ManualSafeModeModule'))");
+    expect(appSource).toContain("const ManualSafeModeModule = lazyWithRetry(() => import('./modules/manual-safe-mode/ManualSafeModeModule'))");
     expect(appSource).toContain("activeTab === 'manual-safe-mode'");
     expect(appSource).toContain('<ManualSafeModeModule');
   });

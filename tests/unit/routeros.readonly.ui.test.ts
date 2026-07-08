@@ -47,7 +47,7 @@ describe('RouterOS Read-Only Lab navigation integration', () => {
   });
 
   it('App importa y renderiza el módulo cuando el tab está activo', () => {
-    expect(appSource).toContain("const RouterOSReadOnlyModule = lazy(() => import('./modules/routeros-readonly/RouterOSReadOnlyModule'))");
+    expect(appSource).toContain("const RouterOSReadOnlyModule = lazyWithRetry(() => import('./modules/routeros-readonly/RouterOSReadOnlyModule'))");
     expect(appSource).toContain("activeTab === 'routeros-readonly'");
     expect(appSource).toContain('<RouterOSReadOnlyModule');
   });

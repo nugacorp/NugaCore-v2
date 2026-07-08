@@ -44,7 +44,7 @@ describe('InventorySyncModule — contrato de UI', () => {
 
 describe('InventorySyncModule — integración', () => {
   it('App importa y renderiza el módulo cuando el tab está activo', () => {
-    expect(appSource).toContain("const InventorySyncModule = lazy(() => import('./modules/inventory-sync/InventorySyncModule'))");
+    expect(appSource).toContain("const InventorySyncModule = lazyWithRetry(() => import('./modules/inventory-sync/InventorySyncModule'))");
     expect(appSource).toContain("activeTab === 'inventory-sync'");
     expect(appSource).toContain('<InventorySyncModule');
   });
