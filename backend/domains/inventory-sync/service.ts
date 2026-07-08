@@ -9,9 +9,9 @@
 
 import { compareInventory, countByType } from './comparator';
 import { diffExportText, summarizeDiff } from './config-diff';
-import { configSnapshotStore } from './config-snapshot-store';
 import { hashExportText, snapshotToExportText } from './config-snapshot';
 import { getNugaInventory } from './nuga-inventory';
+import { getConfigSnapshotRepository, type ConfigSnapshotRepository } from './repository';
 import { buildRouterOsSnapshot } from './snapshot';
 import {
   ConfigSnapshotDiffResponse,
@@ -27,11 +27,13 @@ import {
 export interface InventorySyncDeps {
   loadNugaInventory: () => NugaInventoryRouter[];
   loadRouterOsSnapshot: () => Promise<RouterOsInventorySnapshot>;
+  configSnapshotRepo: ConfigSnapshotRepository;
 }
 
 const defaultDeps: InventorySyncDeps = {
   loadNugaInventory: getNugaInventory,
   loadRouterOsSnapshot: () => buildRouterOsSnapshot(),
+  configSnapshotRepo: getConfigSnapshotRepository(),
 };
 
 export const createInventorySyncService = (deps: InventorySyncDeps = defaultDeps) => {
@@ -82,14 +84,14 @@ export const createInventorySyncService = (deps: InventorySyncDeps = defaultDeps
     },
 
     async listConfigSnapshots(): Promise<ConfigSnapshotListResponse> {
-      const snapshots = configSnapshotStore.list();
+      const snapshots = await deps.configSnapshotRepo.list();
       return { readOnly: true, total: snapshots.length, snapshots };
     },
 
     async captureConfigSnapshot(): Promise<ConfigSnapshotRecord> {
       const snapshot = await deps.loadRouterOsSnapshot();
       const exportText = snapshotToExportText(snapshot);
-      return configSnapshotStore.capture({
+      return deps.configSnapshotRepo.create({
         routerId: snapshot.routerId,
         capturedAt: new Date().toISOString(),
         contentHash: hashExportText(exportText),
@@ -99,12 +101,12 @@ export const createInventorySyncService = (deps: InventorySyncDeps = defaultDeps
     },
 
     async getConfigSnapshot(id: string): Promise<ConfigSnapshotRecord | null> {
-      return configSnapshotStore.getById(id) ?? null;
+      return deps.configSnapshotRepo.getById(id);
     },
 
     async diffConfigSnapshots(fromId: string, toId: string): Promise<ConfigSnapshotDiffResponse | null> {
-      const from = configSnapshotStore.getById(fromId);
-      const to = configSnapshotStore.getById(toId);
+      const from = await deps.configSnapshotRepo.getById(fromId);
+      const to = await deps.configSnapshotRepo.getById(toId);
       if (!from || !to) return null;
       const lines = diffExportText(from.exportText, to.exportText);
       return {

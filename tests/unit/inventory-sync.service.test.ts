@@ -1,4 +1,5 @@
 import { describe, expect, it } from 'vitest';
+import { StoreConfigSnapshotRepository } from '../../backend/domains/inventory-sync/repository';
 import { createInventorySyncService } from '../../backend/domains/inventory-sync/service';
 import type {
   InventorySyncDeps,
@@ -23,6 +24,7 @@ const nuga: NugaInventoryRouter = {
 const makeDeps = (snapshot: RouterOsInventorySnapshot): InventorySyncDeps => ({
   loadNugaInventory: () => [nuga],
   loadRouterOsSnapshot: async () => snapshot,
+  configSnapshotRepo: new StoreConfigSnapshotRepository(),
 });
 
 describe('inventory-sync service — diferencias y estado', () => {
