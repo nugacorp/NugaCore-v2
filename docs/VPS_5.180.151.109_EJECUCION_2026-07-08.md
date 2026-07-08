@@ -89,3 +89,9 @@ node scripts/validate-restore-checklist.mjs
     - `ola0PersistenceClosed=true`, `dataConsistencyHealthy=true`, `restore_tested=true`.
   - **Pendiente (requiere `DATABASE_URL` o `SUPABASE_ACCESS_TOKEN`):** aplicar migraciones SQL `20260707*` y `20260708100000` en Supabase hosted (`payment_promises`, `client_tags`, `portal_user_bindings`, etc.). Script: `scripts/apply-wisp-os-migrations.sh`.
 
+- 2026-07-08 (batch 3 — credenciales publishable/secret):
+  - Migraciones `20260707*` + `portal_user_bindings` aplicadas vía Management API (`SUPABASE_ACCESS_TOKEN` en VPS).
+  - Tablas verificadas: `portal_user_bindings`, `payment_promises`, `client_tags`, `tenants`, `commercial_prospects`, `radius_accounting`.
+  - Coolify staging actualizado a claves `sb_publishable_*` / `sb_secret_*` (runtime confirmado en contenedor).
+  - Código `ddda2e2`: aliases `SUPABASE_SECRET_KEY`, `SUPABASE_PUBLISHABLE_KEY`, `VITE_SUPABASE_PUBLISHABLE_KEY`.
+
