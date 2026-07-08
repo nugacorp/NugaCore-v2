@@ -8,9 +8,15 @@
 // ====================================================================
 
 import { compareInventory, countByType } from './comparator';
+import { diffExportText, summarizeDiff } from './config-diff';
+import { configSnapshotStore } from './config-snapshot-store';
+import { hashExportText, snapshotToExportText } from './config-snapshot';
 import { getNugaInventory } from './nuga-inventory';
 import { buildRouterOsSnapshot } from './snapshot';
 import {
+  ConfigSnapshotDiffResponse,
+  ConfigSnapshotListResponse,
+  ConfigSnapshotRecord,
   InventorySyncDifferencesResponse,
   InventorySyncSnapshotResponse,
   InventorySyncStatusResponse,
@@ -72,6 +78,41 @@ export const createInventorySyncService = (deps: InventorySyncDeps = defaultDeps
         readOnly: true,
         total: differences.length,
         differences,
+      };
+    },
+
+    async listConfigSnapshots(): Promise<ConfigSnapshotListResponse> {
+      const snapshots = configSnapshotStore.list();
+      return { readOnly: true, total: snapshots.length, snapshots };
+    },
+
+    async captureConfigSnapshot(): Promise<ConfigSnapshotRecord> {
+      const snapshot = await deps.loadRouterOsSnapshot();
+      const exportText = snapshotToExportText(snapshot);
+      return configSnapshotStore.capture({
+        routerId: snapshot.routerId,
+        capturedAt: new Date().toISOString(),
+        contentHash: hashExportText(exportText),
+        exportText,
+        source: snapshot.source,
+      });
+    },
+
+    async getConfigSnapshot(id: string): Promise<ConfigSnapshotRecord | null> {
+      return configSnapshotStore.getById(id) ?? null;
+    },
+
+    async diffConfigSnapshots(fromId: string, toId: string): Promise<ConfigSnapshotDiffResponse | null> {
+      const from = configSnapshotStore.getById(fromId);
+      const to = configSnapshotStore.getById(toId);
+      if (!from || !to) return null;
+      const lines = diffExportText(from.exportText, to.exportText);
+      return {
+        readOnly: true,
+        fromId,
+        toId,
+        summary: summarizeDiff(lines),
+        lines,
       };
     },
   };

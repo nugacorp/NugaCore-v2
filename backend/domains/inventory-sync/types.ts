@@ -91,3 +91,30 @@ export interface InventorySyncStatusResponse {
   totalDifferences: number;
   countsByType: Record<InventorySyncDifferenceType, number>;
 }
+
+/** Snapshot de configuración persistido (in-memory; precedente Postgres). */
+export interface ConfigSnapshotRecord {
+  id: string;
+  routerId: string;
+  capturedAt: string;
+  contentHash: string;
+  exportText: string;
+  source: RouterOsSource;
+  readOnly: true;
+}
+
+export interface ConfigSnapshotListResponse {
+  readOnly: true;
+  total: number;
+  snapshots: ConfigSnapshotRecord[];
+}
+
+import type { ConfigDiffLine } from './config-diff';
+
+export interface ConfigSnapshotDiffResponse {
+  readOnly: true;
+  fromId: string;
+  toId: string;
+  summary: { added: number; removed: number; unchanged: number };
+  lines: ConfigDiffLine[];
+}

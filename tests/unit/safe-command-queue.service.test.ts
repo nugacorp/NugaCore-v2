@@ -31,6 +31,9 @@ describe('safeCommandQueueService', () => {
     expect(cmd.wouldExecute).toBe(false);
     expect(cmd.riskLevel).toBe('medium');
     expect(cmd.simulatedCommands.length).toBeGreaterThan(0);
+    expect(cmd.plannedRouterOsCommands.length).toBeGreaterThan(0);
+    expect(cmd.lockoutRisk).toBe('none');
+    expect(cmd.lockoutBlocked).toBe(false);
     expect(cmd.safetyWarnings.length).toBeGreaterThan(0);
   });
 
@@ -100,5 +103,19 @@ describe('safeCommandQueueService', () => {
 
   it('getCommand inexistente lanza NotFound', () => {
     expect(() => safeCommandQueueService.getCommand('nope')).toThrow();
+  });
+
+  it('bloquea validate cuando lockout guard marca blocked', () => {
+    const cmd = safeCommandQueueService.createCommand(
+      {
+        commandType: 'ADD_ADDRESS_LIST',
+        targetId: 'mgmt-block',
+        description: 'bloqueo gestión',
+        payload: { address: '10.0.0.1', addressList: 'BLOCK' },
+      },
+      ACTOR,
+    );
+    expect(cmd.lockoutBlocked).toBe(true);
+    expect(() => safeCommandQueueService.validateCommand(cmd.id, ACTOR)).toThrow();
   });
 });
