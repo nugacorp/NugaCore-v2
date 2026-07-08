@@ -82,7 +82,7 @@ router.get(
         { step: 'critical_flags', done: criticalOn.length === CRITICAL_DOMAINS.length, note: `${criticalOn.length}/${CRITICAL_DOMAINS.length} USE_DB_* críticos` },
         { step: 'data_consistency', done: consistency.healthy, note: `${consistency.mismatches.length} desajustes KPI` },
         { step: 'mikrotik_live_off', done: !mikrotikLive, note: 'MIKROTIK_WORKER_LIVE=false' },
-        { step: 'restore_tested', done: false, note: 'Manual — checklist §14' },
+        { step: 'restore_tested', done: process.env.STAGING_RESTORE_TESTED === 'true', note: process.env.STAGING_RESTORE_TESTED === 'true' ? 'Checklist §14 confirmado' : 'Manual — checklist §14' },
       ],
     });
   }),

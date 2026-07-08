@@ -1,10 +1,10 @@
 # NugaCore — Análisis de Módulos (MODULES_ANALYSIS)
 
-> Última actualización: 2026-07-07 (WISP OS Olas 0–5)
+> Última actualización: 2026-07-08 (WISP OS Olas 0–6)
 > Para cada módulo: **qué existe · qué falta · riesgos · complejidad · dependencias.**
 > Leyenda complejidad: 🟢 baja · 🟡 media · 🟠 alta · 🔴 muy alta.
 
-> **WISP OS (jul 2026):** ver [`WISP_OS_MODULE_MAP.md`](WISP_OS_MODULE_MAP.md) para el mapa código↔flags↔gates. Cobertura promedio ~2.8/5 tras Olas 0–5; persistencia crítica activable vía `USE_DB_*` (ver `STAGING_FLAGS_WISP_OS.md`).
+> **WISP OS (jul 2026):** ver [`WISP_OS_MODULE_MAP.md`](WISP_OS_MODULE_MAP.md) para el mapa código↔flags↔gates. Cobertura promedio ~3.2/5 tras Olas 0–6; persistencia crítica activable vía `USE_DB_*` (ver `STAGING_FLAGS_WISP_OS.md`).
 
 | # | Módulo | Cobertura | Gap principal restante |
 |---|--------|:---------:|------------------------|

@@ -1,7 +1,7 @@
-import { store } from '../../state/store';
 import { getBillingService } from '../billing/service';
 import { getNetworkService } from '../network/service';
 import { getSupportService } from '../tickets/service';
+import { listSecurityAuditLogs } from '../security/audit-log';
 
 const nowStamp = () => new Date().toISOString().replace('T', ' ').substring(0, 19);
 
@@ -27,9 +27,10 @@ export async function buildFinancialRows() {
 }
 
 export async function buildOperationalRows() {
-  const [towers, tickets] = await Promise.all([
+  const [towers, tickets, sectors] = await Promise.all([
     getNetworkService().listTowers({}),
     getSupportService().listTickets({}),
+    getNetworkService().listSectors({}),
   ]);
   const openTickets = tickets.filter((t) => t.status !== 'resolved' && t.status !== 'closed').length;
   return towers.map((tower) => ({
@@ -39,14 +40,14 @@ export async function buildOperationalRows() {
     cpuPct: tower.cpu,
     ramPct: tower.ram,
     pingMs: tower.pingMs,
-    sectors: store.NETWORK_SECTORS.filter((sector) => sector.towerId === tower.id).length,
+    sectors: sectors.filter((sector) => sector.towerId === tower.id).length,
     activeTickets: openTickets,
     timestamp: nowStamp(),
   }));
 }
 
 export function buildSecurityRows() {
-  return store.SECURITY_AUDIT_LOGS.slice(0, 300).map((row) => ({
+  return listSecurityAuditLogs(300).map((row) => ({
     id: row.id,
     actorId: row.actorId || 'anonymous',
     actorRole: row.actorRole || 'unknown',

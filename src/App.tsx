@@ -379,18 +379,12 @@ export default function App() {
       } else if (activeTab === 'inventory') {
         setInventory(await fetchJson('/api/inventory'));
       } else if (activeTab === 'gis') {
-        const [resClients, resTowers, resOlts, resOnus, resNaps] = await Promise.all([
-          fetchJson('/api/clients'),
-          fetchJson('/api/network-towers'),
-          fetchJson('/api/olt'),
-          fetchJson('/api/onu'),
-          fetchJson('/api/naps'),
-        ]);
-        setClients(resClients);
-        setTowers(resTowers);
-        setOlts(resOlts);
-        setOnus(resOnus);
-        setNaps(resNaps);
+        const mapData = await fetchJson('/api/gis/map-data');
+        setClients(mapData.clients ?? []);
+        setTowers(mapData.towers ?? []);
+        setOlts(mapData.olts ?? []);
+        setOnus(mapData.onus ?? []);
+        setNaps(mapData.naps ?? []);
       } else if (activeTab === 'finance' || activeTab === 'owner') {
         const [resClients, resInvoices, resTickets] = await Promise.all([
           fetchJson('/api/clients'),

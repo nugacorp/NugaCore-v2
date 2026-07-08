@@ -12,13 +12,17 @@ USE_DB_SUPPORT=true
 USE_DB_COMMERCIAL=true
 USE_DB_PURCHASES=true
 USE_DB_FINANCE=true
-
-# Activar tras migración suspension validada:
-# USE_DB_SUSPENSION=true
+USE_DB_SUSPENSION=true
 
 # Red — tras aplicar migraciones towers/sectors:
 # USE_DB_NETWORK=true
 # USE_DB_FTTH=true
+
+# Restore probado (checklist §14):
+# STAGING_RESTORE_TESTED=true
+
+# Portal cliente staging (opcional):
+# PORTAL_STAGING_TOKEN=
 
 # NUNCA sin autorización:
 # USE_DB_MIKROTIK=false
@@ -31,6 +35,7 @@ USE_DB_FINANCE=true
 2. `GET /api/system/persistence-status` → `storeFallbackActive: false`
 3. `GET /api/system/staging-readiness` → `ola0PersistenceClosed: true`
 4. `POST /api/jobs/run` → `persistence-audit` ok
-5. Backup + restore probado (checklist §14)
+5. Backup + restore probado → `STAGING_RESTORE_TESTED=true`
 6. `node scripts/validate-staging-readiness.mjs`
-7. `RUN_DB_TESTS=true node scripts/validate-wisp-os-staging.mjs` (tablas)
+7. `node scripts/validate-restore-checklist.mjs`
+8. `RUN_DB_TESTS=true node scripts/validate-wisp-os-staging.mjs` (tablas)

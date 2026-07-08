@@ -1,5 +1,6 @@
 import { Router } from 'express';
 import { AppRole, requireRoles } from '../../common/rbac';
+import { asyncHandler } from '../../common/errors';
 import { nocTelemetryService } from './service';
 
 // ====================================================================
@@ -19,8 +20,8 @@ router.get('/api/noc/health', requireRoles(NOC_READ_ROLES), (_req, res) => {
   res.json(nocTelemetryService.getHealth());
 });
 
-router.get('/api/noc/towers', requireRoles(NOC_READ_ROLES), (_req, res) => {
-  res.json(nocTelemetryService.listTowers());
-});
+router.get('/api/noc/towers', requireRoles(NOC_READ_ROLES), asyncHandler(async (_req, res) => {
+  res.json(await nocTelemetryService.listTowers());
+}));
 
 export default router;

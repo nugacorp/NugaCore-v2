@@ -8,8 +8,8 @@
 // este dominio NO redefine esa ruta para evitar colisión de routing.
 // ====================================================================
 
-import { store } from '../../state/store';
 import { nocReadOnlyRepository } from '../noc/repository';
+import { getNetworkService } from '../network/service';
 import { aggregateTowers, summarizeHealth } from './mappers';
 import type { NocHealthSummary, NocTowerTelemetry } from './types';
 
@@ -18,7 +18,8 @@ export const nocTelemetryService = {
     return summarizeHealth(nocReadOnlyRepository.listRouters());
   },
 
-  listTowers(): NocTowerTelemetry[] {
-    return aggregateTowers(store.TOWERS, nocReadOnlyRepository.listRouters());
+  async listTowers(): Promise<NocTowerTelemetry[]> {
+    const towers = await getNetworkService().listTowers({});
+    return aggregateTowers(towers, nocReadOnlyRepository.listRouters());
   },
 };

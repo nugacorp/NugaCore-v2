@@ -34,7 +34,8 @@ Mapeo entre la especificación WISP OS (20 módulos), código, flags y gates.
 - `GET|POST /api/collections/{promises,cash-register}`
 - `GET /api/portal/:clientId/{summary,invoices,tickets,payment-promise}`
 - `GET /api/tickets/sla/breaches`
-- `GET|POST /api/mikrotik/:routerId/backups` + `operations/preview` (gated)
+- `GET /api/portal/status`
+- `POST /api/mikrotik/:routerId/backups` + diff + `operations/preview`
 - `POST /api/automation/decisions/:id/notify-preview` + `POST /api/automation/notify-pending`
 - `GET /api/system/staging-readiness`
 - `GET /api/radius/status` + `GET /api/radius/sessions`
@@ -45,13 +46,13 @@ Mapeo entre la especificación WISP OS (20 módulos), código, flags y gates.
 
 | Ola | Estado |
 |-----|--------|
-| OLA 0 | `.env.example` flags, jobs auditoría, persistencia-status |
-| OLA 1 | Control center, Client 360, collections, commercial UI |
-| OLA 2 | Router backup/diff/preview (dry-run) |
-| OLA 3 | Network/FTTH SSOT, GIS RBAC + service layer | Entregado |
-| OLA 4 | Portal completo + PWA técnicos ampliada | Entregado |
-| OLA 5 | SLA support DB, Reports fix, notify UI, CFDI banner | Entregado |
-| OLA 6 | RADIUS stub + tenancy foundation | Entregado (diseño) |
+| OLA 0 | Entregado — flags, jobs, staging-readiness, restore checklist |
+| OLA 1 | Entregado — control center 8 áreas SSOT, Client 360, collections, commercial CRUD |
+| OLA 2 | Entregado — router backup/diff/preview UI + API (dry-run gated) |
+| OLA 3 | Entregado — network/FTTH SSOT, GIS map-data, NOC telemetry vía services |
+| OLA 4 | Entregado — portal token staging, PWA sw.js, TechPwa sync |
+| OLA 5 | Entregado — SLA, reports SSOT, notify UI, CFDI stub |
+| OLA 6 | Entregado (diseño) — RADIUS stub + tenancy foundation |
 
 ## Verificación
 

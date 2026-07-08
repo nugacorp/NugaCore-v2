@@ -106,12 +106,16 @@ export class Client360Service {
   async addDocument(clientId: string, body: Record<string, unknown>, uploadedBy?: string) {
     const fileName = String(body.fileName || '').trim();
     if (!fileName) throw new BadRequestError('Missing fileName', 'MISSING_FIELD');
+    const storagePath = body.storagePath ? String(body.storagePath).trim() : undefined;
+    if (storagePath && !/^[\w./-]+$/.test(storagePath)) {
+      throw new BadRequestError('Invalid storagePath', 'INVALID_FIELD');
+    }
     const doc: ClientDocument = {
       id: uid('doc'),
       clientId,
       docType: (String(body.docType || 'other') as ClientDocument['docType']),
       fileName,
-      storagePath: body.storagePath ? String(body.storagePath) : undefined,
+      storagePath,
       mimeType: body.mimeType ? String(body.mimeType) : undefined,
       uploadedBy,
       createdAt: stamp(),

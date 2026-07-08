@@ -16,7 +16,57 @@ describe('API — WISP OS Control Center', () => {
     expect(res.body).toHaveProperty('clients');
     expect(res.body).toHaveProperty('finance');
     expect(res.body).toHaveProperty('network');
+    expect(res.body).toHaveProperty('tickets');
+    expect(res.body).toHaveProperty('installations');
+    expect(res.body).toHaveProperty('alerts');
+    expect(res.body).toHaveProperty('capacity');
     expect(res.body).toHaveProperty('collections');
+  });
+});
+
+describe('API — Commercial CRM', () => {
+  let app: Express;
+  beforeAll(() => { app = createApp(); });
+
+  it('POST /api/commercial/quotes -> 201', async () => {
+    const prospects = await request(app).get('/api/commercial/prospects').set(READER);
+    const prospectId = prospects.body[0]?.id;
+    if (!prospectId) return;
+    const res = await request(app).post('/api/commercial/quotes').set(ADMIN).send({
+      prospectId,
+      title: 'Instalación fibra',
+      amountCents: 150000,
+    });
+    expect(res.status).toBe(201);
+    expect(res.body.title).toBe('Instalación fibra');
+  });
+});
+
+describe('API — Portal auth', () => {
+  let app: Express;
+  beforeAll(() => { app = createApp(); });
+
+  it('GET /api/portal/status', async () => {
+    const res = await request(app).get('/api/portal/status');
+    expect(res.status).toBe(200);
+    expect(res.body).toHaveProperty('mode');
+  });
+});
+
+describe('API — MikroTik config audit', () => {
+  let app: Express;
+  beforeAll(() => { app = createApp(); });
+
+  it('POST backup dry-run on router', async () => {
+    const routers = await request(app).get('/api/mikrotik/routers').set(READER);
+    const routerId = routers.body[0]?.id;
+    if (!routerId) return;
+    const res = await request(app).post(`/api/mikrotik/${routerId}/backups`).set(ADMIN).send({
+      content: '/interface print',
+      backupType: 'export',
+    });
+    expect(res.status).toBe(201);
+    expect(res.body).toHaveProperty('contentHash');
   });
 });
 

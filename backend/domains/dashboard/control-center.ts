@@ -1,5 +1,5 @@
-import { store } from '../../state/store';
 import { getMetricsSnapshot } from '../system/metrics';
+import { nocReadOnlyRepository } from '../noc/repository';
 import { buildBillingKpis } from './routes';
 import { getCollectionsService } from '../collections/service';
 import { getCommercialService } from '../commercial/service';
@@ -28,11 +28,16 @@ export async function buildControlCenter() {
   const pendingInstallations = workOrders.filter((o) => o.status === 'pending' || o.status === 'in_progress').length
     + commercialAppts.filter((a) => a.status === 'scheduled').length;
 
-  const routersOnline = store.MIKROTIK_ROUTERS.filter((r) => r.isOnline).length;
-  const routersOffline = store.MIKROTIK_ROUTERS.length - routersOnline;
-  const towers = await getNetworkService().listTowers({});
+  const routers = nocReadOnlyRepository.listRouters();
+  const routersOnline = routers.filter((r) => r.isOnline).length;
+  const routersOffline = routers.length - routersOnline;
+  const networkSvc = getNetworkService();
+  const [towers, allSectors] = await Promise.all([
+    networkSvc.listTowers({}),
+    networkSvc.listSectors({}),
+  ]);
   const towersByCapacity = towers.map((t) => {
-    const sectors = store.NETWORK_SECTORS.filter((s) => s.towerId === t.id);
+    const sectors = allSectors.filter((s) => s.towerId === t.id);
     const clientsOnTower = sectors.reduce((sum, s) => sum + (s.clientsCount ?? 0), 0);
     return { towerId: t.id, towerName: t.name, clientsCount: clientsOnTower, sectorCount: sectors.length, status: t.status };
   });

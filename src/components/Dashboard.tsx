@@ -251,7 +251,11 @@ export default function Dashboard({ stats, alerts, onRefresh, getAuthHeaders, on
               <div className="text-slate-400 text-xs">Agenda hoy</div>
               <div className="text-indigo-300 font-semibold">{controlCenter.installations?.scheduledToday} citas</div>
             </button>
-            <button type="button" onClick={go('network')} className="text-left p-3 rounded-lg bg-slate-900 border border-slate-800 hover:border-slate-600 col-span-2">
+            <button type="button" onClick={go('automation')} className="text-left p-3 rounded-lg bg-slate-900 border border-slate-800 hover:border-slate-600">
+              <div className="text-slate-400 text-xs">Alertas NOC / Automation</div>
+              <div className="text-amber-400 font-semibold">{controlCenter.alerts?.nocOpen ?? 0} alertas · {controlCenter.alerts?.automationPending ?? 0} automation</div>
+            </button>
+            <button type="button" onClick={go('network')} className="text-left p-3 rounded-lg bg-slate-900 border border-slate-800 hover:border-slate-600">
               <div className="text-slate-400 text-xs">Capacidad red</div>
               <div className="text-white font-semibold">{controlCenter.capacity?.utilizationPct}% utilización</div>
             </button>

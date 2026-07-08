@@ -63,6 +63,7 @@ export const MIKROTIK_ROUTERS: MikrotikRouter[] = [
 
 import MikrotikRoutersPanel from './MikrotikRoutersPanel';
 import MikrotikWorkerPanel from './MikrotikWorkerPanel';
+import MikrotikConfigAuditPanel from './MikrotikConfigAuditPanel';
 import type {
   MikrotikRouterView,
   ProvisioningScriptResponse,
@@ -300,6 +301,13 @@ export default function MikrotikModule({
         onReadRouter={onReadRouter}
         onRefreshRuns={onRefreshWorkerRuns}
       />
+
+      {getAuthHeaders && provisionedRouters[0]?.id && (
+        <MikrotikConfigAuditPanel
+          routerId={provisionedRouters[0].id}
+          getAuthHeaders={getAuthHeaders}
+        />
+      )}
 
       {/* Main Grid: Copilot on Left, Terminal and logs on Right */}
       <div className="grid grid-cols-1 lg:grid-cols-12 gap-6">

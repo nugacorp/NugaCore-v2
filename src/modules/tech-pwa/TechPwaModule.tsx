@@ -65,11 +65,28 @@ export default function TechPwaModule({ getAuthHeaders }: TechPwaModuleProps) {
   };
 
   const syncOffline = async () => {
+    const headers = await getAuthHeaders();
+    const remaining: typeof offlineQueue = [];
     for (const item of offlineQueue) {
-      await runOrderAction(item.orderId, item.action, item.payload);
+      const path =
+        item.action === 'checklist' ? `/api/workorders/${item.orderId}/checklist/0/toggle`
+          : item.action === 'status' ? `/api/workorders/${item.orderId}/status`
+            : `/api/workorders/${item.orderId}/evidences`;
+      const method = item.action === 'status' ? 'PATCH' : 'POST';
+      try {
+        const res = await fetchWithRateLimitBackoff(path, {
+          method,
+          headers: { ...headers, 'Content-Type': 'application/json' },
+          body: JSON.stringify(item.payload),
+        });
+        if (!res.ok) remaining.push(item);
+      } catch {
+        remaining.push(item);
+      }
     }
-    setOfflineQueue([]);
-    localStorage.removeItem(OFFLINE_KEY);
+    setOfflineQueue(remaining);
+    localStorage.setItem(OFFLINE_KEY, JSON.stringify(remaining));
+    if (remaining.length === 0) void load();
   };
 
   const pending = orders.filter((o) => o.status !== 'completed' && o.status !== 'canceled');

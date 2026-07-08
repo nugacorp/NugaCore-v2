@@ -1,11 +1,25 @@
 import { Router } from 'express';
-import { asyncHandler, NotFoundError } from '../../common/errors';
+import { asyncHandler, NotFoundError, UnauthorizedError } from '../../common/errors';
 import { getBillingService } from '../billing/service';
 import { getSupportService } from '../tickets/service';
 import { getCollectionsService } from '../collections/service';
 import { getCustomersService } from '../customers/service';
 
 const router = Router();
+
+const portalTokenConfigured = () => {
+  const token = (process.env.PORTAL_STAGING_TOKEN || '').trim();
+  return token.length > 0;
+};
+
+function assertPortalAccess(req: { headers: Record<string, string | string[] | undefined> }) {
+  const expected = (process.env.PORTAL_STAGING_TOKEN || '').trim();
+  if (!expected) return;
+  const provided = String(req.headers['x-portal-token'] || '').trim();
+  if (provided !== expected) {
+    throw new UnauthorizedError('Invalid portal token', 'PORTAL_UNAUTHORIZED');
+  }
+}
 
 /**
  * Portal cliente — autoservicio (staging: x-portal-client-id o :clientId en ruta).
@@ -17,7 +31,18 @@ async function resolvePortalClient(req: { params: { clientId?: string }; headers
   return getCustomersService().getById(clientId);
 }
 
+router.get('/api/portal/status', asyncHandler(async (_req, res) => {
+  res.json({
+    mode: portalTokenConfigured() ? 'staging-token' : 'open',
+    authRequired: portalTokenConfigured(),
+    note: portalTokenConfigured()
+      ? 'Enviar x-portal-token en requests de portal'
+      : 'Staging abierto — configurar PORTAL_STAGING_TOKEN en producción',
+  });
+}));
+
 router.get('/api/portal/:clientId/summary', asyncHandler(async (req, res) => {
+  assertPortalAccess(req);
   const client = await resolvePortalClient(req);
   if (!client) throw new NotFoundError('Client not found', 'NOT_FOUND');
   const billing = getBillingService();
@@ -37,6 +62,7 @@ router.get('/api/portal/:clientId/summary', asyncHandler(async (req, res) => {
 }));
 
 router.get('/api/portal/:clientId/invoices', asyncHandler(async (req, res) => {
+  assertPortalAccess(req);
   const client = await resolvePortalClient(req);
   if (!client) throw new NotFoundError('Client not found', 'NOT_FOUND');
   const invoices = await getBillingService().listInvoices();
@@ -44,6 +70,7 @@ router.get('/api/portal/:clientId/invoices', asyncHandler(async (req, res) => {
 }));
 
 router.get('/api/portal/:clientId/tickets', asyncHandler(async (req, res) => {
+  assertPortalAccess(req);
   const client = await resolvePortalClient(req);
   if (!client) throw new NotFoundError('Client not found', 'NOT_FOUND');
   const tickets = await getSupportService().listTickets({ clientId: client.id });
@@ -51,6 +78,7 @@ router.get('/api/portal/:clientId/tickets', asyncHandler(async (req, res) => {
 }));
 
 router.post('/api/portal/:clientId/tickets', asyncHandler(async (req, res) => {
+  assertPortalAccess(req);
   const client = await resolvePortalClient(req);
   if (!client) throw new NotFoundError('Client not found', 'NOT_FOUND');
   const title = String(req.body?.title || req.body?.subject || 'Reporte portal').trim();
@@ -65,6 +93,7 @@ router.post('/api/portal/:clientId/tickets', asyncHandler(async (req, res) => {
 }));
 
 router.post('/api/portal/:clientId/payment-promise', asyncHandler(async (req, res) => {
+  assertPortalAccess(req);
   const client = await resolvePortalClient(req);
   if (!client) throw new NotFoundError('Client not found', 'NOT_FOUND');
   const promise = await getCollectionsService().createPromise({

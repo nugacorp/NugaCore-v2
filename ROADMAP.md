@@ -71,12 +71,12 @@ Estados usados:
 | Template Engine | 🟡 Avanzada | 🟡 Seguro como generador manual | No implica provisioning live. |
 | Dynamic Parameters | 🟡 En progreso | 🔴 Bloqueado por persistencia total | Falta independencia total de stores en memoria. |
 | MikroTik Worker | 🔄 Pendiente — propuesta PROD-10 Worker Engine **Dry-Run** | 🔴 No producción | Siguiente fase recomendada tras PROD-9: motor de ejecución en simulación (plan → preview de comandos → resultado mock), **gated**, sin activar `MIKROTIK_WORKER_LIVE` ni RouterOS Write. Requiere autorización explícita de Ramiro. |
-| NOC | 🔄 Pendiente | 🔴 No producción | Primero read-only. |
-| Inventario | 🔄 Pendiente | 🔴 No producción | Falta modelo/operación real. |
-| Tickets | 🔄 Pendiente | 🔴 No producción | Falta trazabilidad completa. |
-| CRM Comercial | 🔄 Pendiente | 🔴 No producción | Futuro. |
-| Portal Cliente | 🟡 Parcial | 🔴 No producción completa | Falta hardening y validación real. |
-| Mobile App | 🔄 Pendiente | 🔴 No producción | Futuro. |
+| NOC | 🟡 Avanzada (read-only + telemetría SSOT) | 🔴 No producción | `noc-telemetry` + health; sin SNMP live. |
+| Inventario | 🟡 Avanzada | 🔴 No producción | ERP 5.1 + serial units; validar staging DB. |
+| Tickets | 🟡 Avanzada (SLA + OT + DB) | 🟡 Staging DB | `USE_DB_SUPPORT`; SLA breaches en dashboard. |
+| CRM Comercial | 🟡 Avanzada (UI + API) | 🟡 Staging | `CommercialModule` pipeline/prospectos/cotizaciones/agenda. |
+| Portal Cliente | 🟡 Avanzada (staging token) | 🔴 No producción completa | `PORTAL_STAGING_TOKEN` opcional; JWT cliente pendiente. |
+| Mobile App / PWA Técnicos | 🟡 Avanzada (PWA shell) | 🔴 No producción | `TechPwaModule` + `sw.js` offline shell. |
 | IA Operativa | 🔄 Pendiente | 🔴 No producción | Primero read-only. |
 | SaaS Multiempresa | 🔄 Futuro | 🔴 No producción | Requiere tenancy completo. |
 
