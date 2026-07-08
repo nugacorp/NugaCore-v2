@@ -1,6 +1,6 @@
 import { Router } from 'express';
 import { asyncHandler, BadRequestError, NotFoundError } from '../../common/errors';
-import { READ_ROLES, requireRoles } from '../../common/rbac';
+import { requireRoles } from '../../common/rbac';
 import { getBillingService } from '../billing/service';
 import { getSupportService } from '../tickets/service';
 import { store } from '../../state/store';

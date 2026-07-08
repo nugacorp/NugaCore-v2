@@ -1,4 +1,3 @@
-import { isDomainOnDb } from '../../config/feature-flags';
 import { isSupabaseAdminConfigured, supabaseAdmin } from '../../services/supabase-admin';
 import { logger } from '../../common/logger';
 

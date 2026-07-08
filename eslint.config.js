@@ -34,6 +34,18 @@ export default tseslint.config(
     },
   },
   {
+    // Service worker público: corre en contexto Worker del navegador.
+    files: ['public/sw.js'],
+    languageOptions: {
+      globals: {
+        caches: 'readonly',
+        fetch: 'readonly',
+        self: 'readonly',
+        URL: 'readonly',
+      },
+    },
+  },
+  {
     files: ['**/*.{ts,tsx}'],
     rules: {
       // TypeScript ya valida identificadores/globals; no-undef da falsos

@@ -96,7 +96,7 @@ export class FinanceOperationalService {
     const to = periodTo ?? today();
     const expenses = await this.listExpenses({ from, to });
     const totalExpensesCents = expenses.reduce((s, e) => s + e.amountCents, 0);
-    let revenueCents = 0;
+    let revenueCents: number;
     try {
       const billing = getBillingService();
       const summary = await billing.getAccountSummary();

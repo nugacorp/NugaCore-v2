@@ -1,5 +1,5 @@
 import React, { useCallback, useEffect, useState } from 'react';
-import { BarChart3, Download, FileSpreadsheet, RefreshCw } from 'lucide-react';
+import { BarChart3, Download, RefreshCw } from 'lucide-react';
 import { fetchWithRateLimitBackoff } from '../lib/apiBackoff';
 
 interface ReportsModuleProps {

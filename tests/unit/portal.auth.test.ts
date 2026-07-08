@@ -12,7 +12,7 @@ vi.mock('../../backend/services/supabase-admin', () => ({
   },
 }));
 
-import { ForbiddenError, UnauthorizedError } from '../../backend/common/errors';
+import { ForbiddenError } from '../../backend/common/errors';
 import { resolvePortalAuth } from '../../backend/domains/portal/auth';
 
 describe('portal auth', () => {
