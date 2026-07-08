@@ -17,8 +17,17 @@ export const env = {
   LOG_FORMAT: process.env.LOG_FORMAT || '',
   GEMINI_API_KEY: process.env.GEMINI_API_KEY || '',
   SUPABASE_URL: process.env.SUPABASE_URL || '',
-  SUPABASE_ANON_KEY: process.env.SUPABASE_ANON_KEY || '',
-  SUPABASE_SERVICE_ROLE_KEY: process.env.SUPABASE_SERVICE_ROLE_KEY || '',
+  SUPABASE_ANON_KEY:
+    process.env.SUPABASE_ANON_KEY
+    || process.env.SUPABASE_PUBLISHABLE_KEY
+    || process.env.VITE_SUPABASE_ANON_KEY
+    || process.env.VITE_SUPABASE_PUBLISHABLE_KEY
+    || '',
+  SUPABASE_SERVICE_ROLE_KEY:
+    process.env.SUPABASE_SERVICE_ROLE_KEY
+    || process.env.SUPABASE_SECRET_KEY
+    || '',
+  SUPABASE_JWKS_URL: process.env.SUPABASE_JWKS_URL || '',
   DATABASE_URL: process.env.DATABASE_URL || '',
   MIKROTIK_CREDENTIALS_KEY: process.env.MIKROTIK_CREDENTIALS_KEY || '',
 } as const;

@@ -3,7 +3,10 @@ import { createClient } from '@supabase/supabase-js';
 // Load values from Vite client environment variables
 const viteEnv = (import.meta as ImportMeta & { env: Record<string, string | undefined> }).env;
 const supabaseUrl = viteEnv.VITE_SUPABASE_URL || '';
-const supabaseAnonKey = viteEnv.VITE_SUPABASE_ANON_KEY || '';
+const supabaseAnonKey =
+  viteEnv.VITE_SUPABASE_ANON_KEY
+  || viteEnv.VITE_SUPABASE_PUBLISHABLE_KEY
+  || '';
 
 // Lazy initialization check
 export const isSupabaseConfigured = supabaseUrl.trim() !== '' && supabaseAnonKey.trim() !== '';
