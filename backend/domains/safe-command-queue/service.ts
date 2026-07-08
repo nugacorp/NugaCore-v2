@@ -9,7 +9,7 @@
 
 import { NotFoundError } from '../../common/errors';
 import { sanitizeText } from '../../common/security/sanitize-sensitive-data';
-import { buildAudit, buildSafeCommand, resolveTransition } from './mappers';
+import { assertNotLockoutBlocked, buildAudit, buildSafeCommand, resolveTransition } from './mappers';
 import { safeCommandQueueRepository as repo } from './repository';
 import {
   CreateSafeCommandInput,
@@ -52,28 +52,36 @@ export const safeCommandQueueService = {
 
   validateCommand(id: string, actor: string): SafeCommand {
     const command = requireCommand(id);
+    assertNotLockoutBlocked(command, 'validar');
     const status = resolveTransition(command.status, 'VALIDATED');
     const updated = repo.update(id, { status, validatedBy: actor, validatedAt: new Date().toISOString() })!;
-    audit(id, actor, 'VALIDATED', 'Comando validado (estructura y parámetros correctos).');
+    audit(
+      id,
+      actor,
+      'VALIDATED',
+      `Comando validado (estructura, parámetros y lockout guard OK; riesgo ${command.lockoutRisk}).`,
+    );
     return updated;
   },
 
   // simulateCommand NO ejecuta nada: confirma el dry-run y deja traza.
   simulateCommand(id: string, actor: string): SafeCommand {
     const command = requireCommand(id);
+    assertNotLockoutBlocked(command, 'simular');
     const status = resolveTransition(command.status, 'SIMULATED');
     const updated = repo.update(id, { status })!;
     audit(
       id,
       actor,
       'SIMULATED',
-      `Simulación segura (dry-run): no se ejecutó ningún comando. Previsualización: ${command.simulatedCommands.length} línea(s).`,
+      `Simulación segura (dry-run): ${command.plannedRouterOsCommands.length} comando(s) planificado(s); lockout ${command.lockoutRisk}.`,
     );
     return updated;
   },
 
   approveCommand(id: string, actor: string): SafeCommand {
     const command = requireCommand(id);
+    assertNotLockoutBlocked(command, 'aprobar');
     const status = resolveTransition(command.status, 'APPROVED');
     const updated = repo.update(id, { status, approvedBy: actor, approvedAt: new Date().toISOString() })!;
     audit(id, actor, 'APPROVED', 'Comando aprobado (sin ejecución; queda en cola dry-run).');

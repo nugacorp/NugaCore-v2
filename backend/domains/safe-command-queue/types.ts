@@ -30,6 +30,9 @@ export type SafeCommandType = (typeof SAFE_COMMAND_TYPES)[number];
 export const RISK_LEVELS = ['low', 'medium', 'high'] as const;
 export type RiskLevel = (typeof RISK_LEVELS)[number];
 
+export const LOCKOUT_RISKS = ['none', 'possible', 'blocked'] as const;
+export type LockoutRisk = (typeof LOCKOUT_RISKS)[number];
+
 export const SAFE_COMMAND_EVENTS = [
   'CREATED',
   'VALIDATED',
@@ -57,6 +60,9 @@ export interface SafeCommand {
   wouldExecute: boolean; // siempre false
   riskLevel: RiskLevel;
   simulatedCommands: string[]; // previsualización descriptiva, NO ejecutable
+  plannedRouterOsCommands: string[]; // plan técnico para análisis lockout (no se ejecuta)
+  lockoutRisk: LockoutRisk;
+  lockoutBlocked: boolean;
   safetyWarnings: string[];
   validatedBy?: string;
   validatedAt?: string;

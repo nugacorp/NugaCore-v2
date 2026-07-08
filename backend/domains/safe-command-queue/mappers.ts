@@ -1,13 +1,14 @@
 // ====================================================================
-// Mappers / validación / dry-run Safe Command Queue (FAST-1).
+// Mappers / validación / dry-run Safe Command Queue (FAST-1 + PROD-5 prep).
 //
-// Funciones puras. Generan una previsualización DESCRIPTIVA (no ejecutable)
-// de lo que un comando HARÍA, junto con nivel de riesgo y advertencias de
-// seguridad. Nunca producen scripts RouterOS reales ni ejecutan nada.
+// Funciones puras. Generan previsualización y plan RouterOS para análisis
+// lockout. Nunca ejecutan comandos ni tocan routers reales.
 // ====================================================================
 
 import { BadRequestError, ConflictError } from '../../common/errors';
 import { sanitizeSensitiveData, sanitizeText } from '../../common/security/sanitize-sensitive-data';
+import { describePlannedCommands, planRouterOsCommands } from './command-planner';
+import { analyzeLockoutRisk, readManagementPostureFromEnv } from './lockout-guard';
 import {
   CreateSafeCommandInput,
   RiskLevel,
@@ -46,7 +47,6 @@ const normalizePayload = (value: unknown): Record<string, unknown> => {
   return value as Record<string, unknown>;
 };
 
-// Nivel de riesgo por tipo de comando.
 const RISK_BY_TYPE: Record<SafeCommandType, RiskLevel> = {
   SUSPEND_CUSTOMER: 'high',
   RESTORE_CUSTOMER: 'medium',
@@ -57,33 +57,46 @@ const RISK_BY_TYPE: Record<SafeCommandType, RiskLevel> = {
   REBOOT_CPE: 'high',
 };
 
-// Previsualización DESCRIPTIVA (dry-run). No es sintaxis RouterOS ejecutable.
-const PREVIEW_BY_TYPE: Record<SafeCommandType, (targetId: string) => string[]> = {
-  SUSPEND_CUSTOMER: (t) => [`[dry-run] Marcaría al cliente ${t} en address-list de suspensión (no se ejecuta).`],
-  RESTORE_CUSTOMER: (t) => [`[dry-run] Quitaría al cliente ${t} de la address-list de suspensión (no se ejecuta).`],
-  UPDATE_QUEUE: (t) => [`[dry-run] Ajustaría la cola/ancho de banda del target ${t} (no se ejecuta).`],
-  UPDATE_PLAN: (t) => [`[dry-run] Aplicaría el nuevo plan al target ${t} (no se ejecuta).`],
-  ADD_ADDRESS_LIST: (t) => [`[dry-run] Agregaría ${t} a una address-list (no se ejecuta).`],
-  REMOVE_ADDRESS_LIST: (t) => [`[dry-run] Quitaría ${t} de una address-list (no se ejecuta).`],
-  REBOOT_CPE: (t) => [`[dry-run] Reiniciaría el CPE ${t} (no se ejecuta).`],
-};
-
-/** Genera la previsualización dry-run (comandos descriptivos, riesgo, warnings). */
+/** Genera preview dry-run, plan RouterOS y análisis lockout. */
 export const buildDryRunPreview = (
   commandType: SafeCommandType,
   targetId: string,
-): { simulatedCommands: string[]; riskLevel: RiskLevel; safetyWarnings: string[] } => {
+  payload: Record<string, unknown> = {},
+): {
+  simulatedCommands: string[];
+  plannedRouterOsCommands: string[];
+  riskLevel: RiskLevel;
+  lockoutRisk: SafeCommand['lockoutRisk'];
+  lockoutBlocked: boolean;
+  safetyWarnings: string[];
+} => {
   const riskLevel = RISK_BY_TYPE[commandType];
+  const planInput = { commandType, targetId, payload };
+  const plannedRouterOsCommands = planRouterOsCommands(planInput);
+  const simulatedCommands = describePlannedCommands(planInput);
+  const lockout = analyzeLockoutRisk(plannedRouterOsCommands, readManagementPostureFromEnv());
+
   const safetyWarnings = [
     'Dry-run: ningún comando se ejecuta en routers reales (wouldExecute=false).',
+    ...lockout.warnings,
   ];
   if (riskLevel === 'high') {
     safetyWarnings.push('Acción de alto impacto: requiere aprobación humana antes de cualquier ejecución futura.');
   }
-  return { simulatedCommands: PREVIEW_BY_TYPE[commandType](targetId), riskLevel, safetyWarnings };
+  if (lockout.blocked) {
+    safetyWarnings.push('LOCKOUT GUARD: el plan podría bloquear acceso administrativo — validación bloqueada.');
+  }
+
+  return {
+    simulatedCommands,
+    plannedRouterOsCommands,
+    riskLevel,
+    lockoutRisk: lockout.risk,
+    lockoutBlocked: lockout.blocked,
+    safetyWarnings,
+  };
 };
 
-/** Construye un comando nuevo (status PENDING) con campos libres saneados. */
 export const buildSafeCommand = (
   input: CreateSafeCommandInput,
   id: string,
@@ -93,7 +106,7 @@ export const buildSafeCommand = (
   const targetId = sanitizeText(requireString(input.targetId, 'targetId'));
   const description = sanitizeText(requireString(input.description, 'description'));
   const payload = sanitizeSensitiveData(normalizePayload(input.payload));
-  const preview = buildDryRunPreview(commandType, targetId);
+  const preview = buildDryRunPreview(commandType, targetId, payload);
 
   return {
     id,
@@ -108,6 +121,9 @@ export const buildSafeCommand = (
     wouldExecute: false,
     riskLevel: preview.riskLevel,
     simulatedCommands: preview.simulatedCommands,
+    plannedRouterOsCommands: preview.plannedRouterOsCommands,
+    lockoutRisk: preview.lockoutRisk,
+    lockoutBlocked: preview.lockoutBlocked,
     safetyWarnings: preview.safetyWarnings,
     notes:
       typeof input.notes === 'string' && input.notes.trim() !== ''
@@ -128,12 +144,9 @@ export const buildAudit = (
   timestamp: nowIso(),
   actor,
   event,
-  // Saneo central: ningún detalle de auditoría debe filtrar secretos/scripts.
   details: sanitizeText(details),
 });
 
-// ── Máquina de estados (dry-run safe) ─────────────────────────────────
-// No existe transición a EXECUTED/RUNNING/COMPLETED. Aprobar exige simular antes.
 type TransitionEvent = Exclude<SafeCommandEvent, 'CREATED'>;
 
 const ALLOWED_FROM: Record<TransitionEvent, SafeCommandStatus[]> = {
@@ -152,7 +165,6 @@ const RESULTING_STATUS: Record<TransitionEvent, SafeCommandStatus> = {
   CANCELLED: 'CANCELLED',
 };
 
-/** Valida la transición y devuelve el estado resultante; lanza 409 si es inválida. */
 export const resolveTransition = (current: SafeCommandStatus, event: TransitionEvent): SafeCommandStatus => {
   if (!ALLOWED_FROM[event].includes(current)) {
     throw new ConflictError(
@@ -161,4 +173,14 @@ export const resolveTransition = (current: SafeCommandStatus, event: TransitionE
     );
   }
   return RESULTING_STATUS[event];
+};
+
+/** Impide avanzar si el lockout guard marcó el plan como bloqueado. */
+export const assertNotLockoutBlocked = (command: SafeCommand, action: string): void => {
+  if (command.lockoutBlocked) {
+    throw new ConflictError(
+      `Lockout guard: no se puede ${action} — el plan podría bloquear acceso administrativo (riesgo ${command.lockoutRisk}).`,
+      'LOCKOUT_BLOCKED',
+    );
+  }
 };

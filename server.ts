@@ -3,6 +3,7 @@ import path from 'path';
 import { createApp } from './backend/app';
 import { env, isProduction, validateEnvironment } from './backend/config/env';
 import { logger } from './backend/common/logger';
+import { startNocPoller } from './backend/domains/noc-poller/service';
 
 // ── Modo de servido (Fase 4.5.2) ─────────────────────────────────────
 // El Vite dev server bloquea hosts desconocidos ("This host is not allowed")
@@ -84,6 +85,7 @@ async function startServer() {
 
   app.listen(env.PORT, '0.0.0.0', () => {
     logger.info(`NugaCore server running on http://0.0.0.0:${env.PORT}`, { mode: env.NODE_ENV });
+    startNocPoller();
   });
 }
 
