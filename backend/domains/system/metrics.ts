@@ -14,7 +14,7 @@
 // Fuentes oficiales (ver docs/DATA_CONSISTENCY_AUDIT.md):
 //   - Clientes (activos/suspendidos/leads) → CRM (CustomersService)
 //   - MRR, Facturación/Cobrado del mes, Pendiente, Vencidas, Adeudo → Billing
-//   - Tickets abiertos                     → Support (store.TICKETS)
+//   - Tickets abiertos                     → Support (SupportService)
 //   - Torres / SLA de red                  → Network (store.TOWERS)
 //   - Capacidad / Clientes por torre       → IPAM (IpamService)
 //   - Equipos reservados / instalaciones   → Inventory + Tickets (WORK_ORDERS)
@@ -25,6 +25,7 @@ import { getCustomersService } from '../customers/service';
 import { getBillingService } from '../billing/service';
 import { ipamService } from '../ipam/service';
 import { customerEquipmentService } from '../inventory/customer-equipment/service';
+import { getPlansService } from '../plans/service';
 import { getServiceStatusSummary } from '../service-status/service';
 import { getSupportService } from '../tickets/service';
 
@@ -128,8 +129,11 @@ export async function getCustomerMetrics(): Promise<CustomerMetrics> {
 /** MRR — FUENTE OFICIAL: Billing/Revenue. Suscripciones que facturan
  *  (active + suspended) × precio del plan. CRM no recalcula MRR. */
 export async function getMrr(): Promise<number> {
-  const clients = await getCustomersService().list({});
-  const priceById = new Map(store.PLANS.map((p) => [p.id, p.price]));
+  const [clients, plans] = await Promise.all([
+    getCustomersService().list({}),
+    getPlansService().list({}),
+  ]);
+  const priceById = new Map(plans.map((p) => [p.id, p.price]));
   return round(
     clients.reduce((acc, c) => {
       if (c.status === 'active' || c.status === 'suspended') {
@@ -218,11 +222,12 @@ export async function getCapacityMetrics(): Promise<CapacityMetrics> {
 }
 
 /** Equipos reservados + instalaciones pendientes — FUENTE OFICIAL:
- *  Inventory (reservas) + Tickets (WORK_ORDERS de instalación abiertas). */
-export function getInventoryMetrics(): InventoryMetrics {
+ *  Inventory (reservas) + Support (órdenes de instalación abiertas). */
+export async function getInventoryMetrics(): Promise<InventoryMetrics> {
   const reservedEquipment = customerEquipmentService.countReservations();
-  const openInstallations = store.WORK_ORDERS.filter(
-    (order) => order.type === 'installation' && order.status !== 'canceled' && order.status !== 'completed',
+  const workOrders = await getSupportService().listWorkOrders({ type: 'installation' });
+  const openInstallations = workOrders.filter(
+    (order) => order.status !== 'canceled' && order.status !== 'completed',
   ).length;
   return {
     reservedEquipment,
@@ -249,12 +254,13 @@ export async function getServiceStatusMetrics(): Promise<ServiceStatusMetrics> {
 const nowStamp = () => new Date().toISOString().replace('T', ' ').substring(0, 16);
 
 export async function getMetricsSnapshot(): Promise<MetricsSnapshot> {
-  const [customers, billing, capacity, serviceStatus, tickets] = await Promise.all([
+  const [customers, billing, capacity, serviceStatus, tickets, inventory] = await Promise.all([
     getCustomerMetrics(),
     getBillingMetrics(),
     getCapacityMetrics(),
     getServiceStatusMetrics(),
     getTicketMetrics(),
+    getInventoryMetrics(),
   ]);
   return {
     generatedAt: nowStamp(),
@@ -263,7 +269,7 @@ export async function getMetricsSnapshot(): Promise<MetricsSnapshot> {
     tickets,
     towers: getTowerMetrics(),
     capacity,
-    inventory: getInventoryMetrics(),
+    inventory,
     serviceStatus,
   };
 }

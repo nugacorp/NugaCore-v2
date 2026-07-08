@@ -4,6 +4,7 @@
 //
 // Uso:
 //   STAGING_RESTORE_TESTED=true node scripts/validate-restore-checklist.mjs
+//   node scripts/vps/staging-restore-smoke.mjs  (smoke previo)
 // ====================================================================
 
 console.log('\n=== Restore Checklist — OLA 0 §14 ===\n');
