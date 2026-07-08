@@ -70,4 +70,12 @@ node scripts/validate-restore-checklist.mjs
   - `scripts/vps/preflight.sh`: FAIL por `git ls-remote` a URL HTTPS (el remoto VPS usa SSH y sí puede hacer fetch/pull).
   - `validate-staging.sh` sobre `https://nugacore-staging.5.180.151.109.sslip.io`: health OK, pero `GET /api/clients` devuelve 401.
   - Deploy de Coolify al commit `8c1e91e` fue iniciado, pero quedó inconsistente por una cola de restart posterior en commit previo; requiere nuevo trigger limpio de deploy y validación posterior.
+  - Se corrigió la cola de deploy de Coolify (deployments atascados) con `check:deployment-queue --force --seconds=0` + `cleanup:deployment-queue`.
+  - Se ajustaron flags críticos en Coolify (`USE_DB_SUPPORT`, `USE_DB_INVENTORY`, `USE_DB_SUSPENSION`, `USE_DB_PAYMENTS` = `true`) y se confirmó su presencia en el contenedor runtime.
+  - Se desplegó commit `b14c84e` (fix SSOT tickets dashboard vs support service).
+  - Verificación real en staging (JWT):
+    - `/api/system/persistence-status`: `storeFallbackActive=false`, `criticalOnCount=7/7`.
+    - `/api/system/data-consistency`: `healthy=true`, `mismatches=[]`.
+    - `/api/system/staging-readiness`: `ola0PersistenceClosed=true`, `dataConsistencyHealthy=true`.
+  - Estado restante para cierre total OLA 0: **restore manual §14** (`restore_tested=false` hasta ejecutar backup+restore y marcar `STAGING_RESTORE_TESTED=true`).
 
