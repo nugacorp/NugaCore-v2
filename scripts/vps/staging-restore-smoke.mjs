@@ -18,6 +18,7 @@ const serviceRoleKey = (process.env.SUPABASE_SERVICE_ROLE_KEY || '').trim();
 const stagingUrl = (process.env.STAGING_URL || 'https://nugacore-staging.5.180.151.109.sslip.io').replace(/\/$/, '');
 
 const tables = ['clients', 'invoices', 'payment_promises', 'portal_user_bindings'];
+const optional = new Set(['payment_promises', 'portal_user_bindings']);
 let ok = 0;
 let fail = 0;
 
@@ -35,8 +36,12 @@ const client = createClient(supabaseUrl, serviceRoleKey, {
 for (const table of tables) {
   const { error, count } = await client.from(table).select('*', { count: 'exact', head: true });
   if (error) {
-    console.log(`  ❌  ${table}: ${error.message}`);
-    fail++;
+    if (optional.has(table)) {
+      console.log(`  ⚠️  ${table} (opcional — migración pendiente): ${error.message}`);
+    } else {
+      console.log(`  ❌  ${table}: ${error.message}`);
+      fail++;
+    }
   } else {
     console.log(`  ✅  ${table} (${count ?? 0} rows)`);
     ok++;

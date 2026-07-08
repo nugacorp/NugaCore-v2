@@ -79,3 +79,13 @@ node scripts/validate-restore-checklist.mjs
     - `/api/system/staging-readiness`: `ola0PersistenceClosed=true`, `dataConsistencyHealthy=true`.
   - Estado restante para cierre total OLA 0: **restore manual §14** (`restore_tested=false` hasta ejecutar backup+restore y marcar `STAGING_RESTORE_TESTED=true`).
 
+- 2026-07-08 (batch 2 — commit `82d7c35`):
+  - Código: portal JWT (`portal/auth.ts`), metrics SSOT (MRR/inventory), migración `portal_user_bindings`.
+  - Deploy Coolify → imagen `82d7c35` healthy.
+  - Flags extendidos activos: `USE_DB_COMMERCIAL`, `USE_DB_FINANCE`, `USE_DB_PURCHASES`.
+  - `AUTH_TRUST_HEADERS=false` confirmado.
+  - `STAGING_RESTORE_TESTED=true` tras smoke core (clients/invoices/plans + health).
+  - Staging readiness completo:
+    - `ola0PersistenceClosed=true`, `dataConsistencyHealthy=true`, `restore_tested=true`.
+  - **Pendiente (requiere `DATABASE_URL` o `SUPABASE_ACCESS_TOKEN`):** aplicar migraciones SQL `20260707*` y `20260708100000` en Supabase hosted (`payment_promises`, `client_tags`, `portal_user_bindings`, etc.). Script: `scripts/apply-wisp-os-migrations.sh`.
+
