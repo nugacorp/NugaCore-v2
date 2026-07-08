@@ -13,8 +13,15 @@ Use `agent/skills/README.md` as the index. At minimum:
 - For frontend UI, React, Vite, or Tailwind work: read:
   - `agent/skills/software-development/vercel-react-best-practices/SKILL.md`
   - `agent/skills/software-development/tailwind-4-docs/SKILL.md`
+  - `agent/skills/testing/playwright/SKILL.md` when browser/E2E validation is needed.
 - For debugging: read `agent/skills/software-development/systematic-debugging/SKILL.md`.
+- For Docker/Compose/local stack work: read `agent/skills/devops/docker-management/SKILL.md`.
+- For Prometheus/Grafana/metrics work: read:
+  - `agent/skills/observability/prometheus/SKILL.md`
+  - `agent/skills/observability/promql/SKILL.md`
+- For security-sensitive code review or hardening: read `agent/skills/security/security-best-practices/SKILL.md`.
 - For PRs, branches, commits, or GitHub workflow: read `agent/skills/github/github-pr-workflow/SKILL.md`.
+- For suspicious commits, force-pushes, or supply-chain investigation: read `agent/skills/security/oss-forensics/SKILL.md`.
 - For handoff docs: read `agent/skills/productivity/document-workflows/SKILL.md` and keep public docs sanitized.
 
 ## Project guardrails
