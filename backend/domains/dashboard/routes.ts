@@ -309,7 +309,7 @@ router.post('/api/notifications/trigger-simulation', requireRoles(['super admin'
         notificationPayload: {
           title: 'Latencia Critica en Backhaul',
           body: `Enlace ${targetSource} registra ${latency}ms (Limite: ${threshold}ms).`,
-          icon: '/favicon.ico',
+          icon: '/favicon.png',
           tag: 'noc-latency',
         },
       });
@@ -334,7 +334,7 @@ router.post('/api/notifications/trigger-simulation', requireRoles(['super admin'
         notificationPayload: {
           title: 'Rotura o Corte de Fibra',
           body: `Caida de senal inmediata en ${targetSource}. Atenuacion critica en curso.`,
-          icon: '/favicon.ico',
+          icon: '/favicon.png',
           tag: 'noc-fibercut',
         },
       });

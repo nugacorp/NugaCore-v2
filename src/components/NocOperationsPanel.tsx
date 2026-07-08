@@ -201,7 +201,7 @@ export default function NocOperationsPanel({
             try {
               new Notification(data.notificationPayload.title, {
                 body: data.notificationPayload.body,
-                icon: '/favicon.ico',
+                icon: '/favicon.png',
                 tag: data.notificationPayload.tag
               });
             } catch (e) {
