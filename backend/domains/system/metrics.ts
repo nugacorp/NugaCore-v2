@@ -26,6 +26,7 @@ import { getBillingService } from '../billing/service';
 import { ipamService } from '../ipam/service';
 import { customerEquipmentService } from '../inventory/customer-equipment/service';
 import { getServiceStatusSummary } from '../service-status/service';
+import { getSupportService } from '../tickets/service';
 
 const round = (v: number): number => Math.round(v * 100) / 100;
 
@@ -177,10 +178,11 @@ export async function getBillingMetrics(now = new Date()): Promise<BillingMetric
   };
 }
 
-/** Tickets — FUENTE OFICIAL: Support (store.TICKETS). */
-export function getTicketMetrics(): TicketMetrics {
-  const active = store.TICKETS.filter((t) => t.status !== 'resolved' && t.status !== 'closed').length;
-  const resolved = store.TICKETS.filter((t) => t.status === 'resolved' || t.status === 'closed').length;
+/** Tickets — FUENTE OFICIAL: SupportService (respeta USE_DB_SUPPORT). */
+export async function getTicketMetrics(): Promise<TicketMetrics> {
+  const tickets = await getSupportService().listTickets({});
+  const active = tickets.filter((t) => t.status !== 'resolved' && t.status !== 'closed').length;
+  const resolved = tickets.filter((t) => t.status === 'resolved' || t.status === 'closed').length;
   return { active, resolved, total: active + resolved };
 }
 
@@ -247,17 +249,18 @@ export async function getServiceStatusMetrics(): Promise<ServiceStatusMetrics> {
 const nowStamp = () => new Date().toISOString().replace('T', ' ').substring(0, 16);
 
 export async function getMetricsSnapshot(): Promise<MetricsSnapshot> {
-  const [customers, billing, capacity, serviceStatus] = await Promise.all([
+  const [customers, billing, capacity, serviceStatus, tickets] = await Promise.all([
     getCustomerMetrics(),
     getBillingMetrics(),
     getCapacityMetrics(),
     getServiceStatusMetrics(),
+    getTicketMetrics(),
   ]);
   return {
     generatedAt: nowStamp(),
     customers,
     billing,
-    tickets: getTicketMetrics(),
+    tickets,
     towers: getTowerMetrics(),
     capacity,
     inventory: getInventoryMetrics(),

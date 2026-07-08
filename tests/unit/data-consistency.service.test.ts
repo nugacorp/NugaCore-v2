@@ -65,7 +65,7 @@ describe('systemMetrics — fuente única por KPI', () => {
   });
 
   it('tickets y torres derivan de Support / Network (store)', async () => {
-    const t = getTicketMetrics();
+    const t = await getTicketMetrics();
     expect(t.active).toBe(store.TICKETS.filter((tk) => tk.status !== 'resolved' && tk.status !== 'closed').length);
     expect(t.total).toBe(t.active + t.resolved);
 
