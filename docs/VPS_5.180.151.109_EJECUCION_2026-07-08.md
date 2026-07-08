@@ -62,3 +62,12 @@ node scripts/validate-restore-checklist.mjs
 4. Confirmación de backup+restore
 5. Confirmación de rollback exitoso
 
+## Bitácora de ejecución (Cloud Agent)
+
+- 2026-07-08:
+  - Acceso SSH exitoso como `root` usando clave `cloud-agent-nugacore-2026-07-08`.
+  - Repo VPS actualizado a `main` (`8c1e91e`).
+  - `scripts/vps/preflight.sh`: FAIL por `git ls-remote` a URL HTTPS (el remoto VPS usa SSH y sí puede hacer fetch/pull).
+  - `validate-staging.sh` sobre `https://nugacore-staging.5.180.151.109.sslip.io`: health OK, pero `GET /api/clients` devuelve 401.
+  - Deploy de Coolify al commit `8c1e91e` fue iniciado, pero quedó inconsistente por una cola de restart posterior en commit previo; requiere nuevo trigger limpio de deploy y validación posterior.
+
