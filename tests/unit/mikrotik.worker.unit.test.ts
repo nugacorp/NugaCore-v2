@@ -1,6 +1,10 @@
 import { describe, it, expect } from 'vitest';
-import { encodeLength } from '../../backend/domains/mikrotik/worker/routeros-client';
-import { DefaultRouterConnector, isLiveWorkerEnabled } from '../../backend/domains/mikrotik/worker/connector';
+import { encodeLength, resolveRouterApiEndpoint } from '../../backend/domains/mikrotik/worker/routeros-client';
+import {
+  DefaultRouterConnector,
+  isLiveWorkerEnabled,
+  isWorkerApiTlsPreferred,
+} from '../../backend/domains/mikrotik/worker/connector';
 import { READ_ONLY_COMMANDS } from '../../backend/domains/mikrotik/worker/types';
 import type { MikrotikRouterRegistryItem } from '../../backend/state/store';
 
@@ -34,6 +38,17 @@ describe('DefaultRouterConnector (simulado por defecto)', () => {
 
   it('live está deshabilitado por defecto (sin MIKROTIK_WORKER_LIVE)', () => {
     expect(isLiveWorkerEnabled()).toBe(false);
+  });
+
+  it('TLS api-ssl está deshabilitado por defecto (sin MIKROTIK_WORKER_API_TLS)', () => {
+    expect(isWorkerApiTlsPreferred()).toBe(false);
+  });
+
+  it('resolveRouterApiEndpoint prefiere apiSslPort cuando preferTls=true', () => {
+    expect(resolveRouterApiEndpoint({ apiPort: 8728, apiSslPort: 8729, preferTls: true })).toEqual({
+      port: 8729,
+      useTls: true,
+    });
   });
 
   it('lee comandos de la allowlist en modo simulado', async () => {

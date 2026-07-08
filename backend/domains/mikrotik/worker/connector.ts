@@ -12,7 +12,7 @@ import { decryptSecret } from '../../../services/crypto';
 import { logger } from '../../../common/logger';
 import { redactString } from '../../../common/secret-redaction';
 import { MikrotikRouterRegistryItem } from '../../../state/store';
-import { routerOsRead } from './routeros-client';
+import { resolveRouterApiEndpoint, routerOsRead } from './routeros-client';
 import {
   READ_ONLY_COMMANDS,
   ReadOnlyCommand,
@@ -23,6 +23,10 @@ import {
 
 export const isLiveWorkerEnabled = (): boolean =>
   (process.env.MIKROTIK_WORKER_LIVE || 'false').trim().toLowerCase() === 'true';
+
+/** Prefiere api-ssl (puerto 8729) cuando el router lo expone. */
+export const isWorkerApiTlsPreferred = (): boolean =>
+  (process.env.MIKROTIK_WORKER_API_TLS || 'false').trim().toLowerCase() === 'true';
 
 const isReadOnly = (command: string): command is ReadOnlyCommand =>
   (READ_ONLY_COMMANDS as readonly string[]).includes(command);
@@ -65,11 +69,17 @@ export class DefaultRouterConnector implements RouterConnector {
     if (canLive) {
       try {
         const password = decryptSecret(router.encryptedPassword);
+        const endpoint = resolveRouterApiEndpoint({
+          apiPort: router.apiPort,
+          apiSslPort: router.apiSslPort,
+          preferTls: isWorkerApiTlsPreferred(),
+        });
         const rows = await routerOsRead(command, {
           host: resolveHost(router),
-          port: router.apiPort,
+          port: endpoint.port,
           username: router.username,
           password,
+          useTls: endpoint.useTls,
         });
         return { command, ok: true, source: 'live', data: JSON.stringify(rows) };
       } catch (err) {
