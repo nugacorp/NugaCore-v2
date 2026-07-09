@@ -2,6 +2,8 @@
 
 Plantilla recomendada para activar persistencia crítica en staging. **No usar en producción sin validar restore.**
 
+> Checklist Coolify VPS con variables exactas: [`COOLIFY_VPS_5.180.151.109_CHECKLIST.md`](COOLIFY_VPS_5.180.151.109_CHECKLIST.md)
+
 ```env
 USE_DB_CUSTOMERS=true
 USE_DB_PLANS=true
