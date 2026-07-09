@@ -1,0 +1,57 @@
+name: Production Gates
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+    branches: [main]
+
+jobs:
+  quality:
+    name: Lint · Typecheck · Test · Build
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+      - run: npm ci
+      - run: npx eslint .
+      - run: npm run typecheck
+      - run: npm test
+      - run: npm run build
+
+  production-readiness-local:
+    name: Production readiness (local gates)
+    runs-on: ubuntu-latest
+    needs: quality
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+      - run: npm ci
+      - name: Validate production env template exists
+        run: test -f .env.production.example
+      - name: Validate production scripts
+        run: |
+          test -x scripts/smoke-production.sh || chmod +x scripts/smoke-production.sh
+          test -f scripts/validate-production-readiness.mjs
+          test -f scripts/vps/validate-production.sh
+      - name: Local readiness (expects failures without prod env)
+        run: node scripts/validate-production-readiness.mjs || true
+
+  security-smoke:
+    name: Security contract tests
+    runs-on: ubuntu-latest
+    needs: quality
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+      - run: npm ci
+      - run: npx vitest run tests/contract/payments.webhook-hardening.test.ts tests/contract/gis.rbac.test.ts tests/contract/production-readiness.contract.test.ts
