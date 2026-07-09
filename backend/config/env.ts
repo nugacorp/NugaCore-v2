@@ -30,9 +30,20 @@ export const env = {
   SUPABASE_JWKS_URL: process.env.SUPABASE_JWKS_URL || '',
   DATABASE_URL: process.env.DATABASE_URL || '',
   MIKROTIK_CREDENTIALS_KEY: process.env.MIKROTIK_CREDENTIALS_KEY || '',
+  // Marca de "despliegue accesible desde internet" (staging/prod). Permite
+  // endurecer la coraza sin depender de que NODE_ENV sea EXACTAMENTE
+  // 'production' (ver C-03 en el reporte de auditoria). Default: false.
+  PUBLIC_DEPLOYMENT: (process.env.PUBLIC_DEPLOYMENT || 'false').toLowerCase() === 'true',
 } as const;
 
 export const isProduction = env.NODE_ENV === 'production';
+
+// Runtime "endurecido": produccion real O cualquier despliegue marcado como
+// publico. La coraza de borde (JWT-only, HSTS, CSP, trust proxy, fail-fast,
+// secretos de webhook obligatorios) se activa cuando esto es true, para que un
+// servidor en internet con NODE_ENV distinto de 'production' NO quede abierto.
+export const isPublicDeployment = env.PUBLIC_DEPLOYMENT;
+export const isHardenedRuntime = isProduction || isPublicDeployment;
 
 // ====================================================================
 // Validación de entorno.
@@ -47,7 +58,9 @@ export const isProduction = env.NODE_ENV === 'production';
 //   - SUPABASE_URL / SUPABASE_SERVICE_ROLE_KEY ausentes -> no hay auth verificable.
 // ====================================================================
 export function validateEnvironment(): void {
-  if (!isProduction) return;
+  // Fail-fast en cualquier runtime endurecido (produccion o PUBLIC_DEPLOYMENT),
+  // no solo cuando NODE_ENV es EXACTAMENTE 'production'. Ver C-03.
+  if (!isHardenedRuntime) return;
 
   const fatal: string[] = [];
 

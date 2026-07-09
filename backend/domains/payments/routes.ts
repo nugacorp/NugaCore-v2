@@ -129,6 +129,18 @@ const handleWebhook = (provider: PaymentProvider) =>
       (req.headers['x-openpay-signature'] as string) || '';
     const secret = process.env[`WEBHOOK_SECRET_${provider.toUpperCase()}`] || '';
 
+    // Fail-closed (C-01): en un despliegue publico (produccion o
+    // PUBLIC_DEPLOYMENT) un webhook SIN secreto configurado se rechaza, para que
+    // un endpoint accesible desde internet no apruebe pagos sin verificacion.
+    const isHardened =
+      process.env.NODE_ENV === 'production' ||
+      (process.env.PUBLIC_DEPLOYMENT || '').toLowerCase() === 'true';
+    if (!secret && isHardened) {
+      logger.warn('PaymentEngine: webhook sin secreto en runtime endurecido; rechazado', { provider });
+      res.status(503).json({ error: 'Webhook no configurado.', code: 'WEBHOOK_NOT_CONFIGURED' });
+      return;
+    }
+
     const providerImpl = getProvider(provider);
     const verify = providerImpl.verifyWebhook(rawBody, signature, secret);
 

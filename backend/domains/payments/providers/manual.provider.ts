@@ -5,6 +5,7 @@
 // También se usa como stub para spei_provider_future.
 // ====================================================================
 
+import crypto from 'crypto';
 import { PaymentProvider } from '../types';
 import {
   IPaymentProvider,
@@ -29,8 +30,20 @@ export class ManualProvider implements IPaymentProvider {
     };
   }
 
-  verifyWebhook(_rawBody: string | Buffer, _signature: string, _secret: string): WebhookVerifyResult {
-    // Webhooks manuales no requieren firma — el operador llama directamente al endpoint
+  verifyWebhook(rawBody: string | Buffer, signature: string, secret: string): WebhookVerifyResult {
+    // Seguridad (C-01): si hay secreto configurado (WEBHOOK_SECRET_MANUAL) se
+    // EXIGE firma HMAC-SHA256, igual que mercado_pago/openpay. Sin secreto se
+    // conserva el comportamiento legacy; el runtime endurecido exige el secreto
+    // a nivel de ruta (fail-closed), de modo que el endpoint publico nunca
+    // aprueba pagos sin verificacion.
+    if (!secret) return { valid: true };
+    if (!signature) return { valid: false, reason: 'missing_signature' };
+    const expected = crypto.createHmac('sha256', secret).update(rawBody).digest('hex');
+    const sigBuf = Buffer.from(signature);
+    const expBuf = Buffer.from(expected);
+    if (sigBuf.length !== expBuf.length || !crypto.timingSafeEqual(sigBuf, expBuf)) {
+      return { valid: false, reason: 'signature_mismatch' };
+    }
     return { valid: true };
   }
 

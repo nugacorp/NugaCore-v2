@@ -4,11 +4,10 @@ import { READ_ROLES, requireRoles } from '../../common/rbac';
 import { getCustomersService, parseClientStatus } from '../customers/service';
 import { getNetworkService } from '../network/service';
 import { buildGisMapData } from './service';
-
 const router = Router();
 
 router.get('/api/gis/health', requireRoles(READ_ROLES), (_req, res) => {
-  res.json({ status: 'ok', mode: 'store-backed-v2', note: 'Datos SSOT vía services según USE_DB_*' });
+  res.json({ status: 'ok', mode: 'store-backed-v2', note: 'Datos SSOT via services segun USE_DB_*' });
 });
 
 router.get('/api/gis/layers', requireRoles(READ_ROLES), (_req, res) => {

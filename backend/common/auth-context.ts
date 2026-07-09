@@ -1,5 +1,5 @@
 import { NextFunction, Request, Response } from 'express';
-import { env, isProduction } from '../config/env';
+import { env, isHardenedRuntime } from '../config/env';
 import { logger } from './logger';
 import { isSupabaseAdminConfigured, supabaseAdmin } from '../services/supabase-admin';
 import { AppRole, normalizeRole } from './rbac';
@@ -27,19 +27,21 @@ export const computeAllowTrustedHeaders = (
   return trustHeadersEnv || !supabaseConfigured; // dev: explicit flag, or no Supabase yet
 };
 
+// En cualquier runtime endurecido (produccion o PUBLIC_DEPLOYMENT) los
+// trusted-headers quedan SIEMPRE deshabilitados: identidad solo por JWT.
 const allowTrustedHeaders = computeAllowTrustedHeaders(
-  isProduction,
+  isHardenedRuntime,
   env.AUTH_TRUST_HEADERS,
   isSupabaseAdminConfigured,
 );
 
-if (isProduction && !isSupabaseAdminConfigured) {
+if (isHardenedRuntime && !isSupabaseAdminConfigured) {
   logger.warn(
     'Producción sin Supabase configurado: no hay forma de autenticar. ' +
       'Todas las rutas protegidas responderán 401. Define SUPABASE_URL y SUPABASE_SERVICE_ROLE_KEY.',
   );
 }
-if (!isProduction && allowTrustedHeaders) {
+if (!isHardenedRuntime && allowTrustedHeaders) {
   logger.info('Auth: trusted-headers habilitados (solo dev). En producción se ignoran; identidad por JWT.');
 }
 

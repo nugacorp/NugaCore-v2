@@ -65,8 +65,14 @@ export class OpenPayProvider implements IPaymentProvider {
     if (SIMULATED) return { valid: true };
     if (!secret || !signature) return { valid: false, reason: 'missing_secret_or_signature' };
     const expected = crypto.createHmac('sha256', secret).update(rawBody).digest('hex');
-    const valid = crypto.timingSafeEqual(Buffer.from(signature), Buffer.from(expected));
-    return valid ? { valid: true } : { valid: false, reason: 'signature_mismatch' };
+    // timingSafeEqual lanza si los buffers difieren en longitud: comparar
+    // longitud primero evita un 500 ante una firma malformada (queda 400 limpio).
+    const sigBuf = Buffer.from(signature);
+    const expBuf = Buffer.from(expected);
+    if (sigBuf.length !== expBuf.length || !crypto.timingSafeEqual(sigBuf, expBuf)) {
+      return { valid: false, reason: 'signature_mismatch' };
+    }
+    return { valid: true };
   }
 
   async getPaymentStatus(providerOrderId: string): Promise<ProviderPaymentStatus> {

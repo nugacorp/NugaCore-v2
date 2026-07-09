@@ -46,10 +46,14 @@ const parsePositive = (value: string | undefined, fallback: number): number => {
 export function applyHttpSecurity(app: Express): void {
   const isProd = process.env.NODE_ENV === 'production';
   const isTest = process.env.NODE_ENV === 'test';
+  // Runtime endurecido: produccion real O despliegue publico (PUBLIC_DEPLOYMENT).
+  // Se lee de process.env para que un staging expuesto active HSTS/CSP/trust
+  // proxy aunque NODE_ENV no sea 'production'.
+  const isHardened = isProd || (process.env.PUBLIC_DEPLOYMENT || '').toLowerCase() === 'true';
 
-  // En producción la app corre detrás de proxy (Coolify): confiar en 1 hop
-  // para que rate-limit/IP funcionen con X-Forwarded-For sin abrir spoofing.
-  if (isProd) app.set('trust proxy', 1);
+  // Detras de proxy (Coolify) confiamos en 1 hop para que rate-limit/IP
+  // funcionen con X-Forwarded-For sin abrir spoofing.
+  if (isHardened) app.set('trust proxy', 1);
 
   // ── 1. Helmet ─────────────────────────────────────────────────────
   // CSP (Fase 6 production-ready): activa salvo que se desactive por env.
@@ -60,7 +64,7 @@ export function applyHttpSecurity(app: Express): void {
   //     que el cliente se conecta directamente; lista separada por comas).
   //   - En dev/test se desactiva: el dev server de Vite necesita inline/eval.
   // HSTS solo en producción (no tiene efecto fuera de HTTPS y evita líos en dev).
-  const cspEnabled = isProd && isTrue(process.env.CSP_ENABLED, true);
+  const cspEnabled = isHardened && isTrue(process.env.CSP_ENABLED, true);
   const extraConnect = parseList(process.env.CSP_CONNECT_SRC);
   app.use(
     helmet({
@@ -82,7 +86,7 @@ export function applyHttpSecurity(app: Express): void {
           }
         : false,
       crossOriginEmbedderPolicy: false,
-      hsts: isProd,
+      hsts: isHardened,
     }),
   );
 
