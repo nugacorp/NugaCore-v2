@@ -1,5 +1,6 @@
 import { Router } from 'express';
 import { store } from '../../../backend/state/store';
+import { isDomainOnDb } from '../../config/feature-flags';
 import { READ_ROLES, requireRoles } from '../../common/rbac';
 import { asyncHandler } from '../../common/errors';
 import { suspensionKpis } from '../suspension/engine';
@@ -7,6 +8,7 @@ import { provisioningService } from '../provisioning/service';
 import { automationService } from '../automation/service';
 import { notificationService } from '../notifications/service';
 import { getBillingService } from '../billing/service';
+import { getCustomersService } from '../customers/service';
 import { getBillingMetrics, getMetricsSnapshot, type MetricsSnapshot } from '../system/metrics';
 import { buildControlCenter } from './control-center';
 
@@ -24,6 +26,23 @@ const monthRevenueFromBilling = async (key: string): Promise<number> => {
     .reduce((acc, inv) => acc + inv.amount, 0);
 };
 
+const countLeadConversions = async (monthPrefix: string): Promise<number> => {
+  if (!isDomainOnDb('customers')) {
+    return store.CLIENT_TIMELINE.filter((event) => (
+      event.eventType === 'lead_conversion' && String(event.createdAt).startsWith(monthPrefix)
+    )).length;
+  }
+  const clients = await getCustomersService().list({});
+  let count = 0;
+  for (const client of clients) {
+    const history = await getCustomersService().getHistory(client.id);
+    count += history.filter((event) => (
+      event.eventType === 'lead_conversion' && String(event.createdAt).startsWith(monthPrefix)
+    )).length;
+  }
+  return count;
+};
+
 // Deriva los KPIs ejecutivos (tasas y tendencias) a partir del snapshot SSOT.
 const buildExecutiveKpis = async (snapshot: MetricsSnapshot) => {
   const now = new Date();
@@ -38,12 +57,8 @@ const buildExecutiveKpis = async (snapshot: MetricsSnapshot) => {
     ? Number((((currentRevenue - previousRevenue) / previousRevenue) * 100).toFixed(2))
     : currentRevenue > 0 ? 100 : 0;
 
-  const leadConversionsCurrentMonth = store.CLIENT_TIMELINE.filter((event) => (
-    event.eventType === 'lead_conversion' && String(event.createdAt).startsWith(currentMonth)
-  )).length;
-  const leadConversionsPreviousMonth = store.CLIENT_TIMELINE.filter((event) => (
-    event.eventType === 'lead_conversion' && String(event.createdAt).startsWith(previousMonth)
-  )).length;
+  const leadConversionsCurrentMonth = await countLeadConversions(currentMonth);
+  const leadConversionsPreviousMonth = await countLeadConversions(previousMonth);
 
   const clientGrowthPct = leadConversionsPreviousMonth > 0
     ? Number((((leadConversionsCurrentMonth - leadConversionsPreviousMonth) / leadConversionsPreviousMonth) * 100).toFixed(2))
@@ -54,7 +69,8 @@ const buildExecutiveKpis = async (snapshot: MetricsSnapshot) => {
     : 100;
 
   const monitoring = calculateMonitoringOverview();
-  const totalNetworkOffline = monitoring.onlineOffline.offlineTargets + snapshot.towers.offline + store.ONUS.filter((o) => o.status !== 'online').length;
+  const onuOffline = isDomainOnDb('customers') ? 0 : store.ONUS.filter((o) => o.status !== 'online').length;
+  const totalNetworkOffline = monitoring.onlineOffline.offlineTargets + snapshot.towers.offline + onuOffline;
 
   return {
     generatedAt: snapshot.generatedAt,

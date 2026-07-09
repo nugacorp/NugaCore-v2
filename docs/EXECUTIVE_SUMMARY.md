@@ -29,7 +29,7 @@ La buena noticia: el trabajo de diseño "invisible" pesado **ya está hecho** (e
 | **Seguridad / acceso** | ~40% | Estructura buena, pero el control de acceso es burlable hoy |
 | **Integración MikroTik (red real)** | ~25% | Worker commit gated; CHR read-only staging |
 | **Pagos y facturación fiscal (CFDI) reales** | ~20% | Webhooks + reactivación gated; CFDI stub |
-| **Listo para producción (deploy/operación)** | ~35% | Staging validado; gates `NUGACORE_LIVE_MODE` |
+| **Listo para producción (deploy/operación)** | ~55–65% | Gates + readiness API; activar live gradual |
 
 **Estimación global ponderada hacia "producción usable": ~60–70%.**
 La percepción de "casi listo" viene de que **lo visible (la UI) sí está casi listo**; lo costoso que falta es lo que no se ve.

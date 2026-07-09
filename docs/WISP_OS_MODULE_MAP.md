@@ -47,6 +47,7 @@ API: `GET /api/system/production-gates` · UI: `ProductionGateBadge` + `useProdu
 
 - `GET /api/dashboard/control-center` — 8 áreas cabina de mando
 - `GET /api/system/production-gates` — estado dry-run vs live
+- `GET /api/system/production-readiness` — checklist `readyForLiveWisp` + blockers
 - `GET /api/system/persistence-status` + `staging-readiness`
 - `GET|POST /api/clients/:id/{tags,contacts,documents,activity,expediente}`
 - `GET|POST /api/collections/{promises,cash-register}`

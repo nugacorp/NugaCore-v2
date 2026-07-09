@@ -1,6 +1,7 @@
 import { Router } from 'express';
 import { store } from '../../state/store';
 import { requireAction } from '../../common/rbac';
+import { legacyAutomationsDisabled, rejectLegacyAutomations } from './legacy-guard';
 
 const router = Router();
 
@@ -154,6 +155,7 @@ router.delete('/api/automations/rules/:id', requireAction('automation.manage'), 
 });
 
 router.post('/api/automations/run', requireAction('automation.execute'), (req, res) => {
+  if (legacyAutomationsDisabled()) return rejectLegacyAutomations(res);
   const trigger = req.body.trigger ? parseTrigger(req.body.trigger) : null;
   const rules = store.AUTOMATION_RULES.filter((rule) => rule.enabled && (!trigger || rule.trigger === trigger));
 

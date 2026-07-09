@@ -10,7 +10,7 @@ import { getSuspensionService } from '../domains/suspension/service';
 export async function dispatchNetworkOrder(input: {
   customerId: string;
   orderType: 'suspension' | 'reactivation';
-  source: 'service-status' | 'provisioning-center' | 'payment-engine';
+  source: 'service-status' | 'provisioning-center' | 'payment-engine' | 'engine';
   reason: string;
   actor: string | null;
 }): Promise<void> {

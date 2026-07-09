@@ -19,7 +19,10 @@ USE_DB_SUSPENSION=true
 # USE_DB_FTTH=true
 
 # Restore probado (checklist §14):
-# STAGING_RESTORE_TESTED=true
+STAGING_RESTORE_TESTED=true
+
+# Validación estricta en CI:
+# STRICT_STAGING=1 node scripts/validate-staging-readiness.mjs
 
 # Portal cliente staging (opcional):
 # PORTAL_STAGING_TOKEN=
@@ -36,6 +39,7 @@ USE_DB_SUSPENSION=true
 3. `GET /api/system/staging-readiness` → `ola0PersistenceClosed: true`
 4. `POST /api/jobs/run` → `persistence-audit` ok
 5. Backup + restore probado → `STAGING_RESTORE_TESTED=true`
-6. `node scripts/validate-staging-readiness.mjs`
+6. `STRICT_STAGING=1 node scripts/validate-staging-readiness.mjs`
 7. `node scripts/validate-restore-checklist.mjs`
 8. `RUN_DB_TESTS=true node scripts/validate-wisp-os-staging.mjs` (tablas)
+9. `GET /api/system/production-readiness` → `readyForLiveWisp: true`

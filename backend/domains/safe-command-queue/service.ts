@@ -9,7 +9,7 @@
 
 import { NotFoundError } from '../../common/errors';
 import { productionGates } from '../../config/production-gates';
-import { store } from '../../state/store';
+import { inventoryRoutersRepository } from '../inventory/routers/repository';
 import { executePlannedCommands } from '../mikrotik/worker/command-executor';
 import { sanitizeText } from '../../common/security/sanitize-sensitive-data';
 import { assertNotLockoutBlocked, buildAudit, buildSafeCommand, resolveTransition } from './mappers';
@@ -95,7 +95,10 @@ export const safeCommandQueueService = {
       wouldExecute: live,
     })!;
     if (live && command.plannedRouterOsCommands.length > 0) {
-      const router = store.MIKROTIK_ROUTERS.find((r) => r.encryptedPassword) ?? store.MIKROTIK_ROUTERS[0];
+      const routers = inventoryRoutersRepository.list();
+      const router = routers.find((r) => r.id === command.targetId)
+        ?? routers.find((r) => r.encryptedPassword || r.hasCredentials)
+        ?? routers[0];
       if (router) {
         void executePlannedCommands(router, command.plannedRouterOsCommands).then((result) => {
           audit(

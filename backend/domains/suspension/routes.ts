@@ -3,6 +3,9 @@ import { store } from '../../state/store';
 import { requireRoles } from '../../common/rbac';
 import { getSuspensionService } from './service';
 import { asyncHandler } from '../../common/errors';
+import { legacySuspensionDisabled, rejectLegacySuspension } from './legacy-guard';
+import { productionGates } from '../../config/production-gates';
+import { processPendingOrders } from '../mikrotik/worker/worker';
 import {
   customerServiceView,
   evaluateAllCustomers,
@@ -98,11 +101,13 @@ const reactivateClient = (clientId: string, reason: string, source: 'manual' | '
   return client;
 };
 
-router.get('/api/suspension/policy', (_req, res) => {
+router.get('/api/suspension/policy', requireRoles([...SUSP_VIEW_ROLES]), (req, res) => {
+  if (legacySuspensionDisabled()) return rejectLegacySuspension(res);
   res.json(store.SUSPENSION_POLICY);
 });
 
 router.put('/api/suspension/policy', requireRoles(['super admin', 'administrador', 'cobranza']), (req, res) => {
+  if (legacySuspensionDisabled()) return rejectLegacySuspension(res);
   const { enabled, graceDays, allowAutoReactivateOnPayment } = req.body;
 
   if (enabled !== undefined) {
@@ -124,7 +129,8 @@ router.put('/api/suspension/policy', requireRoles(['super admin', 'administrador
   res.json(store.SUSPENSION_POLICY);
 });
 
-router.get('/api/suspension/logs', (req, res) => {
+router.get('/api/suspension/logs', requireRoles([...SUSP_VIEW_ROLES]), (req, res) => {
+  if (legacySuspensionDisabled()) return rejectLegacySuspension(res);
   const clientId = String(req.query.clientId || '').trim();
   const filtered = clientId
     ? store.SUSPENSION_ACTION_LOGS.filter((event) => event.clientId === clientId)
@@ -132,7 +138,8 @@ router.get('/api/suspension/logs', (req, res) => {
   res.json(filtered);
 });
 
-router.post('/api/suspension/run', requireRoles(['super admin', 'administrador', 'cobranza']), (req, res) => {
+router.post('/api/suspension/run', requireRoles([...SUSP_EVALUATE_ROLES]), (req, res) => {
+  if (legacySuspensionDisabled()) return rejectLegacySuspension(res);
   if (!store.SUSPENSION_POLICY.enabled) {
     return res.json({
       policyEnabled: false,
@@ -187,7 +194,8 @@ router.post('/api/suspension/run', requireRoles(['super admin', 'administrador',
   });
 });
 
-router.post('/api/suspension/clients/:id/suspend', requireRoles(['super admin', 'administrador', 'cobranza']), (req, res) => {
+router.post('/api/suspension/clients/:id/suspend', requireRoles([...SUSP_EVALUATE_ROLES]), (req, res) => {
+  if (legacySuspensionDisabled()) return rejectLegacySuspension(res);
   const clientId = req.params.id;
   const reason = String(req.body.reason || 'Suspension manual solicitada por operacion.');
   const client = suspendClient(clientId, reason, 'manual', req.authContext?.userId);
@@ -199,7 +207,8 @@ router.post('/api/suspension/clients/:id/suspend', requireRoles(['super admin', 
   res.json(client);
 });
 
-router.post('/api/suspension/clients/:id/reactivate', requireRoles(['super admin', 'administrador', 'cobranza']), (req, res) => {
+router.post('/api/suspension/clients/:id/reactivate', requireRoles([...SUSP_EVALUATE_ROLES]), (req, res) => {
+  if (legacySuspensionDisabled()) return rejectLegacySuspension(res);
   const clientId = req.params.id;
   const reason = String(req.body.reason || 'Reactivacion manual solicitada por operacion.');
   const client = reactivateClient(clientId, reason, 'manual', req.authContext?.userId);
@@ -294,7 +303,14 @@ router.post('/api/suspension/evaluate-all', requireRoles([...SUSP_EVALUATE_ROLES
     reactivationOrders: results.filter((r) => r.action === 'create_reactivation').length,
     changed: results.filter((r) => r.changed).length,
   };
-  res.json({ summary, results });
+  let worker: Awaited<ReturnType<typeof processPendingOrders>> | null = null;
+  if (
+    summary.changed > 0
+    && (productionGates.serviceStatusLive() || productionGates.mikrotikWorkerCommit())
+  ) {
+    worker = await processPendingOrders(req.authContext?.userId);
+  }
+  res.json({ summary, results, worker });
 }));
 
 // ════════════════════════════════════════════════════════════════════

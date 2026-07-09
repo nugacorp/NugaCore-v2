@@ -20,6 +20,9 @@ import { dispatchNetworkOrder } from '../../bridges/network-order-dispatch';
 import { isDomainOnDb } from '../../config/feature-flags';
 import { isSupabaseAdminConfigured, supabaseAdmin } from '../../services/supabase-admin';
 import { getBillingService } from '../billing/service';
+import { getCustomersService } from '../customers/service';
+import { getSuspensionService } from '../suspension/service';
+import { inventoryRoutersRepository } from '../inventory/routers/repository';
 import { store } from '../../state/store';
 import { buildPaymentDataProvider } from './data-provider';
 import { getProvider } from './providers/index';
@@ -262,7 +265,7 @@ export class PaymentService {
     const prevStatus = client.status;
     await dataProvider.reactivateCustomer(customerId);
 
-    store.addClientTimelineEvent({
+    await getCustomersService().addTimelineEvent({
       clientId: customerId,
       eventType: 'status_change',
       summary: `Cambio de estado ${prevStatus} → active`,
@@ -271,7 +274,8 @@ export class PaymentService {
     });
 
     const actionId = await this.repo.nextActionId();
-    const router = store.MIKROTIK_ROUTERS.find((r) => r.vpnIp);
+    const routers = inventoryRoutersRepository.list();
+    const router = routers.find((r) => r.encryptedPassword || r.hasCredentials) ?? routers[0];
     const actionRec: MikrotikActionRecord = {
       id: actionId,
       customerId,
@@ -301,22 +305,23 @@ export class PaymentService {
       });
     }
 
-    store.logSuspensionAction({
-      clientId: customerId,
-      clientName: client.name,
-      action: 'reactivate',
+    await getSuspensionService().repo.recordEvent({
+      customerId,
+      eventType: 'reactivation_order_created',
       reason: `Pago confirmado vía Payment Engine. Factura: ${context?.invoiceId ?? 'N/A'}.`,
-      source: 'automation',
+      automatic: true,
       actorId: context?.triggeredBy ?? 'payment-engine',
+      metadata: { dryRun, routerLive },
     });
 
-    // Alerta NOC
-    store.createAlert(
-      'client',
-      'info',
-      client.name,
-      `Servicio reactivado por pago confirmado.${dryRun ? ' Acción MikroTik pendiente (dry_run).' : ' Orden de reactivación procesada.'}`,
-    );
+    if (!isDomainOnDb('customers')) {
+      store.createAlert(
+        'client',
+        'info',
+        client.name,
+        `Servicio reactivado por pago confirmado.${dryRun ? ' Acción MikroTik pendiente (dry_run).' : ' Orden de reactivación procesada.'}`,
+      );
+    }
 
     logger.info('PaymentEngine: reactivación completada', {
       customerId, actionId, dryRun,

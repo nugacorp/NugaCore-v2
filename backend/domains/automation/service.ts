@@ -13,6 +13,7 @@
 
 import { BadRequestError } from '../../common/errors';
 import { productionGates } from '../../config/production-gates';
+import { executeAutomationDecision } from './executor';
 import { sanitizeText } from '../../common/security/sanitize-sensitive-data';
 import { recordEvaluationAudit } from './audit';
 import { automationStore } from './store';
@@ -142,6 +143,11 @@ export const automationService = {
     // Persistimos los artefactos descriptivos dry-run (decisiones + audit).
     // Esto NO cambia nada real; alimenta Dashboard / Client 360 / bitacora.
     decisions.forEach((decision) => automationStore.recordDecision(decision));
+    if (productionGates.automationExecute()) {
+      for (const decision of decisions) {
+        void executeAutomationDecision(decision, actor);
+      }
+    }
     automationStore.markSimulationRun();
     recordEvaluationAudit({
       context,

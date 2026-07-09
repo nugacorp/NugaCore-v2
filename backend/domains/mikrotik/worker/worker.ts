@@ -6,9 +6,9 @@
 // actualiza el estado del cliente tras éxito.
 // ====================================================================
 
-import { store } from '../../../state/store';
 import { getCustomersService } from '../../customers/service';
 import { getSuspensionService } from '../../suspension/service';
+import { inventoryRoutersRepository } from '../../inventory/routers/repository';
 import { productionGates } from '../../../config/production-gates';
 import { executePlannedCommands } from './command-executor';
 import { getRouterConnector, isLiveWorkerEnabled } from './connector';
@@ -37,9 +37,13 @@ const planFor = (
   ];
 };
 
-const resolveRouterForCustomer = (_customerId: string) => {
-  const routers = store.MIKROTIK_ROUTERS;
-  return routers.find((r) => r.encryptedPassword) ?? routers[0];
+const resolveRouterForCustomer = (routerId?: string) => {
+  if (routerId) {
+    const direct = inventoryRoutersRepository.getById(routerId);
+    if (direct) return direct;
+  }
+  const routers = inventoryRoutersRepository.list();
+  return routers.find((r) => r.encryptedPassword || r.hasCredentials) ?? routers[0];
 };
 
 export async function processPendingOrders(actorId?: string): Promise<WorkerRun> {
@@ -57,7 +61,7 @@ export async function processPendingOrders(actorId?: string): Promise<WorkerRun>
     const pppoeUser = client?.pppoeUser || order.customerId;
     const ip = client?.ip || '0.0.0.0';
     const plannedCommands = planFor(order.orderType, pppoeUser, ip, order.customerId);
-    const router = resolveRouterForCustomer(order.customerId);
+    const router = resolveRouterForCustomer(client?.routerId);
 
     if (!commitEnabled) {
       const note = `DRY-RUN: ${order.orderType} simulada para ${order.customerId}. No se ejecutó ninguna acción en el router.`;
@@ -162,7 +166,7 @@ export async function processPendingOrders(actorId?: string): Promise<WorkerRun>
 }
 
 export async function readRouterSnapshot(routerId: string): Promise<RouterSnapshot | null> {
-  const router = store.MIKROTIK_ROUTERS.find((r) => r.id === routerId);
+  const router = inventoryRoutersRepository.getById(routerId);
   if (!router) return null;
   return getRouterConnector().snapshot(router);
 }

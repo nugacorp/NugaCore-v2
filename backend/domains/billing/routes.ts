@@ -5,6 +5,9 @@ import { AppRole, READ_ROLES, requireRoles } from '../../common/rbac';
 import { NotFoundError, asyncHandler } from '../../common/errors';
 import { getBillingService } from './service';
 import { getBillingCycleService } from './cycle';
+import { getCustomersService } from '../customers/service';
+import { getPaymentService } from '../payments/service';
+import { getSuspensionService } from '../suspension/service';
 
 const router = Router();
 
@@ -95,11 +98,12 @@ router.post(
       }
       clientName = client.name;
     } else {
-      // En modo DB se puede pasar clientName en el body, o se buscará desde clients
-      clientName =
-        typeof req.body.clientName === 'string' && req.body.clientName.trim()
-          ? req.body.clientName.trim()
-          : validated.clientId;
+      const client = await getCustomersService().getById(validated.clientId);
+      if (!client) {
+        res.status(404).json({ error: 'Client not found' });
+        return;
+      }
+      clientName = client.name;
     }
 
     const invoice = await service.createInvoice({
@@ -127,9 +131,18 @@ router.post(
     const paymentInput = service.validatePayment(invoice, req.body);
     const updated = await service.recordPayment(req.params.id, paymentInput);
 
-    // ── Reactivación automática al pagar (solo modo mock) ────────────
-    // En modo DB se implementará en Fase 4.5 junto con el dominio Suspension.
-    if (!isDomainOnDb('billing')) {
+    if (isDomainOnDb('billing')) {
+      const policy = await getSuspensionService().repo.getPolicy();
+      if (policy.reactivateOnPayment) {
+        const client = await getCustomersService().getById(invoice.clientId);
+        if (client?.status === 'suspended') {
+          await getPaymentService().reactivateCustomerService(invoice.clientId, {
+            triggeredBy: req.authContext?.userId,
+            invoiceId: invoice.id,
+          });
+        }
+      }
+    } else if (!isDomainOnDb('billing')) {
       const client = store.CLIENTS.find((c) => c.id === invoice.clientId);
       if (client && client.status === 'suspended' && store.SUSPENSION_POLICY.allowAutoReactivateOnPayment) {
         client.status = 'active';

@@ -2,6 +2,7 @@ import { Router } from 'express';
 import { READ_ROLES, requireRoles } from '../../common/rbac';
 import { asyncHandler } from '../../common/errors';
 import { productionGates, productionGatesSnapshot } from '../../config/production-gates';
+import { productionReadinessSnapshot } from '../../config/production-readiness';
 import { domainsOnDb, featureFlags, type DomainKey } from '../../config/feature-flags';
 import { isSupabaseAdminConfigured } from '../../services/supabase-admin';
 import { runDataConsistencyCheck } from './consistency';
@@ -21,6 +22,17 @@ router.get(
   requireRoles(READ_ROLES),
   asyncHandler(async (_req, res) => {
     res.json(await runDataConsistencyCheck());
+  }),
+);
+
+router.get(
+  '/api/system/production-readiness',
+  requireRoles(READ_ROLES),
+  asyncHandler(async (_req, res) => {
+    res.json({
+      checkedAt: new Date().toISOString(),
+      ...productionReadinessSnapshot(),
+    });
   }),
 );
 
