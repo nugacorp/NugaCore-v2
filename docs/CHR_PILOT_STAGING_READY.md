@@ -12,7 +12,7 @@ Infraestructura preparada en VPS `5.180.151.109` para el piloto factory-reset + 
 | Staging deploy | `main` @ `0af05aa`+ (deploy #118 finished 2026-07-13) |
 | `GET /api/snmp/health` | OK con JWT; `enabled:false` (esperado) |
 | `USE_DB_WIREGUARD` | `true` en contenedor |
-| Servidor WG en DB | **Pendiente** — aplicar `20260714010000_wireguard_servers_is_default.sql` y registrar servidor |
+| Servidor WG en DB | OK (`wgs-*`, `isDefault=true`, pool `10.70.0.0/16`) |
 | `SNMP_POLLER_ENABLED` | `false` hasta CHR validado |
 | `MIKROTIK_WORKER_LIVE` | `false` hasta CHR online |
 

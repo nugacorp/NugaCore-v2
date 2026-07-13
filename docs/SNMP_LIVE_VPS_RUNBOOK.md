@@ -13,8 +13,8 @@
 | `GET /api/snmp/health` (JWT) | `{"enabled":false,"intervalMs":120000}` |
 | Flags runtime | `MIKROTIK_WORKER_LIVE=false`, `SNMP_POLLER_ENABLED=false`, `USE_DB_WIREGUARD=true` |
 | `wg0` host | OK — UDP `13231` |
-| Servidor WG en DB | **Bloqueado** — falta columna `is_default` → migración `20260714010000` |
-| DB schema probes | OK `snmp_snapshot`, `warehouses`, `inventory_items.operational_status` |
+| Servidor WG en DB | OK — migración `20260714010000` aplicada; `wgs-*` registrado (`isDefault=true`) |
+| Peers activos | `0` (pendiente enrollment CHR) |
 | Coolify env fix | Variables SNMP insertadas vía SQL rompían cifrado Laravel; recreadas con modelo PHP |
 
 Deploy:
