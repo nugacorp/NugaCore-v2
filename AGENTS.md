@@ -61,3 +61,16 @@ When building or changing code, provide real execution evidence. Prefer the narr
 - Browser/staging checks when validating UI behavior
 
 Do not claim completion from inspection alone if runnable verification is available.
+
+## Cursor Cloud specific instructions
+
+Durable, non-obvious notes for running this repo in the cloud dev environment (dependencies are already installed by the startup update script; do not re-document install steps here).
+
+- **Single process, port 3000.** `server.ts` serves BOTH the React SPA and the Express API (`/api/*`) from one Node process on `http://localhost:3000`. There is no separate frontend server.
+- **Dev is hermetic (Fase 0).** The app runs fully with no external services: in-memory stores (all `USE_DB_*=false`) plus `AUTH_TRUST_HEADERS=true`. Supabase, Gemini, and MikroTik/RouterOS are all optional and default to mock/simulated. Copy `.env.example` to `.env` (its defaults are dev-ready).
+- **Serve-mode gotcha:** `server.ts` auto-selects `static` mode whenever `dist/index.html` exists (i.e. after any `npm run build`). To force the true Vite dev server with HMR, run `SERVE_MODE=dev npm run dev:tsx`. `npm run dev` intentionally builds then serves the static bundle.
+- **UI login requires Supabase.** The login form (`src/components/LoginForm.tsx`) only authenticates when `VITE_SUPABASE_*` are set. In the default no-Supabase dev setup you cannot log in via the form. To enter the app in dev, seed a session profile into `localStorage` (the app's supported trusted-headers path), then reload:
+  `localStorage.setItem('nugacore_user_profile', JSON.stringify({id:'dev-superadmin',email:'dev@nugacore.local',full_name:'Dev Super Admin',role:'Super Admin',permissions:[]}))`
+  Roles: `Super Admin` | `Administrador` | `Cobranza` | `Técnico` | `Soporte` | `Solo lectura`. The backend then trusts `x-user-role`/`x-user-id` headers sent by the frontend.
+- **Tests:** `npm test` is hermetic (no network/secrets). The `test:db`, `test:db:billing`, and `test:auth` suites require a live Supabase and are skipped otherwise — do not treat their skips as failures.
+- **Lint = eslint + typecheck.** `npm run lint` runs ESLint then `tsc` for both `tsconfig.json` (frontend) and `tsconfig.backend.json` (backend). Pre-existing `no-explicit-any` warnings in tests are expected (0 errors is the gate).
