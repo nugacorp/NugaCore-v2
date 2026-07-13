@@ -17,6 +17,7 @@ import { logger } from '../../common/logger';
 import { processPendingOrders, readRouterSnapshot, listWorkerRuns } from './worker/worker';
 import { getWireguardService } from '../wireguard/service';
 import type { PeerCreatedOnce } from '../wireguard/types';
+import { persistMikrotikRouter } from './repository';
 
 const router = Router();
 
@@ -323,6 +324,13 @@ router.post('/api/mikrotik/routers', requireRoles(['super admin', 'administrador
   };
 
   store.MIKROTIK_ROUTERS.push(routerItem);
+  try {
+    await persistMikrotikRouter(routerItem);
+  } catch (err) {
+    store.MIKROTIK_ROUTERS = store.MIKROTIK_ROUTERS.filter((r) => r.id !== id);
+    res.status(500).json({ error: err instanceof Error ? err.message : 'No se pudo persistir el router' });
+    return;
+  }
   provisioningStore.recordAudit({
     routerId: id,
     action: 'create',

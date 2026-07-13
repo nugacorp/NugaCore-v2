@@ -5,6 +5,7 @@ import { env, isProduction, validateEnvironment } from './backend/config/env';
 import { logger } from './backend/common/logger';
 import { startNocPoller } from './backend/domains/noc-poller/service';
 import { startSnmpPoller } from './backend/domains/snmp-poller/service';
+import { hydrateMikrotikRoutersFromDb } from './backend/domains/mikrotik/repository';
 
 // ── Modo de servido (Fase 4.5.2) ─────────────────────────────────────
 // El Vite dev server bloquea hosts desconocidos ("This host is not allowed")
@@ -81,6 +82,14 @@ async function startServer() {
     app.get('*', (_req, res) => {
       res.setHeader('Cache-Control', 'no-cache, no-store, must-revalidate');
       res.sendFile(path.join(distPath, 'index.html'));
+    });
+  }
+
+  try {
+    await hydrateMikrotikRoutersFromDb();
+  } catch (err) {
+    logger.warn('No se pudieron hidratar routers MikroTik desde Supabase', {
+      error: err instanceof Error ? err.message : String(err),
     });
   }
 

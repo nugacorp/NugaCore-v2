@@ -887,3 +887,18 @@ export const store: {
     return `ma-${nextNum}`;
   },
 };
+
+/** En staging/producción pública no se sirven routers demo mkt-1/2/3 ni alertas ficticias. */
+const seedDemoData = (): boolean => {
+  const explicit = (process.env.SEED_DEMO_DATA || '').trim().toLowerCase();
+  if (explicit === 'true') return true;
+  if (explicit === 'false') return false;
+  return (process.env.PUBLIC_DEPLOYMENT || 'false').trim().toLowerCase() !== 'true';
+};
+
+if (!seedDemoData()) {
+  store.MIKROTIK_ROUTERS = [];
+  store.NOC_ALERTS = [];
+  store.MIKROTIK_LOGS = [];
+  store.MIKROTIK_COMMAND_AUDIT = [];
+}

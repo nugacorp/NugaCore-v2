@@ -19,6 +19,7 @@ import { buildTemplateFilename } from '../routeros-templates/validators';
 import { store } from '../../state/store';
 import { readRouterSnapshot } from '../mikrotik/worker/worker';
 import { isLiveWorkerEnabled } from '../mikrotik/worker/connector';
+import { persistMikrotikRouter } from '../mikrotik/repository';
 import { getWireguardService } from '../wireguard/service';
 import type { PeerCreatedOnce, WireguardPeerView } from '../wireguard/types';
 import { encryptSecret, decryptSecret } from '../../services/crypto';
@@ -426,24 +427,34 @@ export const enrollmentService = {
     const { script, scriptFilename, scriptHash, templateId: resolvedTemplateId, templateName, generatorVersion, wgPeerId, wgAssignedIp, wgServerPublicKey, peerConfig, snmpCommunity } = buildResult;
 
     // Push al store SOLO tras buildScript exitoso → no hay router huérfano
-    store.MIKROTIK_ROUTERS.push({
+    const enrolledRouter = {
       id: routerId,
       name: input.routerName.trim(),
-      ipAddress: input.ipAddress || '0.0.0.0',
+      ipAddress: wgAssignedIp || input.ipAddress || '0.0.0.0',
       apiPort: input.apiPort || 8728,
       username: '',
       encryptedPassword: '',
       isOnline: false,
       cpuUsagePct: 0,
       memoryUsagePct: 0,
-      routerOsVersion: 'unknown',
+      routerOsVersion: input.routerosVersion || 'unknown',
       linkedTowerId: input.linkedTowerId,
       lastHealthCheckAt: nowIso(),
-      connectionType: 'wireguard',
-      provisioningStatus: 'pending',
+      connectionType: 'wireguard' as const,
+      provisioningStatus: 'pending' as const,
+      managementIp: wgAssignedIp || input.ipAddress || undefined,
       vpnIp: wgAssignedIp,
       notes: input.notes,
-    });
+    };
+    store.MIKROTIK_ROUTERS.push(enrolledRouter);
+    try {
+      await persistMikrotikRouter(enrolledRouter);
+    } catch (persistErr) {
+      logger.warn('Enrollment: no se pudo persistir router en Supabase', {
+        routerId,
+        error: String(persistErr),
+      });
+    }
 
     // Snapshot NO sensible del router para regenerar el .rsc en /download tras
     // un restart, sin depender de store.MIKROTIK_ROUTERS (volátil) ni de

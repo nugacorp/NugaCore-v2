@@ -22,44 +22,20 @@ export interface MikrotikRouter {
   status: 'online' | 'warning' | 'offline';
 }
 
-export const MIKROTIK_ROUTERS: MikrotikRouter[] = [
-  {
-    id: 'mkt-1',
-    name: 'Router Principal (Norte)',
-    model: 'RB5009UG+S+OUT',
-    ip: '10.0.1.1',
-    location: 'Torre del Valle (Norte)',
-    cpuCores: 4,
-    ramTotal: '1024 MB',
-    rosVersion: '7.12',
-    promptUser: 'admin@NugaCore_Norte',
-    status: 'online'
-  },
-  {
-    id: 'mkt-2',
-    name: 'Router Core (Sur)',
-    model: 'CCR2116-12G-4S+',
-    ip: '10.0.1.3',
-    location: 'Torre Ajusco (Sur-Master)',
-    cpuCores: 16,
-    ramTotal: '16 GB',
-    rosVersion: '7.14.2 (stable)',
-    promptUser: 'admin@SurMaster_CCR2116',
-    status: 'warning'
-  },
-  {
-    id: 'mkt-3',
-    name: 'Concentrador San Pedro',
-    model: 'hEX lite',
-    ip: '10.0.1.5',
-    location: 'Repetidor San Pedro',
-    cpuCores: 1,
-    ramTotal: '64 MB',
-    rosVersion: '6.49',
-    promptUser: 'admin@SanPedro_hEX_Client',
-    status: 'online'
-  }
-];
+export const MIKROTIK_ROUTERS: MikrotikRouter[] = [];
+
+const toConsoleRouter = (r: MikrotikRouterView): MikrotikRouter => ({
+  id: r.id,
+  name: r.name,
+  model: r.routerOsVersion || 'MikroTik',
+  ip: r.vpnIp || r.managementIp || r.ipAddress || '—',
+  location: r.name,
+  cpuCores: 0,
+  ramTotal: '—',
+  rosVersion: r.routerOsVersion || '7.x',
+  promptUser: `${r.username || 'admin'}@${r.name.replace(/\s+/g, '_')}`,
+  status: r.isOnline ? 'online' : 'offline',
+});
 
 import MikrotikRoutersPanel from './MikrotikRoutersPanel';
 import MikrotikWorkerPanel from './MikrotikWorkerPanel';
@@ -114,21 +90,40 @@ export default function MikrotikModule({
   // Onboarding Wizard (Fase 4.9)
   const [showOnboarding, setShowOnboarding] = useState(false);
 
-  // Connected Router State
-  const [activeRouter, setActiveRouter] = useState<MikrotikRouter>(MIKROTIK_ROUTERS[0]);
+  const consoleRouters = provisionedRouters.map(toConsoleRouter);
+  const placeholderRouter: MikrotikRouter = {
+    id: '',
+    name: 'Sin routers registrados',
+    model: '—',
+    ip: '—',
+    location: '—',
+    cpuCores: 0,
+    ramTotal: '—',
+    rosVersion: '—',
+    promptUser: 'admin@NugaCore',
+    status: 'offline',
+  };
+
+  // Connected Router State — solo routers reales desde /api/mikrotik/routers
+  const [activeRouter, setActiveRouter] = useState<MikrotikRouter>(placeholderRouter);
+
+  useEffect(() => {
+    if (consoleRouters.length === 0) {
+      setActiveRouter(placeholderRouter);
+      return;
+    }
+    setActiveRouter((prev) => {
+      const stillThere = consoleRouters.find((r) => r.id === prev.id);
+      return stillThere || consoleRouters[0];
+    });
+  }, [provisionedRouters]);
 
   // Command Shell States
   const [commandInput, setCommandInput] = useState('');
   const [shellLines, setShellLines] = useState<string[]>([
-    "[admin@NugaCore_Norte] > /system resource print",
-    "uptime: 45d 12h 30m",
-    "version: 7.12 (stable)",
-    "cpu: arm64",
-    "cpu-count: 4",
-    "cpu-load: 8%",
-    "free-memory: 680MB",
-    "total-memory: 1024MB",
-    "[admin@NugaCore_Norte] > "
+    '# Consola NugaCore — selecciona un router registrado (sin datos demo).',
+    '# Usa Enrollment o Registrar Router para agregar equipos reales.',
+    '> ',
   ]);
   const [executingCommand, setExecutingCommand] = useState(false);
 
@@ -153,7 +148,7 @@ export default function MikrotikModule({
 
   // Handle Switching Routers Beautifully
   const handleRouterChange = (routerId: string) => {
-    const selected = MIKROTIK_ROUTERS.find(r => r.id === routerId);
+    const selected = consoleRouters.find(r => r.id === routerId);
     if (!selected) return;
     const oldIp = activeRouter.ip;
     setActiveRouter(selected);
@@ -262,8 +257,12 @@ export default function MikrotikModule({
               value={activeRouter.id}
               onChange={(e) => handleRouterChange(e.target.value)}
               className="bg-transparent text-emerald-400 font-medium font-mono focus:outline-none focus:ring-0 cursor-pointer text-xs pr-6"
+              disabled={consoleRouters.length === 0}
             >
-              {MIKROTIK_ROUTERS.map(router => (
+              {consoleRouters.length === 0 && (
+                <option value="" className="bg-slate-950 text-slate-200">Sin routers registrados</option>
+              )}
+              {consoleRouters.map(router => (
                 <option key={router.id} value={router.id} className="bg-slate-950 text-slate-200">
                   {router.name} — {router.ip} ({router.model})
                 </option>

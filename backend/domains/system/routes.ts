@@ -30,6 +30,14 @@ router.get(
   '/api/system/production-readiness',
   requireRoles(READ_ROLES),
   asyncHandler(async (_req, res) => {
+    res.json(await buildProductionReadinessReport());
+  }),
+);
+
+router.get(
+  '/api/system/production-readiness-snapshot',
+  requireRoles(READ_ROLES),
+  asyncHandler(async (_req, res) => {
     res.json({
       checkedAt: new Date().toISOString(),
       ...productionReadinessSnapshot(),
