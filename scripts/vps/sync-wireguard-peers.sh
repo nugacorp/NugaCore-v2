@@ -53,12 +53,12 @@ for p in peers:
     if p.get("status") != "active":
         continue
     ip = p["allocatedIp"]
-    allowed = p.get("allowedCidr") or "10.0.0.0/24"
+    # En el host solo enrutamos el /32 del peer; allowedCidr es para el script del router.
     lines += [
         f"# {p.get('name', p['id'])}",
         "[Peer]",
         f"PublicKey = {p['publicKey']}",
-        f"AllowedIPs = {ip}/32,{allowed}",
+        f"AllowedIPs = {ip}/32",
         "PersistentKeepalive = 25",
         "",
     ]
