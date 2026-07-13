@@ -75,6 +75,7 @@ Checklist:
 
 - [ ] Todos los endpoints `/api/*` sensibles exigen JWT Supabase válido.
 - [ ] `AUTH_TRUST_HEADERS=false` en producción.
+- [ ] Supabase Auth: **Prevent use of leaked passwords** (HaveIBeenPwned) habilitado en Dashboard → Authentication → Email (Pro+; linter `auth_leaked_password_protection`).
 - [ ] Roles se resuelven desde DB (`user_roles`/`roles`), no desde headers manipulables.
 - [ ] Super Admin, Administrador, Técnico, Cobranza, Soporte y Solo lectura probados con usuarios reales.
 - [ ] Cada rol tiene pruebas de allow/deny por endpoint crítico.
