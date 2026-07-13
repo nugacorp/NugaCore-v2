@@ -25,9 +25,9 @@ describe('dashboard Notificaciones Pendientes KPI (FASE M)', () => {
     expect(stats.notificationsPending).toBe(notificationService.pendingCount());
   });
 
-  it('Dashboard incluye el KPI visual Notificaciones Pendientes', () => {
+  it('Dashboard ya no muestra Notificaciones Pendientes (vive en módulo Notifications)', () => {
     const source = readFileSync('src/components/Dashboard.tsx', 'utf8');
-    expect(source).toContain('Notificaciones Pendientes');
-    expect(source).toContain('notificationsPending');
+    expect(source).not.toContain('Notificaciones Pendientes');
+    expect(source).not.toContain('kpi-notifications-pending');
   });
 });

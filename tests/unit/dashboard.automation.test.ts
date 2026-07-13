@@ -18,9 +18,9 @@ describe('dashboard Automation Queue KPI', () => {
     expect(stats.automationQueue).toBe(automationService.pendingDecisionsCount());
   });
 
-  it('Dashboard incluye el KPI visual Automation Queue', () => {
+  it('Dashboard ya no muestra Automation Queue (vive en módulo NOC/Automation)', () => {
     const source = readFileSync('src/components/Dashboard.tsx', 'utf8');
-    expect(source).toContain('Automation Queue');
-    expect(source).toContain('automationQueue');
+    expect(source).not.toContain('Automation Queue');
+    expect(source).not.toContain('kpi-automation-queue');
   });
 });

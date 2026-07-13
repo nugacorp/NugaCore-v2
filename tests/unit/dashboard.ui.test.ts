@@ -13,17 +13,17 @@ const dashboardSource = readFileSync('src/components/Dashboard.tsx', 'utf8');
 const appSource = readFileSync('src/App.tsx', 'utf8');
 
 describe('Dashboard — estructura ejecutiva V3', () => {
-  it('renderiza las tres secciones núcleo (KPIs, alertas, acciones)', () => {
+  it('renderiza las secciones núcleo (KPIs, zonas, alertas, acciones)', () => {
     expect(dashboardSource).toContain('id="dashboard-executive-kpis"');
+    expect(dashboardSource).toContain('id="dashboard-zone-status"');
     expect(dashboardSource).toContain('id="dashboard-important-alerts"');
     expect(dashboardSource).toContain('id="dashboard-quick-actions"');
   });
 
-  it('deriva indicadores de datos existentes (stats/alerts/billingKpis), sin integraciones nuevas', () => {
+  it('deriva indicadores de billing y zonas', () => {
     expect(dashboardSource).toContain('stats.activeClients');
-    expect(dashboardSource).toContain('stats.suspendedClients');
-    expect(dashboardSource).toContain('stats.activeTickets');
     expect(dashboardSource).toContain('/api/dashboard/billing-kpis');
+    expect(dashboardSource).toContain('/api/dashboard/zones');
   });
 
   it('permite enlazar a módulos vía onNavigate (cada KPI/alerta/acción)', () => {
