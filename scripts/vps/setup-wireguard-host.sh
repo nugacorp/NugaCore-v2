@@ -18,7 +18,7 @@ WG_SERVER_IP="${WG_SERVER_IP:-10.70.0.1}"
 KEY_DIR="${WG_KEY_DIR:-/root/.wireguard}"
 SERVER_KEY_FILE="${KEY_DIR}/nugacore-server.key"
 WG_CONF="/etc/wireguard/wg0.conf"
-AUTH_EMAIL="${WG_AUTH_EMAIL:-superadmin@nugacore.local}"
+AUTH_EMAIL="${WG_AUTH_EMAIL:-superadmin@staging.nugacore.local}"
 
 log() { printf '[wg-setup] %s\n' "$1"; }
 fail() { printf '[wg-setup] ERROR: %s\n' "$1" >&2; exit 1; }

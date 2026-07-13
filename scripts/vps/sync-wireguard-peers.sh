@@ -10,7 +10,7 @@ SERVER_KEY_FILE="${KEY_DIR}/nugacore-server.key"
 WG_CONF="/etc/wireguard/wg0.conf"
 WG_PORT="${WG_PORT:-13231}"
 WG_SERVER_IP="${WG_SERVER_IP:-10.70.0.1}"
-AUTH_EMAIL="${WG_AUTH_EMAIL:-superadmin@nugacore.local}"
+AUTH_EMAIL="${WG_AUTH_EMAIL:-superadmin@staging.nugacore.local}"
 
 log() { printf '[wg-sync] %s\n' "$1"; }
 fail() { printf '[wg-sync] ERROR: %s\n' "$1" >&2; exit 1; }
