@@ -6,7 +6,7 @@
 #   ADD_SNMP_ENV=true bash scripts/vps/deploy-coolify-staging.sh
 set -euo pipefail
 
-BRANCH="${BRANCH:-cursor/snmp-live-mikrotik-wizard-cb99}"
+BRANCH="${BRANCH:-main}"
 APP_NAME="${COOLIFY_APP_NAME:-nugacore-staging}"
 ADD_SNMP_ENV="${ADD_SNMP_ENV:-true}"
 WAIT_SECS="${WAIT_SECS:-600}"
@@ -28,19 +28,34 @@ docker exec coolify-db psql -U coolify -d coolify -c \
 
 upsert_env() {
   local key="$1" val="$2" runtime="${3:-true}" buildtime="${4:-false}"
-  local exists
-  exists="$(docker exec coolify-db psql -U coolify -d coolify -At -c \
-    "SELECT id FROM environment_variables WHERE resourceable_type='App\\\\Models\\\\Application' AND resourceable_id=${APP_ID} AND key='${key}' AND is_preview=false LIMIT 1;")"
-  if [[ -n "$exists" ]]; then
-    docker exec coolify-db psql -U coolify -d coolify -c \
-      "UPDATE environment_variables SET value='${val}', is_runtime=${runtime}, is_buildtime=${buildtime}, resourceable_type='App\\Models\\Application', updated_at=NOW() WHERE id=${exists};" >/dev/null
-  else
-    local new_uuid
-    new_uuid="$(uuidgen 2>/dev/null || cat /proc/sys/kernel/random/uuid)"
-    docker exec coolify-db psql -U coolify -d coolify -c \
-      "INSERT INTO environment_variables (uuid, key, value, is_preview, is_runtime, is_buildtime, version, is_literal, is_required, is_shared, resourceable_type, resourceable_id, created_at, updated_at)
-       VALUES ('${new_uuid}', '${key}', '${val}', false, ${runtime}, ${buildtime}, '4.0', false, false, false, 'App\\Models\\Application', ${APP_ID}, NOW(), NOW());" >/dev/null
-  fi
+  docker exec coolify php -r "
+require '/var/www/html/vendor/autoload.php';
+\$app = require_once '/var/www/html/bootstrap/app.php';
+\$app->make(Illuminate\Contracts\Console\Kernel::class)->bootstrap();
+\$appId = ${APP_ID};
+\$key = '${key}';
+\$plain = '${val}';
+\$runtime = ${runtime};
+\$buildtime = ${buildtime};
+\$rows = App\Models\EnvironmentVariable::where('resourceable_id', \$appId)
+  ->where('resourceable_type', 'App\\\\Models\\\\Application')
+  ->where('key', \$key)->where('is_preview', false)->get();
+foreach (\$rows as \$row) { \$row->delete(); }
+\$v = new App\Models\EnvironmentVariable();
+\$v->uuid = (string) new Visus\Cuid2\Cuid2();
+\$v->key = \$key;
+\$v->value = \$plain;
+\$v->is_preview = false;
+\$v->is_runtime = \$runtime;
+\$v->is_buildtime = \$buildtime;
+\$v->version = '4.0';
+\$v->is_literal = false;
+\$v->is_required = false;
+\$v->is_shared = false;
+\$v->resourceable_type = 'App\\\\Models\\\\Application';
+\$v->resourceable_id = \$appId;
+\$v->save();
+" >/dev/null
   log "env ${key}=${val}"
 }
 
@@ -72,16 +87,27 @@ echo 'queued:' . \$uuid;
 echo "$DEPLOY_OUT" | tail -3
 echo "$DEPLOY_OUT" | grep -q 'queued:' || fail "deploy no encolado: $DEPLOY_OUT"
 
-log "esperando health (max ${WAIT_SECS}s)..."
+DEPLOY_UUID="$(echo "$DEPLOY_OUT" | grep -o 'queued:[^[:space:]]*' | head -1 | cut -d: -f2)"
+[[ -n "$DEPLOY_UUID" ]] || fail "deploy no encolado: $DEPLOY_OUT"
+log "deploy uuid=${DEPLOY_UUID}"
+
+log "esperando deploy finished (max ${WAIT_SECS}s)..."
 deadline=$((SECONDS + WAIT_SECS))
 while (( SECONDS < deadline )); do
-  code="$(curl -fsS -m 10 -o /dev/null -w '%{http_code}' "${APP_URL}/api/health/live" 2>/dev/null || echo 000)"
-  if [[ "$code" == "200" ]]; then
-    snmp_code="$(curl -fsS -m 10 -o /dev/null -w '%{http_code}' "${APP_URL}/api/snmp/health" 2>/dev/null || echo 000)"
-    log "health/live=200 snmp/health=${snmp_code}"
-    exit 0
+  status="$(docker exec coolify-db psql -U coolify -d coolify -At -c \
+    "SELECT status FROM application_deployment_queues WHERE deployment_uuid='${DEPLOY_UUID}' LIMIT 1;" 2>/dev/null || echo unknown)"
+  if [[ "$status" == "finished" ]]; then
+    log "deploy status=finished"
+    break
+  fi
+  if [[ "$status" == "failed" ]]; then
+    fail "deploy status=failed (uuid=${DEPLOY_UUID})"
   fi
   sleep 15
 done
+[[ "$status" == "finished" ]] || fail "timeout esperando deploy finished (last status=${status})"
 
-fail "timeout esperando ${APP_URL}/api/health/live"
+log "validando health..."
+code="$(curl -fsS -m 10 -o /dev/null -w '%{http_code}' "${APP_URL}/api/health/live" 2>/dev/null || echo 000)"
+[[ "$code" == "200" ]] || fail "health/live=${code}"
+log "health/live=200 — deploy OK"
