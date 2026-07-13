@@ -56,6 +56,12 @@ export const MODEL_OPTIONS: Array<{ value: RouterModel; label: string }> = [
 
 export const ONBOARDING_TEMPLATES: OnboardingTemplate[] = [
   {
+    id: 'nugacore_factory_onboarding',
+    label: 'Factory Reset — WG + API + SNMP',
+    description: 'Recomendado tras reset de fábrica: LAN mínima, WireGuard, API, SNMP y firewall VPN.',
+    routerosVersion: '7',
+  },
+  {
     id: 'router_base_wireguard',
     label: 'Router Base + WireGuard',
     description: 'Bridge LAN, DHCP, NAT, firewall básico y túnel WireGuard NugaCore. Recomendado para producción.',
@@ -111,6 +117,28 @@ export const ONBOARDING_TEMPLATES: OnboardingTemplate[] = [
   },
 ];
 
+/** Plantillas visibles en modo simple (oculta PCC/PPPoE avanzados). */
+export const ONBOARDING_SIMPLE_TEMPLATES = ONBOARDING_TEMPLATES.filter((t) =>
+  ['nugacore_factory_onboarding', 'router_base_wireguard', 'tower_wisp', 'noc_ready', 'monitoring_agent'].includes(t.id),
+);
+
+export const FACTORY_RESET_CHECKLIST = [
+  'Router reseteado de fábrica o con backup previo guardado',
+  'Tengo acceso Winbox/SSH al router',
+  'Internet en WAN operativo',
+] as const;
+
+/** Plantillas cuyo túnel WireGuard (servidor VPS + peer) es automático y no editable en UI. */
+export const WIREGUARD_MANAGED_TEMPLATES = new Set([
+  'nugacore_factory_onboarding',
+  'router_base_wireguard',
+  'tower_wisp',
+]);
+
+export function isWireguardManagedTemplate(templateId: string): boolean {
+  return WIREGUARD_MANAGED_TEMPLATES.has(templateId);
+}
+
 export const DEFAULT_FORM: OnboardingForm = {
   routerName:      '',
   routerType:      'tower',
@@ -118,7 +146,7 @@ export const DEFAULT_FORM: OnboardingForm = {
   model:           'RB5009',
   siteName:        '',
   notes:           '',
-  templateId:      'router_base_wireguard',
+  templateId:      'nugacore_factory_onboarding',
   lanCidr:         '192.168.88.0/24',
   lanGateway:      '192.168.88.1',
   lanBridgeName:   'bridgeLAN',

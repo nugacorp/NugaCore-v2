@@ -19,7 +19,7 @@ export interface ValidationResult {
 }
 
 const PCC_TEMPLATES = new Set<TemplateLibraryId>(['pcc_2wan', 'pcc_3wan', 'pcc_4wan', 'pcc_5wan']);
-const WG_TEMPLATES = new Set<TemplateLibraryId>(['router_base_wireguard', 'wireguard_client', 'tower_wisp']);
+const WG_TEMPLATES = new Set<TemplateLibraryId>(['router_base_wireguard', 'wireguard_client', 'tower_wisp', 'nugacore_factory_onboarding']);
 
 const wanCountOf = (id: TemplateLibraryId): number => {
   if (id === 'pcc_2wan') return 2;

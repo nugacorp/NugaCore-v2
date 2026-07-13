@@ -11,6 +11,7 @@ const ALL = Object.keys(TEMPLATE_PARAMETER_REGISTRY);
 // ── Estructura general ─────────────────────────────────────────────────
 
 describe('TEMPLATE_PARAMETER_REGISTRY — estructura', () => {
+  it('incluye nugacore_factory_onboarding', () => expect(hasParameterSchema('nugacore_factory_onboarding')).toBe(true));
   it('incluye router_base_wireguard', () => expect(hasParameterSchema('router_base_wireguard')).toBe(true));
   it('incluye pcc_2wan', () => expect(hasParameterSchema('pcc_2wan')).toBe(true));
   it('incluye pcc_5wan', () => expect(hasParameterSchema('pcc_5wan')).toBe(true));

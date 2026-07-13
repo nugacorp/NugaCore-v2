@@ -579,3 +579,30 @@ describe('Template Engine — check-online y revoke no afectados por templateId'
     expect(res.body.templateId).toBe('noc_ready');
   });
 });
+
+describe('Factory onboarding — nugacore_factory_onboarding', () => {
+  let app: Express;
+  let serverId: string;
+
+  beforeAll(async () => {
+    enrollmentRepository._reset();
+    resetWireguardService();
+    app = createApp();
+    const srv = await request(app)
+      .post('/api/wireguard/servers')
+      .set(ADMIN)
+      .send({ name: 'VPN Factory Test', endpointHost: 'vpn.factory.local', endpointPort: 13231 });
+    expect(srv.status).toBe(201);
+    serverId = srv.body.server.id;
+  });
+
+  it('POST /start devuelve script con SNMP y comunidad una vez', async () => {
+    const res = await startEnrollment(app, serverId, 'nugacore_factory_onboarding');
+    expect(res.status).toBe(201);
+    expect(res.body.templateId).toBe('nugacore_factory_onboarding');
+    expect(res.body.script).toContain('/snmp set enabled=yes');
+    expect(res.body.snmpCommunity).toMatch(/^nc-/);
+    expect(res.body.enrollment.snmpSnapshot?.hasEncryptedSecrets).toBe(true);
+    expect(res.body.enrollment.snmpSnapshot?.encryptedCommunity).toBeUndefined();
+  });
+});

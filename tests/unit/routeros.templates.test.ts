@@ -34,8 +34,8 @@ const WG_PARAMS = {
 // ── Catálogo ────────────────────────────────────────────────────────
 
 describe('Template Library Catalog', () => {
-  it('contiene exactamente 13 plantillas', () => {
-    expect(TEMPLATE_LIBRARY).toHaveLength(13);
+  it('contiene exactamente 14 plantillas', () => {
+    expect(TEMPLATE_LIBRARY).toHaveLength(14);
   });
 
   it('todos los IDs del catálogo son IDs válidos', () => {

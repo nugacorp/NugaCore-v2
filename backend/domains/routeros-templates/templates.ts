@@ -8,6 +8,17 @@ import { TEMPLATE_LIBRARY_VERSION, TemplateLibraryDescriptor, TemplateLibraryId 
 export const TEMPLATE_LIBRARY: TemplateLibraryDescriptor[] = [
   // ── CORE ──────────────────────────────────────────────────────────
   {
+    id: 'nugacore_factory_onboarding',
+    name: 'Factory Reset — WG + API + SNMP',
+    description:
+      'Onboarding post-factory-reset: identidad, LAN mínima, WireGuard, usuario API, SNMP (solo lectura) y firewall restringido a la VPN de gestión.',
+    category: 'core',
+    routerosVersion: '7',
+    tags: ['factory-reset', 'wireguard', 'snmp', 'onboarding', 'produccion'],
+    features: ['LAN mínima', 'WireGuard VPN', 'API NugaCore', 'SNMP read-only', 'Firewall VPN', 'Idempotente'],
+    generatorVersion: TEMPLATE_LIBRARY_VERSION,
+  },
+  {
     id: 'router_base_wireguard',
     name: 'Router Base WISP + WireGuard NugaCore',
     description:

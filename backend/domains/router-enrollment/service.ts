@@ -29,7 +29,7 @@ import {
   getTemplateMetadata,
   enrollmentTemplateNeedsWireguard,
 } from './template-mapper';
-import { validateTemplateParameters, redactSecretValues, applyDefaults } from '../router-template-parameters/validators';
+import { validateTemplateParameters, redactSecretValues, applyDefaults, stripWireguardParameterOverrides } from '../router-template-parameters/validators';
 import { mapParametersToLibraryParams } from '../router-template-parameters/mappers';
 import {
   CheckOnlineResult,
@@ -39,11 +39,14 @@ import {
   RouterEnrollmentRouterSnapshot,
   RouterEnrollmentWireGuardSnapshot,
   RouterEnrollmentWireGuardSnapshotView,
+  RouterEnrollmentSnmpSnapshot,
+  RouterEnrollmentSnmpSnapshotView,
   RouterEnrollmentView,
   StartEnrollmentInput,
   StartEnrollmentResult,
 } from './types';
 
+import { generateSnmpCommunity } from '../mikrotik/provisioning/snmp-credentials';
 import { nowIso } from '../../common/time';
 const MAX_CHECK_ATTEMPTS = 10;
 
@@ -73,6 +76,7 @@ const toView = (rec: RouterEnrollmentRecord): RouterEnrollmentView => {
     routerSnapshot: rec.routerSnapshot,
     // Snapshot WireGuard SANEADO: se eliminan los campos cifrados antes de exponer.
     wireguardSnapshot: sanitizeWgSnapshot(rec.wireguardSnapshot),
+    snmpSnapshot: sanitizeSnmpSnapshot(rec.snmpSnapshot),
     scriptHash: rec.scriptHash,
     scriptDownloadedAt: rec.scriptDownloadedAt,
     checkOnlineAttempts: rec.checkOnlineAttempts,
@@ -100,7 +104,8 @@ const buildScriptPreview = (script: string): string =>
     .replace(/preshared-key="[^"]*"/gi, '<PRESHARED_KEY_OMITIDA>')
     .replace(/preshared-key=[^\s\\\n"]+/gi, '<PRESHARED_KEY_OMITIDA>')
     .replace(/password="[^"]*"/gi, '<PASSWORD_OMITIDO>')
-    .replace(/password=[^\s\\\n"]+/gi, '<PASSWORD_OMITIDO>');
+    .replace(/password=[^\s\\\n"]+/gi, '<PASSWORD_OMITIDO>')
+    .replace(/name="nc-[a-f0-9]+"/gi, 'name="<SNMP_COMMUNITY_OMITIDA>"');
 
 // ── WireGuard snapshot helpers (Fase 4.9.2 hotfix) ────────────────────
 
@@ -111,6 +116,28 @@ const sanitizeWgSnapshot = (
   if (!snap) return undefined;
   const { encryptedPeerPrivateKey: _p, encryptedPresharedKey: _k, ...safe } = snap;
   return safe;
+};
+
+const sanitizeSnmpSnapshot = (
+  snap?: RouterEnrollmentSnmpSnapshot,
+): RouterEnrollmentSnmpSnapshotView | undefined => {
+  if (!snap) return undefined;
+  const { encryptedCommunity: _c, ...safe } = snap;
+  return safe;
+};
+
+const buildSnmpSnapshot = (community: string, mgmtCidr?: string): RouterEnrollmentSnmpSnapshot => ({
+  version: '2c',
+  mgmtCidr,
+  hasEncryptedSecrets: true,
+  encryptedCommunity: encryptSecret(community),
+});
+
+const reconstructSnmpCommunityFromSnapshot = (
+  snap?: RouterEnrollmentSnmpSnapshot,
+): string | null => {
+  if (!snap?.encryptedCommunity) return null;
+  return decryptSecret(snap.encryptedCommunity);
 };
 
 /**
@@ -216,6 +243,7 @@ interface BuildScriptResult {
   wgAssignedIp: string;
   wgServerPublicKey: string;
   peerConfig: PeerCreatedOnce | null;
+  snmpCommunity?: string;
 }
 
 /**
@@ -234,7 +262,11 @@ const buildScript = async (
   input: StartEnrollmentInput,
   wgServerId: string,
   actorId: string,
-  opts: { mode: 'create' | 'download'; wgSnapshot?: RouterEnrollmentWireGuardSnapshot } = { mode: 'create' },
+  opts: {
+    mode: 'create' | 'download';
+    wgSnapshot?: RouterEnrollmentWireGuardSnapshot;
+    snmpSnapshot?: RouterEnrollmentSnmpSnapshot;
+  } = { mode: 'create' },
 ): Promise<BuildScriptResult> => {
   // Resuelve templateId con fallback a router_base_wireguard (backward compat).
   const effectiveTemplateId = input.templateId?.trim() || 'router_base_wireguard';
@@ -255,6 +287,23 @@ const buildScript = async (
   // base (solo las claves presentes; no clobbean con undefined).
   const dynamicParams = mapParametersToLibraryParams(effectiveTemplateId, input.templateParameters);
   const generatorParams = { ...resolved.params, ...dynamicParams };
+
+  const needsSnmp = effectiveTemplateId === 'nugacore_factory_onboarding';
+  let snmpCommunityPlain: string | undefined;
+  if (needsSnmp) {
+    if (opts.mode === 'download') {
+      snmpCommunityPlain = reconstructSnmpCommunityFromSnapshot(opts.snmpSnapshot) ?? undefined;
+      if (!snmpCommunityPlain) {
+        throw new NotFoundError(
+          'No se puede regenerar el script SNMP: no hay snapshot SNMP suficiente. Vuelve a iniciar el enrollment.',
+          'SNMP_SNAPSHOT_MISSING',
+        );
+      }
+    } else {
+      snmpCommunityPlain = generateSnmpCommunity(input.routerName);
+    }
+    generatorParams.snmpCommunity = snmpCommunityPlain;
+  }
 
   const resource = generateFromTemplate(generatorParams);
   const filename = buildTemplateFilename(input.routerName, resolved.libraryId);
@@ -280,6 +329,7 @@ const buildScript = async (
     wgAssignedIp: peerConfig ? peerConfig.assignedIp.replace(/\/\d+$/, '') : '',
     wgServerPublicKey: peerConfig?.serverPublicKey ?? '',
     peerConfig,
+    snmpCommunity: snmpCommunityPlain,
   };
 };
 
@@ -308,7 +358,9 @@ export const enrollmentService = {
     // se persiste el set completo para regenerar de forma determinista.
     let effectiveParams = input.templateParameters;
     if (input.templateParameters) {
-      effectiveParams = applyDefaults(effectiveTemplateId, input.templateParameters);
+      effectiveParams = stripWireguardParameterOverrides(
+        applyDefaults(effectiveTemplateId, input.templateParameters),
+      );
       const paramCheck = validateTemplateParameters(effectiveTemplateId, effectiveParams);
       if (!paramCheck.valid) {
         throw new BadRequestError(
@@ -318,11 +370,13 @@ export const enrollmentService = {
       }
     }
 
-    // ── 3-4. Resolver servidor WireGuard ─────────────────────────────
+    // ── 3-4. Resolver servidor WireGuard (siempre default VPS salvo override de tests) ──
+    const allowWgServerOverride =
+      (process.env.ENROLLMENT_WG_SERVER_OVERRIDE || '').trim().toLowerCase() === 'true';
     const wgService = getWireguardService();
     let resolvedServerId: string;
 
-    if (input.wgServerId?.trim()) {
+    if (allowWgServerOverride && input.wgServerId?.trim()) {
       resolvedServerId = input.wgServerId.trim();
       // Validar que existe: 404 en lugar de 500
       const server = await wgService.findServer(resolvedServerId);
@@ -369,7 +423,7 @@ export const enrollmentService = {
       throw err;
     }
 
-    const { script, scriptFilename, scriptHash, templateId: resolvedTemplateId, templateName, generatorVersion, wgPeerId, wgAssignedIp, wgServerPublicKey, peerConfig } = buildResult;
+    const { script, scriptFilename, scriptHash, templateId: resolvedTemplateId, templateName, generatorVersion, wgPeerId, wgAssignedIp, wgServerPublicKey, peerConfig, snmpCommunity } = buildResult;
 
     // Push al store SOLO tras buildScript exitoso → no hay router huérfano
     store.MIKROTIK_ROUTERS.push({
@@ -409,6 +463,10 @@ export const enrollmentService = {
       ? buildWireguardSnapshot(resolvedServerId, peerConfig)
       : {};
 
+    const snmpSnapshot: RouterEnrollmentSnmpSnapshot = snmpCommunity
+      ? buildSnmpSnapshot(snmpCommunity, peerConfig?.allowedCidr)
+      : {};
+
     const repo = getEnrollmentRepository();
     const id = await repo.nextId();
     const rec: RouterEnrollmentRecord = {
@@ -424,6 +482,7 @@ export const enrollmentService = {
       templateParameters: effectiveParams,
       routerSnapshot,
       wireguardSnapshot,
+      snmpSnapshot,
       scriptHash,
       checkOnlineAttempts: 0,
       createdAt: nowIso(),
@@ -440,8 +499,9 @@ export const enrollmentService = {
     });
 
     const securityMsg =
-      'Este script contiene claves privadas WireGuard. ' +
-      'Guárdalo de forma segura, úsalo UNA VEZ y elimínalo del dispositivo tras importarlo.';
+      'Este script contiene claves privadas WireGuard' +
+      (snmpCommunity ? ' y la comunidad SNMP' : '') +
+      '. Guárdalo de forma segura, úsalo UNA VEZ y elimínalo del dispositivo tras importarlo.';
 
     return {
       // ── Aliases top-level (contrato Hermes) ──────────────────────
@@ -465,6 +525,7 @@ export const enrollmentService = {
       scriptFilename,
       scriptHash,
       securityWarning: securityMsg,
+      snmpCommunity,
     };
   },
 
@@ -530,6 +591,7 @@ export const enrollmentService = {
     const { script, scriptFilename } = await buildScript(rec.routerId, input, rec.wgServerId, actorId, {
       mode: 'download',
       wgSnapshot: rec.wireguardSnapshot,
+      snmpSnapshot: rec.snmpSnapshot,
     });
 
     const updated = await repo.update(id, {

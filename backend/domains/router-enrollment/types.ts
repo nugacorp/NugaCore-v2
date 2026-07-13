@@ -78,6 +78,20 @@ export type RouterEnrollmentWireGuardSnapshotView = Omit<
   'encryptedPeerPrivateKey' | 'encryptedPresharedKey'
 >;
 
+/** Snapshot SNMP persistido (comunidad cifrada para re-download). */
+export interface RouterEnrollmentSnmpSnapshot {
+  version?: '2c';
+  /** CIFRADO (encryptSecret). NUNCA exponer en View/API/logs. */
+  encryptedCommunity?: string;
+  mgmtCidr?: string;
+  hasEncryptedSecrets?: boolean;
+}
+
+export type RouterEnrollmentSnmpSnapshotView = Omit<
+  RouterEnrollmentSnmpSnapshot,
+  'encryptedCommunity'
+>;
+
 /** Forma interna persistida en el repositorio. */
 export interface RouterEnrollmentRecord {
   id: string;
@@ -107,6 +121,7 @@ export interface RouterEnrollmentRecord {
    * secretos viajan CIFRADOS; nunca se exponen por API.
    */
   wireguardSnapshot?: RouterEnrollmentWireGuardSnapshot;
+  snmpSnapshot?: RouterEnrollmentSnmpSnapshot;
   scriptHash?: string;
   scriptDownloadedAt?: string;
   checkOnlineAttempts: number;
@@ -142,6 +157,7 @@ export interface RouterEnrollmentView {
   routerSnapshot?: RouterEnrollmentRouterSnapshot;
   /** Snapshot WireGuard saneado (sin campos cifrados). Solo metadata pública. */
   wireguardSnapshot?: RouterEnrollmentWireGuardSnapshotView;
+  snmpSnapshot?: RouterEnrollmentSnmpSnapshotView;
   scriptHash?: string;
   scriptDownloadedAt?: string;
   checkOnlineAttempts: number;
@@ -204,6 +220,8 @@ export interface StartEnrollmentResult {
   scriptFilename: string;
   scriptHash: string;
   securityWarning: string;
+  /** Comunidad SNMPv2c. SOLO SE ENTREGA en POST /start (una vez). */
+  snmpCommunity?: string;
 }
 
 /** Respuesta de POST /:id/check-online. */

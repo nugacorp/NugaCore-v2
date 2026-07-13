@@ -20,6 +20,7 @@ import networkRoutes from './domains/network/routes';
 import nocRoutes from './domains/noc/routes';
 import nocTelemetryRoutes from './domains/noc-telemetry/routes';
 import nocPollerRoutes from './domains/noc-poller/routes';
+import snmpPollerRoutes from './domains/snmp-poller/routes';
 import plansRoutes from './domains/plans/routes';
 import reportsRoutes from './domains/reports/routes';
 import routerosReadOnlyRoutes from './domains/routeros-readonly/routes';
@@ -77,6 +78,7 @@ export function registerRoutes(app: Express): void {
   app.use(nocRoutes);
   app.use(nocTelemetryRoutes);
   app.use(nocPollerRoutes);
+  app.use(snmpPollerRoutes);
   app.use(manualSafeModeRoutes);
   app.use(safeCommandQueueRoutes);
   app.use(gisRoutes);

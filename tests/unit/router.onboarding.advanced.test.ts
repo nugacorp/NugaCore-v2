@@ -301,8 +301,8 @@ describe('getTemplateLabel', () => {
 //   setForm((f) => setTemplateSelection(f, tpl.id))
 
 describe('setTemplateSelection', () => {
-  it('default form templateId = router_base_wireguard', () => {
-    expect(DEFAULT_ADVANCED_FORM.templateId).toBe('router_base_wireguard');
+  it('default form templateId = nugacore_factory_onboarding', () => {
+    expect(DEFAULT_ADVANCED_FORM.templateId).toBe('nugacore_factory_onboarding');
   });
 
   it('seleccionar pcc_5wan → form.templateId = pcc_5wan', () => {
@@ -323,7 +323,7 @@ describe('setTemplateSelection', () => {
   it('es inmutable: no muta el form original', () => {
     const original = { ...DEFAULT_ADVANCED_FORM };
     setTemplateSelection(original, 'pcc_5wan');
-    expect(original.templateId).toBe('router_base_wireguard');
+    expect(original.templateId).toBe('nugacore_factory_onboarding');
   });
 
   it('preserva el resto de campos del form', () => {
@@ -372,10 +372,10 @@ describe('Wizard — selección de plantilla se conserva en resumen y payload', 
     expect(buildAdvancedEnrollmentPayload(form).templateId).toBe('noc_ready');
   });
 
-  it('sin selección (default): label y payload son router_base_wireguard', () => {
+  it('sin selección (default): label y payload son nugacore_factory_onboarding', () => {
     const form = { ...DEFAULT_ADVANCED_FORM, routerName: 'R' };
-    expect(getTemplateLabel(form.templateId)).toBe('Router Base + WireGuard');
-    expect(buildAdvancedEnrollmentPayload(form).templateId).toBe('router_base_wireguard');
+    expect(getTemplateLabel(form.templateId)).toBe('Factory Reset — WG + API + SNMP');
+    expect(buildAdvancedEnrollmentPayload(form).templateId).toBe('nugacore_factory_onboarding');
   });
 
   it('selección en modo avanzado pcc_5wan también conserva templateId en payload', () => {

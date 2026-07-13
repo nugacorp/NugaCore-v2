@@ -41,7 +41,7 @@ describe('ENROLLMENT_SUPPORTED_TEMPLATES', () => {
   it('contiene pppoe_server',         () => expect(ENROLLMENT_SUPPORTED_TEMPLATES.has('pppoe_server')).toBe(true));
   it('contiene noc_ready',            () => expect(ENROLLMENT_SUPPORTED_TEMPLATES.has('noc_ready')).toBe(true));
   it('contiene monitoring_agent',     () => expect(ENROLLMENT_SUPPORTED_TEMPLATES.has('monitoring_agent')).toBe(true));
-  it('tiene exactamente 9 templates', () => expect(ENROLLMENT_SUPPORTED_TEMPLATES.size).toBe(9));
+  it('tiene exactamente 10 templates', () => expect(ENROLLMENT_SUPPORTED_TEMPLATES.size).toBe(10));
   it('NO contiene router_base_sstp',  () => expect(ENROLLMENT_SUPPORTED_TEMPLATES.has('router_base_sstp')).toBe(false));
   it('NO contiene wireguard_client',  () => expect(ENROLLMENT_SUPPORTED_TEMPLATES.has('wireguard_client')).toBe(false));
 });

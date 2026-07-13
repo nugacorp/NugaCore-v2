@@ -12,6 +12,7 @@ import {
   type MetricsSnapshot,
 } from '../system/metrics';
 import { buildControlCenter } from './control-center';
+import { buildZoneStatusReport } from './zone-status';
 
 const router = Router();
 
@@ -468,6 +469,10 @@ router.post('/api/alerts/acknowledge-all', requireRoles(['super admin', 'adminis
 
 router.get('/api/dashboard/control-center', requireRoles(READ_ROLES), asyncHandler(async (_req, res) => {
   res.json(await buildControlCenter());
+}));
+
+router.get('/api/dashboard/zones', requireRoles(READ_ROLES), asyncHandler(async (_req, res) => {
+  res.json(await buildZoneStatusReport());
 }));
 
 export default router;

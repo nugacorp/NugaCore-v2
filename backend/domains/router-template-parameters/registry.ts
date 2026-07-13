@@ -59,6 +59,57 @@ const pccSchema = (templateId: string, templateName: string, wanCount: number): 
 // ── Registry ────────────────────────────────────────────────────────────
 
 export const TEMPLATE_PARAMETER_REGISTRY: Record<string, TemplateParameterSchema> = {
+  nugacore_factory_onboarding: {
+    templateId: 'nugacore_factory_onboarding',
+    templateName: 'Factory Reset — WG + API + SNMP',
+    groups: [
+      {
+        id: 'network',
+        label: 'Red local (WISP)',
+        nested: false,
+        parameters: [
+          str('wanInterface', 'Interfaz WAN', {
+            required: true,
+            defaultValue: 'ether1',
+            description: 'Puerto físico hacia internet.',
+          }),
+          str('lanBridgeName', 'Bridge LAN', {
+            defaultValue: 'bridgeLAN',
+            description: 'Nombre del bridge para la red local.',
+          }),
+          lanCidrParam(),
+          str('lanInterfaces', 'Puertos LAN', {
+            defaultValue: 'ether2,ether3,ether4,ether5',
+            description: 'Interfaces del bridge, separadas por coma.',
+          }),
+          dhcpEnabledParam(),
+          ip('dhcpPoolStart', 'Inicio pool DHCP', { defaultValue: '192.168.88.10' }),
+          ip('dhcpPoolEnd', 'Fin pool DHCP', { defaultValue: '192.168.88.254' }),
+          dnsServersParam(),
+        ],
+      },
+      {
+        id: 'site',
+        label: 'Sitio y SNMP',
+        nested: false,
+        parameters: [
+          str('zoneName', 'Nombre de zona / sitio', {
+            description: 'Ubicación SNMP (sysLocation) y trazabilidad NOC.',
+          }),
+        ],
+      },
+      {
+        id: 'management',
+        label: 'Gestión API',
+        nested: false,
+        parameters: [
+          num('apiPort', 'Puerto API RouterOS', { defaultValue: 8728 }),
+        ],
+      },
+    ],
+    // WireGuard: servidor en el VPS (wg0) + peer único por router — automático, NO configurable.
+  },
+
   router_base_wireguard: {
     templateId: 'router_base_wireguard',
     templateName: 'Router Base + WireGuard',

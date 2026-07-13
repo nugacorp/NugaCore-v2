@@ -107,5 +107,28 @@ export function mapParametersToLibraryParams(
     if (typeof v.enableAutoBackup === 'boolean') out.enableAutoBackup = v.enableAutoBackup;
   }
 
+  // ── Factory onboarding (WISP) ─────────────────────────────────────────
+  if (templateId === 'nugacore_factory_onboarding') {
+    const bridge = asString(v.lanBridgeName);
+    if (bridge) out.lanBridgeName = bridge;
+    const wan = asString(v.wanInterface);
+    if (wan) out.wanInterface = wan;
+    const lanIf = asString(v.lanInterfaces);
+    if (lanIf) {
+      out.lanInterfaces = lanIf.split(',').map((s) => s.trim()).filter(Boolean);
+    }
+    if (typeof v.dhcpEnabled === 'boolean') out.enableDhcp = v.dhcpEnabled;
+    const poolStart = asString(v.dhcpPoolStart);
+    const poolEnd = asString(v.dhcpPoolEnd);
+    if (poolStart) out.dhcpPoolStart = poolStart;
+    if (poolEnd) out.dhcpPoolEnd = poolEnd;
+    const zoneName = asString(v.zoneName);
+    if (zoneName) out.zoneName = zoneName;
+    if (v.apiPort !== undefined && v.apiPort !== '') {
+      const port = Number(v.apiPort);
+      if (Number.isFinite(port)) out.apiPort = port;
+    }
+  }
+
   return out;
 }

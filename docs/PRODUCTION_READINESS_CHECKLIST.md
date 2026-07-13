@@ -75,6 +75,7 @@ Checklist:
 
 - [ ] Todos los endpoints `/api/*` sensibles exigen JWT Supabase válido.
 - [ ] `AUTH_TRUST_HEADERS=false` en producción.
+- [ ] Supabase Auth: **Prevent use of leaked passwords** (HaveIBeenPwned) habilitado en Dashboard → Authentication → Email (Pro+; linter `auth_leaked_password_protection`).
 - [ ] Roles se resuelven desde DB (`user_roles`/`roles`), no desde headers manipulables.
 - [ ] Super Admin, Administrador, Técnico, Cobranza, Soporte y Solo lectura probados con usuarios reales.
 - [ ] Cada rol tiene pruebas de allow/deny por endpoint crítico.
@@ -292,6 +293,10 @@ Recomendado antes de Command Center live.
 - [ ] Telegram/email/push configurados sin exponer secretos.
 - [ ] Dashboard no muestra PII innecesaria.
 - [ ] Resumen NOC sanitizado para agentes IA.
+- [ ] Plantilla `nugacore_factory_onboarding` (WG + API + SNMP) disponible en wizard.
+- [ ] Poller SNMP (`SNMP_POLLER_ENABLED`) documentado; default `false`.
+- [ ] `GET /api/snmp/health` y `GET /api/dashboard/zones` con `source: snmp-live` tras piloto.
+- [ ] Runbook VPS: `docs/SNMP_LIVE_VPS_RUNBOOK.md`.
 
 ## 13. Inventario, tickets, CRM y portal
 
@@ -339,6 +344,7 @@ Portal Cliente:
 - [ ] Dashboard de operación.
 - [ ] Retención de logs definida.
 - [ ] Logs sin secretos.
+- [ ] SNMP poller (`/api/snmp/health`) con comunidades redactadas en logs y API.
 
 ## 15. Backups y restore
 
