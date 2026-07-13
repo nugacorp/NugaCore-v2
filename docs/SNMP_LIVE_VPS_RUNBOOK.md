@@ -14,9 +14,9 @@ SSH_AUTH_SOCK=/tmp/ssh-*/agent.* ssh -o BatchMode=yes root@5.180.151.109 'wg sho
 
 **Resultado:** `Permission denied (publickey,password)` — no hay claves privadas en `~/.ssh/` ni identidades cargadas en el agente (`ssh-add -l` → *The agent has no identities*). Solo existe `known_hosts` (huella del host ya conocida).
 
-**Para habilitar auditoría automática desde Cloud Agent:** cargar la llave privada en los secretos del entorno Cursor (o `~/.ssh/id_ed25519` en el pod) con acceso a `root@<VPS>`. Sin eso, el operador debe ejecutar los pasos de este runbook directamente en el VPS.
+**Para habilitar auditoría automática desde Cloud Agent:** ver guía completa **`docs/CLOUD_AGENT_VPS_SSH.md`** (secretos `VPS_SSH_PRIVATE_KEY`, scripts `setup-ssh-from-secret.sh` y `test-ssh-connection.sh`).
 
-**Acción:** el operador (Hermes) ejecuta los pasos siguientes en el VPS hasta que la llave esté disponible en el agente.
+**Acción:** configurar la llave en el entorno Cursor y ejecutar `bash scripts/vps/test-ssh-connection.sh`, o el operador ejecuta los pasos siguientes directamente en el VPS.
 
 ---
 
