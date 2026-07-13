@@ -33,6 +33,22 @@ Use `agent/skills/README.md` as the index. At minimum:
 - Respect strict no-router/no-live/no-migration boundaries unless explicitly authorized by the user.
 - When safe and within guardrails, proactively fix validation blockers instead of only reporting them.
 
+## Cursor Cloud — SSH al VPS
+
+En runs de Cloud Agent, al inicio (o tras `install` en `.cursor/environment.json`):
+
+```bash
+bash scripts/vps/bootstrap-ssh-access.sh
+```
+
+Tras la primera conexión exitosa, persistir para futuros runs:
+
+```bash
+bash scripts/vps/persist-ssh-key-for-environment.sh
+```
+
+Requiere secreto `VPS_SSH_PRIVATE_KEY` en Cursor Cloud Environment (ver `docs/CLOUD_AGENT_VPS_SSH.md`). No commitear claves privadas.
+
 ## Verification expectations
 
 When building or changing code, provide real execution evidence. Prefer the narrowest relevant checks first, then broader checks when appropriate:

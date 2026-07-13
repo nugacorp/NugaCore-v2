@@ -93,7 +93,15 @@ bash scripts/vps/setup-ssh-from-secret.sh
 bash scripts/vps/test-ssh-connection.sh
 ```
 
-Si `test-ssh-connection.sh` imprime `RESULTADO: OK`, ya puedes usar SSH en el mismo run:
+Tras la primera conexión exitosa, persistir para futuros runs:
+
+```bash
+bash scripts/vps/persist-ssh-key-for-environment.sh
+```
+
+El script asegura la clave pública en el VPS y prepara `.cursor/local/vps-ssh-private-key` (gitignored) para copiar una vez a **Cursor → Cloud → Environment → Secrets** como `VPS_SSH_PRIVATE_KEY`.
+
+Con `.cursor/environment.json` en el repo, el `install` ejecuta `bootstrap-ssh-access.sh` automáticamente en cada run (requiere el secreto cargado).
 
 ```bash
 ssh -o BatchMode=yes root@5.180.151.109 'wg show wg0; ss -ulnp | grep 13231 || true'

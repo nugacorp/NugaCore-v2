@@ -5,18 +5,46 @@
 
 ## Auditoría SSH (2026-07-13)
 
-Intentos desde el entorno del agente Cloud:
+**Estado:** SSH operativo desde Cloud Agent (`cloud-agent-nugacore-cb99`).
+
+```bash
+bash scripts/vps/bootstrap-ssh-access.sh    # conectar
+bash scripts/vps/persist-ssh-key-for-environment.sh  # persistir VPS + preparar secret Cursor
+ssh nugacore-vps 'hostname'                 # alias configurado
+```
+
+| Comprobación | Resultado |
+|--------------|-----------|
+| Auth SSH `root@5.180.151.109` | OK (`vmi2244281`) |
+| Clave en `authorized_keys` | OK (idempotente en `/root/.ssh/authorized_keys.d/`) |
+| WireGuard `wg0` | **No configurado** (`wg` no instalado en host) |
+| UDP 13231 | No escuchando |
+| Coolify app (staging) | Healthy (`zmjc5lnl0wj3kh0uj14s2p4i-*`) |
+| `nugacore-web-1` (compose local) | Unhealthy — healthcheck Docker roto (OCI cwd); no bloquea staging Coolify |
+| Repo VPS | `/root/work/NugaCore-v2` @ `main` (`59b607b`) |
+| `MIKROTIK_WORKER_LIVE` | `false` |
+| `SNMP_POLLER_ENABLED` | No desplegado aún (staging en commit previo al dominio snmp-poller) |
+| `GET /api/snmp/health` | 404 en staging actual |
+| `validate-staging.sh` | Health OK; `/api/clients` → 401 sin JWT (esperado) |
+| `preflight.sh` en VPS | FAIL solo por `git ls-remote` HTTPS (remoto VPS usa SSH); resto OK |
+
+**Persistencia futura:** añadir `VPS_SSH_PRIVATE_KEY` en Cursor Cloud Environment (ver `docs/CLOUD_AGENT_VPS_SSH.md`). `.cursor/environment.json` ejecuta bootstrap en `install`.
+
+**Pendiente operador:** crear `wg0` en host (§2), desplegar rama con snmp-poller cuando se autorice piloto live.
+
+---
+
+## Auditoría SSH (2026-07-13 — intento inicial sin clave)
+
+Intentos desde el entorno del agente Cloud antes de configurar clave:
 
 ```bash
 ssh -o BatchMode=yes root@5.180.151.109 'wg show'
-SSH_AUTH_SOCK=/tmp/ssh-*/agent.* ssh -o BatchMode=yes root@5.180.151.109 'wg show'
 ```
 
-**Resultado:** `Permission denied (publickey,password)` — no hay claves privadas en `~/.ssh/` ni identidades cargadas en el agente (`ssh-add -l` → *The agent has no identities*). Solo existe `known_hosts` (huella del host ya conocida).
+**Resultado:** `Permission denied (publickey,password)` — resuelto tras bootstrap + persist.
 
-**Para habilitar auditoría automática desde Cloud Agent:** ver guía completa **`docs/CLOUD_AGENT_VPS_SSH.md`** (secretos `VPS_SSH_PRIVATE_KEY`, scripts `setup-ssh-from-secret.sh` y `test-ssh-connection.sh`).
-
-**Acción:** configurar la llave en el entorno Cursor y ejecutar `bash scripts/vps/test-ssh-connection.sh`, o el operador ejecuta los pasos siguientes directamente en el VPS.
+**Para habilitar auditoría automática desde Cloud Agent:** ver guía completa **`docs/CLOUD_AGENT_VPS_SSH.md`** (secretos `VPS_SSH_PRIVATE_KEY`, scripts `bootstrap-ssh-access.sh`, `persist-ssh-key-for-environment.sh`, `test-ssh-connection.sh`).
 
 ---
 

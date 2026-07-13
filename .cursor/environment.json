@@ -1,0 +1,8 @@
+{
+  "install": "npm install --ignore-scripts 2>/dev/null || npm install 2>/dev/null || true; bash scripts/vps/bootstrap-ssh-access.sh || true",
+  "env": {
+    "VPS_SSH_HOST": "5.180.151.109",
+    "VPS_SSH_USER": "root",
+    "VPS_SSH_KEY_PATH": "/home/ubuntu/.ssh/cloud-agent-nugacore-cb99"
+  }
+}

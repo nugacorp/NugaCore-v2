@@ -5,7 +5,7 @@ set -euo pipefail
 
 HOST="${VPS_SSH_HOST:-5.180.151.109}"
 USER="${VPS_SSH_USER:-root}"
-KEY_PATH="${VPS_SSH_KEY_PATH:-$HOME/.ssh/id_ed25519}"
+KEY_PATH="${VPS_SSH_KEY_PATH:-$HOME/.ssh/cloud-agent-nugacore-cb99}"
 
 mkdir -p "$HOME/.ssh"
 chmod 700 "$HOME/.ssh"

@@ -21,3 +21,8 @@ tsconfig.verify.json
 !.env.example
 !.env.production.example
 !.env.development.example
+
+# Claves SSH locales del Cloud Agent (nunca commitear)
+.cursor/local/
+**/.ssh/id_*
+**/.ssh/cloud-agent-*
