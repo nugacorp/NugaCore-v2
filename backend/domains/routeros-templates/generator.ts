@@ -11,6 +11,7 @@
 
 import { createHash } from 'crypto';
 import { generateApiCredential } from '../mikrotik/provisioning/credentials';
+import { generateSnmpCommunity } from '../mikrotik/provisioning/snmp-credentials';
 import { NUGACORE_GROUP_POLICY } from '../mikrotik/provisioning/script-generator';
 import {
   TemplateLibraryParams,
@@ -171,6 +172,61 @@ const sectionFileCleanup = (): string => `
 /file remove [find name~"nugacore-tpl-"]
 :log info "NugaCore Templates: script aplicado correctamente."`;
 
+// ── Sección SNMP (factory onboarding) ───────────────────────────────
+
+const sectionSnmp = (community: string, mgmtCidr: string, zoneName: string): string => `
+# --- SNMP NugaCore (solo lectura, red de gestión) ---
+/snmp set enabled=yes contact="NugaCore" location="${zoneName.replace(/"/g, '')}"
+:if ([:len [/snmp community find name="${community}"]] = 0) do={
+  /snmp community add name="${community}" addresses="${mgmtCidr}" read-access=yes write-access=no comment="NugaCore SNMP"
+} else={
+  /snmp community set [find name="${community}"] addresses="${mgmtCidr}" read-access=yes write-access=no
+}`;
+
+// ── Firewall gestión (API + SNMP solo desde VPN) ────────────────────
+
+const sectionFactoryFirewall = (vpnCidr: string, apiPort: number): string => `
+# --- Firewall gestión NugaCore (API + SNMP solo VPN) ---
+:if ([:len [/ip firewall filter find chain=input protocol=udp dst-port=13231 comment~"NugaCore WG inbound"]] = 0) do={
+  /ip firewall filter add chain=input protocol=udp dst-port=13231 action=accept comment="NugaCore WG inbound"
+}
+:if ([:len [/ip firewall filter find chain=input protocol=tcp dst-port=${apiPort} src-address="${vpnCidr}" comment~"NugaCore API VPN"]] = 0) do={
+  /ip firewall filter add chain=input protocol=tcp dst-port=${apiPort} src-address="${vpnCidr}" action=accept comment="NugaCore API VPN"
+}
+:if ([:len [/ip firewall filter find chain=input protocol=tcp dst-port=8729 src-address="${vpnCidr}" comment~"NugaCore API-SSL VPN"]] = 0) do={
+  /ip firewall filter add chain=input protocol=tcp dst-port=8729 src-address="${vpnCidr}" action=accept comment="NugaCore API-SSL VPN"
+}
+:if ([:len [/ip firewall filter find chain=input protocol=udp dst-port=161 src-address="${vpnCidr}" comment~"NugaCore SNMP VPN"]] = 0) do={
+  /ip firewall filter add chain=input protocol=udp dst-port=161 src-address="${vpnCidr}" action=accept comment="NugaCore SNMP VPN"
+}
+:if ([:len [/ip firewall filter find chain=input protocol=tcp dst-port=${apiPort} action=drop comment~"NugaCore API deny"]] = 0) do={
+  /ip firewall filter add chain=input protocol=tcp dst-port=${apiPort} action=drop log=yes log-prefix="NugaCore-API-deny:" comment="NugaCore API deny external"
+}
+:if ([:len [/ip firewall filter find chain=input protocol=udp dst-port=161 action=drop comment~"NugaCore SNMP deny"]] = 0) do={
+  /ip firewall filter add chain=input protocol=udp dst-port=161 action=drop log=yes log-prefix="NugaCore-SNMP-deny:" comment="NugaCore SNMP deny external"
+}`;
+
+const sectionFactoryLogging = (): string => `
+# --- Logging NugaCore ---
+:if ([:len [/system logging find comment~"NugaCore factory"]] = 0) do={
+  /system logging add topics=critical,error,warning,info action=memory comment="NugaCore factory logging"
+}`;
+
+// ── LAN mínima (WAN + bridge opcional) ──────────────────────────────
+
+const sectionMinimalLan = (d: Defaults): string => `
+# --- WAN ---
+:if ([:len [/interface list find name=WAN]] = 0) do={ /interface list add name=WAN }
+:if ([:len [/interface list member find interface="${d.wan}" list=WAN]] = 0) do={
+  /interface list member add interface="${d.wan}" list=WAN comment="NugaCore WAN"
+}
+${sectionBridge(d)}
+${sectionInterfaceLists(d)}
+${sectionLanIp(d)}
+${sectionDhcp(d)}
+${sectionNat(d)}
+${sectionFirewall()}`;
+
 // ── Sección WireGuard (client/tunnel) ─────────────────────────────
 
 interface WgSectionResult {
@@ -280,6 +336,7 @@ const sectionSstp = (p: TemplateLibraryParams, vpnUser: string, vpnPass: string)
 interface GenResult {
   script: string;
   apiUsername?: string;
+  snmpCommunity?: string;
   warnings: string[];
 }
 
@@ -312,6 +369,45 @@ const genRouterBaseWireguard = (p: TemplateLibraryParams): GenResult => {
   ].join('\n');
 
   return { script, apiUsername: cred.username, warnings };
+};
+
+const genFactoryOnboarding = (p: TemplateLibraryParams): GenResult => {
+  const d = getDefaults(p);
+  const cred = generateApiCredential(p.routerName);
+  const snmpCommunity = p.snmpCommunity || generateSnmpCommunity(p.routerName);
+  const { section: wgSection, warnings } = sectionWireguard(p);
+  const vpnCidr = p.wgVpnCidr || p.wgManagementCidr || d.apiCidr;
+  const snmpCidr = p.snmpMgmtCidr || vpnCidr;
+  const zoneName = p.zoneName || p.routerName;
+
+  const script = [
+    header(p, 'Factory Reset — WG + API + SNMP'),
+    `\n# --- Limpieza NugaCore previa ---`,
+    `/user remove [find where name~"nugacore_"]`,
+    `/user group remove [find where name="nugacore"]`,
+    `/snmp community remove [find where comment~"NugaCore"]`,
+    `/ip route remove [find where comment~"NugaCore"]`,
+    `/ip address remove [find where comment~"NugaCore"]`,
+    `/ip firewall filter remove [find where comment~"NugaCore"]`,
+    `/ip firewall nat remove [find where comment~"NugaCore"]`,
+    sectionIdentity(p.routerName),
+    sectionMinimalLan(d),
+    sectionApiUser(cred.username, cred.plainPassword, vpnCidr, d.apiPort),
+    wgSection,
+    sectionSnmp(snmpCommunity, snmpCidr, zoneName),
+    sectionFactoryFirewall(vpnCidr, d.apiPort),
+    sectionFactoryLogging(),
+    `# --- Watchdog sistema ---`,
+    `:if ([:len [/system scheduler find name="NugaCore-Factory-Watchdog"]] = 0) do={`,
+    `  /system scheduler add name="NugaCore-Factory-Watchdog" interval=00:10:00 \\`,
+    `    on-event=":log info \\"NugaCore factory: sistema activo\\"" \\`,
+    `    comment="NugaCore factory watchdog"`,
+    `}`,
+    sectionSystemNote(p.routerName, 'Factory Reset — WG + API + SNMP'),
+    sectionFileCleanup(),
+  ].join('\n');
+
+  return { script, apiUsername: cred.username, snmpCommunity, warnings };
 };
 
 const genRouterBaseSstp = (p: TemplateLibraryParams): GenResult => {
@@ -825,6 +921,7 @@ ${sectionFileCleanup()}`;
 
 const dispatch = (p: TemplateLibraryParams): GenResult => {
   switch (p.templateId) {
+    case 'nugacore_factory_onboarding': return genFactoryOnboarding(p);
     case 'router_base_wireguard': return genRouterBaseWireguard(p);
     case 'router_base_sstp':     return genRouterBaseSstp(p);
     case 'client_residential':   return genClientResidential(p);
@@ -844,7 +941,7 @@ const dispatch = (p: TemplateLibraryParams): GenResult => {
 // ── Punto de entrada público ──────────────────────────────────────
 
 export function generateFromTemplate(params: TemplateLibraryParams): TemplateGeneratedResource {
-  const { script, apiUsername, warnings } = dispatch(params);
+  const { script, apiUsername, snmpCommunity, warnings } = dispatch(params);
 
   assertNoBrandViolation(script);
   assertNoForbiddenPolicies(script);
@@ -862,5 +959,6 @@ export function generateFromTemplate(params: TemplateLibraryParams): TemplateGen
     warnings,
     generatedAt: new Date().toISOString(),
     apiUsername,
+    snmpCommunity,
   };
 }

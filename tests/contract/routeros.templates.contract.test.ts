@@ -49,13 +49,13 @@ describe('Templates Library — GET /api/routeros-templates/catalog', () => {
     const res = await request(app).get('/api/routeros-templates/catalog').set(ADMIN);
     expect(res.status).toBe(200);
     expect(Array.isArray(res.body)).toBe(true);
-    expect(res.body.length).toBe(13);
+    expect(res.body.length).toBe(14);
   });
 
   it('Administrador obtiene el catálogo (200)', async () => {
     const res = await request(app).get('/api/routeros-templates/catalog').set(ADM2);
     expect(res.status).toBe(200);
-    expect(res.body.length).toBe(13);
+    expect(res.body.length).toBe(14);
   });
 
   it('Técnico obtiene el catálogo (200)', async () => {

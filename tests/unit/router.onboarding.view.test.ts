@@ -13,8 +13,8 @@ import {
 // ── Constantes ────────────────────────────────────────────────────────
 
 describe('ONBOARDING_TEMPLATES — catálogo', () => {
-  it('contiene 9 plantillas', () => {
-    expect(ONBOARDING_TEMPLATES).toHaveLength(9);
+  it('contiene 10 plantillas', () => {
+    expect(ONBOARDING_TEMPLATES).toHaveLength(10);
   });
 
   it('cada plantilla tiene id, label, description y routerosVersion', () => {
@@ -38,8 +38,8 @@ describe('ONBOARDING_TEMPLATES — catálogo', () => {
     expect(ids).toContain('noc_ready');
   });
 
-  it('router_base_wireguard es la primera plantilla (default)', () => {
-    expect(ONBOARDING_TEMPLATES[0].id).toBe('router_base_wireguard');
+  it('nugacore_factory_onboarding es la primera plantilla (default)', () => {
+    expect(ONBOARDING_TEMPLATES[0].id).toBe('nugacore_factory_onboarding');
   });
 });
 
@@ -86,8 +86,8 @@ describe('DEFAULT_FORM', () => {
     expect(DEFAULT_FORM.routerosVersion).toBe('7');
   });
 
-  it('templateId es router_base_wireguard por defecto', () => {
-    expect(DEFAULT_FORM.templateId).toBe('router_base_wireguard');
+  it('templateId es nugacore_factory_onboarding por defecto', () => {
+    expect(DEFAULT_FORM.templateId).toBe('nugacore_factory_onboarding');
   });
 
   it('lanCidr tiene valor por defecto correcto', () => {
@@ -193,7 +193,7 @@ describe('buildEnrollmentPayload', () => {
   });
 
   it('incluye templateId', () => {
-    expect(buildEnrollmentPayload(base).templateId).toBe('router_base_wireguard');
+    expect(buildEnrollmentPayload(base).templateId).toBe('nugacore_factory_onboarding');
   });
 
   it('incluye routerType', () => {

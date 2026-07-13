@@ -23,6 +23,7 @@ import type { StartEnrollmentInput } from './types';
  * Fase 4.9.2 puede agregar más.
  */
 export const ENROLLMENT_SUPPORTED_TEMPLATES = new Set<string>([
+  'nugacore_factory_onboarding',
   'router_base_wireguard',
   'tower_wisp',
   'pcc_2wan',
@@ -37,6 +38,7 @@ export const ENROLLMENT_SUPPORTED_TEMPLATES = new Set<string>([
 // Templates cuyo script incrusta credenciales WireGuard de NugaCore.
 // Los demás (PCC, PPPoE, NOC, monitoring) no necesitan WG en el script.
 const WG_TEMPLATES = new Set<string>([
+  'nugacore_factory_onboarding',
   'router_base_wireguard',
   'tower_wisp',
 ]);
@@ -156,6 +158,8 @@ export function resolveTemplateParams(
         wgVpnCidr:         peerConfig.allowedCidr,
         wgPrivateKey:      peerConfig.privateKey,
         wgKeepalive:       25,
+        snmpMgmtCidr:      peerConfig.allowedCidr,
+        zoneName:          input.routerName,
       }
     : {};
 

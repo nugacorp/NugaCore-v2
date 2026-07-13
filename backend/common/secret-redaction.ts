@@ -16,7 +16,7 @@ export const REDACTED = '****REDACTED****';
 // Nombres de propiedad que SIEMPRE deben redactarse en objetos.
 // (incluye encryptedPassword/plainPassword: ni siquiera el blob cifrado se loguea)
 const SECRET_KEY_REGEX =
-  /(pass(word|wd)?|pwd|secret|token|jwt|bearer|authorization|auth[-_]?token|service[-_]?role|encryption[-_]?key|encrypted[-_]?password|plain[-_]?password|credential|api[-_]?key|private[-_]?key)/i;
+  /(pass(word|wd)?|pwd|secret|token|jwt|bearer|authorization|auth[-_]?token|service[-_]?role|encryption[-_]?key|encrypted[-_]?password|plain[-_]?password|credential|api[-_]?key|private[-_]?key|snmp[-_]?community|community)/i;
 
 /** Colapsa un secreto crudo conocido a la marca de redacción. */
 export function redactSecret(value?: unknown): string {
@@ -31,6 +31,12 @@ export function redactSecret(value?: unknown): string {
 export function redactString(text: string): string {
   if (typeof text !== 'string' || text.length === 0) return text;
   let out = text;
+
+  // SNMP community = ...
+  out = out.replace(
+    /(\b(?:community|snmp[-_]?community)\b\s*[:=]\s*)("[^"]*"|'[^']*'|[^\s,;)]+)/gi,
+    `$1${REDACTED}`,
+  );
 
   // password / passwd / pwd = "X" | 'X' | X   (evita capturar `public-key`)
   out = out.replace(

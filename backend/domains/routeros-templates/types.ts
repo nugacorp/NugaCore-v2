@@ -17,7 +17,8 @@ export type TemplateLibraryId =
   | 'monitoring_agent'
   | 'wireguard_client'
   | 'wireguard_server'
-  | 'noc_ready';
+  | 'noc_ready'
+  | 'nugacore_factory_onboarding';
 
 export const TEMPLATE_LIBRARY_IDS: TemplateLibraryId[] = [
   'router_base_wireguard',
@@ -33,6 +34,7 @@ export const TEMPLATE_LIBRARY_IDS: TemplateLibraryId[] = [
   'wireguard_client',
   'wireguard_server',
   'noc_ready',
+  'nugacore_factory_onboarding',
 ];
 
 export type TemplateLibraryCategory =
@@ -112,6 +114,10 @@ export interface TemplateLibraryParams {
   apiMode?: 'readonly' | 'operator';
   apiPort?: number;
   apiCidr?: string;
+  // SNMP (factory onboarding)
+  snmpCommunity?: string;
+  snmpMgmtCidr?: string;
+  zoneName?: string;
 }
 
 export interface TemplateGeneratedResource {
@@ -123,6 +129,7 @@ export interface TemplateGeneratedResource {
   warnings: string[];
   generatedAt: string;
   apiUsername?: string;
+  snmpCommunity?: string;
 }
 
 export interface TemplateHistoryEntry {

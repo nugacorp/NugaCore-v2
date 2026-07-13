@@ -7,25 +7,29 @@ desde el módulo MikroTik, sin exponer conceptos internos de WireGuard peers, se
 
 ---
 
-## Flujo UX (7 pasos)
+## Flujo UX (8 pasos)
 
 ```
 [ + Agregar Router ]
+        ↓
+0. Preparación         → checklist factory-reset (backup, acceso, WAN)
         ↓
 1. Datos del router    → nombre, tipo, modelo, versión RouterOS, sitio
         ↓
 2. Conectividad        → NugaCore VPN administrada automáticamente
         ↓
-3. Plantilla inicial   → selección de plantilla por nombre amigable
+3. Plantilla inicial   → por defecto `nugacore_factory_onboarding`
         ↓
 4. Configuración LAN   → CIDR, gateway, bridge, WAN, DHCP
         ↓
 5. Generar             → llama POST /api/router-enrollment/start
         ↓
-6. Descargar .rsc      → botón + instrucciones paso a paso
+6. Descargar .rsc      → copiar script + comunidad SNMP (una vez)
         ↓
 7. Confirmar online    → POST /api/router-enrollment/:id/check-online
 ```
+
+Ver también: `docs/FACTORY_RESET_ONBOARDING_WIZARD.md`
 
 ---
 

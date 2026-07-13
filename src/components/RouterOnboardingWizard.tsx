@@ -34,6 +34,8 @@ import {
 import type { UserRole } from '../lib/supabase';
 import {
   ONBOARDING_TEMPLATES,
+  ONBOARDING_SIMPLE_TEMPLATES,
+  FACTORY_RESET_CHECKLIST,
   ROUTER_TYPE_OPTIONS,
   MODEL_OPTIONS,
   DEFAULT_ADVANCED_FORM,
@@ -79,6 +81,7 @@ interface StartResult {
   scriptHash: string;
   securityWarning: string;
   wgAssignedIp: string;
+  snmpCommunity?: string;
 }
 
 interface CheckResult {
@@ -101,6 +104,7 @@ export interface RouterOnboardingWizardProps {
 // ── Constantes ─────────────────────────────────────────────────────────
 
 const STEP_LABELS = [
+  'Preparación',
   'Datos',
   'Conectividad',
   'Plantilla',
@@ -132,6 +136,9 @@ export default function RouterOnboardingWizard({
   const [startResult, setStartResult] = useState<StartResult | null>(null);
   const [checkResult, setCheckResult] = useState<CheckResult | null>(null);
   const [copied, setCopied] = useState(false);
+  const [factoryChecks, setFactoryChecks] = useState<boolean[]>(
+    () => FACTORY_RESET_CHECKLIST.map(() => false),
+  );
 
   if (!isOpen) return null;
 
@@ -256,7 +263,7 @@ export default function RouterOnboardingWizard({
       const api = createAuthorizedApi(getAuthHeaders);
       const data = await api.post<StartResult>('/api/router-enrollment/start', payload);
       setStartResult(data);
-      setStep(6);
+      setStep(7);
     } catch (e: unknown) {
       setError(e instanceof Error ? e.message : 'Error desconocido.');
     } finally {
@@ -309,6 +316,14 @@ export default function RouterOnboardingWizard({
     });
   };
 
+  const copyFullScript = () => {
+    if (!startResult?.script) return;
+    navigator.clipboard.writeText(startResult.script).then(() => {
+      setCopied(true);
+      setTimeout(() => setCopied(false), 2000);
+    });
+  };
+
   const handleClose = () => {
     setStep(1);
     setForm(freshDefaultForm());
@@ -318,6 +333,7 @@ export default function RouterOnboardingWizard({
     setCheckResult(null);
     clearError();
     setWgDefaultOk(null);
+    setFactoryChecks(FACTORY_RESET_CHECKLIST.map(() => false));
     onClose();
   };
 
@@ -334,6 +350,10 @@ export default function RouterOnboardingWizard({
 
   const fileName = startResult?.scriptFilename || startResult?.filename || '';
   const assignedIp = startResult?.wgAssignedIp || startResult?.assignedIp || '';
+  const factoryReady = factoryChecks.every(Boolean);
+  const visibleTemplates = form.configMode === 'advanced'
+    ? ONBOARDING_TEMPLATES
+    : ONBOARDING_SIMPLE_TEMPLATES;
 
   // ── Render ─────────────────────────────────────────────────────────
 
@@ -392,8 +412,52 @@ export default function RouterOnboardingWizard({
             </div>
           )}
 
-          {/* ── Paso 1: Datos del router ──────────────────────────────── */}
+          {/* ── Paso 1: Preparación factory-reset ─────────────────────── */}
           {step === 1 && (
+            <div className="space-y-4">
+              <div className="flex items-center gap-2">
+                <Shield size={16} className="text-amber-400" />
+                <h3 className="text-sm font-semibold text-white">Preparación del router</h3>
+              </div>
+              <p className="text-sm text-slate-400">
+                Confirma que el router está listo para el onboarding post-factory-reset.
+              </p>
+              <div className="space-y-2">
+                {FACTORY_RESET_CHECKLIST.map((label, index) => (
+                  <label key={label} className="flex items-start gap-2 p-3 bg-slate-800/60 border border-slate-700/50 rounded-lg cursor-pointer">
+                    <input
+                      type="checkbox"
+                      checked={factoryChecks[index]}
+                      onChange={(e) => setFactoryChecks((prev) => {
+                        const next = [...prev];
+                        next[index] = e.target.checked;
+                        return next;
+                      })}
+                      className="mt-0.5 w-3.5 h-3.5 accent-indigo-500"
+                    />
+                    <span className="text-xs text-slate-300">{label}</span>
+                  </label>
+                ))}
+              </div>
+              <div className="flex justify-end">
+                <button
+                  onClick={() => {
+                    if (!factoryReady) {
+                      setError('Marca todos los requisitos antes de continuar.');
+                      return;
+                    }
+                    stepTo(2);
+                  }}
+                  className="flex items-center gap-2 px-4 py-2 bg-indigo-600 hover:bg-indigo-500 text-white rounded-lg text-sm font-medium transition-colors"
+                >
+                  Siguiente <ChevronRight size={15} />
+                </button>
+              </div>
+            </div>
+          )}
+
+          {/* ── Paso 2: Datos del router ──────────────────────────────── */}
+          {step === 2 && (
             <div className="space-y-4">
               <div className="flex items-center gap-2">
                 <Server size={16} className="text-indigo-400" />
@@ -476,7 +540,7 @@ export default function RouterOnboardingWizard({
                 <button
                   onClick={() => {
                     if (!form.routerName.trim()) { setError('El nombre del router es obligatorio.'); return; }
-                    stepTo(2);
+                    stepTo(3);
                     checkWgDefault();
                   }}
                   className="flex items-center gap-2 px-4 py-2 bg-indigo-600 hover:bg-indigo-500 text-white rounded-lg text-sm font-medium transition-colors"
@@ -487,8 +551,8 @@ export default function RouterOnboardingWizard({
             </div>
           )}
 
-          {/* ── Paso 2: Conectividad ──────────────────────────────────── */}
-          {step === 2 && (
+          {/* ── Paso 3: Conectividad ──────────────────────────────────── */}
+          {step === 3 && (
             <div className="space-y-4">
               <div className="flex items-center gap-2">
                 <Wifi size={16} className="text-emerald-400" />
@@ -535,11 +599,11 @@ export default function RouterOnboardingWizard({
               )}
 
               <div className="flex justify-between">
-                <button onClick={() => stepTo(1)} className="flex items-center gap-1 px-3 py-2 text-slate-400 hover:text-slate-200 text-sm transition-colors">
+                <button onClick={() => stepTo(2)} className="flex items-center gap-1 px-3 py-2 text-slate-400 hover:text-slate-200 text-sm transition-colors">
                   <ChevronLeft size={15} /> Atrás
                 </button>
                 <button
-                  onClick={() => stepTo(3)}
+                  onClick={() => stepTo(4)}
                   disabled={wgDefaultOk === false}
                   className="flex items-center gap-2 px-4 py-2 bg-indigo-600 hover:bg-indigo-500 text-white rounded-lg text-sm font-medium transition-colors disabled:opacity-40"
                 >
@@ -549,8 +613,8 @@ export default function RouterOnboardingWizard({
             </div>
           )}
 
-          {/* ── Paso 3: Plantilla inicial ─────────────────────────────── */}
-          {step === 3 && (
+          {/* ── Paso 4: Plantilla inicial ─────────────────────────────── */}
+          {step === 4 && (
             <div className="space-y-4">
               <div className="flex items-center gap-2">
                 <FileCode size={16} className="text-purple-400" />
@@ -565,7 +629,7 @@ export default function RouterOnboardingWizard({
               )}
 
               <div className="space-y-2 max-h-72 overflow-y-auto pr-1">
-                {ONBOARDING_TEMPLATES.map((tpl) => {
+                {visibleTemplates.map((tpl) => {
                   const incompatible = tpl.routerosVersion === '7' && form.routerosVersion === '6';
                   return (
                     <button
@@ -599,14 +663,14 @@ export default function RouterOnboardingWizard({
               </div>
 
               <div className="flex justify-between">
-                <button onClick={() => stepTo(2)} className="flex items-center gap-1 px-3 py-2 text-slate-400 hover:text-slate-200 text-sm transition-colors">
+                <button onClick={() => stepTo(3)} className="flex items-center gap-1 px-3 py-2 text-slate-400 hover:text-slate-200 text-sm transition-colors">
                   <ChevronLeft size={15} /> Atrás
                 </button>
                 <button
                   onClick={() => {
                     // Carga el esquema de parámetros dinámicos de la plantilla.
                     loadParameters(form.templateId);
-                    stepTo(4);
+                    stepTo(5);
                   }}
                   className="flex items-center gap-2 px-4 py-2 bg-indigo-600 hover:bg-indigo-500 text-white rounded-lg text-sm font-medium transition-colors"
                 >
@@ -616,8 +680,8 @@ export default function RouterOnboardingWizard({
             </div>
           )}
 
-          {/* ── Paso 4: Configuración dinámica según plantilla ────────── */}
-          {step === 4 && (
+          {/* ── Paso 5: Configuración dinámica según plantilla ────────── */}
+          {step === 5 && (
             <div className="space-y-4">
               <div className="flex items-center gap-2">
                 <SlidersHorizontal size={16} className="text-orange-400" />
@@ -655,11 +719,11 @@ export default function RouterOnboardingWizard({
               )}
 
               <div className="flex justify-between">
-                <button onClick={() => stepTo(3)} className="flex items-center gap-1 px-3 py-2 text-slate-400 hover:text-slate-200 text-sm transition-colors">
+                <button onClick={() => stepTo(4)} className="flex items-center gap-1 px-3 py-2 text-slate-400 hover:text-slate-200 text-sm transition-colors">
                   <ChevronLeft size={15} /> Atrás
                 </button>
                 <button
-                  onClick={() => stepTo(5)}
+                  onClick={() => stepTo(6)}
                   disabled={paramsLoading}
                   className="flex items-center gap-2 px-4 py-2 bg-indigo-600 hover:bg-indigo-500 text-white rounded-lg text-sm font-medium transition-colors disabled:opacity-50"
                 >
@@ -669,8 +733,8 @@ export default function RouterOnboardingWizard({
             </div>
           )}
 
-          {/* ── Paso 5: Generar configuración ─────────────────────────── */}
-          {step === 5 && (
+          {/* ── Paso 6: Generar configuración ─────────────────────────── */}
+          {step === 6 && (
             <div className="space-y-4">
               <div className="flex items-center gap-2">
                 <Zap size={16} className="text-emerald-400" />
@@ -699,12 +763,13 @@ export default function RouterOnboardingWizard({
               {/* Advertencia de seguridad */}
               <div className="p-3 bg-amber-500/10 border border-amber-500/20 rounded-lg text-amber-400 text-xs flex items-start gap-2">
                 <AlertTriangle size={13} className="shrink-0 mt-0.5" />
-                El script .rsc contiene la clave privada WireGuard del router.
+                El script .rsc contiene la clave privada WireGuard del router
+                {form.templateId === 'nugacore_factory_onboarding' ? ' y la comunidad SNMP' : ''}.
                 Guárdalo de forma segura y elimínalo del equipo tras importarlo.
               </div>
 
               <div className="flex justify-between">
-                <button onClick={() => stepTo(4)} className="flex items-center gap-1 px-3 py-2 text-slate-400 hover:text-slate-200 text-sm transition-colors">
+                <button onClick={() => stepTo(5)} className="flex items-center gap-1 px-3 py-2 text-slate-400 hover:text-slate-200 text-sm transition-colors">
                   <ChevronLeft size={15} /> Atrás
                 </button>
                 <button
@@ -719,8 +784,8 @@ export default function RouterOnboardingWizard({
             </div>
           )}
 
-          {/* ── Paso 6: Descargar .rsc ────────────────────────────────── */}
-          {step === 6 && startResult && (
+          {/* ── Paso 7: Descargar .rsc ────────────────────────────────── */}
+          {step === 7 && startResult && (
             <div className="space-y-4">
               <div className="flex items-center gap-2">
                 <Download size={16} className="text-blue-400" />
@@ -739,14 +804,27 @@ export default function RouterOnboardingWizard({
                 {startResult.securityWarning || startResult.securityNotice}
               </div>
 
+              {startResult.snmpCommunity && (
+                <div className="p-3 bg-indigo-500/10 border border-indigo-500/20 rounded-lg text-indigo-300 text-xs">
+                  <p className="font-medium text-indigo-200">Comunidad SNMP (mostrada una sola vez)</p>
+                  <p className="font-mono mt-1">{startResult.snmpCommunity}</p>
+                </div>
+              )}
+
               {/* Vista previa sanitizada */}
               <div className="space-y-1.5">
                 <div className="flex items-center justify-between">
                   <span className="text-xs text-slate-400 font-mono">{fileName}</span>
-                  <button onClick={copyPreview} className="flex items-center gap-1 text-xs text-slate-400 hover:text-slate-200 transition-colors">
-                    {copied ? <CheckCircle size={11} className="text-emerald-400" /> : <Copy size={11} />}
-                    {copied ? 'Copiado' : 'Copiar preview'}
-                  </button>
+                  <div className="flex gap-2">
+                    <button onClick={copyFullScript} className="flex items-center gap-1 text-xs text-slate-400 hover:text-slate-200 transition-colors">
+                      {copied ? <CheckCircle size={11} className="text-emerald-400" /> : <Copy size={11} />}
+                      {copied ? 'Copiado' : 'Copiar script'}
+                    </button>
+                    <button onClick={copyPreview} className="flex items-center gap-1 text-xs text-slate-400 hover:text-slate-200 transition-colors">
+                      <Copy size={11} />
+                      Copiar preview
+                    </button>
+                  </div>
                 </div>
                 <pre className="bg-slate-950 border border-slate-700/50 rounded-lg p-3 text-[11px] text-emerald-300 font-mono overflow-auto max-h-32 whitespace-pre-wrap leading-relaxed">
                   {startResult.scriptPreview}
@@ -788,7 +866,7 @@ export default function RouterOnboardingWizard({
                     <Download size={14} /> Descargar .rsc
                   </button>
                   <button
-                    onClick={() => stepTo(7)}
+                    onClick={() => stepTo(8)}
                     className="flex items-center gap-2 px-4 py-2 bg-indigo-600 hover:bg-indigo-500 text-white rounded-lg text-sm transition-colors"
                   >
                     Ya importé el script <ChevronRight size={14} />
@@ -798,8 +876,8 @@ export default function RouterOnboardingWizard({
             </div>
           )}
 
-          {/* ── Paso 7: Confirmar online ──────────────────────────────── */}
-          {step === 7 && startResult && (
+          {/* ── Paso 8: Confirmar online ──────────────────────────────── */}
+          {step === 8 && startResult && (
             <div className="space-y-4">
               <div className="flex items-center gap-2">
                 <Wifi size={16} className="text-emerald-400" />
@@ -831,8 +909,12 @@ export default function RouterOnboardingWizard({
                   }
                   <div>
                     <p>{checkResult.message}</p>
-                    {checkResult.snapshotSource && (
-                      <p className="text-xs opacity-70 mt-0.5">fuente: {checkResult.snapshotSource}</p>
+                    {checkResult.snapshotSource === 'simulated' && (
+                      <p className="text-xs text-amber-300/90 mt-1">
+                        La verificación devolvió <strong>simulated</strong>: activa
+                        {' '}<code className="font-mono">MIKROTIK_WORKER_LIVE=true</code> en staging (con autorización)
+                        para confirmación live.
+                      </p>
                     )}
                   </div>
                 </div>
@@ -857,7 +939,7 @@ export default function RouterOnboardingWizard({
               )}
 
               <div className="flex items-center justify-between">
-                <button onClick={() => stepTo(6)} className="flex items-center gap-1 px-3 py-2 text-slate-400 hover:text-slate-200 text-sm transition-colors">
+                <button onClick={() => stepTo(7)} className="flex items-center gap-1 px-3 py-2 text-slate-400 hover:text-slate-200 text-sm transition-colors">
                   <ChevronLeft size={15} /> Atrás
                 </button>
                 <div className="flex gap-2">
