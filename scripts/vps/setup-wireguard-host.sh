@@ -38,8 +38,8 @@ fi
 mkdir -p "$KEY_DIR" /etc/wireguard
 chmod 700 "$KEY_DIR" /etc/wireguard
 
-# ── 2) Si wg0 ya escucha, validar y salir ─────────────────────────────
-if wg show wg0 >/dev/null 2>&1 && ss -ulnp | grep -q ":${WG_PORT} "; then
+# ── 2) Si wg0 ya escucha, validar y salir (salvo FORCE_WG_RECREATE) ───
+if [[ "${FORCE_WG_RECREATE:-false}" != "true" ]] && wg show wg0 >/dev/null 2>&1 && ss -ulnp | grep -q ":${WG_PORT} "; then
   log "wg0 ya activo en UDP ${WG_PORT}"
   wg show wg0 | sed 's/^/  /'
   exit 0

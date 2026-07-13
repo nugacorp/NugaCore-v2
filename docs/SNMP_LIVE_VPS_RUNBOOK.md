@@ -3,6 +3,28 @@
 **VPS documentado:** `5.180.151.109`  
 **Staging URL:** `https://nugacore-staging.5.180.151.109.sslip.io`
 
+## Auditoría operativa (2026-07-13 — post wg0 + deploy)
+
+| Comprobación | Resultado |
+|--------------|-----------|
+| `wg0` host | **OK** — UDP `13231` escuchando |
+| Servidor WG en NugaCore | Creado (`isDefault`, pool `10.70.0.0/16`) |
+| Peers activos | `0` (pendiente enrollment CHR) |
+| Coolify deploy | `629e25b` @ rama `cursor/snmp-live-mikrotik-wizard-cb99` — **finished** |
+| `GET /api/snmp/health` (JWT) | `{"enabled":false,"intervalMs":120000}` |
+| Env runtime | `SNMP_POLLER_ENABLED=false`, `MIKROTIK_VPN_*` configurados |
+| `validate-staging.sh` | Health OK; `/api/clients` 401 sin JWT (esperado Fase 2) |
+
+Scripts ejecutados en VPS:
+
+```bash
+bash scripts/vps/setup-wireguard-host.sh
+bash scripts/vps/sync-wireguard-peers.sh          # tras cada enrollment
+BRANCH=cursor/snmp-live-mikrotik-wizard-cb99 bash scripts/vps/deploy-coolify-staging.sh
+```
+
+---
+
 ## Auditoría SSH (2026-07-13)
 
 **Estado:** SSH operativo desde Cloud Agent (`cloud-agent-nugacore-cb99`).
