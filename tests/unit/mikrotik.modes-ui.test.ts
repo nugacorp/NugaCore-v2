@@ -25,4 +25,10 @@ describe('UI selector de modos VPN', () => {
   it('por defecto selecciona WireGuard administrado', () => {
     expect(panel).toContain("useState<MikrotikProvisioningMode>('wireguard_managed')");
   });
+
+  it('WireGuard: IP VPN automática (solo informativa, sin input manual)', () => {
+    expect(panel).toContain('IP VPN asignada (automática)');
+    expect(panel).toContain('/api/mikrotik/routers/vpn-ip-preview');
+    expect(panel).toContain('isWireguardMode ? {} : { managementIp: fIp }');
+  });
 });

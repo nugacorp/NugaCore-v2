@@ -87,6 +87,33 @@ export class WireguardService {
     return servers.map((s) => this.toServerView(s, peers.filter((p) => p.serverId === s.id && p.status === 'active').length));
   }
 
+  /** Servidor WireGuard por defecto (o null si no hay ninguno activo). */
+  async getDefaultServer(): Promise<WireguardServerView | null> {
+    const rec = await this.repo.getDefaultServer();
+    if (!rec) return null;
+    const peers = await this.repo.listPeers({ serverId: rec.id, status: 'active' });
+    return this.toServerView(rec, peers.length);
+  }
+
+  /**
+   * Vista previa de la siguiente IP libre del pool (sin reservar).
+   * Para mostrar al operador antes de registrar un router WireGuard.
+   */
+  async previewNextIp(serverId?: string): Promise<{ ip: string; serverId: string; serverName: string; preview: true }> {
+    const rec = serverId
+      ? await this.repo.getServer(serverId)
+      : await this.repo.getDefaultServer();
+    if (!rec) throw new NotFoundError('No hay servidor WireGuard configurado.');
+    const allocations = await this.repo.listAllocations(rec.id);
+    const ip = nextFreeIp(
+      allocations.map((a) => ({ ip: a.ip, status: a.status })),
+      rec.vpnCidr,
+      [rec.serverVpnIp],
+    );
+    if (!ip) throw new Error('WireGuard IP pool exhausted');
+    return { ip, serverId: rec.id, serverName: rec.name, preview: true };
+  }
+
   async createServer(input: CreateServerInput): Promise<ServerCreatedOnce> {
     // Si este servidor es default, quitar el default anterior.
     if (input.isDefault) {
@@ -106,14 +133,6 @@ export class WireguardService {
     await this.repo.createServer(rec);
     logger.info('WireGuard: servidor creado', { serverId: id, name: rec.name, isDefault: rec.isDefault });
     return { server: this.toServerView(rec, 0), serverPrivateKey: kp.privateKey };
-  }
-
-  /** Devuelve la vista del servidor default activo, o null si no existe. */
-  async getDefaultServer(): Promise<WireguardServerView | null> {
-    const rec = await this.repo.getDefaultServer();
-    if (!rec) return null;
-    const peers = await this.repo.listPeers({ serverId: rec.id, status: 'active' });
-    return this.toServerView(rec, peers.length);
   }
 
   /** Busca un servidor por ID y devuelve su vista, o null si no existe. */

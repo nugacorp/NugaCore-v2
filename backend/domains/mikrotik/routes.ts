@@ -198,6 +198,19 @@ router.get('/api/mikrotik/routers', requireRoles([...PROV_VIEW_ROLES]), (_req, r
   res.json(store.MIKROTIK_ROUTERS.map(fullRouterView));
 });
 
+router.get('/api/mikrotik/routers/vpn-ip-preview', requireRoles(['super admin', 'administrador', 'tecnico']), asyncHandler(async (req, res) => {
+  const mode = String(req.query.connectionType || 'wireguard');
+  if (mode !== 'wireguard' && mode !== 'wireguard_managed') {
+    res.status(400).json({ error: 'vpn-ip-preview solo aplica a connectionType wireguard' });
+    return;
+  }
+  try {
+    res.json(await getWireguardService().previewNextIp());
+  } catch (err) {
+    res.status(400).json({ error: err instanceof Error ? err.message : 'No se pudo obtener IP VPN' });
+  }
+}));
+
 router.get('/api/mikrotik/routers/:id', requireRoles([...PROV_VIEW_ROLES]), (req, res) => {
   const routerItem = store.MIKROTIK_ROUTERS.find((row) => row.id === req.params.id);
   if (!routerItem) {
@@ -208,25 +221,63 @@ router.get('/api/mikrotik/routers/:id', requireRoles([...PROV_VIEW_ROLES]), (req
 
 const VALID_CONNECTION_TYPES = ['wireguard', 'sstp', 'direct', 'zerotier', 'tailscale'] as const;
 
-router.post('/api/mikrotik/routers', requireRoles(['super admin', 'administrador']), (req, res) => {
+router.post('/api/mikrotik/routers', requireRoles(['super admin', 'administrador']), asyncHandler(async (req, res) => {
   const { name, ipAddress, managementIp, apiPort, apiSslPort, username, password, linkedTowerId, connectionType, vpnIp, notes, routerOsVersion } = req.body;
 
-  const mgmt = managementIp ?? ipAddress;
-  if (!name || !mgmt) {
-    return res.status(400).json({ error: 'Missing required fields: name, managementIp (o ipAddress)' });
-  }
-  if (connectionType !== undefined && !VALID_CONNECTION_TYPES.includes(String(connectionType) as never)) {
-    return res.status(400).json({ error: 'Invalid connectionType' });
+  const connType = connectionType ? String(connectionType) : 'sstp';
+  if (!VALID_CONNECTION_TYPES.includes(connType as never)) {
+    res.status(400).json({ error: 'Invalid connectionType' });
+    return;
   }
 
-  const duplicatedIp = store.MIKROTIK_ROUTERS.some((row) => row.ipAddress === String(mgmt));
-  if (duplicatedIp) {
-    return res.status(409).json({ error: 'Router IP already registered' });
+  const isWireguard = connType === 'wireguard';
+  let mgmt = managementIp ?? ipAddress;
+
+  if (!name) {
+    res.status(400).json({ error: 'Missing required field: name' });
+    return;
+  }
+  if (!isWireguard && !mgmt) {
+    res.status(400).json({ error: 'Missing required fields: name, managementIp (o ipAddress)' });
+    return;
   }
 
   const id = store.getUniqueMikrotikRouterId();
-  // Credenciales: NO se exige password manual. Username auto si no se da; el
-  // password real se genera al emitir el script de provisioning.
+  let assignedVpnIp: string | undefined;
+  let wireguardMeta: { peerId: string; serverId: string; assignedIp: string; autoAssigned: true } | undefined;
+
+  if (isWireguard) {
+    try {
+      const defaultServer = await getWireguardService().getDefaultServer();
+      if (!defaultServer) {
+        res.status(400).json({ error: 'No hay servidor WireGuard default. Configura uno en WireGuard Manager.' });
+        return;
+      }
+      const peer = await getWireguardService().createPeer(
+        { serverId: defaultServer.id, name: String(name), routerId: id },
+        req.authContext?.userId,
+      );
+      assignedVpnIp = peer.peer.allocatedIp;
+      mgmt = peer.peer.allocatedIp;
+      wireguardMeta = {
+        peerId: peer.peer.id,
+        serverId: defaultServer.id,
+        assignedIp: peer.peer.allocatedIp,
+        autoAssigned: true,
+      };
+    } catch (err) {
+      res.status(400).json({ error: err instanceof Error ? err.message : 'No se pudo asignar IP WireGuard' });
+      return;
+    }
+  } else {
+    mgmt = String(mgmt);
+    const duplicatedIp = store.MIKROTIK_ROUTERS.some((row) => row.ipAddress === mgmt);
+    if (duplicatedIp) {
+      res.status(409).json({ error: 'Router IP already registered' });
+      return;
+    }
+  }
+
   const resolvedUser = username ? String(username) : generateApiUsername(id);
   const encryptedPassword = password ? encryptSecret(String(password)) : '';
 
@@ -243,9 +294,9 @@ router.post('/api/mikrotik/routers', requireRoles(['super admin', 'administrador
     routerOsVersion: routerOsVersion ? String(routerOsVersion) : '7.x',
     linkedTowerId: linkedTowerId ? String(linkedTowerId) : undefined,
     lastHealthCheckAt: nowStamp(),
-    connectionType: connectionType ? (String(connectionType) as MikrotikRouterRegistryItem['connectionType']) : 'sstp',
+    connectionType: connType as MikrotikRouterRegistryItem['connectionType'],
     managementIp: String(mgmt),
-    vpnIp: vpnIp ? String(vpnIp) : undefined,
+    vpnIp: assignedVpnIp ?? (vpnIp ? String(vpnIp) : undefined),
     apiSslPort: Number(apiSslPort) || 8729,
     provisioningStatus: 'pending',
     notes: notes ? String(notes) : undefined,
@@ -258,11 +309,16 @@ router.post('/api/mikrotik/routers', requireRoles(['super admin', 'administrador
     dryRun: false,
     status: 'executed',
     actorId: req.authContext?.userId,
-    requestPayload: { name: routerItem.name, connectionType: routerItem.connectionType },
-    resultSummary: `Router ${id} registrado (${routerItem.connectionType}).`,
+    requestPayload: { name: routerItem.name, connectionType: routerItem.connectionType, ...(wireguardMeta ? { wireguardPeerId: wireguardMeta.peerId } : {}) },
+    resultSummary: wireguardMeta
+      ? `Router ${id} registrado (wireguard, IP ${wireguardMeta.assignedIp} auto-asignada).`
+      : `Router ${id} registrado (${routerItem.connectionType}).`,
   });
-  res.status(201).json(fullRouterView(routerItem));
-});
+  res.status(201).json({
+    ...fullRouterView(routerItem),
+    ...(wireguardMeta ? { wireguard: wireguardMeta } : {}),
+  });
+}));
 
 router.put('/api/mikrotik/routers/:id', requireRoles(['super admin', 'administrador']), (req, res) => {
   const index = store.MIKROTIK_ROUTERS.findIndex((row) => row.id === req.params.id);
@@ -538,24 +594,33 @@ const emitProvisioning = async (
   const serverOverrides = (body.server && typeof body.server === 'object' ? body.server : {}) as Partial<ScriptServerConfig>;
   const server = buildServerConfig(serverOverrides);
 
-  // Integración con el WireGuard Manager (Fase 4.6.1): si se indica un
-  // wireguardServerId y el modo es WireGuard administrado, NugaCore asigna el
-  // peer (claves + IP) y lo incrusta en el script (sin intercambio manual).
+  // Integración con el WireGuard Manager (Fase 4.6.1): en modo WireGuard
+  // administrado, NugaCore asigna el peer (claves + IP) usando el servidor
+  // indicado o el default del pool.
   let wgPeer: PeerCreatedOnce | undefined;
-  if (requestedMode === 'wireguard_managed' && body.wireguardServerId) {
-    try {
-      wgPeer = await getWireguardService().getPeerConfigForRouter(routerItem.id, String(body.wireguardServerId), actorId);
-      const [host, port] = wgPeer.serverEndpoint.split(':');
-      server.wgServerPublicKey = wgPeer.serverPublicKey;
-      server.vpnServerHost = host || server.vpnServerHost;
-      server.vpnServerPort = Number(port) || server.vpnServerPort;
-      server.routerVpnIp = wgPeer.assignedIp;
-      server.wgAllowedAddress = wgPeer.allowedCidr;
-      server.serverManagementCidr = wgPeer.allowedCidr || server.serverManagementCidr;
-      server.wgRouterPrivateKey = wgPeer.privateKey || undefined;
-      server.wgPresharedKey = wgPeer.presharedKey || undefined;
-    } catch {
-      // Si falla, el script se genera con placeholders (modo manual).
+  if (requestedMode === 'wireguard_managed') {
+    const serverId = body.wireguardServerId
+      ? String(body.wireguardServerId)
+      : (await getWireguardService().getDefaultServer())?.id;
+    if (serverId) {
+      try {
+        wgPeer = await getWireguardService().getPeerConfigForRouter(routerItem.id, serverId, actorId);
+        const [host, port] = wgPeer.serverEndpoint.split(':');
+        server.wgServerPublicKey = wgPeer.serverPublicKey;
+        server.vpnServerHost = host || server.vpnServerHost;
+        server.vpnServerPort = Number(port) || server.vpnServerPort;
+        server.routerVpnIp = wgPeer.assignedIp;
+        server.wgAllowedAddress = wgPeer.allowedCidr;
+        server.serverManagementCidr = wgPeer.allowedCidr || server.serverManagementCidr;
+        server.wgRouterPrivateKey = wgPeer.privateKey || undefined;
+        server.wgPresharedKey = wgPeer.presharedKey || undefined;
+        routerItem.vpnIp = wgPeer.peer.allocatedIp;
+        routerItem.managementIp = wgPeer.peer.allocatedIp;
+        routerItem.ipAddress = wgPeer.peer.allocatedIp;
+        body.wireguardServerId = serverId;
+      } catch {
+        // Si falla, el script se genera con placeholders (modo manual).
+      }
     }
   }
 

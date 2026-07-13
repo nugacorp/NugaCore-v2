@@ -1,5 +1,6 @@
-import React, { useState } from 'react';
+import React, { useState, useEffect, useCallback } from 'react';
 import { getErrorMessage } from '../lib/errors';
+import { fetchWithRateLimitBackoff } from '../lib/apiBackoff';
 import {
   Router as RouterIcon,
   Plus,
@@ -41,6 +42,7 @@ interface Props {
   onGenerateScript: (id: string, connectionType: string, server?: Record<string, unknown>) => Promise<ProvisioningScriptResponse>;
   onRotateCredentials: (id: string, connectionType: string, server?: Record<string, unknown>) => Promise<ProvisioningScriptResponse>;
   onTestConnection: (id: string) => Promise<MikrotikTestConnectionResponse>;
+  getAuthHeaders?: () => Promise<Record<string, string>>;
 }
 
 const STATUS_CLASS: Record<StatusTone, string> = {
@@ -60,6 +62,7 @@ export default function MikrotikRoutersPanel({
   onGenerateScript,
   onRotateCredentials,
   onTestConnection,
+  getAuthHeaders,
 }: Props) {
   const canManage = canManageRouters(userRole);
   const canScript = canGenerateScript(userRole);
@@ -76,6 +79,44 @@ export default function MikrotikRoutersPanel({
   const [fType, setFType] = useState<MikrotikProvisioningMode>('wireguard_managed');
   const [fApiPort, setFApiPort] = useState('8728');
   const [fNotes, setFNotes] = useState('');
+  const [vpnIpPreview, setVpnIpPreview] = useState<string | null>(null);
+  const [vpnIpPreviewLoading, setVpnIpPreviewLoading] = useState(false);
+  const [vpnIpPreviewError, setVpnIpPreviewError] = useState<string | null>(null);
+
+  const isWireguardMode = fType === 'wireguard_managed';
+
+  const loadVpnIpPreview = useCallback(async () => {
+    if (!getAuthHeaders) {
+      setVpnIpPreview(null);
+      setVpnIpPreviewError('Sin sesión para consultar el pool WireGuard.');
+      return;
+    }
+    setVpnIpPreviewLoading(true);
+    setVpnIpPreviewError(null);
+    try {
+      const headers = await getAuthHeaders();
+      const res = await fetchWithRateLimitBackoff('/api/mikrotik/routers/vpn-ip-preview?connectionType=wireguard', { headers });
+      if (!res.ok) {
+        const err = await res.json().catch(() => ({}));
+        throw new Error((err as { error?: string }).error || `HTTP ${res.status}`);
+      }
+      const data = await res.json() as { ip: string };
+      setVpnIpPreview(data.ip);
+    } catch (err) {
+      setVpnIpPreview(null);
+      setVpnIpPreviewError(getErrorMessage(err, 'No se pudo obtener la IP del pool.'));
+    } finally {
+      setVpnIpPreviewLoading(false);
+    }
+  }, [getAuthHeaders]);
+
+  useEffect(() => {
+    if (showCreate && isWireguardMode) void loadVpnIpPreview();
+    if (!showCreate || !isWireguardMode) {
+      setVpnIpPreview(null);
+      setVpnIpPreviewError(null);
+    }
+  }, [showCreate, isWireguardMode, loadVpnIpPreview]);
 
   // Configuración avanzada del servidor VPN (opcional; se envía como `server`).
   const [showAdvanced, setShowAdvanced] = useState(false);
@@ -106,22 +147,20 @@ export default function MikrotikRoutersPanel({
 
   const handleCreate = async (e: React.FormEvent) => {
     e.preventDefault();
-    if (!fName || !fIp) return;
+    if (!fName || (!isWireguardMode && !fIp)) return;
     setBusy('Creando router...');
     try {
-      // El registro guarda el connectionType base; el modo administrado se
-      // elige al generar el script.
       const baseType = ({
         wireguard_managed: 'wireguard', sstp_managed: 'sstp', tailscale_lab: 'tailscale', direct_lab: 'direct',
       } as Record<MikrotikProvisioningMode, string>)[fType];
       await onCreateRouter({
         name: fName,
-        managementIp: fIp,
+        ...(isWireguardMode ? {} : { managementIp: fIp }),
         connectionType: baseType,
         apiPort: Number(fApiPort) || 8728,
         notes: fNotes || undefined,
       });
-      flash('success', 'Router registrado.');
+      flash('success', isWireguardMode ? 'Router registrado. IP VPN asignada automáticamente.' : 'Router registrado.');
       setFName(''); setFIp(''); setFNotes('');
       setShowCreate(false);
     } catch (err) {
@@ -382,8 +421,27 @@ export default function MikrotikRoutersPanel({
                 <input required value={fName} onChange={(e) => setFName(e.target.value)} placeholder="Router Core Norte" className="w-full bg-slate-900 text-white border border-slate-800 rounded-xl p-2.5" />
               </div>
               <div className="space-y-1">
-                <label className="text-slate-400 font-mono">IP de administración</label>
-                <input required value={fIp} onChange={(e) => setFIp(e.target.value)} placeholder="10.0.1.1" className="w-full bg-slate-900 text-white border border-slate-800 rounded-xl p-2.5 font-mono" />
+                <label className="text-slate-400 font-mono">
+                  {isWireguardMode ? 'IP VPN asignada (automática)' : 'IP de administración'}
+                </label>
+                {isWireguardMode ? (
+                  <div className="w-full bg-slate-900/60 text-slate-200 border border-slate-800 rounded-xl p-2.5 font-mono">
+                    {vpnIpPreviewLoading ? (
+                      <span className="text-slate-500">Consultando pool WireGuard…</span>
+                    ) : vpnIpPreview ? (
+                      <span>{vpnIpPreview}</span>
+                    ) : (
+                      <span className="text-amber-400">{vpnIpPreviewError || 'Sin vista previa'}</span>
+                    )}
+                  </div>
+                ) : (
+                  <input required value={fIp} onChange={(e) => setFIp(e.target.value)} placeholder="10.0.1.1" className="w-full bg-slate-900 text-white border border-slate-800 rounded-xl p-2.5 font-mono" />
+                )}
+                {isWireguardMode && (
+                  <p className="text-[10px] text-slate-500 font-mono">
+                    NugaCore reserva la IP al registrar desde el pool WireGuard. La vista previa es orientativa.
+                  </p>
+                )}
               </div>
               <div className="grid grid-cols-2 gap-3">
                 <div className="space-y-1">

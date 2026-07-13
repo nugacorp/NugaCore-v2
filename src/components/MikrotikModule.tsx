@@ -290,6 +290,7 @@ export default function MikrotikModule({
         onGenerateScript={onGenerateScript}
         onRotateCredentials={onRotateCredentials}
         onTestConnection={onTestConnection}
+        getAuthHeaders={getAuthHeaders}
       />
 
       {/* Worker MikroTik · Read Only + Dry Run (Fase 4.6) */}

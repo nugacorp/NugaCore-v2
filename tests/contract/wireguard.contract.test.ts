@@ -86,10 +86,13 @@ describe('WireGuard Manager — integración con provisioning', () => {
   beforeAll(() => { app = createApp(); });
 
   it('wireguard_managed + wireguardServerId → script con private-key e IP asignada', async () => {
-    const srv = await request(app).post('/api/wireguard/servers').set(ADMIN).send({ name: 'VPN Int', endpointHost: 'vpn.int.local', endpointPort: 51820 });
+    const srv = await request(app).post('/api/wireguard/servers').set(ADMIN).send({ name: 'VPN Int', endpointHost: 'vpn.int.local', endpointPort: 51820, isDefault: true });
     const serverId = srv.body.server.id;
 
-    const router = await request(app).post('/api/mikrotik/routers').set(ADMIN).send({ name: 'Int Router', managementIp: '10.5.5.5', connectionType: 'wireguard' });
+    const router = await request(app).post('/api/mikrotik/routers').set(ADMIN).send({ name: 'Int Router', connectionType: 'wireguard' });
+    expect(router.status).toBe(201);
+    expect(router.body.wireguard?.autoAssigned).toBe(true);
+    expect(router.body.wireguard?.assignedIp).toMatch(/^10\.70\./);
     const routerId = router.body.id;
 
     const res = await request(app).post(`/api/mikrotik/routers/${routerId}/provisioning-script`).set(ADMIN).send({ connectionType: 'wireguard_managed', wireguardServerId: serverId });

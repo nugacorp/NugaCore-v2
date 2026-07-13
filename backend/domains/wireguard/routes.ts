@@ -18,6 +18,11 @@ router.get('/api/wireguard/servers', requireRoles([...WG_READ_ROLES]), asyncHand
   res.json(await getWireguardService().listServers());
 }));
 
+router.get('/api/wireguard/next-ip', requireRoles([...WG_READ_ROLES]), asyncHandler(async (req, res) => {
+  const serverId = String(req.query.serverId || '').trim() || undefined;
+  res.json(await getWireguardService().previewNextIp(serverId));
+}));
+
 router.post('/api/wireguard/servers', requireRoles([...WG_ROLES]), asyncHandler(async (req, res) => {
   const { name, endpointHost, endpointPort, listenPort, vpnCidr, serverVpnIp, isDefault } = req.body || {};
   if (!name || !endpointHost) {

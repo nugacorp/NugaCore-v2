@@ -37,16 +37,23 @@ describe('MikroTik provisioning — RBAC de lectura', () => {
 describe('MikroTik provisioning — crear y generar script', () => {
   let app: Express;
   let routerId: string;
-  beforeAll(() => { app = createApp(); });
+  beforeAll(async () => {
+    app = createApp();
+    await request(app).post('/api/wireguard/servers').set(ADMIN).send({
+      name: 'Test WG Default', endpointHost: 'vpn.test.local', endpointPort: 13231, isDefault: true,
+    });
+  });
 
-  it('admin crea un router (status pending, sin credenciales)', async () => {
+  it('admin crea un router WireGuard (IP auto-asignada, status pending)', async () => {
     const res = await request(app)
       .post('/api/mikrotik/routers')
       .set(ADMIN)
-      .send({ name: 'Router Test 4.4', managementIp: '10.9.9.9', connectionType: 'wireguard' });
+      .send({ name: 'Router Test 4.4', connectionType: 'wireguard' });
     expect(res.status).toBe(201);
     expect(res.body.status).toBe('pending');
     expect(res.body.hasCredentials).toBe(false);
+    expect(res.body.wireguard?.autoAssigned).toBe(true);
+    expect(res.body.vpnIp || res.body.managementIp).toMatch(/^10\.70\./);
     routerId = res.body.id;
   });
 
