@@ -2,6 +2,7 @@ import { afterEach, describe, expect, it } from 'vitest';
 import { diffExportText, summarizeDiff } from '../../backend/domains/inventory-sync/config-diff';
 import { hashExportText, snapshotToExportText } from '../../backend/domains/inventory-sync/config-snapshot';
 import { configSnapshotStore } from '../../backend/domains/inventory-sync/config-snapshot-store';
+import { StoreConfigSnapshotRepository } from '../../backend/domains/inventory-sync/repository';
 import { createInventorySyncService } from '../../backend/domains/inventory-sync/service';
 import type { RouterOsInventorySnapshot } from '../../backend/domains/inventory-sync/types';
 
@@ -39,6 +40,7 @@ describe('inventory sync config snapshot service', () => {
     const service = createInventorySyncService({
       loadNugaInventory: () => [],
       loadRouterOsSnapshot: async () => labSnapshot(),
+      configSnapshotRepo: new StoreConfigSnapshotRepository(),
     });
 
     const first = await service.captureConfigSnapshot();

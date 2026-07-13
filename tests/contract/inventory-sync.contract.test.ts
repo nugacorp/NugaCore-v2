@@ -22,6 +22,7 @@ const endpoints = [
   '/api/inventory-sync/status',
   '/api/inventory-sync/snapshot',
   '/api/inventory-sync/differences',
+  '/api/inventory-sync/config-snapshots',
 ];
 
 describe('Inventory Sync Read-Only contract', () => {
@@ -39,6 +40,17 @@ describe('Inventory Sync Read-Only contract', () => {
 
   it('Cobranza recibe 403 en los 3 endpoints', async () => {
     for (const path of endpoints) {
+      const res = await request(app).get(path).set(COBRANZA);
+      expect(res.status, `GET ${path}`).toBe(403);
+    }
+  });
+
+  it('Cobranza recibe 403 en endpoints de historial', async () => {
+    for (const path of [
+      '/api/inventory-sync/config-snapshots/capture',
+      '/api/inventory-sync/config-snapshots/diff?from=x&to=y',
+      '/api/inventory-sync/config-snapshots/cfg-snap-x',
+    ]) {
       const res = await request(app).get(path).set(COBRANZA);
       expect(res.status, `GET ${path}`).toBe(403);
     }
@@ -86,6 +98,49 @@ describe('Inventory Sync Read-Only contract', () => {
     expect(res.body.nugaCoreInventory).toEqual(res.body.nugacore);
     expect(res.body.routerosSnapshot).toEqual(res.body.routeros);
     expect(res.body.routeros[0]).toMatchObject({ source: 'mock', name: expect.any(String) });
+  });
+
+  it('config snapshots: capture/list/get/diff mantienen contrato read-only', async () => {
+    const captureA = await request(app).get('/api/inventory-sync/config-snapshots/capture').set(ADMIN);
+    expect(captureA.status).toBe(200);
+    expect(captureA.body).toMatchObject({
+      id: expect.any(String),
+      routerId: expect.any(String),
+      source: 'mock',
+      readOnly: true,
+      contentHash: expect.any(String),
+    });
+
+    const captureB = await request(app).get('/api/inventory-sync/config-snapshots/capture').set(ADMIN);
+    expect(captureB.status).toBe(200);
+    expect(captureB.body.id).not.toBe(captureA.body.id);
+
+    const list = await request(app).get('/api/inventory-sync/config-snapshots').set(ADMIN);
+    expect(list.status).toBe(200);
+    expect(list.body.readOnly).toBe(true);
+    expect(list.body.total).toBeGreaterThanOrEqual(2);
+
+    const byId = await request(app)
+      .get(`/api/inventory-sync/config-snapshots/${captureA.body.id}`)
+      .set(ADMIN);
+    expect(byId.status).toBe(200);
+    expect(byId.body.id).toBe(captureA.body.id);
+
+    const diff = await request(app)
+      .get(`/api/inventory-sync/config-snapshots/diff?from=${captureA.body.id}&to=${captureB.body.id}`)
+      .set(ADMIN);
+    expect(diff.status).toBe(200);
+    expect(diff.body).toMatchObject({
+      readOnly: true,
+      fromId: captureA.body.id,
+      toId: captureB.body.id,
+      summary: {
+        added: expect.any(Number),
+        removed: expect.any(Number),
+        unchanged: expect.any(Number),
+      },
+    });
+    expect(Array.isArray(diff.body.lines)).toBe(true);
   });
 
   it('no existen métodos write para los endpoints', async () => {
