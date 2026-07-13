@@ -24,7 +24,34 @@ En una ejecución anterior (2026-07-08) el acceso funcionó con la clave **`clou
 
 ---
 
-## Opción A — Recomendada: secreto en el entorno Cursor
+## Opción A — Automática: script bootstrap (recomendado)
+
+Con secretos cargados en el Cloud Environment, un solo comando:
+
+```bash
+bash scripts/vps/bootstrap-ssh-access.sh
+```
+
+El script intenta en orden: `VPS_SSH_PRIVATE_KEY` → llave local → `VPS_SSH_PASSWORD` (instala la pública con `ssh-copy-id`) → muestra la clave pública para instalación manual.
+
+| Secreto | Uso |
+|---------|-----|
+| `VPS_SSH_PRIVATE_KEY` | Clave privada ya presente en `authorized_keys` del VPS |
+| `VPS_SSH_PASSWORD` | Contraseña de `root` (o `VPS_SSH_USER`); instala la pública una vez |
+| `VPS_SSH_HOST` | Default `5.180.151.109` |
+| `VPS_SSH_USER` | Default `root` |
+| `VPS_SSH_KEY_PATH` | Default `~/.ssh/cloud-agent-nugacore-cb99` |
+
+Tras `RESULTADO: OK`, ejecuta runbooks:
+
+```bash
+ssh nugacore-vps 'wg show wg0'
+ssh nugacore-vps 'bash -s' < scripts/vps/preflight.sh
+```
+
+---
+
+## Opción B — Secreto manual en el entorno Cursor
 
 ### 1. En el VPS (una sola vez): autorizar la clave pública
 
@@ -75,7 +102,7 @@ ssh -o BatchMode=yes root@5.180.151.109 'bash -s' < scripts/vps/preflight.sh
 
 ---
 
-## Opción B — Sesión manual en el terminal del Cloud Agent
+## Opción C — Sesión manual en el terminal del Cloud Agent
 
 Si el dashboard no expone secretos multilínea, puedes configurar **solo para un run** (menos seguro; no dejar la clave en el repo):
 
@@ -91,7 +118,7 @@ ssh -o IdentitiesOnly=yes -i ~/.ssh/id_ed25519 root@5.180.151.109 'echo OK'
 
 ---
 
-## Opción C — Tailscale / bastión
+## Opción D — Tailscale / bastión
 
 Si el VPS solo acepta SSH vía Tailscale u otra IP:
 
