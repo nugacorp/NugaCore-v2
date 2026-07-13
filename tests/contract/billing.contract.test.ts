@@ -112,7 +112,7 @@ describe('API v1 — Billing (escritura + RBAC)', () => {
     const res = await request(app)
       .post('/api/billing/invoices')
       .set(ADMIN)
-      .send({ clientId: 'c-1', amount: 299, dueDateStr: '2026-07-10' });
+      .send({ clientId: 'c-1', amount: 299, dueDateStr: '2999-07-10' });
     expect(res.status).toBe(201);
     expectKeys(res.body, INVOICE_KEYS);
     expect(res.body.amount).toBe(299);

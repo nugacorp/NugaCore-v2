@@ -5,6 +5,13 @@ import { isSupabaseAdminConfigured, supabaseAdmin } from '../../services/supabas
 
 const router = Router();
 
+interface UserProfileRow {
+  email?: string | null;
+  full_name?: string | null;
+  phone?: string | null;
+  avatar_url?: string | null;
+}
+
 router.get('/api/auth/health', (_req, res) => {
   res.json({ status: 'ok', mode: 'mock-auth-v1' });
 });
@@ -31,10 +38,11 @@ router.get('/api/auth/me', asyncHandler(async (req, res) => {
       .eq('id', userId)
       .maybeSingle();
     if (data) {
-      email = (data as any).email || '';
-      fullName = (data as any).full_name || '';
-      phone = (data as any).phone || '';
-      avatarUrl = (data as any).avatar_url || '';
+      const profile = data as UserProfileRow;
+      email = profile.email || '';
+      fullName = profile.full_name || '';
+      phone = profile.phone || '';
+      avatarUrl = profile.avatar_url || '';
     }
   }
 

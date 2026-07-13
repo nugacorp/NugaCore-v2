@@ -63,7 +63,11 @@ const resolveRoleFromSupabase = async (userId: string): Promise<AppRole> => {
     .limit(1)
     .maybeSingle();
 
-  const roleName = ((mappedRole as any)?.roles?.name || '').trim();
+  type SupabaseRoleJoin = { name?: string | null } | { name?: string | null }[] | null;
+  type UserRoleRow = { roles?: SupabaseRoleJoin };
+  const roles = (mappedRole as UserRoleRow | null)?.roles;
+  const rawRoleName = Array.isArray(roles) ? roles[0]?.name : roles?.name;
+  const roleName = (rawRoleName || '').trim();
   const normalized = normalizeRole(roleName);
   return normalized || DEFAULT_ROLE;
 };

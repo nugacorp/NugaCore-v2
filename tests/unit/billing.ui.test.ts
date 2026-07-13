@@ -42,7 +42,7 @@ describe('App — billing usa Bearer JWT vía fetchJson', () => {
   });
 
   it('la lectura de billing pasa por fetchJson', () => {
-    expect(appSource).toContain("fetchJson('/api/billing/invoices')");
-    expect(appSource).toContain("fetchJson('/api/billing/account-summary')");
+    expect(appSource).toContain("fetchJson<Invoice[]>('/api/billing/invoices')");
+    expect(appSource).toContain("fetchJson<BillingAccountSummary>('/api/billing/account-summary')");
   });
 });

@@ -78,6 +78,27 @@ import { AlertTriangle, RefreshCw, Menu, Sparkles, ArrowRight } from 'lucide-rea
 const SIDEBAR_COLLAPSE_STORAGE_KEY = 'nugacore.sidebar.collapsed.v1';
 const WELCOME_BANNER_DISMISSED_KEY = 'nugacore.welcome.dismissed.v1';
 
+interface DashboardStats {
+  activeClients: number;
+  suspendedClients: number;
+  leadsCount: number;
+  mrr: number;
+  cobranzaMes: number;
+  facturacionMes: number;
+  activeTickets: number;
+  towers: { online: number; warning: number; offline: number };
+  oltStats: { connected: number; offlineOnus: number };
+  provisioningPending?: number;
+}
+
+interface GisMapData {
+  clients?: Client[];
+  towers?: Tower[];
+  olts?: OltFTTH[];
+  onus?: OnuFTTH[];
+  naps?: NapBox[];
+}
+
 // Code splitting (Fase 2 production-ready): cada módulo se carga bajo
 // demanda con React.lazy; este fallback se muestra durante la descarga
 // del chunk correspondiente.
@@ -218,7 +239,7 @@ export default function App() {
   };
 
   // DB States
-  const [stats, setStats] = useState<any>({
+  const [stats, setStats] = useState<DashboardStats>({
     activeClients: 0,
     suspendedClients: 0,
     leadsCount: 0,
@@ -243,7 +264,7 @@ export default function App() {
   // Fase 5.1: sub-tab interna del módulo Inventario ERP (aditiva, sin tocar el sidebar).
   const [inventorySubTab, setInventorySubTab] = useState<'items' | 'warehouses' | 'transfers'>('items');
   const [alerts, setAlerts] = useState<NocAlert[]>([]);
-  const [mikrotikLogs, setMikrotikLogs] = useState<any[]>([]);
+  const [mikrotikLogs, setMikrotikLogs] = useState<RouterSnapshot[]>([]);
   const [naps, setNaps] = useState<NapBox[]>([]);
   const [provisionedRouters, setProvisionedRouters] = useState<MikrotikRouterView[]>([]);
   const [workerRuns, setWorkerRuns] = useState<MikrotikWorkerRun[]>([]);
@@ -279,7 +300,7 @@ export default function App() {
     return headers;
   }, [userSession]);
 
-  const fetchJson = useCallback(async (url: string, init?: RequestInit) => {
+  const fetchJson = useCallback(async <T,>(url: string, init?: RequestInit): Promise<T> => {
     const authHeaders = await getAuthHeaders();
     const response = await fetchWithRateLimitBackoff(url, {
       ...init,
@@ -292,7 +313,7 @@ export default function App() {
     });
 
     if (!response.ok) {
-      const errPayload = await response.json().catch(() => ({ error: 'Request failed' }));
+      const errPayload = await response.json().catch(() => ({ error: 'Request failed' })) as { error?: string };
       throw new Error(errPayload.error || `HTTP ${response.status}`);
     }
 
@@ -334,26 +355,26 @@ export default function App() {
       if (activeTab === 'dashboard') {
         attemptedFetch = true;
         const [resStats, resAlerts] = await Promise.all([
-          fetchJson('/api/dashboard-stats'),
-          fetchJson('/api/alerts'),
+          fetchJson<DashboardStats>('/api/dashboard-stats'),
+          fetchJson<NocAlert[]>('/api/alerts'),
         ]);
         setStats(resStats);
         setAlerts(resAlerts);
       } else if (activeTab === 'crm') {
         attemptedFetch = true;
         const [resClients, resPlans] = await Promise.all([
-          fetchJson('/api/clients'),
-          fetchJson('/api/plans'),
+          fetchJson<Client[]>('/api/clients'),
+          fetchJson<Plan[]>('/api/plans'),
         ]);
         setClients(resClients);
         setPlans(resPlans);
       } else if (activeTab === 'billing') {
         attemptedFetch = true;
         const [resClients, resInvoices, resBillingSummary, resRevenueReport] = await Promise.all([
-          fetchJson('/api/clients'),
-          fetchJson('/api/billing/invoices'),
-          fetchJson('/api/billing/account-summary'),
-          fetchJson('/api/billing/revenue-report'),
+          fetchJson<Client[]>('/api/clients'),
+          fetchJson<Invoice[]>('/api/billing/invoices'),
+          fetchJson<BillingAccountSummary>('/api/billing/account-summary'),
+          fetchJson<BillingRevenueReport>('/api/billing/revenue-report'),
         ]);
         setClients(resClients);
         setInvoices(resInvoices);
@@ -362,11 +383,11 @@ export default function App() {
       } else if (activeTab === 'network') {
         attemptedFetch = true;
         const [resClients, resTowers, resOlts, resOnus, resNaps] = await Promise.all([
-          fetchJson('/api/clients'),
-          fetchJson('/api/network-towers'),
-          fetchJson('/api/olt'),
-          fetchJson('/api/onu'),
-          fetchJson('/api/naps'),
+          fetchJson<Client[]>('/api/clients'),
+          fetchJson<Tower[]>('/api/network-towers'),
+          fetchJson<OltFTTH[]>('/api/olt'),
+          fetchJson<OnuFTTH[]>('/api/onu'),
+          fetchJson<NapBox[]>('/api/naps'),
         ]);
         setClients(resClients);
         setTowers(resTowers);
@@ -376,19 +397,19 @@ export default function App() {
       } else if (activeTab === 'support') {
         attemptedFetch = true;
         const [resClients, resTickets, resWorkOrders] = await Promise.all([
-          fetchJson('/api/clients'),
-          fetchJson('/api/tickets'),
-          fetchJson('/api/workorders'),
+          fetchJson<Client[]>('/api/clients'),
+          fetchJson<Ticket[]>('/api/tickets'),
+          fetchJson<TaskOrder[]>('/api/workorders'),
         ]);
         setClients(resClients);
         setTickets(resTickets);
         setWorkOrders(resWorkOrders);
       } else if (activeTab === 'inventory') {
         attemptedFetch = true;
-        setInventory(await fetchJson('/api/inventory'));
+        setInventory(await fetchJson<WarehouseItem[]>('/api/inventory'));
       } else if (activeTab === 'gis') {
         attemptedFetch = true;
-        const mapData = await fetchJson('/api/gis/map-data');
+        const mapData = await fetchJson<GisMapData>('/api/gis/map-data');
         setClients(mapData.clients ?? []);
         setTowers(mapData.towers ?? []);
         setOlts(mapData.olts ?? []);
@@ -397,9 +418,9 @@ export default function App() {
       } else if (activeTab === 'finance' || activeTab === 'owner') {
         attemptedFetch = true;
         const [resClients, resInvoices, resTickets] = await Promise.all([
-          fetchJson('/api/clients'),
-          fetchJson('/api/billing/invoices'),
-          fetchJson('/api/tickets'),
+          fetchJson<Client[]>('/api/clients'),
+          fetchJson<Invoice[]>('/api/billing/invoices'),
+          fetchJson<Ticket[]>('/api/tickets'),
         ]);
         setClients(resClients);
         setInvoices(resInvoices);
@@ -407,17 +428,17 @@ export default function App() {
       } else if (isMikrotikWorkspaceTab(activeTab)) {
         attemptedFetch = true;
         try {
-          setMikrotikLogs(await fetchJson('/api/mikrotik/logs'));
+          setMikrotikLogs(await fetchJson<RouterSnapshot[]>('/api/mikrotik/logs'));
         } catch {
           setMikrotikLogs([]);
         }
         try {
-          setProvisionedRouters(await fetchJson('/api/mikrotik/routers'));
+          setProvisionedRouters(await fetchJson<MikrotikRouterView[]>('/api/mikrotik/routers'));
         } catch {
           setProvisionedRouters([]);
         }
         try {
-          setWorkerRuns(await fetchJson('/api/mikrotik/worker/runs'));
+          setWorkerRuns(await fetchJson<MikrotikWorkerRun[]>('/api/mikrotik/worker/runs'));
         } catch {
           setWorkerRuns([]);
         }
@@ -430,10 +451,10 @@ export default function App() {
         attemptedFetch = true;
         try {
           const [customers, orders, events, policy] = await Promise.all([
-            fetchJson('/api/suspension/customers'),
-            fetchJson('/api/suspension/orders'),
-            fetchJson('/api/suspension/events'),
-            fetchJson('/api/suspension/policies'),
+            fetchJson<CustomerServiceView[]>('/api/suspension/customers'),
+            fetchJson<SuspensionOrder[]>('/api/suspension/orders'),
+            fetchJson<SuspensionEvent[]>('/api/suspension/events'),
+            fetchJson<SuspensionPolicy>('/api/suspension/policies'),
           ]);
           setSuspensionCustomers(customers);
           setSuspensionOrders(orders);
@@ -450,8 +471,8 @@ export default function App() {
         attemptedFetch = true;
         try {
           const [servers, peers] = await Promise.all([
-            fetchJson('/api/wireguard/servers'),
-            fetchJson('/api/wireguard/peers'),
+            fetchJson<WireguardServerView[]>('/api/wireguard/servers'),
+            fetchJson<WireguardPeerView[]>('/api/wireguard/peers'),
           ]);
           setWgServers(servers);
           setWgPeers(peers);
@@ -518,7 +539,7 @@ export default function App() {
         document.removeEventListener('visibilitychange', onVisibilityChange);
       }
     };
-  }, [sessionBootstrapped, userSession?.id, fetchData, rateLimitNotice, rateLimitUntilMs]);
+  }, [sessionBootstrapped, userSession, fetchData, rateLimitNotice, rateLimitUntilMs]);
 
   useEffect(() => {
     if (!rateLimitNotice) return;
@@ -552,7 +573,7 @@ export default function App() {
   };
 
   // CLIENT CRUD CONTROLS
-  const handleAddClient = async (newClientData: any) => {
+  const handleAddClient = async (newClientData: Record<string, unknown>) => {
     try {
       await fetchJson('/api/clients', {
         method: 'POST',
@@ -596,7 +617,7 @@ export default function App() {
   // Estado de cuenta por factura (allocations + saldos). Lo consume BillingModule
   // bajo demanda al abrir el detalle de una factura.
   const fetchAccountState = async (invoiceId: string): Promise<AccountStateResponse> => {
-    return fetchJson(`/api/billing/invoices/${invoiceId}/account-state`);
+    return fetchJson<AccountStateResponse>(`/api/billing/invoices/${invoiceId}/account-state`);
   };
 
   // ── MikroTik provisioning (Fase 4.4) ─────────────────────────────────
@@ -604,7 +625,7 @@ export default function App() {
   // así que un 403 NO debe romper la carga global de datos.
   async function loadProvisionedRouters() {
     try {
-      const data = await fetchJson('/api/mikrotik/routers');
+      const data = await fetchJson<MikrotikRouterView[]>('/api/mikrotik/routers');
       setProvisionedRouters(data);
     } catch {
       setProvisionedRouters([]);
@@ -771,7 +792,7 @@ export default function App() {
     }
   };
 
-  const handleProvisionOnu = async (onuData: any) => {
+  const handleProvisionOnu = async (onuData: Record<string, unknown>) => {
     try {
       await fetchJson('/api/onu/provision', {
         method: 'POST',
@@ -785,7 +806,7 @@ export default function App() {
   };
 
   // Errores RELANZADOS para que BillingModule muestre estado de error/éxito.
-  const handleCreateInvoice = async (invoiceData: any) => {
+  const handleCreateInvoice = async (invoiceData: Record<string, unknown>) => {
     await fetchJson('/api/billing/invoices', {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
@@ -794,7 +815,7 @@ export default function App() {
     await fetchData();
   };
 
-  const handleEditInvoice = async (id: string, invoiceData: any) => {
+  const handleEditInvoice = async (id: string, invoiceData: Record<string, unknown>) => {
     await fetchJson(`/api/billing/invoices/${id}`, {
       method: 'PUT',
       headers: { 'Content-Type': 'application/json' },
@@ -803,7 +824,7 @@ export default function App() {
     await fetchData();
   };
 
-  const handleCreateTower = async (towerData: any) => {
+  const handleCreateTower = async (towerData: Record<string, unknown>) => {
     try {
       await fetchJson('/api/network-towers', {
         method: 'POST',
@@ -825,8 +846,8 @@ export default function App() {
     });
   };
 
-  const handleAskCopilot = async (prompt: string, routerContext?: any) => {
-    return fetchJson('/api/mikrotik/copilot', {
+  const handleAskCopilot = async (prompt: string, routerContext?: Record<string, unknown>) => {
+    return fetchJson<unknown>('/api/mikrotik/copilot', {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({ prompt, routerContext })
@@ -834,7 +855,7 @@ export default function App() {
   };
 
   // HELPDESK TICKETS & TECH CHECKS
-  const handleAddTicket = async (ticketData: any) => {
+  const handleAddTicket = async (ticketData: Record<string, unknown>) => {
     try {
       await fetchJson('/api/tickets', {
         method: 'POST',
@@ -860,7 +881,7 @@ export default function App() {
     }
   };
 
-  const handleUpdateWorkOrderStatus = async (id: string, status: string, signature?: string, checklist?: any[]) => {
+  const handleUpdateWorkOrderStatus = async (id: string, status: string, signature?: string, checklist?: Record<string, unknown>[]) => {
     try {
       await fetchJson(`/api/workorders/${id}/update-status`, {
         method: 'POST',
@@ -887,7 +908,7 @@ export default function App() {
     }
   };
 
-  const handleAddInventoryItem = async (itemData: any) => {
+  const handleAddInventoryItem = async (itemData: Record<string, unknown>) => {
     try {
       await fetchJson('/api/inventory/add', {
         method: 'POST',

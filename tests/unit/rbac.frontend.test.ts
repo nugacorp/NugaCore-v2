@@ -131,7 +131,7 @@ describe('RBAC visual por rol (frontend)', () => {
     const app = readFileSync('src/App.tsx', 'utf8');
 
     expect(app).toContain('if (!sessionBootstrapped || !userSession)');
-    expect(app).toContain('[sessionBootstrapped, userSession?.id');
+    expect(app).toContain('[sessionBootstrapped, userSession, fetchData');
   });
 
   it('App pausa polling cuando la pestaña no está visible y limpia listeners', () => {
