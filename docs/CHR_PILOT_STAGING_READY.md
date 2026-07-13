@@ -9,8 +9,10 @@ Infraestructura preparada en VPS `5.180.151.109` para el piloto factory-reset + 
 | SSH Cloud Agent | OK (`ssh nugacore-vps`) |
 | `wg0` host UDP 13231 | OK |
 | Servidor WG NugaCore (API) | OK (`GET /api/wireguard/servers` → 1 default) |
-| Staging deploy | `629e25b+` rama `cursor/snmp-live-mikrotik-wizard-cb99` |
+| Staging deploy | `main` @ `0af05aa`+ (deploy #118 finished 2026-07-13) |
 | `GET /api/snmp/health` | OK con JWT; `enabled:false` (esperado) |
+| `USE_DB_WIREGUARD` | `true` en contenedor |
+| Servidor WG en DB | **Pendiente** — aplicar `20260714010000_wireguard_servers_is_default.sql` y registrar servidor |
 | `SNMP_POLLER_ENABLED` | `false` hasta CHR validado |
 | `MIKROTIK_WORKER_LIVE` | `false` hasta CHR online |
 

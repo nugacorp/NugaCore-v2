@@ -3,6 +3,37 @@
 **VPS documentado:** `5.180.151.109`  
 **Staging URL:** `https://nugacore-staging.5.180.151.109.sslip.io`
 
+## Auditoría operativa (2026-07-13 — redeploy main @ 0af05aa)
+
+| Comprobación | Resultado |
+|--------------|-----------|
+| Coolify rama | `main` — deploy **#118 finished** (`0af05aa`) |
+| Contenedor | `zmjc5lnl0wj3kh0uj14s2p4i:0af05aa…` healthy |
+| `GET /api/health` | 200 — `persistence=mixed` |
+| `GET /api/snmp/health` (JWT) | `{"enabled":false,"intervalMs":120000}` |
+| Flags runtime | `MIKROTIK_WORKER_LIVE=false`, `SNMP_POLLER_ENABLED=false`, `USE_DB_WIREGUARD=true` |
+| `wg0` host | OK — UDP `13231` |
+| Servidor WG en DB | **Bloqueado** — falta columna `is_default` → migración `20260714010000` |
+| DB schema probes | OK `snmp_snapshot`, `warehouses`, `inventory_items.operational_status` |
+| Coolify env fix | Variables SNMP insertadas vía SQL rompían cifrado Laravel; recreadas con modelo PHP |
+
+Deploy:
+
+```bash
+BRANCH=main bash scripts/vps/deploy-coolify-staging.sh
+```
+
+Tras aplicar `20260714010000_wireguard_servers_is_default.sql`:
+
+```bash
+bash scripts/vps/setup-wireguard-host.sh   # registra servidor en DB si wg0 ya existe: ver nota abajo
+bash scripts/vps/sync-wireguard-peers.sh
+```
+
+> Si `wg0` ya está activo pero la DB está vacía, registrar servidor con `POST /api/wireguard/servers` (JWT) o borrar `/root/.wireguard/nugacore-server.key` y re-ejecutar setup.
+
+---
+
 ## Auditoría operativa (2026-07-13 — post wg0 + deploy)
 
 | Comprobación | Resultado |
