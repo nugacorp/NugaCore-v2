@@ -33,13 +33,13 @@ upsert_env() {
     "SELECT id FROM environment_variables WHERE resourceable_type='App\\\\Models\\\\Application' AND resourceable_id=${APP_ID} AND key='${key}' AND is_preview=false LIMIT 1;")"
   if [[ -n "$exists" ]]; then
     docker exec coolify-db psql -U coolify -d coolify -c \
-      "UPDATE environment_variables SET value='${val}', is_runtime=${runtime}, is_buildtime=${buildtime}, updated_at=NOW() WHERE id=${exists};" >/dev/null
+      "UPDATE environment_variables SET value='${val}', is_runtime=${runtime}, is_buildtime=${buildtime}, resourceable_type='App\\Models\\Application', updated_at=NOW() WHERE id=${exists};" >/dev/null
   else
     local new_uuid
     new_uuid="$(uuidgen 2>/dev/null || cat /proc/sys/kernel/random/uuid)"
     docker exec coolify-db psql -U coolify -d coolify -c \
       "INSERT INTO environment_variables (uuid, key, value, is_preview, is_runtime, is_buildtime, version, is_literal, is_required, is_shared, resourceable_type, resourceable_id, created_at, updated_at)
-       VALUES ('${new_uuid}', '${key}', '${val}', false, ${runtime}, ${buildtime}, '4.0', false, false, false, 'App\\\\Models\\\\Application', ${APP_ID}, NOW(), NOW());" >/dev/null
+       VALUES ('${new_uuid}', '${key}', '${val}', false, ${runtime}, ${buildtime}, '4.0', false, false, false, 'App\\Models\\Application', ${APP_ID}, NOW(), NOW());" >/dev/null
   fi
   log "env ${key}=${val}"
 }
