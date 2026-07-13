@@ -29,7 +29,10 @@ import {
 } from './types';
 
 import { nowIso } from '../../common/time';
-const mgmtCidr = () => process.env.MIKROTIK_MGMT_CIDR || '10.0.0.0/24';
+
+/** CIDR de gestión/API: preferir el pool del servidor WG, no un default desalineado. */
+const peerAllowedCidr = (server: WireguardServerRecord, override?: string): string =>
+  override || server.vpnCidr || process.env.MIKROTIK_MGMT_CIDR || DEFAULT_WG_POOL;
 
 export interface CreateServerInput {
   name: string;
@@ -76,7 +79,7 @@ export class WireguardService {
       serverPublicKey: server.publicKey,
       serverEndpoint: `${server.endpointHost}:${server.endpointPort}`,
       assignedIp: `${peer.allocatedIp}/32`,
-      allowedCidr: peer.allowedCidr || mgmtCidr(),
+      allowedCidr: peer.allowedCidr || server.vpnCidr,
     };
   }
 
@@ -162,7 +165,7 @@ export class WireguardService {
     const rec: WireguardPeerRecord = {
       id, serverId: server.id, routerId: input.routerId, name: input.name, publicKey: kp.publicKey,
       encryptedPrivateKey: encryptSecret(kp.privateKey), encryptedPresharedKey: encryptSecret(psk),
-      encryptionVersion: ENCRYPTION_VERSION, allocatedIp: ip, allowedCidr: input.allowedCidr || mgmtCidr(),
+      encryptionVersion: ENCRYPTION_VERSION, allocatedIp: ip, allowedCidr: peerAllowedCidr(server, input.allowedCidr),
       status: 'active', createdBy: actorId, createdAt: nowIso(), updatedAt: nowIso(),
     };
     await this.repo.createPeer(rec);

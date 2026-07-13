@@ -62,7 +62,8 @@ foreach (\$rows as \$row) { \$row->delete(); }
 if [[ "$ADD_SNMP_ENV" == "true" ]]; then
   upsert_env "MIKROTIK_VPN_HOST" "5.180.151.109"
   upsert_env "MIKROTIK_VPN_CIDR" "10.70.0.0/16"
-  upsert_env "MIKROTIK_MGMT_CIDR" "10.0.0.0/24"
+  upsert_env "MIKROTIK_MGMT_CIDR" "10.70.0.0/16"
+  upsert_env "MIKROTIK_ALLOWED_API_CIDR" "10.70.0.0/16"
   upsert_env "USE_DB_WIREGUARD" "true"
   upsert_env "SNMP_POLLER_ENABLED" "false"
   upsert_env "SNMP_POLLER_INTERVAL_MS" "120000"

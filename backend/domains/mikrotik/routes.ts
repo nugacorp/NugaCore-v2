@@ -13,6 +13,7 @@ import {
   normalizeProvisioningMode,
 } from './provisioning/types';
 import { asyncHandler } from '../../common/errors';
+import { logger } from '../../common/logger';
 import { processPendingOrders, readRouterSnapshot, listWorkerRuns } from './worker/worker';
 import { getWireguardService } from '../wireguard/service';
 import type { PeerCreatedOnce } from '../wireguard/types';
@@ -27,8 +28,8 @@ const PROV_ROTATE_ROLES = ['super admin', 'administrador'] as const;
 // Configuración de servidor/VPN de NugaCore (placeholders seguros si no hay env).
 const buildServerConfig = (overrides: Partial<ScriptServerConfig> = {}): ScriptServerConfig => {
   const vpnHost = overrides.vpnServerHost || overrides.vpnHost || process.env.MIKROTIK_VPN_HOST || 'vpn.nugacore.local';
-  const vpnCidr = overrides.vpnNetworkCidr || overrides.vpnCidr || process.env.MIKROTIK_VPN_CIDR || '10.10.0.0/24';
-  const mgmtCidr = overrides.serverManagementCidr || process.env.MIKROTIK_MGMT_CIDR || '10.0.0.0/24';
+  const vpnCidr = overrides.vpnNetworkCidr || overrides.vpnCidr || process.env.MIKROTIK_VPN_CIDR || '10.70.0.0/16';
+  const mgmtCidr = overrides.serverManagementCidr || process.env.MIKROTIK_MGMT_CIDR || vpnCidr;
   return {
     // Compatibilidad (Fase 4.4)
     vpnHost,
@@ -45,9 +46,28 @@ const buildServerConfig = (overrides: Partial<ScriptServerConfig> = {}): ScriptS
     vpnNetworkCidr: vpnCidr,
     routerVpnIp: overrides.routerVpnIp,
     serverVpnIp: overrides.serverVpnIp || process.env.MIKROTIK_VPN_SERVER_IP,
-    allowedApiCidr: overrides.allowedApiCidr || process.env.MIKROTIK_ALLOWED_API_CIDR,
+    allowedApiCidr: overrides.allowedApiCidr || process.env.MIKROTIK_ALLOWED_API_CIDR || vpnCidr,
     routerOsVersionHint: overrides.routerOsVersionHint,
   };
+};
+
+/** Completa server config desde el WireGuard Manager (servidor default o indicado). */
+const enrichServerFromWireguard = async (
+  server: ScriptServerConfig,
+  serverId?: string,
+): Promise<string | undefined> => {
+  const wgSvc = getWireguardService();
+  const wgServer = serverId ? await wgSvc.findServer(serverId) : await wgSvc.getDefaultServer();
+  if (!wgServer) return undefined;
+
+  server.wgServerPublicKey = server.wgServerPublicKey || wgServer.publicKey;
+  server.vpnServerHost = server.vpnServerHost || wgServer.endpointHost;
+  server.vpnServerPort = server.vpnServerPort || wgServer.endpointPort;
+  server.vpnNetworkCidr = server.vpnNetworkCidr || wgServer.vpnCidr;
+  server.serverManagementCidr = server.serverManagementCidr || wgServer.vpnCidr;
+  server.allowedApiCidr = server.allowedApiCidr || wgServer.vpnCidr;
+  server.serverVpnIp = server.serverVpnIp || wgServer.serverVpnIp;
+  return wgServer.id;
 };
 
 const nowStamp = () => new Date().toISOString().replace('T', ' ').substring(0, 16);
@@ -596,31 +616,40 @@ const emitProvisioning = async (
 
   // Integración con el WireGuard Manager (Fase 4.6.1): en modo WireGuard
   // administrado, NugaCore asigna el peer (claves + IP) usando el servidor
-  // indicado o el default del pool.
+  // indicado o el default del pool. Si falla, NO se entrega script con placeholders.
   let wgPeer: PeerCreatedOnce | undefined;
   if (requestedMode === 'wireguard_managed') {
-    const serverId = body.wireguardServerId
-      ? String(body.wireguardServerId)
-      : (await getWireguardService().getDefaultServer())?.id;
-    if (serverId) {
-      try {
-        wgPeer = await getWireguardService().getPeerConfigForRouter(routerItem.id, serverId, actorId);
-        const [host, port] = wgPeer.serverEndpoint.split(':');
-        server.wgServerPublicKey = wgPeer.serverPublicKey;
-        server.vpnServerHost = host || server.vpnServerHost;
-        server.vpnServerPort = Number(port) || server.vpnServerPort;
-        server.routerVpnIp = wgPeer.assignedIp;
-        server.wgAllowedAddress = wgPeer.allowedCidr;
-        server.serverManagementCidr = wgPeer.allowedCidr || server.serverManagementCidr;
-        server.wgRouterPrivateKey = wgPeer.privateKey || undefined;
-        server.wgPresharedKey = wgPeer.presharedKey || undefined;
-        routerItem.vpnIp = wgPeer.peer.allocatedIp;
-        routerItem.managementIp = wgPeer.peer.allocatedIp;
-        routerItem.ipAddress = wgPeer.peer.allocatedIp;
-        body.wireguardServerId = serverId;
-      } catch {
-        // Si falla, el script se genera con placeholders (modo manual).
-      }
+    const hintedServerId = body.wireguardServerId ? String(body.wireguardServerId) : undefined;
+    const serverId = (await enrichServerFromWireguard(server, hintedServerId))
+      ?? (await getWireguardService().getDefaultServer())?.id;
+
+    if (!serverId) {
+      throw new Error('No hay servidor WireGuard default. Configura uno en WireGuard Manager.');
+    }
+
+    try {
+      wgPeer = await getWireguardService().getPeerConfigForRouter(routerItem.id, serverId, actorId);
+      const [host, port] = wgPeer.serverEndpoint.split(':');
+      server.wgServerPublicKey = wgPeer.serverPublicKey;
+      server.vpnServerHost = host || server.vpnServerHost;
+      server.vpnServerPort = Number(port) || server.vpnServerPort;
+      server.routerVpnIp = wgPeer.assignedIp;
+      server.wgAllowedAddress = wgPeer.allowedCidr;
+      server.serverManagementCidr = wgPeer.allowedCidr || server.serverManagementCidr;
+      server.wgRouterPrivateKey = wgPeer.privateKey || undefined;
+      server.wgPresharedKey = wgPeer.presharedKey || undefined;
+      routerItem.vpnIp = wgPeer.peer.allocatedIp;
+      routerItem.managementIp = wgPeer.peer.allocatedIp;
+      routerItem.ipAddress = wgPeer.peer.allocatedIp;
+      body.wireguardServerId = serverId;
+    } catch (err) {
+      const message = err instanceof Error ? err.message : 'error desconocido';
+      logger.warn('WireGuard provisioning: no se pudo resolver peer del router', {
+        routerId: routerItem.id,
+        serverId,
+        error: message,
+      });
+      throw new Error(`No se pudo generar configuración WireGuard administrada: ${message}`, { cause: err });
     }
   }
 

@@ -14,10 +14,15 @@ describe('Managed VPN provisioning — endpoint', () => {
   let routerId = '';
   beforeAll(async () => {
     app = createApp();
+    await request(app)
+      .post('/api/wireguard/servers')
+      .set(ADMIN)
+      .send({ name: 'VPN Default', endpointHost: 'vpn.staging.local', endpointPort: 13231, isDefault: true });
     const created = await request(app)
       .post('/api/mikrotik/routers')
       .set(ADMIN)
-      .send({ name: 'VPN Modes Test', managementIp: '10.8.8.8', connectionType: 'wireguard' });
+      .send({ name: 'VPN Modes Test', connectionType: 'wireguard' });
+    expect(created.status).toBe(201);
     routerId = created.body.id;
   });
 
@@ -29,8 +34,11 @@ describe('Managed VPN provisioning — endpoint', () => {
     expect(res.status).toBe(201);
     expect(res.body.mode).toBe('wireguard_managed');
     expect(res.body.script).toContain('NugaCoreWG');
+    expect(res.body.script).not.toContain('<ASIGNAR_IP_WG_DEL_ROUTER>');
+    expect(res.body.script).not.toContain('<PEGAR_PUBLIC_KEY_DEL_SERVIDOR_NUGACORE>');
     expect(res.body.credentials.apiUsername).toBeTruthy();
     expect(res.body).toHaveProperty('routerVpnIp');
+    expect(res.body.wireguard?.managed).toBe(true);
   });
 
   it('sstp_managed → script SSTP con vpnUsername', async () => {
