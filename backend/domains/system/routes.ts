@@ -4,6 +4,7 @@ import { asyncHandler } from '../../common/errors';
 import { domainsOnDb, featureFlags, type DomainKey } from '../../config/feature-flags';
 import { isSupabaseAdminConfigured } from '../../services/supabase-admin';
 import { runDataConsistencyCheck } from './consistency';
+import { buildProductionReadinessReport } from './production-readiness';
 
 const router = Router();
 
@@ -58,6 +59,14 @@ router.get(
         mikrotikLiveBlocked: !mikrotikLive,
       },
     });
+  }),
+);
+
+router.get(
+  '/api/system/production-readiness',
+  requireRoles(READ_ROLES),
+  asyncHandler(async (_req, res) => {
+    res.json(await buildProductionReadinessReport());
   }),
 );
 

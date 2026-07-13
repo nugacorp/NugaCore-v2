@@ -1,7 +1,8 @@
 # NugaCore — Guía de Despliegue (DEPLOYMENT)
 
-> Cubre Fase 0: empaquetado, ejecución local, VPS, Coolify y rollback.
-> **Aún sin Supabase ni datos persistentes** (eso llega en Fase 1). El sistema corre con el store en memoria.
+> Cubre empaquetado, ejecución local, VPS, Coolify, staging y promoción a producción.
+> La persistencia crítica se activa con flags `USE_DB_*` (ver `.env.production.example` y `docs/STAGING_FLAGS_WISP_OS.md`).
+> Gates de producción: `GET /api/system/production-readiness` y `scripts/validate-production-readiness.mjs`.
 
 ---
 

@@ -136,4 +136,5 @@ Orden obligatorio: **Ver -> Auditar -> Simular -> Confirmar -> Ejecutar -> Autom
 - 2026-07-08: Plan creado y versionado.
 - 2026-07-08: Bloqueador identificado: sin acceso SSH directo desde este entorno; ejecución VPS delegada a Hermes/operator con runbook.
 - 2026-07-08: Siguiente acción requerida del operador: correr `scripts/vps/preflight.sh` y `validate-staging.sh` sobre el último commit de la rama activa.
+- 2026-07-09: Infraestructura de producción en repo: `GET /api/system/production-readiness`, Prometheus `/api/metrics/prometheus`, health/ready con ping Supabase, scripts `validate-production-readiness.mjs` / `smoke-production.sh`, workflow `production-gates.yml`, runbooks (backup, promoción, incidentes, rotación de secretos).
 

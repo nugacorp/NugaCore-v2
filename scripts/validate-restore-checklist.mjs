@@ -9,15 +9,17 @@
 
 console.log('\n=== Restore Checklist — OLA 0 §14 ===\n');
 
-const tested = process.env.STAGING_RESTORE_TESTED === 'true';
+const tested = process.env.STAGING_RESTORE_TESTED === 'true'
+  || process.env.PRODUCTION_RESTORE_TESTED === 'true';
 
 if (tested) {
-  console.log('  ✅  STAGING_RESTORE_TESTED=true');
+  const flag = process.env.PRODUCTION_RESTORE_TESTED === 'true' ? 'PRODUCTION_RESTORE_TESTED' : 'STAGING_RESTORE_TESTED';
+  console.log(`  ✅  ${flag}=true`);
   console.log('  Confirmar manualmente: backup tomado, restore ejecutado, API responde.');
   process.exit(0);
 }
 
-console.log('  ⚠️  STAGING_RESTORE_TESTED no está en true');
+console.log('  ⚠️  STAGING_RESTORE_TESTED / PRODUCTION_RESTORE_TESTED no están en true');
 console.log('\nPasos manuales (PRODUCTION_READINESS_CHECKLIST.md §14):');
 console.log('  1. Backup completo de Supabase (schema + data)');
 console.log('  2. Restore en entorno de prueba');

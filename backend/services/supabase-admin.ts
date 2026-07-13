@@ -13,3 +13,10 @@ export const supabaseAdmin = isConfigured
   : null;
 
 export const isSupabaseAdminConfigured = isConfigured;
+
+/** Ping ligero a PostgREST para readiness (no expone datos). */
+export async function pingSupabase(): Promise<boolean> {
+  if (!supabaseAdmin) return false;
+  const { error } = await supabaseAdmin.from('clients').select('id', { head: true, count: 'exact' });
+  return !error;
+}

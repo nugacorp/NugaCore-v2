@@ -14,7 +14,13 @@ import { Router } from 'express';
 import { env, isProduction } from '../../config/env';
 import { domainsOnDb } from '../../config/feature-flags';
 import { metrics } from '../../common/metrics';
-import { isSupabaseAdminConfigured } from '../../services/supabase-admin';
+import {
+  isPrometheusEnabled,
+  renderPrometheusMetrics,
+  requireMetricsAuth,
+} from '../../common/prometheus';
+import { asyncHandler } from '../../common/errors';
+import { isSupabaseAdminConfigured, pingSupabase } from '../../services/supabase-admin';
 import { listRegisteredJobs } from '../../jobs/runner';
 
 const router = Router();
@@ -42,10 +48,29 @@ router.get('/api/health/live', (_req, res) => {
   res.json({ status: 'ok' });
 });
 
-router.get('/api/health/ready', (_req, res) => {
-  // En Fase 0 el sistema siempre está listo (store en memoria, sin dependencias externas).
-  // En Fase 1+, aquí se verificará la conectividad con Supabase si algún dominio usa DB.
-  res.json({ status: 'ready', production: isProduction });
+router.get('/api/health/ready', asyncHandler(async (_req, res) => {
+  const onDb = domainsOnDb();
+  const needsDb = onDb.length > 0;
+  const supabaseOk = !needsDb || (isSupabaseAdminConfigured && await pingSupabase());
+  const ready = !needsDb || supabaseOk;
+
+  res.status(ready ? 200 : 503).json({
+    status: ready ? 'ready' : 'not_ready',
+    production: isProduction,
+    persistence: needsDb ? 'db' : 'in-memory',
+    domainsOnDb: onDb,
+    supabaseConfigured: isSupabaseAdminConfigured,
+    supabaseReachable: supabaseOk,
+  });
+}));
+
+router.get('/api/metrics/prometheus', requireMetricsAuth, (_req, res) => {
+  if (!isPrometheusEnabled()) {
+    res.status(404).json({ error: 'Prometheus metrics disabled', code: 'METRICS_DISABLED' });
+    return;
+  }
+  res.setHeader('Content-Type', 'text/plain; version=0.0.4; charset=utf-8');
+  res.send(renderPrometheusMetrics());
 });
 
 export default router;
