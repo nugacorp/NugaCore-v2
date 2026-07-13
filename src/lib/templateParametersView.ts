@@ -108,6 +108,11 @@ export function isParameterVisible(
     if (param.id === 'gateway') return mode === 'static';
     if (param.id === 'username' || param.id === 'password') return mode === 'pppoe';
   }
+  if (group.id === 'network') {
+    if (param.id === 'dhcpPoolStart' || param.id === 'dhcpPoolEnd') {
+      return groupValues.dhcpEnabled !== false;
+    }
+  }
   return true;
 }
 

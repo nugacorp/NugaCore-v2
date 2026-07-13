@@ -5,15 +5,18 @@
 
 ## Auditoría SSH (2026-07-13)
 
-Intento desde el entorno del agente:
+Intentos desde el entorno del agente Cloud:
 
 ```bash
 ssh -o BatchMode=yes root@5.180.151.109 'wg show'
+SSH_AUTH_SOCK=/tmp/ssh-*/agent.* ssh -o BatchMode=yes root@5.180.151.109 'wg show'
 ```
 
-**Resultado:** `Permission denied (publickey,password)` — no hay llave SSH cargada en este entorno.
+**Resultado:** `Permission denied (publickey,password)` — no hay claves privadas en `~/.ssh/` ni identidades cargadas en el agente (`ssh-add -l` → *The agent has no identities*). Solo existe `known_hosts` (huella del host ya conocida).
 
-**Acción:** el operador (Hermes) debe ejecutar los pasos de este runbook directamente en el VPS.
+**Para habilitar auditoría automática desde Cloud Agent:** cargar la llave privada en los secretos del entorno Cursor (o `~/.ssh/id_ed25519` en el pod) con acceso a `root@<VPS>`. Sin eso, el operador debe ejecutar los pasos de este runbook directamente en el VPS.
+
+**Acción:** el operador (Hermes) ejecuta los pasos siguientes en el VPS hasta que la llave esté disponible en el agente.
 
 ---
 

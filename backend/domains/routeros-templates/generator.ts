@@ -54,6 +54,7 @@ const getDefaults = (p: TemplateLibraryParams): Defaults => ({
   dns: p.dnsServers?.length ? p.dnsServers : ['8.8.8.8', '1.1.1.1'],
   apiPort: p.apiPort ?? 8728,
   apiCidr: p.apiCidr || '10.0.0.0/24',
+  enableDhcp: p.enableDhcp !== false,
 });
 
 // ── Cabecera estándar ──────────────────────────────────────────────
@@ -214,7 +215,11 @@ const sectionFactoryLogging = (): string => `
 
 // ── LAN mínima (WAN + bridge opcional) ──────────────────────────────
 
-const sectionMinimalLan = (d: Defaults): string => `
+const sectionMinimalLan = (d: Defaults): string => {
+  const dhcpBlock = d.enableDhcp !== false
+    ? sectionDhcp(d)
+    : '\n# --- DHCP: deshabilitado por configuración WISP ---';
+  return `
 # --- WAN ---
 :if ([:len [/interface list find name=WAN]] = 0) do={ /interface list add name=WAN }
 :if ([:len [/interface list member find interface="${d.wan}" list=WAN]] = 0) do={
@@ -223,9 +228,10 @@ const sectionMinimalLan = (d: Defaults): string => `
 ${sectionBridge(d)}
 ${sectionInterfaceLists(d)}
 ${sectionLanIp(d)}
-${sectionDhcp(d)}
+${dhcpBlock}
 ${sectionNat(d)}
 ${sectionFirewall()}`;
+};
 
 // ── Sección WireGuard (client/tunnel) ─────────────────────────────
 

@@ -114,6 +114,7 @@ export interface TemplateLibraryParams {
   apiMode?: 'readonly' | 'operator';
   apiPort?: number;
   apiCidr?: string;
+  enableDhcp?: boolean;
   // SNMP (factory onboarding)
   snmpCommunity?: string;
   snmpMgmtCidr?: string;

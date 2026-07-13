@@ -36,6 +36,7 @@ import {
   ONBOARDING_TEMPLATES,
   ONBOARDING_SIMPLE_TEMPLATES,
   FACTORY_RESET_CHECKLIST,
+  isWireguardManagedTemplate,
   ROUTER_TYPE_OPTIONS,
   MODEL_OPTIONS,
   DEFAULT_ADVANCED_FORM,
@@ -158,7 +159,15 @@ export default function RouterOnboardingWizard({
         `/api/router-templates/${templateId}/parameters`,
       );
       setParamSchema(schema);
-      setParamValues(buildDefaultParameterValues(schema));
+      const defaults = buildDefaultParameterValues(schema);
+      if (templateId === 'nugacore_factory_onboarding') {
+        if (form.siteName.trim()) defaults.zoneName = form.siteName.trim();
+        defaults.lanBridgeName = form.lanBridgeName || defaults.lanBridgeName;
+        defaults.wanInterface = form.wanInterface || defaults.wanInterface;
+        defaults.lanCidr = form.lanCidr || defaults.lanCidr;
+        if (form.lanInterfaces) defaults.lanInterfaces = form.lanInterfaces;
+      }
+      setParamValues(defaults);
     } catch {
       setParamSchema(null);
       setParamValues({});
@@ -563,17 +572,18 @@ export default function RouterOnboardingWizard({
               <div className="p-4 bg-emerald-500/5 border border-emerald-500/20 rounded-xl space-y-2">
                 <div className="flex items-center gap-2 text-emerald-400 font-medium text-sm">
                   <CheckCircle size={15} />
-                  Administrado por NugaCore VPN
+                  WireGuard en el VPS — peer automático
                 </div>
                 <p className="text-xs text-slate-400 leading-relaxed">
-                  NugaCore asignará automáticamente una IP VPN única al router, creará el peer WireGuard
-                  y generará el script de configuración. No necesitas configurar nada manualmente.
+                  El servidor WireGuard corre en el VPS (interfaz <code className="font-mono text-slate-300">wg0</code>).
+                  Por cada script generado, NugaCore crea <strong className="text-slate-300">un peer único</strong> con IP VPN
+                  y claves — no se configura manualmente ni se edita desde esta pantalla.
                 </p>
                 <div className="grid grid-cols-2 gap-2 text-xs text-slate-500 pt-1">
-                  <span className="flex items-center gap-1"><Shield size={10} className="text-indigo-400" /> Peer WireGuard automático</span>
+                  <span className="flex items-center gap-1"><Shield size={10} className="text-indigo-400" /> Servidor WG: VPS (default)</span>
+                  <span className="flex items-center gap-1"><Shield size={10} className="text-indigo-400" /> Peer: auto al generar</span>
                   <span className="flex items-center gap-1"><Shield size={10} className="text-indigo-400" /> IP VPN asignada automáticamente</span>
-                  <span className="flex items-center gap-1"><Shield size={10} className="text-indigo-400" /> Claves nunca visibles en UI</span>
-                  <span className="flex items-center gap-1"><Shield size={10} className="text-indigo-400" /> Script .rsc generado en segundos</span>
+                  <span className="flex items-center gap-1"><Shield size={10} className="text-indigo-400" /> Claves nunca editables en UI</span>
                 </div>
               </div>
 
@@ -705,6 +715,18 @@ export default function RouterOnboardingWizard({
 
               {!paramsLoading && paramSchema && (
                 <div className="space-y-5 max-h-[52vh] overflow-y-auto pr-1" data-testid="dynamic-params-form">
+                  {isWireguardManagedTemplate(form.templateId) && (
+                    <div
+                      data-testid="wireguard-auto-notice"
+                      className="p-3 bg-indigo-500/10 border border-indigo-500/20 rounded-lg text-xs text-indigo-200 space-y-1"
+                    >
+                      <p className="font-medium text-indigo-100">WireGuard no editable</p>
+                      <p className="text-indigo-200/80">
+                        Servidor en el VPS + peer único por router. Se crea al pulsar «Generar configuración».
+                        Los campos siguientes son solo parámetros WISP (LAN, sitio, API).
+                      </p>
+                    </div>
+                  )}
                   {paramSchema.groups.map((group) => (
                     <section key={group.id} data-testid={`param-group-${group.id}`}>
                       <p className="text-xs font-semibold text-slate-300 mb-2 flex items-center gap-1.5">

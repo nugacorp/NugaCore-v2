@@ -128,6 +128,17 @@ export const FACTORY_RESET_CHECKLIST = [
   'Internet en WAN operativo',
 ] as const;
 
+/** Plantillas cuyo túnel WireGuard (servidor VPS + peer) es automático y no editable en UI. */
+export const WIREGUARD_MANAGED_TEMPLATES = new Set([
+  'nugacore_factory_onboarding',
+  'router_base_wireguard',
+  'tower_wisp',
+]);
+
+export function isWireguardManagedTemplate(templateId: string): boolean {
+  return WIREGUARD_MANAGED_TEMPLATES.has(templateId);
+}
+
 export const DEFAULT_FORM: OnboardingForm = {
   routerName:      '',
   routerType:      'tower',

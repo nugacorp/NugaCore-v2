@@ -31,6 +31,36 @@ const isCidr = (v: string): boolean => {
 const isPresent = (raw: unknown): boolean =>
   raw !== undefined && raw !== null && raw !== '';
 
+/** Claves que el cliente NUNCA puede enviar: WireGuard es automático (servidor VPS + peer). */
+const WIREGUARD_PARAM_BLOCKLIST = new Set([
+  'wgServerId',
+  'wgServerPublicKey',
+  'wgEndpoint',
+  'wgRouterIp',
+  'wgPrivateKey',
+  'wgVpnCidr',
+  'wgManagementCidr',
+  'wgPeerId',
+  'wgKeepalive',
+  'wireguardServer',
+  'wireguardEndpoint',
+]);
+
+const isForbiddenWireguardParam = (key: string): boolean =>
+  WIREGUARD_PARAM_BLOCKLIST.has(key) || /^wg[A-Z_]/i.test(key) || /^wireguard/i.test(key);
+
+/** Elimina overrides WireGuard del payload de parámetros (defensa en profundidad). */
+export function stripWireguardParameterOverrides(
+  values: TemplateParameterValues | undefined | null,
+): TemplateParameterValues {
+  if (!values) return {};
+  const out: TemplateParameterValues = { ...values };
+  for (const key of Object.keys(out)) {
+    if (isForbiddenWireguardParam(key)) delete out[key];
+  }
+  return out;
+}
+
 /**
  * Valida los valores contra el esquema de la plantilla.
  * Si la plantilla no tiene esquema, solo acepta values vacíos.
@@ -44,12 +74,24 @@ export function validateTemplateParameters(
 
   if (!schema) {
     if (values && Object.keys(values).length > 0) {
-      errors.push(`La plantilla '${templateId}' no admite parámetros dinámicos.`);
+      const v = values ?? {};
+      const onlyForbidden = Object.keys(v).every((k) => isForbiddenWireguardParam(k));
+      if (!onlyForbidden) {
+        errors.push(`La plantilla '${templateId}' no admite parámetros dinámicos.`);
+      }
     }
     return { valid: errors.length === 0, errors };
   }
 
   const v = values ?? {};
+
+  for (const key of Object.keys(v)) {
+    if (isForbiddenWireguardParam(key)) {
+      errors.push(
+        `Parámetro '${key}' no es configurable: el servidor WireGuard del VPS y el peer se gestionan automáticamente.`,
+      );
+    }
+  }
 
   for (const group of schema.groups) {
     const groupValues: Record<string, unknown> = group.nested

@@ -29,7 +29,7 @@ import {
   getTemplateMetadata,
   enrollmentTemplateNeedsWireguard,
 } from './template-mapper';
-import { validateTemplateParameters, redactSecretValues, applyDefaults } from '../router-template-parameters/validators';
+import { validateTemplateParameters, redactSecretValues, applyDefaults, stripWireguardParameterOverrides } from '../router-template-parameters/validators';
 import { mapParametersToLibraryParams } from '../router-template-parameters/mappers';
 import {
   CheckOnlineResult,
@@ -358,7 +358,9 @@ export const enrollmentService = {
     // se persiste el set completo para regenerar de forma determinista.
     let effectiveParams = input.templateParameters;
     if (input.templateParameters) {
-      effectiveParams = applyDefaults(effectiveTemplateId, input.templateParameters);
+      effectiveParams = stripWireguardParameterOverrides(
+        applyDefaults(effectiveTemplateId, input.templateParameters),
+      );
       const paramCheck = validateTemplateParameters(effectiveTemplateId, effectiveParams);
       if (!paramCheck.valid) {
         throw new BadRequestError(
@@ -368,11 +370,13 @@ export const enrollmentService = {
       }
     }
 
-    // ── 3-4. Resolver servidor WireGuard ─────────────────────────────
+    // ── 3-4. Resolver servidor WireGuard (siempre default VPS salvo override de tests) ──
+    const allowWgServerOverride =
+      (process.env.ENROLLMENT_WG_SERVER_OVERRIDE || '').trim().toLowerCase() === 'true';
     const wgService = getWireguardService();
     let resolvedServerId: string;
 
-    if (input.wgServerId?.trim()) {
+    if (allowWgServerOverride && input.wgServerId?.trim()) {
       resolvedServerId = input.wgServerId.trim();
       // Validar que existe: 404 en lugar de 500
       const server = await wgService.findServer(resolvedServerId);

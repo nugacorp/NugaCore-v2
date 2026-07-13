@@ -75,6 +75,8 @@ if (!runDb && !runAuth) {
   process.env.AUTH_TRUST_HEADERS = 'true';
   process.env.IPAM_PROVIDER = 'mock';
   process.env.NODE_ENV = 'test';
+  // Los contratos de enrollment usan wgServerId explícito contra servidores de prueba.
+  process.env.ENROLLMENT_WG_SERVER_OVERRIDE = 'true';
 } else if (runAuth) {
   // -------- MODO AUTH REAL (staging JWT-only) --------
   // La suite de auth verifica que en producción los trusted-headers se
