@@ -41,6 +41,7 @@ interface Defaults {
   dns: string[];
   apiPort: number;
   apiCidr: string;
+  enableDhcp: boolean;
 }
 
 const getDefaults = (p: TemplateLibraryParams): Defaults => ({
