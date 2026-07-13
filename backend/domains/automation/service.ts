@@ -12,6 +12,8 @@
 // ====================================================================
 
 import { BadRequestError } from '../../common/errors';
+import { productionGates } from '../../config/production-gates';
+import { executeAutomationDecision } from './executor';
 import { sanitizeText } from '../../common/security/sanitize-sensitive-data';
 import { recordEvaluationAudit } from './audit';
 import { automationStore } from './store';
@@ -101,7 +103,7 @@ export const automationService = {
       supportedDecisions: AUTOMATION_DECISIONS.length,
       pendingDecisions: stats.pendingDecisions,
       simulationsRun: stats.simulationsRun,
-      dryRun: true,
+      dryRun: !productionGates.automationExecute(),
     };
   },
 
@@ -133,7 +135,7 @@ export const automationService = {
       executionPreview: buildExecutionPreview(rule.decision, customerId),
       status: 'PENDING',
       createdAt: nowIso(),
-      dryRun: true,
+      dryRun: !productionGates.automationExecute(),
     }));
 
     const executionPreview = mergePreview(decisions);
@@ -141,6 +143,11 @@ export const automationService = {
     // Persistimos los artefactos descriptivos dry-run (decisiones + audit).
     // Esto NO cambia nada real; alimenta Dashboard / Client 360 / bitacora.
     decisions.forEach((decision) => automationStore.recordDecision(decision));
+    if (productionGates.automationExecute()) {
+      for (const decision of decisions) {
+        void executeAutomationDecision(decision, actor);
+      }
+    }
     automationStore.markSimulationRun();
     recordEvaluationAudit({
       context,
@@ -158,7 +165,7 @@ export const automationService = {
       rulesMatched: matched.map(toRuleView),
       decisions,
       executionPreview,
-      dryRun: true,
+      dryRun: !productionGates.automationExecute(),
     };
   },
 };

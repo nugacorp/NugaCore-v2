@@ -68,7 +68,8 @@ const buildFlags = (): Record<DomainKey, boolean> => {
 export const featureFlags: Record<DomainKey, boolean> = buildFlags();
 
 /** ¿El dominio debe leer/escribir contra la base de datos (en vez del store)? */
-export const isDomainOnDb = (domain: DomainKey): boolean => featureFlags[domain] === true;
+export const isDomainOnDb = (domain: DomainKey): boolean =>
+  asBool(process.env[FLAG_ENV[domain]]);
 
 /** Lista de dominios actualmente apuntando a la DB (para diagnósticos/health). */
 export const domainsOnDb = (): DomainKey[] =>

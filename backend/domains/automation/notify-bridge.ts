@@ -6,6 +6,7 @@
 // ====================================================================
 
 import { BadRequestError, NotFoundError } from '../../common/errors';
+import { productionGates } from '../../config/production-gates';
 import { notificationService } from '../notifications/service';
 import type { NotificationType } from '../notifications/types';
 import { automationService } from './service';
@@ -60,6 +61,9 @@ export const automationNotifyBridge = {
       actor,
       'automation',
     );
+    if (productionGates.notificationsLive()) {
+      notificationService.simulateMessage(message.id, actor);
+    }
 
     return {
       decisionId: decision.id,
@@ -67,7 +71,7 @@ export const automationNotifyBridge = {
       event: decision.event,
       preview,
       message,
-      dryRun: true,
+      dryRun: !productionGates.notificationsLive(),
     };
   },
 
@@ -87,7 +91,7 @@ export const automationNotifyBridge = {
 
     return {
       processed: results.length,
-      dryRun: true,
+      dryRun: !productionGates.notificationsLive(),
       results,
     };
   },

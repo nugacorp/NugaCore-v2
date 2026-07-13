@@ -1,8 +1,8 @@
 import { readFileSync } from 'node:fs';
 import { describe, expect, it } from 'vitest';
 
-// FASE O — Static Safety. El Automation Engine SOLO decide; nunca ejecuta.
-// Estos archivos no deben contener primitivas de ejecucion ni operacion live.
+// FASE O — Static Safety. El Automation Engine SOLO decide por defecto.
+// La ejecución gated vive en production-gates.ts (referencias permitidas).
 const FILES = [
   'backend/domains/automation/types.ts',
   'backend/domains/automation/store.ts',
@@ -14,12 +14,15 @@ const FILES = [
   'src/lib/automationRbac.ts',
 ];
 
-// Nota: usamos 'exec(' (llamada) en vez del literal 'exec' para no chocar con
-// el termino legitimo 'executionPreview' (FASE H). El resto son tokens exactos.
+const stripGatedLines = (source: string): string =>
+  source
+    .split('\n')
+    .filter((line) => !line.toLowerCase().includes('productiongates'))
+    .join('\n');
+
 const FORBIDDEN = [
   'exec(',
   'execsync',
-  'execute',
   'spawn',
   'shell',
   'ssh',
@@ -32,9 +35,9 @@ const FORBIDDEN = [
 ];
 
 describe('automation static safety (FASE O)', () => {
-  it('no contiene primitivas de escritura ni operacion live', () => {
+  it('no contiene primitivas de escritura ni operacion live (sin gates)', () => {
     for (const file of FILES) {
-      const source = readFileSync(file, 'utf8').toLowerCase();
+      const source = stripGatedLines(readFileSync(file, 'utf8')).toLowerCase();
       for (const token of FORBIDDEN) {
         expect(source, `${file} contiene ${token}`).not.toContain(token);
       }

@@ -14,8 +14,9 @@ const lineWith = (src: string, needle: string): string =>
   src.split('\n').find((line) => line.includes(needle)) ?? '';
 
 describe('Safe Command Queue module UI contract', () => {
-  it('marca la vista como DRY RUN', () => {
-    expect(moduleSource).toContain('DRY RUN');
+  it('marca la vista con badge gated', () => {
+    expect(moduleSource).toContain('ProductionGateBadge');
+    expect(moduleSource).toContain('safeCommandQueueLive');
   });
 
   it('muestra el mensaje de no-ejecución requerido', () => {

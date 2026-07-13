@@ -24,14 +24,14 @@ La buena noticia: el trabajo de diseño "invisible" pesado **ya está hecho** (e
 | Dimensión | Avance | Comentario |
 |-----------|:------:|------------|
 | **Interfaz de usuario (frontend)** | ~90% | Completa y pulida; no requiere rediseño |
-| **Persistencia real (datos que perduran)** | ~55–65% | Repos + flags por dominio; activable en staging vía `USE_DB_*` |
-| **API / lógica de negocio** | ~75% | 40+ dominios; motores billing/suspension/provisioning |
+| **Persistencia real (datos que perduran)** | ~70–80% | 7/7 flags críticos en staging; `storeFallbackActive: false` con flags ON |
+| **API / lógica de negocio** | ~80% | 40+ dominios; production gates dry-run→live |
 | **Seguridad / acceso** | ~40% | Estructura buena, pero el control de acceso es burlable hoy |
-| **Integración MikroTik (red real)** | ~10% | Todo simulado; falta la conexión real |
-| **Pagos y facturación fiscal (CFDI) reales** | ~10% | Se registran a mano; sin cobro en línea ni timbrado |
-| **Listo para producción (deploy/operación)** | ~15% | Falta empaquetado, despliegue y endurecimiento |
+| **Integración MikroTik (red real)** | ~25% | Worker commit gated; CHR read-only staging |
+| **Pagos y facturación fiscal (CFDI) reales** | ~20% | Webhooks + reactivación gated; CFDI stub |
+| **Listo para producción (deploy/operación)** | ~55–65% | Gates + readiness API; activar live gradual |
 
-**Estimación global ponderada hacia "producción usable": ~50–60%.**
+**Estimación global ponderada hacia "producción usable": ~60–70%.**
 La percepción de "casi listo" viene de que **lo visible (la UI) sí está casi listo**; lo costoso que falta es lo que no se ve.
 
 ---

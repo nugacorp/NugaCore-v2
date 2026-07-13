@@ -7,6 +7,7 @@
 // ====================================================================
 
 import { BadRequestError, ConflictError, NotFoundError } from '../../common/errors';
+import { productionGates } from '../../config/production-gates';
 import { sanitizeText } from '../../common/security/sanitize-sensitive-data';
 import { nowIso } from '../../common/time';
 import { recordTransition } from './audit';
@@ -182,7 +183,7 @@ export const notificationService = {
       renderedBody: providerResult.renderedBody,
       variables,
       provider: 'mock',
-      dryRun: true,
+      dryRun: !productionGates.notificationsLive(),
       wouldSend: true,
       sent: false,
     };
@@ -204,7 +205,7 @@ export const notificationService = {
       status: 'DRAFT',
       source: sanitizeText(source),
       provider: 'mock',
-      dryRun: true,
+      dryRun: !productionGates.notificationsLive(),
       sent: false,
       createdAt,
       updatedAt: createdAt,
@@ -221,13 +222,19 @@ export const notificationService = {
     if (!['DRAFT', 'QUEUED'].includes(message.status)) {
       throw new ConflictError(`No se puede simular en estado ${message.status}.`, 'INVALID_TRANSITION');
     }
-    const providerResult = providerForChannel(message.channel).preview(message.renderedBody);
+    const provider = providerForChannel(message.channel);
+    const providerResult = provider.deliver
+      ? provider.deliver(message.renderedBody)
+      : provider.preview(message.renderedBody);
+    const live = productionGates.notificationsLive() && providerResult.sent;
     const previousStatus = message.status;
     const updated = notificationStore.update(id, {
-      status: 'SIMULATED',
+      status: live ? 'SENT' : 'SIMULATED',
       updatedAt: nowIso(),
-      sent: false,
-      simulationResult: `${providerResult.provider}: wouldSend=true, sent=false (dry-run).`,
+      sent: providerResult.sent,
+      dryRun: providerResult.dryRun,
+      provider: providerResult.provider,
+      simulationResult: providerResult.note,
     });
     if (!updated) throw new NotFoundError('Notificación no encontrada.', 'NOTIFICATION_NOT_FOUND');
     recordTransition(updated, previousStatus, 'SIMULATED', actor);
@@ -268,7 +275,7 @@ export const notificationService = {
       supportedTypes: NOTIFICATION_TYPES.length,
       supportedChannels: NOTIFICATION_CHANNELS.length,
       templates: TEMPLATES.length,
-      dryRun: true,
+      dryRun: !productionGates.notificationsLive(),
     };
   },
 };

@@ -17,6 +17,7 @@ export default function CommercialModule({ getAuthHeaders }: CommercialModulePro
   const [loading, setLoading] = useState(false);
   const [newName, setNewName] = useState('');
 
+  const [newQuoteProspectId, setNewQuoteProspectId] = useState('');
   const [newQuoteTitle, setNewQuoteTitle] = useState('');
   const [newQuoteAmount, setNewQuoteAmount] = useState('');
   const [newApptTitle, setNewApptTitle] = useState('');
@@ -33,7 +34,11 @@ export default function CommercialModule({ getAuthHeaders }: CommercialModulePro
         fetchWithRateLimitBackoff('/api/commercial/appointments', { headers }),
       ]);
       if (pRes.ok) setPipeline(await pRes.json());
-      if (prRes.ok) setProspects(await prRes.json());
+      if (prRes.ok) {
+        const rows = await prRes.json();
+        setProspects(rows);
+        if (!newQuoteProspectId && rows[0]?.id) setNewQuoteProspectId(rows[0].id);
+      }
       if (qRes.ok) setQuotes(await qRes.json());
       if (aRes.ok) setAppointments(await aRes.json());
     } finally {
@@ -68,13 +73,14 @@ export default function CommercialModule({ getAuthHeaders }: CommercialModulePro
   };
 
   const createQuote = async () => {
-    if (!newQuoteTitle.trim() || !prospects[0]?.id) return;
+    const prospectId = newQuoteProspectId || prospects[0]?.id;
+    if (!newQuoteTitle.trim() || !prospectId) return;
     const headers = await getAuthHeaders();
     const res = await fetchWithRateLimitBackoff('/api/commercial/quotes', {
       method: 'POST',
       headers: { ...headers, 'Content-Type': 'application/json' },
       body: JSON.stringify({
-        prospectId: prospects[0].id,
+        prospectId,
         title: newQuoteTitle.trim(),
         amountCents: Math.round(Number(newQuoteAmount || 0) * 100),
       }),
@@ -104,6 +110,15 @@ export default function CommercialModule({ getAuthHeaders }: CommercialModulePro
       setNewApptDate('');
       void load();
     }
+  };
+
+  const convertProspect = async (id: string) => {
+    const headers = await getAuthHeaders();
+    const res = await fetchWithRateLimitBackoff(`/api/commercial/prospects/${id}/convert`, {
+      method: 'POST',
+      headers,
+    });
+    if (res.ok) void load();
   };
 
   const STAGE_NEXT: Record<string, string> = {
@@ -181,7 +196,7 @@ export default function CommercialModule({ getAuthHeaders }: CommercialModulePro
                     <td className="p-3 text-white">{p.name}</td>
                     <td className="p-3 text-indigo-300">{p.stage}</td>
                     <td className="p-3 text-slate-400">{p.city ?? '—'}</td>
-                    <td className="p-3">
+                    <td className="p-3 flex flex-wrap gap-2">
                       {STAGE_NEXT[p.stage] && (
                         <button
                           type="button"
@@ -189,6 +204,11 @@ export default function CommercialModule({ getAuthHeaders }: CommercialModulePro
                           className="text-xs text-emerald-400 hover:text-emerald-300"
                         >
                           → {STAGE_NEXT[p.stage]}
+                        </button>
+                      )}
+                      {p.stage === 'installation' && (
+                        <button type="button" onClick={() => void convertProspect(p.id)} className="text-xs text-indigo-400 hover:text-indigo-300">
+                          Convertir a cliente
                         </button>
                       )}
                     </td>
@@ -203,6 +223,15 @@ export default function CommercialModule({ getAuthHeaders }: CommercialModulePro
       {tab === 'quotes' && (
         <div className="space-y-4">
           <div className="flex flex-wrap gap-2">
+            <select
+              value={newQuoteProspectId}
+              onChange={(e) => setNewQuoteProspectId(e.target.value)}
+              className="bg-slate-900 border border-slate-700 rounded-lg px-3 py-2 text-white text-sm"
+            >
+              {prospects.map((p) => (
+                <option key={p.id} value={p.id}>{p.name}</option>
+              ))}
+            </select>
             <input value={newQuoteTitle} onChange={(e) => setNewQuoteTitle(e.target.value)} placeholder="Título cotización" className="flex-1 min-w-[140px] bg-slate-900 border border-slate-700 rounded-lg px-3 py-2 text-white text-sm" />
             <input value={newQuoteAmount} onChange={(e) => setNewQuoteAmount(e.target.value)} placeholder="Monto MXN" type="number" className="w-32 bg-slate-900 border border-slate-700 rounded-lg px-3 py-2 text-white text-sm" />
             <button type="button" onClick={() => void createQuote()} className="px-4 py-2 bg-emerald-600 rounded-lg text-white text-sm">Nueva cotización</button>

@@ -62,6 +62,22 @@ registerJob('health-ping', async () => {
   logger.info('job_health_ping', { ts: new Date().toISOString() });
 });
 
+registerJob('suspension-cycle', async () => {
+  const { productionGates } = await import('../config/production-gates');
+  if (!productionGates.serviceStatusLive() && !productionGates.mikrotikWorkerCommit()) {
+    logger.info('suspension_cycle_skipped', { reason: 'gates_off' });
+    return;
+  }
+  const { evaluateAllCustomers } = await import('../domains/suspension/engine');
+  const { processPendingOrders } = await import('../domains/mikrotik/worker/worker');
+  const results = await evaluateAllCustomers('job:suspension-cycle');
+  const changed = results.filter((r) => r.changed).length;
+  if (changed > 0) {
+    await processPendingOrders('job:suspension-cycle');
+  }
+  logger.info('suspension_cycle_complete', { evaluated: results.length, changed });
+});
+
 registerJob('router-backup-audit', async () => {
   logger.info('router_backup_audit', { mode: 'dry-run', note: 'Scheduled backup gated by MIKROTIK_WORKER_LIVE' });
 });

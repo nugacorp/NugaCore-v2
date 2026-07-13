@@ -8,6 +8,7 @@
 // Allowlist estricta: solo comandos de lectura "print". Nada destructivo.
 // ====================================================================
 
+import { productionGates } from '../../../config/production-gates';
 import { decryptSecret } from '../../../services/crypto';
 import { logger } from '../../../common/logger';
 import { redactString } from '../../../common/secret-redaction';
@@ -21,8 +22,7 @@ import {
   WorkerMode,
 } from './types';
 
-export const isLiveWorkerEnabled = (): boolean =>
-  (process.env.MIKROTIK_WORKER_LIVE || 'false').trim().toLowerCase() === 'true';
+export const isLiveWorkerEnabled = (): boolean => productionGates.mikrotikWorkerLive();
 
 /** Prefiere api-ssl (puerto 8729) cuando el router lo expone. */
 export const isWorkerApiTlsPreferred = (): boolean =>

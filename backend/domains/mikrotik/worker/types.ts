@@ -33,14 +33,14 @@ export interface RouterSnapshot {
   reads: RouterReadResult[];
 }
 
-/** Resultado de "procesar" UNA orden en dry-run (no ejecuta nada real). */
+/** Resultado de procesar UNA orden. */
 export interface OrderProcessResult {
   orderId: string;
   orderType: 'suspension' | 'reactivation';
   customerId: string;
-  dryRun: true;
-  outcome: 'simulated' | 'skipped' | 'failed';
-  /** Comandos RouterOS que se EJECUTARÍAN (no se envían). Sin secretos. */
+  dryRun: boolean;
+  outcome: 'simulated' | 'executed' | 'skipped' | 'failed';
+  /** Comandos RouterOS planificados o ejecutados. Sin secretos. */
   plannedCommands: string[];
   targetRouterId?: string;
   note: string;
@@ -51,7 +51,7 @@ export interface WorkerRun {
   startedAt: string;
   finishedAt: string;
   mode: WorkerMode;
-  dryRun: true;
+  dryRun: boolean;
   pendingFound: number;
   processed: number;
   results: OrderProcessResult[];

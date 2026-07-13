@@ -18,7 +18,7 @@
 - [ ] Dominio + TLS (Force HTTPS) configurado
 
 ## Variables
-- [ ] Runtime configuradas (`NODE_ENV`, `PORT`, `AUTH_TRUST_HEADERS`, `USE_DB_CUSTOMERS`, `SUPABASE_URL`, `SUPABASE_SERVICE_ROLE_KEY`, `MIKROTIK_CREDENTIALS_KEY`, `LOG_LEVEL`, `LOG_FORMAT`)
+- [ ] Runtime configuradas (ver [`COOLIFY_VPS_5.180.151.109_CHECKLIST.md`](COOLIFY_VPS_5.180.151.109_CHECKLIST.md) §2)
 - [ ] Build-time configuradas (`VITE_SUPABASE_URL`, `VITE_SUPABASE_ANON_KEY`) marcadas como Build Variable
 - [ ] `SUPABASE_SERVICE_ROLE_KEY` **NO** está como `VITE_*` / no llega al frontend
 

@@ -57,7 +57,7 @@ export interface ServiceStatusAuditEvent {
   reason: string;
   actorRole: string | null;
   createdAt: string;
-  dryRun: true;
+  dryRun: boolean;
 }
 
 export interface ServiceStatusSummary {

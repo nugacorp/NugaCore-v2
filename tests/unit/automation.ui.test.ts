@@ -14,8 +14,9 @@ describe('Automation Center UI', () => {
     expect(sidebarSource.indexOf("name: 'Automation Center'")).toBeLessThan(sidebarSource.indexOf("name: 'Manual de Usuario'"));
   });
 
-  it('muestra badge DRY RUN y el banner obligatorio', () => {
-    expect(moduleSource).toContain('DRY RUN');
+  it('muestra badge gated y el banner obligatorio', () => {
+    expect(moduleSource).toContain('ProductionGateBadge');
+    expect(moduleSource).toContain('automationExecute');
     expect(moduleSource).toContain('El motor de automatización únicamente toma decisiones. No ejecuta acciones reales.');
   });
 

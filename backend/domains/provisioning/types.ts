@@ -49,7 +49,7 @@ export interface ProvisioningAction {
   actor: string;
   createdAt: string;
   updatedAt: string;
-  dryRun: true;
+  dryRun: boolean;
   simulationResult?: string;
   rejectionReason?: string;
   notes?: string;
@@ -65,7 +65,7 @@ export interface ProvisioningAuditEntry {
   nextState: ProvisioningStatus;
   actor: string;
   createdAt: string;
-  dryRun: true;
+  dryRun: boolean;
 }
 
 export interface ProvisioningActionDetail {
@@ -91,5 +91,5 @@ export interface ProvisioningSummary {
   approved: number;
   rejected: number;
   cancelled: number;
-  dryRun: true;
+  dryRun: boolean;
 }

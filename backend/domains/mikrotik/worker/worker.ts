@@ -1,24 +1,22 @@
 // ====================================================================
-// Worker MikroTik (Fase 4.6) — Read Only + Dry Run.
+// Worker MikroTik — lecturas read-only + ejecución commit (producción).
 //
-// Consume las ÓRDENES PENDING del Motor de Suspensiones y las "procesa" en
-// DRY-RUN: registra el plan de comandos que se ejecutarían y marca la orden
-// como EXECUTED(dry_run). NO envía comandos de corte/reactivación, NO muta
-// client.status, NO toca el router. Las lecturas son de SOLO LECTURA.
-//
-// El cambio físico real se hará en una fase posterior (worker en modo commit).
+// Con MIKROTIK_WORKER_COMMIT=false (default): dry-run de órdenes PENDING.
+// Con MIKROTIK_WORKER_COMMIT=true: ejecuta comandos RouterOS reales y
+// actualiza el estado del cliente tras éxito.
 // ====================================================================
 
-import { store } from '../../../state/store';
 import { getCustomersService } from '../../customers/service';
 import { getSuspensionService } from '../../suspension/service';
+import { inventoryRoutersRepository } from '../../inventory/routers/repository';
+import { productionGates } from '../../../config/production-gates';
+import { executePlannedCommands } from './command-executor';
 import { getRouterConnector, isLiveWorkerEnabled } from './connector';
 import { workerStore } from './store';
 import { OrderProcessResult, RouterSnapshot, WorkerRun } from './types';
 
 import { nowIso } from '../../../common/time';
 
-// Plan de comandos (dry-run). NO se envían. Sin secretos.
 const planFor = (
   orderType: 'suspension' | 'reactivation',
   pppoeUser: string,
@@ -39,47 +37,117 @@ const planFor = (
   ];
 };
 
-/**
- * Procesa todas las órdenes PENDING en DRY-RUN. Idempotente: una orden ya
- * EXECUTED no se reprocesa (solo se toman PENDING).
- */
+const resolveRouterForCustomer = (routerId?: string) => {
+  if (routerId) {
+    const direct = inventoryRoutersRepository.getById(routerId);
+    if (direct) return direct;
+  }
+  const routers = inventoryRoutersRepository.list();
+  return routers.find((r) => r.encryptedPassword || r.hasCredentials) ?? routers[0];
+};
+
 export async function processPendingOrders(actorId?: string): Promise<WorkerRun> {
   const startedAt = nowIso();
   const runId = workerStore.nextRunId();
   const repo = getSuspensionService().repo;
   const customers = getCustomersService();
+  const commitEnabled = productionGates.mikrotikWorkerCommit();
 
   const pending = await repo.listOrders({ status: 'PENDING' });
-  // Router objetivo "best-effort" para anotar (resolución real en fase commit).
-  const defaultRouterId = store.MIKROTIK_ROUTERS[0]?.id;
-
   const results: OrderProcessResult[] = [];
+
   for (const order of pending) {
     const client = await customers.getById(order.customerId);
     const pppoeUser = client?.pppoeUser || order.customerId;
     const ip = client?.ip || '0.0.0.0';
     const plannedCommands = planFor(order.orderType, pppoeUser, ip, order.customerId);
-    const note = `DRY-RUN: ${order.orderType} simulada para ${order.customerId}. No se ejecutó ninguna acción en el router.`;
+    const router = resolveRouterForCustomer(client?.routerId);
 
-    // Marca la orden como procesada en dry-run (avanza ciclo, sin tocar red).
-    await repo.updateOrder(order, {
-      status: 'EXECUTED',
-      executedAt: nowIso(),
-      dryRun: true,
-      workerRunId: runId,
-      workerNote: note,
-    });
+    if (!commitEnabled) {
+      const note = `DRY-RUN: ${order.orderType} simulada para ${order.customerId}. No se ejecutó ninguna acción en el router.`;
+      await repo.updateOrder(order, {
+        status: 'EXECUTED',
+        executedAt: nowIso(),
+        dryRun: true,
+        workerRunId: runId,
+        workerNote: note,
+      });
+      results.push({
+        orderId: order.id,
+        orderType: order.orderType,
+        customerId: order.customerId,
+        dryRun: true,
+        outcome: 'simulated',
+        plannedCommands,
+        targetRouterId: router?.id,
+        note,
+      });
+      continue;
+    }
 
-    results.push({
-      orderId: order.id,
-      orderType: order.orderType,
-      customerId: order.customerId,
-      dryRun: true,
-      outcome: 'simulated',
-      plannedCommands,
-      targetRouterId: defaultRouterId,
-      note,
-    });
+    if (!router) {
+      const note = `COMMIT falló: sin router registrado para ${order.customerId}.`;
+      await repo.updateOrder(order, {
+        status: 'FAILED',
+        executedAt: nowIso(),
+        dryRun: false,
+        workerRunId: runId,
+        workerNote: note,
+      });
+      results.push({
+        orderId: order.id,
+        orderType: order.orderType,
+        customerId: order.customerId,
+        dryRun: false,
+        outcome: 'failed',
+        plannedCommands,
+        note,
+      });
+      continue;
+    }
+
+    const exec = await executePlannedCommands(router, plannedCommands);
+    if (exec.ok) {
+      const nextStatus = order.orderType === 'suspension' ? 'suspended' : 'active';
+      if (client) await customers.update(order.customerId, { status: nextStatus });
+      const note = `COMMIT OK: ${order.orderType} ejecutada en router ${router.name} (${exec.executed} comandos).`;
+      await repo.updateOrder(order, {
+        status: 'EXECUTED',
+        executedAt: nowIso(),
+        dryRun: false,
+        workerRunId: runId,
+        workerNote: note,
+      });
+      results.push({
+        orderId: order.id,
+        orderType: order.orderType,
+        customerId: order.customerId,
+        dryRun: false,
+        outcome: 'executed',
+        plannedCommands,
+        targetRouterId: router.id,
+        note,
+      });
+    } else {
+      const note = `COMMIT falló: ${exec.errors.join('; ')}`;
+      await repo.updateOrder(order, {
+        status: 'FAILED',
+        executedAt: nowIso(),
+        dryRun: false,
+        workerRunId: runId,
+        workerNote: note,
+      });
+      results.push({
+        orderId: order.id,
+        orderType: order.orderType,
+        customerId: order.customerId,
+        dryRun: false,
+        outcome: 'failed',
+        plannedCommands,
+        targetRouterId: router.id,
+        note,
+      });
+    }
   }
 
   const run: WorkerRun = {
@@ -87,7 +155,7 @@ export async function processPendingOrders(actorId?: string): Promise<WorkerRun>
     startedAt,
     finishedAt: nowIso(),
     mode: isLiveWorkerEnabled() ? 'live' : 'simulated',
-    dryRun: true,
+    dryRun: !commitEnabled,
     pendingFound: pending.length,
     processed: results.length,
     results,
@@ -97,9 +165,8 @@ export async function processPendingOrders(actorId?: string): Promise<WorkerRun>
   return run;
 }
 
-/** Lectura read-only de un router (real si live+credenciales, si no simulada). */
 export async function readRouterSnapshot(routerId: string): Promise<RouterSnapshot | null> {
-  const router = store.MIKROTIK_ROUTERS.find((r) => r.id === routerId);
+  const router = inventoryRoutersRepository.getById(routerId);
   if (!router) return null;
   return getRouterConnector().snapshot(router);
 }

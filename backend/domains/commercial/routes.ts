@@ -37,6 +37,10 @@ router.post('/api/commercial/prospects/:id/advance', requireRoles([...WRITE_ROLE
   res.json(await svc().advanceProspectStage(req.params.id, stage));
 }));
 
+router.post('/api/commercial/prospects/:id/convert', requireRoles([...WRITE_ROLES]), asyncHandler(async (req, res) => {
+  res.status(201).json(await svc().convertProspectToClient(req.params.id));
+}));
+
 router.get('/api/commercial/quotes', requireRoles(READ_ROLES), asyncHandler(async (req, res) => {
   res.json(await svc().listQuotes({
     prospectId: req.query.prospectId ? String(req.query.prospectId) : undefined,

@@ -1,10 +1,14 @@
 import { Router } from 'express';
-import { Client, Invoice, OnuFTTH } from '../../../src/types';
+import { Client, OnuFTTH } from '../../../src/types';
 import { store } from '../../../backend/state/store';
+import { isDomainOnDb } from '../../config/feature-flags';
 import { READ_ROLES, requireRoles } from '../../common/rbac';
 import { asyncHandler } from '../../common/errors';
 import { paginateArray, parsePaginationOptional } from '../../common/pagination';
 import { getCustomersService, parseClientStatus, parseClientType } from './service';
+import { getPlansService } from '../plans/service';
+import { getBillingService } from '../billing/service';
+import { requestReactivation, requestSuspension } from '../service-status/service';
 import { ipamService } from '../ipam/service';
 
 const router = Router();
@@ -69,7 +73,7 @@ router.post('/api/clients', requireRoles(['super admin', 'administrador', 'tecni
   // Validación de entrada (lanza 400 si es inválida).
   const { type: clientType } = service.validateCreate({ name, type, address, city, email });
 
-  const planExists = store.PLANS.some((p) => p.id === (planId || 'plan-basic'));
+  const planExists = await getPlansService().getById(planId || 'plan-basic');
   if (!planExists) {
     return res.status(400).json({ error: 'Plan not found' });
   }
@@ -170,24 +174,17 @@ router.post('/api/clients', requireRoles(['super admin', 'administrador', 'tecni
   }
 
   if (isConvertLead) {
-    // Efectos cruzados (otros dominios, aún en store mock).
-    const plan = store.PLANS.find((p) => p.id === newClient.planId);
+    const plan = await getPlansService().getById(newClient.planId);
     const cost = plan ? plan.price : 449;
-    const newInvoice: Invoice = {
-      id: store.getUniqueInvoiceId(),
+    await getBillingService().createInvoice({
       clientId: newClient.id,
       clientName: newClient.name,
       amount: cost,
-      dateStr: new Date().toISOString().substring(0, 10),
       dueDateStr: new Date(Date.now() + 10 * 24 * 60 * 60 * 1000).toISOString().substring(0, 10),
-      status: 'unpaid',
-      cfdiStatus: 'pending',
       items: [{ description: `Cargo de instalacion y mensualidad anticipada - Plan ${plan?.name || 'Contrato'}`, price: cost, qty: 1 }],
-      payments: [],
-    };
-    store.INVOICES.push(newInvoice);
+    });
 
-    if (newClient.type === 'residential' || newClient.type === 'school') {
+    if (!isDomainOnDb('customers') && (newClient.type === 'residential' || newClient.type === 'school')) {
       const newOnu: OnuFTTH = {
         id: store.getUniqueOnuId(),
         clientId: newClient.id,
@@ -228,8 +225,8 @@ router.put('/api/clients/:id', requireRoles(['super admin', 'administrador', 'co
   const nextStatus = requestedStatus || beforeStatus;
 
   if (req.body.planId) {
-    const planExists = store.PLANS.some((p) => p.id === req.body.planId);
-    if (!planExists) {
+    const plan = await getPlansService().getById(req.body.planId);
+    if (!plan) {
       return res.status(400).json({ error: 'Plan not found' });
     }
   }
@@ -240,17 +237,17 @@ router.put('/api/clients/:id', requireRoles(['super admin', 'administrador', 'co
   }
 
   if (nextStatus === 'suspended' && beforeStatus !== 'suspended') {
-    store.MIKROTIK_LOGS.push({
-      timestamp: new Date().toISOString().replace('T', ' ').substring(0, 19),
-      message: `script,info Core Router Suspended PPPoE: ${updated.pppoeUser || id} block address list active`,
-    });
-    store.createAlert('client', 'warning', updated.name, 'Linea de cliente automaticamente SUSPENDIDA en el Router Core por falta de pago.');
+    await requestSuspension(
+      id,
+      'Suspensión por cambio administrativo en CRM.',
+      req.authContext?.role ?? null,
+    );
   } else if (nextStatus === 'active' && beforeStatus !== 'active') {
-    store.MIKROTIK_LOGS.push({
-      timestamp: new Date().toISOString().replace('T', ' ').substring(0, 19),
-      message: `script,info Core Router Reactivated PPPoE: ${updated.pppoeUser || id} unblocked address list`,
-    });
-    store.createAlert('client', 'info', updated.name, 'Linea de cliente REACTIVADA con exito en MikroTik con velocidad completa.');
+    await requestReactivation(
+      id,
+      'Reactivación por cambio administrativo en CRM.',
+      req.authContext?.role ?? null,
+    );
   }
 
   await service.addTimelineEvent({
@@ -271,9 +268,12 @@ router.delete('/api/clients/:id', requireRoles(['super admin', 'administrador'])
     return res.status(404).json({ error: 'Customer not found' });
   }
 
-  // Limpieza de dominios aún no migrados (store mock).
-  store.INVOICES = store.INVOICES.filter((i) => i.clientId !== id);
-  store.ONUS = store.ONUS.filter((o) => o.clientId !== id);
+  if (!isDomainOnDb('billing')) {
+    store.INVOICES = store.INVOICES.filter((i) => i.clientId !== id);
+  }
+  if (!isDomainOnDb('customers')) {
+    store.ONUS = store.ONUS.filter((o) => o.clientId !== id);
+  }
 
   res.status(204).send();
 }));

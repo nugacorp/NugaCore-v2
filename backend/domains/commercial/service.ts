@@ -3,6 +3,8 @@ import { BadRequestError, NotFoundError } from '../../common/errors';
 import { isSupabaseAdminConfigured, supabaseAdmin } from '../../services/supabase-admin';
 import { logger } from '../../common/logger';
 import { commercialMemory, newAppointmentId, newProspectId, newQuoteId, stamp } from './memory-store';
+import { getCustomersService } from '../customers/service';
+import type { Client } from '../../../src/types';
 import type {
   AppointmentStatus,
   AppointmentType,
@@ -103,6 +105,31 @@ export class CommercialService {
       if (idx >= 0) commercialMemory.prospects[idx] = updated;
     }
     return updated;
+  }
+
+  async convertProspectToClient(prospectId: string) {
+    const prospect = await this.getProspect(prospectId);
+    if (!prospect) throw new NotFoundError('Prospect not found', 'NOT_FOUND');
+    const customers = getCustomersService();
+    const id = await customers.generateClientId();
+    const client: Client = {
+      id,
+      name: prospect.name,
+      type: 'residential',
+      status: 'lead',
+      email: prospect.email ?? 'sin-correo@nuga.core',
+      phone: prospect.phone ?? '',
+      address: prospect.address ?? '',
+      city: prospect.city ?? 'CDMX',
+      lat: prospect.latitude ?? 19.4125,
+      lng: prospect.longitude ?? -99.1555,
+      planId: prospect.planId ?? 'plan-basic',
+      connectionType: 'WISP',
+      ip: '0.0.0.0',
+    };
+    await customers.create(client);
+    await this.advanceProspectStage(prospectId, 'won');
+    return { client, prospectId };
   }
 
   // ── Quotes ─────────────────────────────────────────────────────────

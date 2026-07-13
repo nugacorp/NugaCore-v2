@@ -1,5 +1,6 @@
 import React, { useCallback, useEffect, useMemo, useState } from 'react';
 import { createAuthorizedApi } from '../../lib/apiClient';
+import ProductionGateBadge from '../../components/ProductionGateBadge';
 import { Bell, Eye, ListChecks, MessageSquare, PlayCircle, RefreshCw, Radio, XCircle } from 'lucide-react';
 import type { UserRole } from '../../lib/supabase';
 import { canWriteNotifications } from '../../lib/notificationsRbac';
@@ -196,7 +197,7 @@ export default function NotificationCenterModule({ userRole, getAuthHeaders }: P
           <div className="flex items-center gap-2">
             <Bell className="h-5 w-5 text-indigo-400" />
             <h2 className="text-2xl font-bold tracking-tight text-white">Notification Center</h2>
-            <span className="rounded border border-amber-500/30 bg-amber-500/10 px-2 py-0.5 text-[10px] font-bold text-amber-200">DRY RUN</span>
+            <ProductionGateBadge getAuthHeaders={getAuthHeaders} gate="notificationsLive" />
           </div>
           <p className="mt-1 text-sm text-slate-400">Centraliza notificaciones de Cobranza, NOC, Tickets, Automation y Provisioning.</p>
         </div>

@@ -46,7 +46,9 @@ node scripts/validate-restore-checklist.mjs
 
 ## Checklist Fase A (operativa)
 
-- [ ] Repo actualizado al último commit de la rama
+Ver checklist completo Coolify: [`COOLIFY_VPS_5.180.151.109_CHECKLIST.md`](COOLIFY_VPS_5.180.151.109_CHECKLIST.md)
+
+- [ ] Repo actualizado al último commit de la rama (`cursor/wisp-os-master-plan-0ffb` / PR #7)
 - [ ] `preflight.sh` en OK
 - [ ] app healthy (`/api/health/live`)
 - [ ] `persistence-status` con `storeFallbackActive=false`
@@ -94,4 +96,9 @@ node scripts/validate-restore-checklist.mjs
   - Tablas verificadas: `portal_user_bindings`, `payment_promises`, `client_tags`, `tenants`, `commercial_prospects`, `radius_accounting`.
   - Coolify staging actualizado a claves `sb_publishable_*` / `sb_secret_*` (runtime confirmado en contenedor).
   - Código `ddda2e2`: aliases `SUPABASE_SECRET_KEY`, `SUPABASE_PUBLISHABLE_KEY`, `VITE_SUPABASE_PUBLISHABLE_KEY`.
+
+- 2026-07-09 (batch 4 — producción real + checklist Coolify):
+  - Rama `cursor/wisp-os-master-plan-0ffb` (PR #7): production gates, readiness API, SSOT sin store en rutas críticas.
+  - Documento operativo: `docs/COOLIFY_VPS_5.180.151.109_CHECKLIST.md` (variables exactas staging + fases gates).
+  - Validar tras deploy: `GET /api/system/production-readiness` → `readyForLiveWisp: true`.
 

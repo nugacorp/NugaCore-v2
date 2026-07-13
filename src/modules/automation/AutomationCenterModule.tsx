@@ -1,5 +1,6 @@
 import React, { useCallback, useEffect, useMemo, useState } from 'react';
 import { createAuthorizedApi } from '../../lib/apiClient';
+import ProductionGateBadge from '../../components/ProductionGateBadge';
 import { Brain, ClipboardList, ListChecks, PlayCircle, RefreshCw, Workflow, Zap, Bell } from 'lucide-react';
 import type { UserRole } from '../../lib/supabase';
 import { canSimulateAutomation } from '../../lib/automationRbac';
@@ -171,7 +172,7 @@ export default function AutomationCenterModule({ userRole, getAuthHeaders }: Pro
           <div className="flex items-center gap-2">
             <Brain className="h-5 w-5 text-indigo-400" />
             <h2 className="text-2xl font-bold tracking-tight text-white">Automation Center</h2>
-            <span className="rounded border border-amber-500/30 bg-amber-500/10 px-2 py-0.5 text-[10px] font-bold text-amber-200">DRY RUN</span>
+            <ProductionGateBadge getAuthHeaders={getAuthHeaders} gate="automationExecute" />
           </div>
           <p className="mt-1 text-sm text-slate-400">El cerebro de NugaCore: decide que deberia hacerse, sin tocar nada real.</p>
         </div>
@@ -364,7 +365,7 @@ export default function AutomationCenterModule({ userRole, getAuthHeaders }: Pro
           <div className="mb-3 flex items-center gap-2">
             <Workflow className="h-4 w-4 text-indigo-400" />
             <h3 className="text-sm font-bold text-white">Execution Preview</h3>
-            <span className="rounded border border-amber-500/30 bg-amber-500/10 px-2 py-0.5 text-[10px] font-bold text-amber-200">DRY RUN</span>
+            <ProductionGateBadge getAuthHeaders={getAuthHeaders} gate="automationExecute" />
           </div>
           {simResult && (
             <p className="mb-3 text-[11px] text-slate-400">

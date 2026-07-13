@@ -106,7 +106,7 @@ export interface DecisionRecord {
   executionPreview: ExecutionPreviewStep[];
   status: 'PENDING';
   createdAt: string;
-  dryRun: true;
+  dryRun: boolean;
 }
 
 export interface SimulationInput {
@@ -122,7 +122,7 @@ export interface SimulationResult {
   rulesMatched: AutomationRuleView[];
   decisions: DecisionRecord[];
   executionPreview: ExecutionPreviewStep[];
-  dryRun: true;
+  dryRun: boolean;
 }
 
 export interface AutomationAuditEntry {
@@ -134,7 +134,7 @@ export interface AutomationAuditEntry {
   decisions: AutomationDecision[];
   executionPreview: ExecutionPreviewStep[];
   actor: string;
-  dryRun: true;
+  dryRun: boolean;
   createdAt: string;
 }
 
@@ -145,5 +145,5 @@ export interface AutomationSummary {
   supportedDecisions: number;
   pendingDecisions: number;
   simulationsRun: number;
-  dryRun: true;
+  dryRun: boolean;
 }

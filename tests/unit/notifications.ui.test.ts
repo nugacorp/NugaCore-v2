@@ -13,8 +13,9 @@ describe('Notification Center UI', () => {
     expect(sidebarSource.indexOf("name: 'Automation Center'")).toBeLessThan(sidebarSource.indexOf("name: 'Notification Center'"));
   });
 
-  it('muestra badge DRY RUN y el banner obligatorio', () => {
-    expect(moduleSource).toContain('DRY RUN');
+  it('muestra badge gated y el banner obligatorio', () => {
+    expect(moduleSource).toContain('ProductionGateBadge');
+    expect(moduleSource).toContain('notificationsLive');
     expect(moduleSource).toContain('Las notificaciones están en modo simulación. No se envían mensajes reales.');
   });
 

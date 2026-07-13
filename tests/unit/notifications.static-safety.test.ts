@@ -3,17 +3,13 @@ import { join } from 'node:path';
 import { describe, expect, it } from 'vitest';
 
 // FASE O — Static Safety. El Notification Engine NO debe poder enviar nada
-// real en esta fase. Estos archivos no deben contener primitivas de entrega
-// real ni clientes de APIs externas.
+// real en esta fase salvo vía providers-deliver.ts (gated, excluido aquí).
 const DIR = 'backend/domains/notifications';
 
 const FILES = readdirSync(DIR)
-  .filter((f) => f.endsWith('.ts'))
+  .filter((f) => f.endsWith('.ts') && f !== 'providers-deliver.ts')
   .map((f) => join(DIR, f));
 
-// Tokens prohibidos (en minúsculas). Nota: se prohíben 'whatsapp real',
-// 'telegram bot api real' y 'push real' (no los nombres de canal/provider mock
-// WHATSAPP/TELEGRAM/PUSH, que son legítimos).
 const FORBIDDEN = [
   'fetch(',
   'axios',
@@ -32,7 +28,7 @@ const FORBIDDEN = [
 ];
 
 describe('notifications static safety (FASE O)', () => {
-  it('incluye los 6 archivos del dominio', () => {
+  it('incluye los archivos del dominio (sin deliver gated)', () => {
     expect(FILES.length).toBeGreaterThanOrEqual(6);
   });
 

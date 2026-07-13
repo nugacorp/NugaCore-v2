@@ -111,6 +111,12 @@ export async function resolvePortalAuth(req: Request): Promise<PortalAuthContext
   if (!requestedClientId) {
     throw new UnauthorizedError('Missing clientId', 'PORTAL_CLIENT_REQUIRED');
   }
+  if ((process.env.NODE_ENV || '').trim() === 'production') {
+    throw new UnauthorizedError(
+      'Portal requires Supabase JWT (client binding or staff role)',
+      'PORTAL_AUTH_REQUIRED',
+    );
+  }
   return { clientId: requestedClientId, mode: 'open' };
 }
 

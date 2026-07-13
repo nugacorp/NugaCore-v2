@@ -12,8 +12,9 @@ describe('Provisioning Center UI', () => {
     expect(sidebarSource).toContain("id: 'provisioning'");
   });
 
-  it('muestra badge y banner dry-run', () => {
-    expect(moduleSource).toContain('DRY RUN');
+  it('muestra badge gated y banner dry-run', () => {
+    expect(moduleSource).toContain('ProductionGateBadge');
+    expect(moduleSource).toContain('provisioningExecute');
     expect(moduleSource).toContain('Las acciones mostradas aquí NO ejecutan cambios reales.');
   });
 

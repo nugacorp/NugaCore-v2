@@ -15,9 +15,14 @@
 
 import { logger } from '../../common/logger';
 import { BadRequestError, NotFoundError } from '../../common/errors';
+import { productionGates } from '../../config/production-gates';
+import { dispatchNetworkOrder } from '../../bridges/network-order-dispatch';
 import { isDomainOnDb } from '../../config/feature-flags';
 import { isSupabaseAdminConfigured, supabaseAdmin } from '../../services/supabase-admin';
 import { getBillingService } from '../billing/service';
+import { getCustomersService } from '../customers/service';
+import { getSuspensionService } from '../suspension/service';
+import { inventoryRoutersRepository } from '../inventory/routers/repository';
 import { store } from '../../state/store';
 import { buildPaymentDataProvider } from './data-provider';
 import { getProvider } from './providers/index';
@@ -253,29 +258,31 @@ export class PaymentService {
       return { customerId, alreadyActive: true, mikrotikAction: null, message: 'Cliente ya activo.' };
     }
 
-    // Cambio de estado lógico (sin tocar MikroTik real)
+    const routerLive = productionGates.paymentsRouterLive();
+    const dryRun = !routerLive;
+
+    // Cambio de estado lógico
     const prevStatus = client.status;
     await dataProvider.reactivateCustomer(customerId);
 
-    // Timeline del cliente
-    store.addClientTimelineEvent({
+    await getCustomersService().addTimelineEvent({
       clientId: customerId,
       eventType: 'status_change',
       summary: `Cambio de estado ${prevStatus} → active`,
-      details: `Reactivación lógica por pago confirmado. ${context?.invoiceId ? `Factura: ${context.invoiceId}.` : ''} Pendiente ejecución en router (dry_run).`,
+      details: `Reactivación por pago confirmado. ${context?.invoiceId ? `Factura: ${context.invoiceId}.` : ''}${dryRun ? ' Pendiente ejecución en router (dry_run).' : ' Orden de reactivación encolada.'}`,
       createdBy: context?.triggeredBy ?? 'payment-engine',
     });
 
-    // Crear mikrotik_action dry_run=true — NO ejecuta en router real
     const actionId = await this.repo.nextActionId();
-    const router = store.MIKROTIK_ROUTERS.find((r) => r.vpnIp);
+    const routers = inventoryRoutersRepository.list();
+    const router = routers.find((r) => r.encryptedPassword || r.hasCredentials) ?? routers[0];
     const actionRec: MikrotikActionRecord = {
       id: actionId,
       customerId,
       routerId: router?.id,
       actionType: 'reactivate',
       status: 'pending',
-      dryRun: true,
+      dryRun,
       payload: {
         previousStatus: prevStatus,
         invoiceId: context?.invoiceId,
@@ -288,33 +295,45 @@ export class PaymentService {
     };
     await this.repo.createAction(actionRec);
 
-    // Log suspension
-    store.logSuspensionAction({
-      clientId: customerId,
-      clientName: client.name,
-      action: 'reactivate',
+    if (routerLive) {
+      await dispatchNetworkOrder({
+        customerId,
+        orderType: 'reactivation',
+        source: 'payment-engine',
+        reason: `Pago confirmado. Factura: ${context?.invoiceId ?? 'N/A'}`,
+        actor: context?.triggeredBy ?? 'payment-engine',
+      });
+    }
+
+    await getSuspensionService().repo.recordEvent({
+      customerId,
+      eventType: 'reactivation_order_created',
       reason: `Pago confirmado vía Payment Engine. Factura: ${context?.invoiceId ?? 'N/A'}.`,
-      source: 'automation',
+      automatic: true,
       actorId: context?.triggeredBy ?? 'payment-engine',
+      metadata: { dryRun, routerLive },
     });
 
-    // Alerta NOC
-    store.createAlert(
-      'client',
-      'info',
-      client.name,
-      `Servicio reactivado lógicamente por pago confirmado. Acción MikroTik pendiente (dry_run).`,
-    );
+    if (!isDomainOnDb('customers')) {
+      store.createAlert(
+        'client',
+        'info',
+        client.name,
+        `Servicio reactivado por pago confirmado.${dryRun ? ' Acción MikroTik pendiente (dry_run).' : ' Orden de reactivación procesada.'}`,
+      );
+    }
 
-    logger.info('PaymentEngine: reactivación lógica completada', {
-      customerId, actionId, dryRun: true,
+    logger.info('PaymentEngine: reactivación completada', {
+      customerId, actionId, dryRun,
     });
 
     return {
       customerId,
       alreadyActive: false,
       mikrotikAction: mikrotikActionToView(actionRec),
-      message: 'Servicio reactivado lógicamente. Acción MikroTik en cola (dry_run=true).',
+      message: dryRun
+        ? 'Servicio reactivado lógicamente. Acción MikroTik en cola (dry_run=true).'
+        : 'Servicio reactivado. Orden de reactivación en cola para el worker.',
     };
   }
 

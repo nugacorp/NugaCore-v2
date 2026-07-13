@@ -7,32 +7,44 @@
 // No hay ninguna primitiva de entrega real en este archivo.
 // ====================================================================
 
+import { deliverNotification } from './providers-deliver';
 import { NotificationChannel, ProviderPreviewResult } from './types';
 
 export interface NotificationMockProvider {
   channel: NotificationChannel;
   name: string;
   preview(renderedBody: string): ProviderPreviewResult;
+  deliver?(renderedBody: string): ProviderPreviewResult;
 }
 
 const buildPreview = (
   channel: NotificationChannel,
   name: string,
   renderedBody: string,
+  live = false,
 ): ProviderPreviewResult => ({
   channel,
-  provider: 'mock',
-  dryRun: true,
+  provider: live ? 'live' : 'mock',
+  dryRun: !live,
   wouldSend: true,
-  sent: false,
+  sent: live,
   renderedBody,
-  note: `${name}: simulacion. No se contacta ningun servicio externo.`,
+  note: live
+    ? `${name}: entregado (modo producción).`
+    : `${name}: simulacion. No se contacta ningun servicio externo.`,
 });
+
+const buildDeliver = (
+  channel: NotificationChannel,
+  name: string,
+  renderedBody: string,
+): ProviderPreviewResult => deliverNotification(channel, name, renderedBody);
 
 export const WhatsAppMockProvider: NotificationMockProvider = {
   channel: 'WHATSAPP',
   name: 'WhatsAppMockProvider',
   preview: (body) => buildPreview('WHATSAPP', 'WhatsAppMockProvider', body),
+  deliver: (body) => buildDeliver('WHATSAPP', 'WhatsAppMockProvider', body),
 };
 
 export const TelegramMockProvider: NotificationMockProvider = {

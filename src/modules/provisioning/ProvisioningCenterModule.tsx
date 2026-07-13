@@ -1,5 +1,6 @@
 import React, { useCallback, useEffect, useMemo, useState } from 'react';
 import { createAuthorizedApi } from '../../lib/apiClient';
+import ProductionGateBadge from '../../components/ProductionGateBadge';
 import { CheckCircle, ClipboardList, RefreshCw, ShieldCheck, XCircle } from 'lucide-react';
 import type { UserRole } from '../../lib/supabase';
 import { canWriteProvisioning } from '../../lib/provisioningRbac';
@@ -115,7 +116,7 @@ export default function ProvisioningCenterModule({ userRole, getAuthHeaders }: P
           <div className="flex items-center gap-2">
             <ClipboardList className="h-5 w-5 text-indigo-400" />
             <h2 className="text-2xl font-bold tracking-tight text-white">Provisioning Center</h2>
-            <span className="rounded border border-amber-500/30 bg-amber-500/10 px-2 py-0.5 text-[10px] font-bold text-amber-200">DRY RUN</span>
+            <ProductionGateBadge getAuthHeaders={getAuthHeaders} gate="provisioningExecute" />
           </div>
           <p className="mt-1 text-sm text-slate-400">Las acciones mostradas aquí NO ejecutan cambios reales.</p>
         </div>
