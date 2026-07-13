@@ -50,6 +50,8 @@ describe('wireguard_managed', () => {
   it('crea NugaCoreWG + peer + allowed-address y limita API a la VPN', () => {
     expect(r.script).toContain('interface wireguard add name=NugaCoreWG');
     expect(r.script).toContain('interface wireguard peers add');
+    expect(r.script).toMatch(/interface wireguard remove \[find where name~"NugaCore"\]/);
+    expect(r.script).toContain('/system scheduler remove [find where comment~"NugaCore"]');
     expect(r.script).toContain('allowed-address=');
     expect(r.script).toContain('/ip service set api');
     expect(r.script).toContain('address="10.10.0.0/24"');

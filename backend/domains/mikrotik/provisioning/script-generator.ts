@@ -67,7 +67,8 @@ const commonCleanup = (): string =>
 /user remove [find where name~"nugacore_"]
 /user group remove [find where name~"nugacore"]
 /ip route remove [find where comment~"NugaCore"]
-/ip address remove [find where comment~"NugaCore"]`;
+/ip address remove [find where comment~"NugaCore"]
+/system scheduler remove [find where comment~"NugaCore"]`;
 
 const userAndGroup = (apiUser: string, apiPassword: string, apiMode: ApiMode, tag: string): string =>
   `# --- 2. Grupo con permisos minimos (${apiMode}) ---

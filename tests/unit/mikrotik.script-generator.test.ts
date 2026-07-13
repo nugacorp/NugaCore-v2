@@ -70,6 +70,7 @@ describe('script SSTP', () => {
     expect(script).toContain('remove [find');
     expect(script).toMatch(/sstp-client remove \[find where name~"NugaCore"\]/);
     expect(script).toContain('/user remove [find where name~"nugacore_"]');
+    expect(script).toContain('/system scheduler remove [find where comment~"NugaCore"]');
   });
 
   it('limita la API a la red VPN de NugaCore', () => {
@@ -111,6 +112,9 @@ describe('script WireGuard', () => {
     expect(connectionType).toBe('wireguard');
     expect(script).toContain('interface wireguard add name=NugaCoreWG');
     expect(script).toContain('interface wireguard peers add');
+    expect(script).toMatch(/interface wireguard peers remove \[find where comment~"NugaCore"\]/);
+    expect(script).toMatch(/interface wireguard remove \[find where name~"NugaCore"\]/);
+    expect(script).toContain('/system scheduler remove [find where comment~"NugaCore"]');
     expect(script.toLowerCase()).not.toContain('wisphub');
     expect(policyOf(script)).toBe('read,write,api,test');
   });
