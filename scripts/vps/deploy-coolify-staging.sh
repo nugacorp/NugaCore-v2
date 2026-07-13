@@ -35,9 +35,11 @@ upsert_env() {
     docker exec coolify-db psql -U coolify -d coolify -c \
       "UPDATE environment_variables SET value='${val}', is_runtime=${runtime}, is_buildtime=${buildtime}, updated_at=NOW() WHERE id=${exists};" >/dev/null
   else
+    local new_uuid
+    new_uuid="$(uuidgen 2>/dev/null || cat /proc/sys/kernel/random/uuid)"
     docker exec coolify-db psql -U coolify -d coolify -c \
       "INSERT INTO environment_variables (uuid, key, value, is_preview, is_runtime, is_buildtime, version, is_literal, is_required, is_shared, resourceable_type, resourceable_id, created_at, updated_at)
-       VALUES (gen_random_uuid()::text, '${key}', '${val}', false, ${runtime}, ${buildtime}, '4.0', false, false, false, 'App\\\\Models\\\\Application', ${APP_ID}, NOW(), NOW());" >/dev/null
+       VALUES ('${new_uuid}', '${key}', '${val}', false, ${runtime}, ${buildtime}, '4.0', false, false, false, 'App\\\\Models\\\\Application', ${APP_ID}, NOW(), NOW());" >/dev/null
   fi
   log "env ${key}=${val}"
 }
@@ -57,14 +59,17 @@ docker exec coolify php artisan cleanup:deployment-queue --force 2>/dev/null || 
 docker exec coolify php artisan check:deployment-queue --force --seconds=0 2>/dev/null || true
 
 log "disparando deploy (tinker)..."
-docker exec coolify php artisan tinker --execute="
+DEPLOY_OUT="$(docker exec coolify php artisan tinker --execute="
 \$app = App\\Models\\Application::find(${APP_ID});
-if (!\$app) { echo 'no app'; exit(1); }
+if (!\$app) { echo 'ERR:no_app'; exit(1); }
 \$app->git_branch = '${BRANCH}';
 \$app->save();
-dispatch(new App\\Jobs\\ApplicationDeploymentJob(\$app, 'manual'));
-echo 'queued';
-" 2>/dev/null || fail "no se pudo encolar deploy"
+\$uuid = (string) new Visus\\Cuid2\\Cuid2();
+queue_application_deployment(application: \$app, deployment_uuid: \$uuid, force_rebuild: true, pull_request_id: 0, is_api: true);
+echo 'queued:' . \$uuid;
+" 2>&1)" || fail "no se pudo encolar deploy"
+echo "$DEPLOY_OUT" | tail -3
+echo "$DEPLOY_OUT" | grep -q 'queued:' || fail "deploy no encolado: $DEPLOY_OUT"
 
 log "esperando health (max ${WAIT_SECS}s)..."
 deadline=$((SECONDS + WAIT_SECS))
