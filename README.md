@@ -5,9 +5,9 @@ NugaCore is a WISP/FTTH operations platform built with React + Vite + TypeScript
 ## Project Direction
 
 - Roadmap maestro: [ROADMAP.md](ROADMAP.md)
-- Production readiness checklist: [docs/PRODUCTION_READINESS_CHECKLIST.md](docs/PRODUCTION_READINESS_CHECKLIST.md)
-- Development handoff checklist: [docs/DEVELOPMENT_HANDOFF_CHECKLIST.md](docs/DEVELOPMENT_HANDOFF_CHECKLIST.md)
-- Architecture reference: [docs/ARCHITECTURE.md](docs/ARCHITECTURE.md)
+- Production readiness checklist: [docs/PRODUCTION_READINESS_CHECKLIST.md](./docs/deployment/PRODUCTION_READINESS_CHECKLIST.md)
+- Development handoff checklist: [docs/DEVELOPMENT_HANDOFF_CHECKLIST.md](./docs/planning/DEVELOPMENT_HANDOFF_CHECKLIST.md)
+- Architecture reference: [docs/ARCHITECTURE.md](./docs/architecture/ARCHITECTURE.md)
 
 Current high-level status:
 - Core platform, Auth/RBAC, Customers, Plans, Billing, Payment Engine and Suspension Engine are functionally advanced.

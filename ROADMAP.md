@@ -20,7 +20,7 @@ Objetivos estratégicos:
 
 ## WISP OS — Plan Maestro (Olas 0–6)
 
-NugaCore se posiciona como **sistema operativo WISP/ISP** (no solo CRM). Mapa completo: [`docs/WISP_OS_MODULE_MAP.md`](docs/WISP_OS_MODULE_MAP.md).
+NugaCore se posiciona como **sistema operativo WISP/ISP** (no solo CRM). Mapa completo: [`docs/WISP_OS_MODULE_MAP.md`](./docs/planning/WISP_OS_MODULE_MAP.md).
 
 | Ola | Enfoque | Gate |
 | --- | --- | --- |
@@ -292,7 +292,7 @@ Gate producción:
 ### FASE 4.9.2 — Dynamic Template Parameters
 
 Estado: ✅ APROBADA por Hermes (commit `a0c9b55`). Ver
-[`docs/DYNAMIC_TEMPLATE_PARAMETERS_DB_APPROVAL.md`](./docs/DYNAMIC_TEMPLATE_PARAMETERS_DB_APPROVAL.md).
+[`docs/DYNAMIC_TEMPLATE_PARAMETERS_DB_APPROVAL.md`](./docs/mikrotik/DYNAMIC_TEMPLATE_PARAMETERS_DB_APPROVAL.md).
 
 Objetivo:
 
@@ -316,7 +316,7 @@ Resuelto (validado por Hermes sobre `a0c9b55`):
 ### FASE 4.9.2.1 — Router/WireGuard Snapshot Persistence
 
 Estado: ✅ APROBADA por Hermes (2026-06-16, commit `a0c9b55`). Ver
-[`docs/ROUTER_ENROLLMENT_4_9_2_1_RESULT.md`](./docs/ROUTER_ENROLLMENT_4_9_2_1_RESULT.md).
+[`docs/ROUTER_ENROLLMENT_4_9_2_1_RESULT.md`](./docs/results/ROUTER_ENROLLMENT_4_9_2_1_RESULT.md).
 
 Objetivo:
 
@@ -420,7 +420,7 @@ Prerequisito para NOC Read-Only e Inventory Read-Only. Resuelve el drift del rep
 las dos definiciones de `public.mikrotik_routers` (modelo de monitoreo en `init_schema`
 vs modelo de provisioning en `mikrotik_provisioning_schema`).
 
-Diseño completo: [`docs/MIKROTIK_ROUTERS_SCHEMA_RECONCILIATION.md`](./docs/MIKROTIK_ROUTERS_SCHEMA_RECONCILIATION.md).
+Diseño completo: [`docs/MIKROTIK_ROUTERS_SCHEMA_RECONCILIATION.md`](./docs/mikrotik/MIKROTIK_ROUTERS_SCHEMA_RECONCILIATION.md).
 
 Nota: la migración `20260605000000` **ya es evolutiva** (`ADD COLUMN IF NOT EXISTS`); el
 conflicto descrito en versiones antiguas de la doc ya fue corregido (`b4d19c4`/`7264e59`).
@@ -464,16 +464,16 @@ Estado: ✅ **4.11.1 Foundation aprobada en staging**.
 Vista consolidada de routers leyendo el modelo canónico de `mikrotik_routers`. Solo
 lectura: resumen + tabla; sin escritura sobre routers, sin RouterOS, sin comandos.
 Endpoints `/api/inventory/routers`, `/api/inventory/routers/:id`, `/api/inventory/summary`.
-Resultado: [`docs/INVENTORY_READ_ONLY_RESULT.md`](./docs/INVENTORY_READ_ONLY_RESULT.md).
-Validación staging: [`docs/INVENTORY_READ_ONLY_STAGING_RESULT.md`](./docs/INVENTORY_READ_ONLY_STAGING_RESULT.md).
-Diseño en [`docs/NOC_READ_ONLY_ARCHITECTURE.md`](./docs/NOC_READ_ONLY_ARCHITECTURE.md) §1.
+Resultado: [`docs/INVENTORY_READ_ONLY_RESULT.md`](./docs/results/INVENTORY_READ_ONLY_RESULT.md).
+Validación staging: [`docs/INVENTORY_READ_ONLY_STAGING_RESULT.md`](./docs/results/INVENTORY_READ_ONLY_STAGING_RESULT.md).
+Diseño en [`docs/NOC_READ_ONLY_ARCHITECTURE.md`](./docs/noc/NOC_READ_ONLY_ARCHITECTURE.md) §1.
 
 ### FASE 4.11 — NOC Read-Only
 
 Estado: ✅ 4.11.2 Foundation + ✅ 4.11.3 Real Telemetry aprobadas en staging por Hermes.
 4.11.3 agrega `GET /api/noc/health` y `GET /api/noc/towers` (telemetría agregada por
 salud y por torre) más UI `NocTelemetryModule`; reutiliza `/api/noc/alerts`. Resultado:
-[`docs/NOC_REAL_TELEMETRY_RESULT.md`](./docs/NOC_REAL_TELEMETRY_RESULT.md).
+[`docs/NOC_REAL_TELEMETRY_RESULT.md`](./docs/results/NOC_REAL_TELEMETRY_RESULT.md).
 
 Subfase actual (4.11.2 Foundation):
 
@@ -487,7 +487,7 @@ Recomendación: validar esta foundation en staging antes de avanzar a NOC comple
 Prerrequisito: **cerrar DB-1** (reconciliación de `mikrotik_routers`) antes de NOC
 read-only sobre DB real.
 
-Diseño completo: [`docs/NOC_READ_ONLY_ARCHITECTURE.md`](./docs/NOC_READ_ONLY_ARCHITECTURE.md).
+Diseño completo: [`docs/NOC_READ_ONLY_ARCHITECTURE.md`](./docs/noc/NOC_READ_ONLY_ARCHITECTURE.md).
 
 Dashboard:
 
@@ -537,7 +537,7 @@ memoria. Dominio `backend/domains/manual-safe-mode/`.
 - UI `src/modules/manual-safe-mode/ManualSafeModeModule.tsx` (badge SAFE MODE).
 - Sin RouterOS, sin escritura real, sin commit mode, sin DB/migraciones.
 
-Resultado: [`docs/PROD1_MANUAL_SAFE_MODE_RESULT.md`](./docs/PROD1_MANUAL_SAFE_MODE_RESULT.md).
+Resultado: [`docs/PROD1_MANUAL_SAFE_MODE_RESULT.md`](./docs/results/PROD1_MANUAL_SAFE_MODE_RESULT.md).
 Siguiente: Safe Command Queue (dry-run).
 
 ### FAST-1 — Safe Command Queue (Dry-Run) + CHR Lab Prep
@@ -555,12 +555,12 @@ audita comandos **sin ejecutar nada**. Dominio `backend/domains/safe-command-que
 - UI `src/modules/safe-command-queue/SafeCommandQueueModule.tsx` (badge DRY RUN).
 - RBAC: SA/Admin/Técnico/Soporte/Solo lectura; Cobranza 403.
 - Preparación documental de la fase siguiente:
-  [`docs/CHR_LAB_PREP_RUNBOOK.md`](./docs/CHR_LAB_PREP_RUNBOOK.md) y
-  [`docs/ROUTEROS_READ_ONLY_API_PLAN.md`](./docs/ROUTEROS_READ_ONLY_API_PLAN.md).
+  [`docs/CHR_LAB_PREP_RUNBOOK.md`](./docs/runbooks/CHR_LAB_PREP_RUNBOOK.md) y
+  [`docs/ROUTEROS_READ_ONLY_API_PLAN.md`](./docs/mikrotik/ROUTEROS_READ_ONLY_API_PLAN.md).
 - Sin RouterOS, sin worker live, sin commit mode, sin DB/migraciones.
 
-Resultado: [`docs/SAFE_COMMAND_QUEUE_DRY_RUN_RESULT.md`](./docs/SAFE_COMMAND_QUEUE_DRY_RUN_RESULT.md).
-Validación staging: [`docs/SAFE_COMMAND_QUEUE_DRY_RUN_STAGING_RESULT.md`](./docs/SAFE_COMMAND_QUEUE_DRY_RUN_STAGING_RESULT.md).
+Resultado: [`docs/SAFE_COMMAND_QUEUE_DRY_RUN_RESULT.md`](./docs/results/SAFE_COMMAND_QUEUE_DRY_RUN_RESULT.md).
+Validación staging: [`docs/SAFE_COMMAND_QUEUE_DRY_RUN_STAGING_RESULT.md`](./docs/results/SAFE_COMMAND_QUEUE_DRY_RUN_STAGING_RESULT.md).
 Siguiente: RouterOS Read-Only Lab.
 
 ### PROD-3 — RouterOS Read-Only Lab
@@ -578,7 +578,7 @@ no conecta con RouterOS real, no toca routers reales y no activa Worker Live ni 
 - UI `src/modules/routeros-readonly/RouterOSReadOnlyModule.tsx` con badge READ ONLY LAB.
 - Tests contract/UI/security; safety guard impide APIs/verbos de mutación en el dominio.
 
-Resultado: [`docs/ROUTEROS_READ_ONLY_LAB_RESULT.md`](./docs/ROUTEROS_READ_ONLY_LAB_RESULT.md).
+Resultado: [`docs/ROUTEROS_READ_ONLY_LAB_RESULT.md`](./docs/results/ROUTEROS_READ_ONLY_LAB_RESULT.md).
 
 Siguiente gated: laboratorio RouterOS real controlado/read-only solo con autorización explícita.
 
@@ -600,7 +600,7 @@ wireguard), UI read-only `RouterOS Read-Only Lab` (badge `READ ONLY LAB`), tests
 (contract/service/ui/static-safety) y una prueba que hace al dominio
 **físicamente incapaz de escribir**. Sin conexión real, sin RouterOS real, sin
 worker live, sin escritura. RBAC: SA/Admin/Técnico/Soporte/Solo lectura; Cobranza
-403. Resultado: [`docs/ROUTEROS_READ_ONLY_LAB_RESULT.md`](./docs/ROUTEROS_READ_ONLY_LAB_RESULT.md).
+403. Resultado: [`docs/ROUTEROS_READ_ONLY_LAB_RESULT.md`](./docs/results/ROUTEROS_READ_ONLY_LAB_RESULT.md).
 
 #### PROD-4 — CHR Real Read-Only Integration
 
@@ -622,8 +622,8 @@ real read-only de PROD-4): cliente RouterOS REST **real** de solo lectura
 USERNAME/PASSWORD/TIMEOUT_MS/TLS`), que mapea cada `print` allowlisted a su ruta
 REST y hace `GET` HTTPS con Basic Auth y timeout. Sin credenciales → cae a mock.
 Logs `routeros_read_success` / `routeros_read_fallback` sin secretos. Resultado:
-[`docs/PROD5_CHR_REAL_READ_ONLY_RESULT.md`](./docs/PROD5_CHR_REAL_READ_ONLY_RESULT.md)
-(antecedente [`docs/CHR_REAL_READ_ONLY_RESULT.md`](./docs/CHR_REAL_READ_ONLY_RESULT.md)).
+[`docs/PROD5_CHR_REAL_READ_ONLY_RESULT.md`](./docs/results/PROD5_CHR_REAL_READ_ONLY_RESULT.md)
+(antecedente [`docs/CHR_REAL_READ_ONLY_RESULT.md`](./docs/results/CHR_REAL_READ_ONLY_RESULT.md)).
 Producción permanece en `mock`; solo CHR de **lab**. Falta (gated): validación
 Hermes/Ramiro con CHR de lab real (credenciales fuera del repo). No avanza a
 PROD-6 ni RouterOS write.
@@ -681,8 +681,8 @@ los roles, ahora con FAQ. El **Dashboard** agrega un "Resumen operativo" prioriz
 (estado de red + alertas y KPIs clave enlazables) reutilizando los mismos
 estilos/colores. RBAC funcional, backend, endpoints, providers, RouterOS y tema sin
 cambios. Resultado:
-[`docs/UI_NAVIGATION_SIMPLIFICATION_RESULT.md`](./docs/UI_NAVIGATION_SIMPLIFICATION_RESULT.md)
-(antecedente: [`docs/UI_NAVIGATION_REORGANIZATION_RESULT.md`](./docs/UI_NAVIGATION_REORGANIZATION_RESULT.md)).
+[`docs/UI_NAVIGATION_SIMPLIFICATION_RESULT.md`](./docs/results/UI_NAVIGATION_SIMPLIFICATION_RESULT.md)
+(antecedente: [`docs/UI_NAVIGATION_REORGANIZATION_RESULT.md`](./docs/results/UI_NAVIGATION_REORGANIZATION_RESULT.md)).
 **Avanzar a PROD-5 / CHR Read-Only real solo después de validar esta UX con Hermes.**
 
 #### CUSTOMER-IPAM-1 — Asignación de IP en alta de cliente WISP
@@ -695,7 +695,7 @@ mock y direcciones ya usadas por clientes NugaCore. Lead Comercial puede
 continuar sin IP. El backend expone `/api/ipam/**` y revalida el payload del alta
 para bloquear duplicados aunque la UI sea omitida. No activa flags MikroTik,
 Worker Live, Commit Mode ni escritura RouterOS. Resultado:
-[`docs/IP_ASSIGNMENT_CUSTOMER_ONBOARDING_RESULT.md`](./docs/IP_ASSIGNMENT_CUSTOMER_ONBOARDING_RESULT.md).
+[`docs/IP_ASSIGNMENT_CUSTOMER_ONBOARDING_RESULT.md`](./docs/results/IP_ASSIGNMENT_CUSTOMER_ONBOARDING_RESULT.md).
 
 Siguiente paso gated: fuente RouterOS read-only únicamente después de aprobar
 PROD-5/CHR; persistencia DB de metadatos IPAM requiere diseño/migración separada.
@@ -714,7 +714,7 @@ mock/local; Generar factura y Cambiar plan quedan "pendiente de integración";
 Cambiar IP valida formato y duplicado local. RBAC por rol vía `clientActionCaps`.
 No activa `USE_DB_MIKROTIK`/`USE_DB_WIREGUARD`/`MIKROTIK_WORKER_LIVE`/commit mode
 ni escritura RouterOS. Resultado:
-[`docs/CLIENT_360_QUICK_ACTIONS_RESULT.md`](./docs/CLIENT_360_QUICK_ACTIONS_RESULT.md).
+[`docs/CLIENT_360_QUICK_ACTIONS_RESULT.md`](./docs/results/CLIENT_360_QUICK_ACTIONS_RESULT.md).
 
 Siguiente fase gated: conectar pago/ticket/estado de cuenta a sus backends
 seguros y suspender/reactivar al Suspension Engine en modo dry-run/manual.
@@ -785,8 +785,8 @@ Transferencias, stock por almacén) como sub-tabs del módulo Inventario.
   inventory_movements, inventory_transfers, inventory_assignments; RLS).
 - Endpoints aditivos `/api/inventory/warehouses*` y `/api/inventory/transfers*`.
 - Tests: `inventory.contract.test.ts` (hermético) + `inventory.db.contract.test.ts`.
-- Resultado: [`docs/INVENTORY_ERP_5_1_RESULT.md`](./docs/INVENTORY_ERP_5_1_RESULT.md).
-  Diseño: [`docs/INVENTORY_ERP_PERSISTENCE.md`](./docs/INVENTORY_ERP_PERSISTENCE.md).
+- Resultado: [`docs/INVENTORY_ERP_5_1_RESULT.md`](./docs/results/INVENTORY_ERP_5_1_RESULT.md).
+  Diseño: [`docs/INVENTORY_ERP_PERSISTENCE.md`](./docs/inventory/INVENTORY_ERP_PERSISTENCE.md).
 
 #### FASE 5.2 — Series, garantías y reportes (gated)
 
@@ -914,10 +914,10 @@ Toda nueva funcionalidad debe tener:
 
 ## Documentos complementarios
 
-- Checklist de producción y desarrollo: [`docs/PRODUCTION_READINESS_CHECKLIST.md`](docs/PRODUCTION_READINESS_CHECKLIST.md)
-- Checklist operativo para técnicos/agentes: [`docs/DEVELOPMENT_HANDOFF_CHECKLIST.md`](docs/DEVELOPMENT_HANDOFF_CHECKLIST.md)
-- Arquitectura rápida: [`docs/ARCHITECTURE.md`](docs/ARCHITECTURE.md)
-- Backlog maestro histórico: [`docs/MASTER_BACKLOG.md`](docs/MASTER_BACKLOG.md)
+- Checklist de producción y desarrollo: [`docs/PRODUCTION_READINESS_CHECKLIST.md`](./docs/deployment/PRODUCTION_READINESS_CHECKLIST.md)
+- Checklist operativo para técnicos/agentes: [`docs/DEVELOPMENT_HANDOFF_CHECKLIST.md`](./docs/planning/DEVELOPMENT_HANDOFF_CHECKLIST.md)
+- Arquitectura rápida: [`docs/ARCHITECTURE.md`](./docs/architecture/ARCHITECTURE.md)
+- Backlog maestro histórico: [`docs/MASTER_BACKLOG.md`](./docs/planning/MASTER_BACKLOG.md)
 
 ## Meta final
 

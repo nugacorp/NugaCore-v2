@@ -48,6 +48,6 @@ const clientsRepo = isDomainOnDb('clients') ? clientsSupabaseRepo : clientsStore
 
 - El **service nunca importa Express** (sin `req`/`res`): es lógica pura y testeable.
 - La traducción `snake_case` ↔ `camelCase` ocurre **solo** en los mappers del repository
-  (ver [../../docs/DATA_CONTRACT.md](../../docs/DATA_CONTRACT.md)). Los valores de enum **no se traducen**.
+  (ver [../../docs/DATA_CONTRACT.md](../../docs/architecture/DATA_CONTRACT.md)). Los valores de enum **no se traducen**.
 - Migrar **un dominio a la vez**, detrás de su flag `USE_DB_<DOMINIO>`, validando con las
   pruebas de contrato (`tests/contract/`).
