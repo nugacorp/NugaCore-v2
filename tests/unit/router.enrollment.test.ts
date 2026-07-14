@@ -75,6 +75,17 @@ describe('enrollmentRepository', () => {
     expect(enrollmentRepository.update('enr-999', { status: 'online' })).toBeUndefined();
   });
 
+  it('delete elimina el registro', () => {
+    enrollmentRepository.create(makeRecord('enr-1'));
+    expect(enrollmentRepository.delete('enr-1')).toBe(true);
+    expect(enrollmentRepository.getById('enr-1')).toBeUndefined();
+    expect(enrollmentRepository.list()).toHaveLength(0);
+  });
+
+  it('delete desconocido → false', () => {
+    expect(enrollmentRepository.delete('enr-999')).toBe(false);
+  });
+
   it('_reset limpia todos los registros y reinicia el contador', () => {
     enrollmentRepository.create(makeRecord('enr-1'));
     enrollmentRepository._reset();

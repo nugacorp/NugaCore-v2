@@ -60,6 +60,13 @@ export const enrollmentRepository = {
     return RECORDS[idx];
   },
 
+  delete(id: string): boolean {
+    const idx = RECORDS.findIndex((r) => r.id === id);
+    if (idx === -1) return false;
+    RECORDS.splice(idx, 1);
+    return true;
+  },
+
   nextId,
 
   /** Solo para tests: limpia el repositorio. */
@@ -78,6 +85,7 @@ export interface RouterEnrollmentRepository {
   findById(id: string): Promise<RouterEnrollmentRecord | null>;
   list(): Promise<RouterEnrollmentRecord[]>;
   update(id: string, patch: Partial<RouterEnrollmentRecord>): Promise<RouterEnrollmentRecord | null>;
+  delete(id: string): Promise<boolean>;
   findByRouterId(routerId: string): Promise<RouterEnrollmentRecord[]>;
   findByPeerId(peerId: string): Promise<RouterEnrollmentRecord[]>;
   nextId(): Promise<string>;
@@ -99,6 +107,9 @@ export class StoreRouterEnrollmentRepository implements RouterEnrollmentReposito
   }
   async update(id: string, patch: Partial<RouterEnrollmentRecord>) {
     return enrollmentRepository.update(id, patch) ?? null;
+  }
+  async delete(id: string) {
+    return enrollmentRepository.delete(id);
   }
   async findByRouterId(routerId: string) {
     return enrollmentRepository.list().filter((r) => r.routerId === routerId);
@@ -149,6 +160,14 @@ export class SupabaseRouterEnrollmentRepository implements RouterEnrollmentRepos
       if (error) throw new Error(`router_enrollment.update: ${error.message}`);
     }
     return this.findById(id);
+  }
+
+  async delete(id: string): Promise<boolean> {
+    const existing = await this.findById(id);
+    if (!existing) return false;
+    const { error } = await this.client.from(TABLE).delete().eq('id', id);
+    if (error) throw new Error(`router_enrollment.delete: ${error.message}`);
+    return true;
   }
 
   async findByRouterId(routerId: string): Promise<RouterEnrollmentRecord[]> {

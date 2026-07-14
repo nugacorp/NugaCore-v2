@@ -18,6 +18,7 @@ import {
   XCircle,
   List,
   Plus,
+  Trash2,
 } from 'lucide-react';
 import { UserRole } from '../lib/supabase';
 import { canStartEnrollment, canRevokeEnrollment } from '../lib/enrollmentRbac';
@@ -275,6 +276,22 @@ export default function RouterEnrollmentWizard({ userRole, getAuthHeaders }: Pro
     finally { setLoading(false); }
   };
 
+  const handleDelete = async (id: string) => {
+    if (!canRevokeEnrollment(userRole)) return;
+    if (!confirm('¿Eliminar este enrollment revocado de la lista? Esta acción no se puede deshacer.')) return;
+    setLoading(true);
+    setError('');
+    try {
+      const api = createAuthorizedApi(getAuthHeaders);
+      await api.delete(`/api/router-enrollment/${id}`);
+      loadEnrollments();
+    } catch (e: unknown) {
+      setError(e instanceof Error ? e.message : 'No se pudo eliminar el enrollment');
+    } finally {
+      setLoading(false);
+    }
+  };
+
   const copyToClipboard = (text: string) => {
     navigator.clipboard.writeText(text).then(() => {
       setCopied(true);
@@ -307,6 +324,12 @@ export default function RouterEnrollmentWizard({ userRole, getAuthHeaders }: Pro
             </button>
           )}
         </div>
+
+        {error && (
+          <div className="bg-red-950/40 border border-red-800/50 text-red-300 text-sm rounded-lg px-4 py-3">
+            {error}
+          </div>
+        )}
 
         {enrollments.length === 0 ? (
           <div className="bg-gray-800 border border-gray-700 rounded-xl p-12 text-center">
@@ -361,6 +384,17 @@ export default function RouterEnrollmentWizard({ userRole, getAuthHeaders }: Pro
                         Revocar
                       </button>
                     )}
+                  {canRevokeEnrollment(userRole) && enr.status === 'revoked' && (
+                    <button
+                      onClick={() => handleDelete(enr.id)}
+                      disabled={loading}
+                      title="Eliminar de la lista"
+                      className="inline-flex items-center gap-1 text-xs px-2 py-1 bg-slate-800 hover:bg-rose-950 text-slate-400 hover:text-rose-300 border border-slate-700 hover:border-rose-800/50 rounded transition-colors"
+                    >
+                      <Trash2 size={12} />
+                      Eliminar
+                    </button>
+                  )}
                 </div>
               </div>
             ))}

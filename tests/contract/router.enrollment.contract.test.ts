@@ -426,6 +426,47 @@ describe('Enrollment — flujo start → download → check-online → revoke', 
       .set(ADMIN);
     expect(res.body.statusLabel).toBe('Revocado');
   });
+
+  // ── DELETE /:id (solo revocados) ──────────────────────────────────────
+
+  it('DELETE /:id con Técnico → 403', async () => {
+    const res = await request(app)
+      .delete(`/api/router-enrollment/${enrollmentId}`)
+      .set(TEC);
+    expect(res.status).toBe(403);
+  });
+
+  it('DELETE /:id revocado con Admin → 200 y desaparece de la lista', async () => {
+    const res = await request(app)
+      .delete(`/api/router-enrollment/${enrollmentId}`)
+      .set(ADMIN);
+    expect(res.status).toBe(200);
+    expect(res.body).toEqual({ deleted: true, id: enrollmentId });
+
+    const get = await request(app)
+      .get(`/api/router-enrollment/${enrollmentId}`)
+      .set(ADMIN);
+    expect(get.status).toBe(404);
+
+    const list = await request(app).get('/api/router-enrollment').set(ADMIN);
+    expect(list.body.find((e: { id: string }) => e.id === enrollmentId)).toBeUndefined();
+  });
+
+  it('DELETE /:id de enrollment no revocado → 400', async () => {
+    const start = await request(app)
+      .post('/api/router-enrollment/start')
+      .set(ADMIN)
+      .send({
+        routerName: 'router-delete-guard',
+        routerosVersion: '7',
+        wgServerId: serverId,
+      });
+    expect(start.status).toBe(201);
+    const id = start.body.enrollment.id;
+
+    const res = await request(app).delete(`/api/router-enrollment/${id}`).set(ADMIN);
+    expect(res.status).toBe(400);
+  });
 });
 
 // ── FIX-1: prevención de routers huérfanos ─────────────────────────────

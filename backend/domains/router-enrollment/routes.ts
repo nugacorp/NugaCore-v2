@@ -7,10 +7,11 @@
 // GET   /api/router-enrollment/:id/download → descargar script .rsc
 // POST  /api/router-enrollment/:id/check-online → confirmar online
 // POST  /api/router-enrollment/:id/revoke   → revocar
+// DELETE /api/router-enrollment/:id         → eliminar (solo revocados)
 //
 // RBAC:
 //   start / list / get / download / check-online : super admin, administrador, tecnico
-//   revoke                                        : super admin, administrador
+//   revoke / delete                               : super admin, administrador
 // ====================================================================
 
 import { Router } from 'express';
@@ -97,6 +98,19 @@ router.post(
     const enrollment = await enrollmentService.revoke(req.params.id, actorId);
     if (!enrollment) return res.status(404).json({ error: 'Enrollment no encontrado.' });
     res.json(enrollment);
+  }),
+);
+
+// ── DELETE /:id (solo revocados) ──────────────────────────────────────
+
+router.delete(
+  '/api/router-enrollment/:id',
+  requireRoles([...CAN_REVOKE]),
+  asyncHandler(async (req, res) => {
+    const actorId = req.authContext?.userId ?? 'unknown';
+    const result = await enrollmentService.remove(req.params.id, actorId);
+    if (!result) return res.status(404).json({ error: 'Enrollment no encontrado.' });
+    res.json(result);
   }),
 );
 

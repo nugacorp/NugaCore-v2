@@ -737,4 +737,32 @@ export const enrollmentService = {
 
     return toView(updated!);
   },
+
+  /**
+   * Elimina un enrollment de la lista. Solo permitido si ya está revocado
+   * (el peer WG ya no está activo). Para registros activos, usar revoke primero.
+   */
+  async remove(id: string, actorId: string): Promise<{ deleted: true; id: string } | null> {
+    const repo = getEnrollmentRepository();
+    const rec = await repo.findById(id);
+    if (!rec) return null;
+
+    if (rec.status !== 'revoked') {
+      throw new BadRequestError(
+        'Solo se pueden eliminar enrollments revocados. Usa Revocar primero.',
+      );
+    }
+
+    const deleted = await repo.delete(id);
+    if (!deleted) return null;
+
+    logger.info('Enrollment eliminado', {
+      enrollmentId: id,
+      routerId: rec.routerId,
+      wgPeerId: rec.wgPeerId,
+      deletedBy: actorId,
+    });
+
+    return { deleted: true, id };
+  },
 };
