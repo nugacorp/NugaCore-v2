@@ -65,7 +65,19 @@ export function applyHttpSecurity(app: Express): void {
   //   - En dev/test se desactiva: el dev server de Vite necesita inline/eval.
   // HSTS solo en producción (no tiene efecto fuera de HTTPS y evita líos en dev).
   const cspEnabled = isHardened && isTrue(process.env.CSP_ENABLED, true);
-  const extraConnect = parseList(process.env.CSP_CONNECT_SRC);
+  // Preferir CSP_CONNECT_SRC explícito; si falta, permitir Supabase del runtime
+  // (evita bloquear auth/refresh del cliente con PUBLIC_DEPLOYMENT=true).
+  const extraConnect = (() => {
+    const listed = parseList(process.env.CSP_CONNECT_SRC);
+    if (listed.length > 0) return listed;
+    const fromEnv = [
+      process.env.VITE_SUPABASE_URL,
+      process.env.SUPABASE_URL,
+    ]
+      .map((u) => (u || '').trim().replace(/\/$/, ''))
+      .filter(Boolean);
+    return [...new Set(fromEnv)];
+  })();
   app.use(
     helmet({
       contentSecurityPolicy: cspEnabled

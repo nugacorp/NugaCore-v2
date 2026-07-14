@@ -69,6 +69,8 @@ if [[ "$ADD_SNMP_ENV" == "true" ]]; then
   upsert_env "USE_DB_MIKROTIK" "true"
   upsert_env "SEED_DEMO_DATA" "false"
   upsert_env "PUBLIC_DEPLOYMENT" "true"
+  upsert_env "CSP_ENABLED" "true"
+  upsert_env "CSP_CONNECT_SRC" "https://elshnzkceutvjzxvzqad.supabase.co"
   upsert_env "SNMP_POLLER_ENABLED" "false"
   upsert_env "SNMP_POLLER_INTERVAL_MS" "120000"
   upsert_env "NOC_POLLER_ENABLED" "false"
