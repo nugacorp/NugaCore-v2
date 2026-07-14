@@ -44,8 +44,18 @@ describe('E2E WISP — ciclo de vida completo', () => {
   let secondInvoiceId = '';
   let routerId = '';
 
-  beforeAll(() => {
+  beforeAll(async () => {
     app = createApp();
+    // En producción el servidor WireGuard ya existe en el VPS antes de enrolar
+    // routers. En el entorno hermético lo sembramos como pre-existente para que
+    // el registro de routers 'wireguard' (que auto-asigna IP VPN desde el
+    // servidor default) refleje esa misma condición. No toca el VPS real.
+    await request(app).post('/api/wireguard/servers').set(ADMIN).send({
+      name: 'VPN E2E (pre-existente en VPS)',
+      endpointHost: 'vpn.e2e.local',
+      endpointPort: 13231,
+      isDefault: true,
+    });
   });
 
   // ──────────────────────────────────────────────────────────────────

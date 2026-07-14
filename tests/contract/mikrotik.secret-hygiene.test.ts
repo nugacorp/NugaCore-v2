@@ -17,7 +17,18 @@ const passwordsInScript = (script: string): string[] =>
 
 describe('MikroTik secret hygiene', () => {
   let app: Express;
-  beforeAll(() => { app = createApp(); });
+  beforeAll(async () => {
+    app = createApp();
+    // El servidor WireGuard lo provee el VPS (ya existe antes de enrolar
+    // routers). Lo sembramos como pre-existente en el entorno hermético para el
+    // caso de registro 'wireguard'. No toca el VPS real.
+    await request(app).post('/api/wireguard/servers').set(ADMIN).send({
+      name: 'VPN Hygiene (pre-existente en VPS)',
+      endpointHost: 'vpn.hygiene.local',
+      endpointPort: 13231,
+      isDefault: true,
+    });
+  });
 
   it('no imprime passwords/token/script en consola al generar script', async () => {
     const captured: string[] = [];
