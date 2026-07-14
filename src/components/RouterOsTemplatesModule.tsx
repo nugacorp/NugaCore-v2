@@ -218,6 +218,17 @@ export default function RouterOsTemplatesModule({ userRole, getAuthHeaders }: Ro
       routerosVersion: form.routerosVersion || '7',
     };
 
+    if (selectedTemplate.id === 'nugacore_factory_onboarding') {
+      payload.applyMode = 'factory_reset';
+    } else {
+      if (!form.applyMode) {
+        setGenError('Selecciona si el router está en factory reset o ya tiene configuración.');
+        setGenerating(false);
+        return;
+      }
+      payload.applyMode = form.applyMode;
+    }
+
     // LAN params
     if (form.lanBridgeName) payload.lanBridgeName = form.lanBridgeName;
     if (form.lanCidr) payload.lanCidr = form.lanCidr;
@@ -521,6 +532,47 @@ export default function RouterOsTemplatesModule({ userRole, getAuthHeaders }: Ro
             <div className="lg:col-span-2 bg-slate-900 border border-slate-800 rounded-xl p-4 space-y-4">
               <h3 className="text-sm font-semibold text-white">Parámetros de generación</h3>
 
+              {/* applyMode obligatorio: wizard vs router existente */}
+              {selectedTemplate.id !== 'nugacore_factory_onboarding' && (
+                <div className="rounded-lg border border-amber-800/40 bg-amber-950/20 p-3 space-y-2">
+                  <p className="text-xs font-semibold text-amber-200">¿Cómo está el router destino? *</p>
+                  <label className="flex items-start gap-2 text-[11px] text-slate-300 cursor-pointer">
+                    <input
+                      type="radio"
+                      name="applyMode"
+                      className="mt-0.5 accent-orange-500"
+                      checked={form.applyMode === 'factory_reset'}
+                      onChange={() => setField('applyMode', 'factory_reset')}
+                    />
+                    <span>
+                      <span className="font-medium text-white">Factory reset / limpio</span>
+                      {' — '}asume router recién reseteado (como el Wizard de alta). Cambia identity, DNS y firewall drop WAN.
+                    </span>
+                  </label>
+                  <label className="flex items-start gap-2 text-[11px] text-slate-300 cursor-pointer">
+                    <input
+                      type="radio"
+                      name="applyMode"
+                      className="mt-0.5 accent-orange-500"
+                      checked={form.applyMode === 'existing_config'}
+                      onChange={() => setField('applyMode', 'existing_config')}
+                    />
+                    <span>
+                      <span className="font-medium text-white">Ya tiene configuración</span>
+                      {' — '}solo objetos NugaCore. No toca identity/DNS ni añade drop WAN.
+                    </span>
+                  </label>
+                  {!form.applyMode && (
+                    <p className="text-[10px] text-rose-400">Selecciona una opción antes de generar.</p>
+                  )}
+                </div>
+              )}
+              {selectedTemplate.id === 'nugacore_factory_onboarding' && (
+                <div className="rounded-lg border border-emerald-800/40 bg-emerald-950/20 p-3 text-[11px] text-emerald-200">
+                  Esta plantilla siempre usa <span className="font-mono">factory_reset</span> (onboarding WISP post-reset).
+                </div>
+              )}
+
               {/* Comunes */}
               <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
                 <FormField label="Nombre del router *" value={form.routerName || ''} onChange={(v) => setField('routerName', v)} placeholder="mi-router-01" />
@@ -657,7 +709,11 @@ export default function RouterOsTemplatesModule({ userRole, getAuthHeaders }: Ro
               <div className="flex items-center space-x-3 pt-2">
                 <button
                   onClick={handleGenerate}
-                  disabled={!canGenerateTemplate(userRole) || generating}
+                  disabled={
+                    !canGenerateTemplate(userRole) ||
+                    generating ||
+                    (selectedTemplate.id !== 'nugacore_factory_onboarding' && !form.applyMode)
+                  }
                   className="flex items-center space-x-2 px-4 py-2 bg-indigo-600 hover:bg-indigo-500 disabled:opacity-50 text-white text-sm rounded-lg transition font-semibold"
                 >
                   {generating ? <RefreshCw className="w-4 h-4 animate-spin" /> : <FileCode className="w-4 h-4" />}

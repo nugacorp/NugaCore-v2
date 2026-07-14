@@ -146,6 +146,8 @@ export function resolveTemplateParams(
     templateId: libId,
     routerName: input.routerName,
     routerosVersion: input.routerosVersion,
+    // Wizard de alta WISP: siempre asume factory-reset / router limpio.
+    applyMode: 'factory_reset',
     lanBridgeName: input.lanBridgeName,
     lanCidr:        input.lanCidr,
     lanGateway:     input.lanGateway,

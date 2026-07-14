@@ -19,6 +19,7 @@ const VALID_WG = {
   templateId: 'router_base_wireguard',
   routerName: 'contract-test-router',
   routerosVersion: '7',
+  applyMode: 'existing_config',
   wgServerPublicKey: 'TEST_PUB_KEY_BASE64==',
   wgEndpoint: 'vpn.test.local:13231',
   wgRouterIp: '10.10.0.55/24',
@@ -29,12 +30,14 @@ const VALID_NOC = {
   templateId: 'noc_ready',
   routerName: 'contract-noc-router',
   routerosVersion: '7',
+  applyMode: 'existing_config',
 };
 
 const VALID_PCC = {
   templateId: 'pcc_2wan',
   routerName: 'contract-pcc-router',
   routerosVersion: '7',
+  applyMode: 'existing_config',
   wanInterfaces: ['ether1', 'ether2'],
   wanGateways: ['10.0.0.1', '10.0.1.1'],
 };
@@ -131,7 +134,12 @@ describe('Templates Library — POST /api/routeros-templates/generate', () => {
     const res = await request(app)
       .post('/api/routeros-templates/generate')
       .set(ADMIN)
-      .send({ templateId: 'router_base_wireguard', routerName: 'router-placeholder', routerosVersion: '7' });
+      .send({
+        templateId: 'router_base_wireguard',
+        routerName: 'router-placeholder',
+        routerosVersion: '7',
+        applyMode: 'existing_config',
+      });
     expect(res.status).toBe(200);
     expect(res.body.script).toContain('<PEGAR_PUBLIC_KEY_DEL_SERVIDOR>');
     expect(res.body.script).toContain('<IP_PEER>/32');
@@ -191,8 +199,17 @@ describe('Templates Library — POST /api/routeros-templates/generate', () => {
     const res = await request(app)
       .post('/api/routeros-templates/generate')
       .set(ADMIN)
-      .send({ templateId: 'noc_ready', routerosVersion: '7' });
+      .send({ templateId: 'noc_ready', routerosVersion: '7', applyMode: 'existing_config' });
     expect(res.status).toBe(400);
+  });
+
+  it('Devuelve 400 si falta applyMode (biblioteca debe preguntar)', async () => {
+    const res = await request(app)
+      .post('/api/routeros-templates/generate')
+      .set(ADMIN)
+      .send({ templateId: 'noc_ready', routerName: 'r1', routerosVersion: '7' });
+    expect(res.status).toBe(400);
+    expect(JSON.stringify(res.body)).toMatch(/applyMode/);
   });
 
   it('genera PCC script correctamente', async () => {

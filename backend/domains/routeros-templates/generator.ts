@@ -17,6 +17,7 @@ import {
   TemplateLibraryParams,
   TemplateGeneratedResource,
   TEMPLATE_LIBRARY_VERSION,
+  TemplateApplyMode,
 } from './types';
 import {
   buildTemplateFilename,
@@ -79,9 +80,44 @@ const getDefaults = (p: TemplateLibraryParams): Defaults => {
   };
 };
 
+// ── Modo de aplicación (wizard factory vs config existente) ─────────
+
+/** Resuelve el modo: factory onboarding siempre factory_reset; resto respeta applyMode o conservador. */
+export function resolveApplyMode(p: TemplateLibraryParams): TemplateApplyMode {
+  if (p.templateId === 'nugacore_factory_onboarding') return 'factory_reset';
+  if (p.applyMode === 'factory_reset' || p.applyMode === 'existing_config') return p.applyMode;
+  return 'existing_config';
+}
+
+const applyModeBanner = (mode: TemplateApplyMode): string => {
+  if (mode === 'factory_reset') {
+    return `# ============================================================
+# MODO: factory_reset (wizard / onboarding)
+# Asume router limpio tras /system reset-configuration (no-defaults=no
+# o con defaults mínimos). Instala LAN/VPN/API de gestión NugaCore.
+# NO usar en un router de producción con clients/VLANs ya activos.
+# ============================================================`;
+  }
+  return `# ============================================================
+# MODO: existing_config (biblioteca / router en servicio)
+# CONFIRMA antes de importar: este script NO hace factory reset.
+# Solo crea/actualiza objetos con comment o name NugaCore.
+# NO cambia identity ni DNS global. NO añade drop WAN.
+# Si el router está limpio, regenera desde el Wizard (factory_reset).
+# ============================================================`;
+};
+
+const modeWarnings = (mode: TemplateApplyMode): string[] =>
+  mode === 'factory_reset'
+    ? ['Modo factory_reset: el script asume router limpio post-reset (wizard).']
+    : [
+        'Modo existing_config: no cambia identity/DNS ni aplica drop WAN.',
+        'Solo gestiona objetos NugaCore; revisa el script antes de importar en producción.',
+      ];
+
 // ── Cabecera estándar ──────────────────────────────────────────────
 
-const header = (p: TemplateLibraryParams, name: string): string => {
+const header = (p: TemplateLibraryParams, name: string, mode: TemplateApplyMode): string => {
   const ts = new Date().toISOString().replace('T', ' ').substring(0, 19);
   return `# NugaCore
 # ============================================================
@@ -90,8 +126,10 @@ const header = (p: TemplateLibraryParams, name: string): string => {
 # Router    : ${p.routerName}
 # Generado  : ${ts} UTC
 # Version   : ${TEMPLATE_LIBRARY_VERSION}
+# ApplyMode : ${mode}
 # RouterOS  : v${p.routerosVersion}+
 # ============================================================
+${applyModeBanner(mode)}
 # ADVERTENCIA: Realiza un backup antes de importar.
 #   /system backup save name=pre-nugacore-tpl
 # Importar:
@@ -99,11 +137,29 @@ const header = (p: TemplateLibraryParams, name: string): string => {
 # ============================================================`;
 };
 
+const sectionCleanupNugaCore = (opts?: { snmp?: boolean }): string => `
+# --- Limpieza solo objetos NugaCore (no toca config ajena) ---
+/user remove [find where name~"nugacore_"]
+/user group remove [find where name="nugacore"]
+${opts?.snmp ? `/snmp community remove [find where comment~"NugaCore"]\n` : ''}/ip route remove [find where comment~"NugaCore"]
+/ip address remove [find where comment~"NugaCore"]
+/interface wireguard peers remove [find where comment~"NugaCore"]
+/interface wireguard remove [find where name~"NugaCore"]
+/system scheduler remove [find where comment~"NugaCore"]
+/ip firewall filter remove [find where comment~"NugaCore"]
+/ip firewall nat remove [find where comment~"NugaCore"]`;
+
 // ── Secciones comunes ─────────────────────────────────────────────
 
-const sectionIdentity = (name: string): string => `
+const sectionIdentity = (name: string, mode: TemplateApplyMode): string => {
+  if (mode === 'existing_config') {
+    return `
+# --- Identidad: omitida (modo existing_config; respeta nombre actual) ---`;
+  }
+  return `
 # --- Identidad ---
 /system identity set name="${name}"`;
+};
 
 const sectionBridge = (d: Defaults): string => {
   const ports = d.lanPorts
@@ -146,20 +202,33 @@ const sectionLanIp = (d: Defaults): string => {
 }`;
 };
 
-const sectionDhcp = (d: Defaults): string => {
+const sectionDhcp = (d: Defaults, mode: TemplateApplyMode): string => {
+  const dnsLine =
+    mode === 'factory_reset'
+      ? `/ip dns set allow-remote-requests=yes servers="${d.dns.join(',')}"`
+      : `# DNS global: omitido (modo existing_config; no sobrescribe servers existentes)`;
+  const dhcpServer =
+    mode === 'factory_reset'
+      ? `:if ([:len [/ip dhcp-server find name="NugaCore-dhcp-LAN"]] = 0) do={
+  /ip dhcp-server add name="NugaCore-dhcp-LAN" interface="${d.bridge}" address-pool="NugaCore-pool-LAN" disabled=no
+}`
+      : `# DHCP server solo si la interfaz aún no tiene ningún dhcp-server
+:if ([:len [/ip dhcp-server find interface="${d.bridge}"]] = 0) do={
+  :if ([:len [/ip dhcp-server find name="NugaCore-dhcp-LAN"]] = 0) do={
+    /ip dhcp-server add name="NugaCore-dhcp-LAN" interface="${d.bridge}" address-pool="NugaCore-pool-LAN" disabled=no
+  }
+}`;
   return `
 # --- DHCP Pool ---
 :if ([:len [/ip pool find name="NugaCore-pool-LAN"]] = 0) do={
   /ip pool add name="NugaCore-pool-LAN" ranges="${d.poolStart}-${d.poolEnd}"
 }
 # --- DHCP Server ---
-:if ([:len [/ip dhcp-server find name="NugaCore-dhcp-LAN"]] = 0) do={
-  /ip dhcp-server add name="NugaCore-dhcp-LAN" interface="${d.bridge}" address-pool="NugaCore-pool-LAN" disabled=no
-}
+${dhcpServer}
 :if ([:len [/ip dhcp-server network find address="${d.lanCidr}"]] = 0) do={
   /ip dhcp-server network add address="${d.lanCidr}" gateway="${d.lanGw}" dns-server="${d.dns.join(',')}" comment="NugaCore"
 }
-/ip dns set allow-remote-requests=yes servers="${d.dns.join(',')}"`;
+${dnsLine}`;
 };
 
 const sectionNat = (_d: Defaults): string => `
@@ -168,7 +237,14 @@ const sectionNat = (_d: Defaults): string => `
   /ip firewall nat add action=masquerade chain=srcnat out-interface-list=WAN comment="NugaCore NAT"
 }`;
 
-const sectionFirewall = (): string => `
+const sectionFirewall = (mode: TemplateApplyMode): string => {
+  const dropWan =
+    mode === 'factory_reset'
+      ? `:if ([:len [/ip firewall filter find chain=input action=drop in-interface-list=WAN comment~"NugaCore"]] = 0) do={
+  /ip firewall filter add chain=input action=drop in-interface-list=WAN comment="NugaCore drop WAN"
+}`
+      : `# drop WAN: omitido (modo existing_config; evita cortar acceso de gestión en routers en servicio)`;
+  return `
 # --- Firewall básico ---
 :if ([:len [/ip firewall filter find chain=input action=accept connection-state=established,related comment~"NugaCore"]] = 0) do={
   /ip firewall filter add chain=input action=accept connection-state=established,related comment="NugaCore established"
@@ -176,9 +252,8 @@ const sectionFirewall = (): string => `
 :if ([:len [/ip firewall filter find chain=input action=accept in-interface-list=LAN comment~"NugaCore"]] = 0) do={
   /ip firewall filter add chain=input action=accept in-interface-list=LAN comment="NugaCore allow LAN"
 }
-:if ([:len [/ip firewall filter find chain=input action=drop in-interface-list=WAN comment~"NugaCore"]] = 0) do={
-  /ip firewall filter add chain=input action=drop in-interface-list=WAN comment="NugaCore drop WAN"
-}`;
+${dropWan}`;
+};
 
 const sectionApiUser = (user: string, pass: string, apiCidr: string, apiPort: number): string => `
 # --- Grupo y usuario API NugaCore (permisos mínimos) ---
@@ -190,9 +265,19 @@ const sectionApiUser = (user: string, pass: string, apiCidr: string, apiPort: nu
 /ip service set api port=${apiPort} address="${apiCidr}" disabled=no
 /ip service disable telnet`;
 
-const sectionSystemNote = (routerName: string, templateName: string): string => `
+const sectionSystemNote = (
+  routerName: string,
+  templateName: string,
+  mode: TemplateApplyMode,
+): string => {
+  if (mode === 'existing_config') {
+    return `
+# --- System note: omitida (modo existing_config) ---`;
+  }
+  return `
 # --- System note ---
 /system note set note="NugaCore Templates Library\\n${routerName}\\n${templateName}\\n${new Date().toISOString().slice(0, 10)}"`;
+};
 
 const sectionFileCleanup = (): string => `
 # --- Limpieza del archivo tras importar ---
@@ -242,9 +327,9 @@ const sectionFactoryLogging = (): string => `
 
 // ── LAN mínima (WAN + bridge opcional) ──────────────────────────────
 
-const sectionMinimalLan = (d: Defaults): string => {
+const sectionMinimalLan = (d: Defaults, mode: TemplateApplyMode): string => {
   const dhcpBlock = d.enableDhcp !== false
-    ? sectionDhcp(d)
+    ? sectionDhcp(d, mode)
     : '\n# --- DHCP: deshabilitado por configuración WISP ---';
   return `
 # --- WAN ---
@@ -259,7 +344,7 @@ ${sectionInterfaceLists(d)}
 ${sectionLanIp(d)}
 ${dhcpBlock}
 ${sectionNat(d)}
-${sectionFirewall()}`;
+${sectionFirewall(mode)}`;
 };
 
 // ── Sección WireGuard (client/tunnel) ─────────────────────────────
@@ -376,33 +461,26 @@ interface GenResult {
 }
 
 const genRouterBaseWireguard = (p: TemplateLibraryParams): GenResult => {
+  const mode = resolveApplyMode(p);
   const d = getDefaults(p);
   const cred = generateApiCredential(p.routerName);
-  const { section: wgSection, warnings } = sectionWireguard(p);
+  const { section: wgSection, warnings: wgWarnings } = sectionWireguard(p);
   const allowedCidr = p.wgVpnCidr || p.wgManagementCidr || d.apiCidr;
+  const warnings = [...modeWarnings(mode), ...wgWarnings];
 
   const script = [
-    header(p, 'Router Base WISP + WireGuard NugaCore'),
-    `\n# --- Limpieza NugaCore previa ---`,
-    `/user remove [find where name~"nugacore_"]`,
-    `/user group remove [find where name="nugacore"]`,
-    `/ip route remove [find where comment~"NugaCore"]`,
-    `/ip address remove [find where comment~"NugaCore"]`,
-    `/interface wireguard peers remove [find where comment~"NugaCore"]`,
-    `/interface wireguard remove [find where name~"NugaCore"]`,
-    `/system scheduler remove [find where comment~"NugaCore"]`,
-    `/ip firewall filter remove [find where comment~"NugaCore"]`,
-    `/ip firewall nat remove [find where comment~"NugaCore"]`,
-    sectionIdentity(p.routerName),
+    header(p, 'Router Base WISP + WireGuard NugaCore', mode),
+    sectionCleanupNugaCore(),
+    sectionIdentity(p.routerName, mode),
     sectionBridge(d),
     sectionInterfaceLists(d),
     sectionLanIp(d),
-    sectionDhcp(d),
+    sectionDhcp(d, mode),
     sectionNat(d),
-    sectionFirewall(),
+    sectionFirewall(mode),
     sectionApiUser(cred.username, cred.plainPassword, allowedCidr, d.apiPort),
     wgSection,
-    sectionSystemNote(p.routerName, 'Router Base WISP + WireGuard'),
+    sectionSystemNote(p.routerName, 'Router Base WISP + WireGuard', mode),
     sectionFileCleanup(),
   ].join('\n');
 
@@ -410,29 +488,21 @@ const genRouterBaseWireguard = (p: TemplateLibraryParams): GenResult => {
 };
 
 const genFactoryOnboarding = (p: TemplateLibraryParams): GenResult => {
+  const mode = resolveApplyMode(p); // siempre factory_reset
   const d = getDefaults(p);
   const cred = generateApiCredential(p.routerName);
   const snmpCommunity = p.snmpCommunity || generateSnmpCommunity(p.routerName);
-  const { section: wgSection, warnings } = sectionWireguard(p);
+  const { section: wgSection, warnings: wgWarnings } = sectionWireguard(p);
   const vpnCidr = p.wgVpnCidr || p.wgManagementCidr || d.apiCidr;
   const snmpCidr = p.snmpMgmtCidr || vpnCidr;
   const zoneName = p.zoneName || p.routerName;
+  const warnings = [...modeWarnings(mode), ...wgWarnings];
 
   const script = [
-    header(p, 'Factory Reset — WG + API + SNMP'),
-    `\n# --- Limpieza NugaCore previa ---`,
-    `/user remove [find where name~"nugacore_"]`,
-    `/user group remove [find where name="nugacore"]`,
-    `/snmp community remove [find where comment~"NugaCore"]`,
-    `/ip route remove [find where comment~"NugaCore"]`,
-    `/ip address remove [find where comment~"NugaCore"]`,
-    `/interface wireguard peers remove [find where comment~"NugaCore"]`,
-    `/interface wireguard remove [find where name~"NugaCore"]`,
-    `/system scheduler remove [find where comment~"NugaCore"]`,
-    `/ip firewall filter remove [find where comment~"NugaCore"]`,
-    `/ip firewall nat remove [find where comment~"NugaCore"]`,
-    sectionIdentity(p.routerName),
-    sectionMinimalLan(d),
+    header(p, 'Factory Reset — WG + API + SNMP', mode),
+    sectionCleanupNugaCore({ snmp: true }),
+    sectionIdentity(p.routerName, mode),
+    sectionMinimalLan(d, mode),
     sectionApiUser(cred.username, cred.plainPassword, vpnCidr, d.apiPort),
     wgSection,
     sectionSnmp(snmpCommunity, snmpCidr, zoneName),
@@ -444,7 +514,7 @@ const genFactoryOnboarding = (p: TemplateLibraryParams): GenResult => {
     `    on-event=":log info \\"NugaCore factory: sistema activo\\"" \\`,
     `    comment="NugaCore factory watchdog"`,
     `}`,
-    sectionSystemNote(p.routerName, 'Factory Reset — WG + API + SNMP'),
+    sectionSystemNote(p.routerName, 'Factory Reset — WG + API + SNMP', mode),
     sectionFileCleanup(),
   ].join('\n');
 
@@ -452,34 +522,27 @@ const genFactoryOnboarding = (p: TemplateLibraryParams): GenResult => {
 };
 
 const genRouterBaseSstp = (p: TemplateLibraryParams): GenResult => {
+  const mode = resolveApplyMode(p);
   const d = getDefaults(p);
   const cred = generateApiCredential(p.routerName);
   const vpnCred = generateApiCredential(`vpn_${p.routerName}`);
-  const { section: sstpSection, warnings } = sectionSstp(p, vpnCred.username, vpnCred.plainPassword);
+  const { section: sstpSection, warnings: sstpWarnings } = sectionSstp(p, vpnCred.username, vpnCred.plainPassword);
   const allowedCidr = p.sstpManagementCidr || d.apiCidr;
+  const warnings = [...modeWarnings(mode), ...sstpWarnings];
 
   const script = [
-    header(p, 'Router Base WISP + SSTP NugaCore'),
-    `\n# --- Limpieza NugaCore previa ---`,
-    `/user remove [find where name~"nugacore_"]`,
-    `/user group remove [find where name="nugacore"]`,
-    `/ip route remove [find where comment~"NugaCore"]`,
-    `/ip address remove [find where comment~"NugaCore"]`,
-    `/interface wireguard peers remove [find where comment~"NugaCore"]`,
-    `/interface wireguard remove [find where name~"NugaCore"]`,
-    `/system scheduler remove [find where comment~"NugaCore"]`,
-    `/ip firewall filter remove [find where comment~"NugaCore"]`,
-    `/ip firewall nat remove [find where comment~"NugaCore"]`,
-    sectionIdentity(p.routerName),
+    header(p, 'Router Base WISP + SSTP NugaCore', mode),
+    sectionCleanupNugaCore(),
+    sectionIdentity(p.routerName, mode),
     sectionBridge(d),
     sectionInterfaceLists(d),
     sectionLanIp(d),
-    sectionDhcp(d),
+    sectionDhcp(d, mode),
     sectionNat(d),
-    sectionFirewall(),
+    sectionFirewall(mode),
     sectionApiUser(cred.username, cred.plainPassword, allowedCidr, d.apiPort),
     sstpSection,
-    sectionSystemNote(p.routerName, 'Router Base WISP + SSTP'),
+    sectionSystemNote(p.routerName, 'Router Base WISP + SSTP', mode),
     sectionFileCleanup(),
   ].join('\n');
 
@@ -487,8 +550,9 @@ const genRouterBaseSstp = (p: TemplateLibraryParams): GenResult => {
 };
 
 const genClientResidential = (p: TemplateLibraryParams): GenResult => {
+  const mode = resolveApplyMode(p);
   const d = getDefaults(p);
-  const warnings: string[] = [];
+  const warnings: string[] = [...modeWarnings(mode)];
   const useWg = !!(p.wgServerPublicKey && p.wgEndpoint);
 
   let wgSection: string;
@@ -501,16 +565,16 @@ const genClientResidential = (p: TemplateLibraryParams): GenResult => {
   }
 
   const script = [
-    header(p, 'Router Residencial'),
-    sectionIdentity(p.routerName),
+    header(p, 'Router Residencial', mode),
+    sectionIdentity(p.routerName, mode),
     sectionBridge(d),
     sectionInterfaceLists(d),
     sectionLanIp(d),
-    sectionDhcp(d),
+    sectionDhcp(d, mode),
     sectionNat(d),
-    sectionFirewall(),
+    sectionFirewall(mode),
     wgSection,
-    sectionSystemNote(p.routerName, 'Router Residencial'),
+    sectionSystemNote(p.routerName, 'Router Residencial', mode),
     sectionFileCleanup(),
   ].join('\n');
 
@@ -518,9 +582,11 @@ const genClientResidential = (p: TemplateLibraryParams): GenResult => {
 };
 
 const genTowerWisp = (p: TemplateLibraryParams): GenResult => {
+  const mode = resolveApplyMode(p);
   const d = getDefaults(p);
   const cred = generateApiCredential(p.routerName);
-  const { section: wgSection, warnings } = sectionWireguard(p);
+  const { section: wgSection, warnings: wgWarnings } = sectionWireguard(p);
+  const warnings = [...modeWarnings(mode), ...wgWarnings];
   const mgmtVlan = p.vlanManagement ?? 100;
   const clientVlan = p.vlanClients ?? 200;
   const backhaulVlan = p.vlanBackhaul ?? 300;
@@ -554,19 +620,19 @@ const genTowerWisp = (p: TemplateLibraryParams): GenResult => {
 }`;
 
   const script = [
-    header(p, 'Torre WISP (RB5009 / CCR)'),
-    sectionIdentity(p.routerName),
+    header(p, 'Torre WISP (RB5009 / CCR)', mode),
+    sectionIdentity(p.routerName, mode),
     sectionBridge(d),
     vlanSection,
     sectionInterfaceLists(d),
     sectionLanIp(d),
-    sectionDhcp(d),
+    sectionDhcp(d, mode),
     sectionNat(d),
-    sectionFirewall(),
+    sectionFirewall(mode),
     sectionApiUser(cred.username, cred.plainPassword, p.wgManagementCidr || d.apiCidr, d.apiPort),
     wgSection,
     schedulerSection,
-    sectionSystemNote(p.routerName, 'Torre WISP'),
+    sectionSystemNote(p.routerName, 'Torre WISP', mode),
     sectionFileCleanup(),
   ].join('\n');
 
@@ -576,8 +642,9 @@ const genTowerWisp = (p: TemplateLibraryParams): GenResult => {
 // ── PCC Generator (genérico para N WANs) ─────────────────────────
 
 const genPcc = (p: TemplateLibraryParams, wanCount: number): GenResult => {
+  const mode = resolveApplyMode(p);
   const d = getDefaults(p);
-  const warnings: string[] = [];
+  const warnings: string[] = [...modeWarnings(mode)];
   const wanIfaces = (p.wanInterfaces || []).map(normalizeIfaceName).slice(0, wanCount);
   const wanGws = (p.wanGateways || []).slice(0, wanCount);
 
@@ -675,8 +742,8 @@ const genPcc = (p: TemplateLibraryParams, wanCount: number): GenResult => {
       : '';
 
   const script = [
-    header(p, templateName),
-    sectionIdentity(p.routerName),
+    header(p, templateName, mode),
+    sectionIdentity(p.routerName, mode),
     sectionBridge(d),
     `\n# --- Interface Lists PCC ---`,
     `:if ([:len [/interface list find name=WAN]] = 0) do={ /interface list add name=WAN }`,
@@ -686,7 +753,7 @@ const genPcc = (p: TemplateLibraryParams, wanCount: number): GenResult => {
   /interface list member add interface="${d.bridge}" list=LAN comment="NugaCore LAN"
 }`,
     sectionLanIp(d),
-    sectionDhcp(d),
+    sectionDhcp(d, mode),
     `\n# --- Routing Tables ---`,
     routingTables,
     `\n# --- Mangle PCC ---`,
@@ -696,11 +763,11 @@ const genPcc = (p: TemplateLibraryParams, wanCount: number): GenResult => {
     `\n# --- Rutas failover ---`,
     failoverRoutes,
     sectionNat(d),
-    sectionFirewall(),
+    sectionFirewall(mode),
     `\n# --- Netwatch failover ---`,
     netwatchSection,
     watchdogSection,
-    sectionSystemNote(p.routerName, templateName),
+    sectionSystemNote(p.routerName, templateName, mode),
     sectionFileCleanup(),
   ].join('\n');
 
@@ -708,15 +775,16 @@ const genPcc = (p: TemplateLibraryParams, wanCount: number): GenResult => {
 };
 
 const genPppoeServer = (p: TemplateLibraryParams): GenResult => {
-  const warnings: string[] = [];
+  const mode = resolveApplyMode(p);
+  const warnings: string[] = [...modeWarnings(mode)];
   const iface = p.pppoeInterface || 'bridge-lan';
   const service = p.pppoeServiceName || 'pppoe-nugacore';
   const localIp = p.pppoeLocalIp || '10.100.0.1';
   const poolStart = p.pppoeRemotePoolStart || '10.100.0.2';
   const poolEnd = p.pppoeRemotePoolEnd || '10.100.0.254';
 
-  const script = `${header(p, 'Servidor PPPoE')}
-${sectionIdentity(p.routerName)}
+  const script = `${header(p, 'Servidor PPPoE', mode)}
+${sectionIdentity(p.routerName, mode)}
 
 # --- Pool de IPs PPPoE ---
 :if ([:len [/ip pool find name="NugaCore-pppoe-pool"]] = 0) do={
@@ -764,14 +832,15 @@ ${sectionIdentity(p.routerName)}
 :if ([:len [/ip firewall nat find action=masquerade chain=srcnat comment~"NugaCore PPPoE NAT"]] = 0) do={
   /ip firewall nat add action=masquerade chain=srcnat out-interface-list=WAN comment="NugaCore PPPoE NAT"
 }
-${sectionSystemNote(p.routerName, 'Servidor PPPoE')}
+${sectionSystemNote(p.routerName, 'Servidor PPPoE', mode)}
 ${sectionFileCleanup()}`;
 
   return { script, warnings };
 };
 
 const genMonitoringAgent = (p: TemplateLibraryParams): GenResult => {
-  const warnings: string[] = [];
+  const mode = resolveApplyMode(p);
+  const warnings: string[] = [...modeWarnings(mode)];
   const watchTarget = p.watchdogTarget || '8.8.8.8';
   const enableBackup = p.enableAutoBackup !== false;
   const enableWatchdog = p.enableWatchdog !== false;
@@ -797,8 +866,8 @@ const genMonitoringAgent = (p: TemplateLibraryParams): GenResult => {
 }`
     : '\n# --- Backup automático: deshabilitado por configuración ---';
 
-  const script = `${header(p, 'Agente de Monitoreo')}
-${sectionIdentity(p.routerName)}
+  const script = `${header(p, 'Agente de Monitoreo', mode)}
+${sectionIdentity(p.routerName, mode)}
 
 # --- Logging NugaCore ---
 :if ([:len [/system logging find comment~"NugaCore"]] = 0) do={
@@ -820,18 +889,20 @@ ${backupSection}
     on-event=":log info \\"NugaCore log check: sistema activo\\"" \\
     comment="NugaCore log rotation check"
 }
-${sectionSystemNote(p.routerName, 'Agente de Monitoreo')}
+${sectionSystemNote(p.routerName, 'Agente de Monitoreo', mode)}
 ${sectionFileCleanup()}`;
 
   return { script, warnings };
 };
 
 const genWireguardClient = (p: TemplateLibraryParams): GenResult => {
-  const { section: wgSection, warnings } = sectionWireguard(p);
+  const mode = resolveApplyMode(p);
+  const { section: wgSection, warnings: wgWarnings } = sectionWireguard(p);
+  const warnings = [...modeWarnings(mode), ...wgWarnings];
   const vpnCidr = p.wgVpnCidr || p.wgManagementCidr || '10.10.0.0/24';
 
-  const script = `${header(p, 'WireGuard Cliente')}
-${sectionIdentity(p.routerName)}
+  const script = `${header(p, 'WireGuard Cliente', mode)}
+${sectionIdentity(p.routerName, mode)}
 # --- Cliente WireGuard integrado con NugaCore WG Manager ---
 ${wgSection}
 
@@ -844,14 +915,15 @@ ${wgSection}
 :if ([:len [/ip firewall filter find chain=input protocol=udp dst-port=13231 comment~"NugaCore WG"]] = 0) do={
   /ip firewall filter add chain=input protocol=udp dst-port=13231 action=accept comment="NugaCore WG UDP"
 }
-${sectionSystemNote(p.routerName, 'WireGuard Cliente')}
+${sectionSystemNote(p.routerName, 'WireGuard Cliente', mode)}
 ${sectionFileCleanup()}`;
 
   return { script, warnings };
 };
 
 const genWireguardServer = (p: TemplateLibraryParams): GenResult => {
-  const warnings: string[] = [];
+  const mode = resolveApplyMode(p);
+  const warnings: string[] = [...modeWarnings(mode)];
   const serverIp = p.wgRouterIp || '10.10.0.1/24';
   const vpnCidr = p.wgVpnCidr || '10.10.0.0/24';
   const apiCidr = p.nocApiCidr || p.apiCidr || '10.0.0.0/24';
@@ -863,8 +935,8 @@ const genWireguardServer = (p: TemplateLibraryParams): GenResult => {
     : `# RouterOS auto-genera la private-key. Exportar la public-key y registrarla.
 # /interface wireguard print where name=NugaCoreWG-Server`;
 
-  const script = `${header(p, 'WireGuard Servidor')}
-${sectionIdentity(p.routerName)}
+  const script = `${header(p, 'WireGuard Servidor', mode)}
+${sectionIdentity(p.routerName, mode)}
 
 # --- Servidor WireGuard NugaCore ---
 ${serverNote}
@@ -893,14 +965,15 @@ ${serverNote}
 }
 
 ${sectionApiUser(cred.username, cred.plainPassword, apiCidr, apiPort)}
-${sectionSystemNote(p.routerName, 'WireGuard Servidor')}
+${sectionSystemNote(p.routerName, 'WireGuard Servidor', mode)}
 ${sectionFileCleanup()}`;
 
   return { script, apiUsername: cred.username, warnings };
 };
 
 const genNocReady = (p: TemplateLibraryParams): GenResult => {
-  const warnings: string[] = [];
+  const mode = resolveApplyMode(p);
+  const warnings: string[] = [...modeWarnings(mode)];
   const apiCidr = p.nocApiCidr || p.apiCidr || '10.0.0.0/24';
   const apiPort = p.apiPort ?? 8728;
   const cred = generateApiCredential(p.routerName);
@@ -913,8 +986,8 @@ const genNocReady = (p: TemplateLibraryParams): GenResult => {
 # --- API-SSL deshabilitada (usar api sobre VPN) ---
 /ip service disable api-ssl`;
 
-  const script = `${header(p, 'NOC Ready')}
-${sectionIdentity(p.routerName)}
+  const script = `${header(p, 'NOC Ready', mode)}
+${sectionIdentity(p.routerName, mode)}
 
 # --- Servicios seguros: desactivar lo que no se usa ---
 /ip service disable telnet
@@ -955,7 +1028,7 @@ ${apiSslSection}
     on-event=":log info \\"NugaCore NOC: sistema activo - usuario ${cred.username}\\"" \\
     comment="NugaCore NOC watchdog"
 }
-${sectionSystemNote(p.routerName, 'NOC Ready')}
+${sectionSystemNote(p.routerName, 'NOC Ready', mode)}
 ${sectionFileCleanup()}`;
 
   return { script, apiUsername: cred.username, warnings };

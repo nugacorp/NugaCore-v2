@@ -439,6 +439,8 @@ export default function RouterOnboardingWizard({
               </div>
               <p className="text-sm text-slate-400">
                 Confirma que el router está listo para el onboarding post-factory-reset.
+                El script se generará en modo <span className="font-mono text-emerald-300">factory_reset</span>
+                (asume router limpio; no uses este flujo en un equipo en producción).
               </p>
               <div className="space-y-2">
                 {FACTORY_RESET_CHECKLIST.map((label, index) => (
