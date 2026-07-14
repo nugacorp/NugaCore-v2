@@ -138,6 +138,47 @@ describe('Generator — Core templates', () => {
     expect(result.script).toContain('NugaCoreWG');
   });
 
+  it('WireGuard usa ruta absoluta /interface wireguard add (no bare add)', () => {
+    const result = generateFromTemplate({
+      templateId: 'router_base_wireguard',
+      ...WG_PARAMS,
+      wgPrivateKey: 'TEST_PRIVATE_KEY_BASE64==',
+    });
+    expect(result.script).toContain('/interface wireguard add name="NugaCoreWG"');
+    expect(result.script).not.toMatch(/do=\{\s*\n\s*add name="NugaCoreWG"/);
+  });
+
+  it('corrige typo ehter→ether en WAN y omite ether5 por defecto', () => {
+    const result = generateFromTemplate({
+      templateId: 'router_base_wireguard',
+      ...WG_PARAMS,
+      wanInterface: 'ehter1',
+    });
+    expect(result.script).toContain('interface="ether1"');
+    expect(result.script).not.toContain('ehter1');
+    expect(result.script).not.toContain('ether5');
+  });
+
+  it('realinea DHCP pool a la subred LAN cuando no coincide', () => {
+    const result = generateFromTemplate({
+      templateId: 'router_base_wireguard',
+      ...WG_PARAMS,
+      lanGateway: '192.168.6.1',
+      lanCidr: '192.168.6.0/24',
+      dhcpPoolStart: '192.168.1.10',
+      dhcpPoolEnd: '192.168.1.254',
+    });
+    expect(result.script).toContain('ranges="192.168.6.10-192.168.6.254"');
+    expect(result.script).toContain('address="192.168.6.1/24"');
+    expect(result.script).not.toContain('192.168.1.10-192.168.1.254');
+  });
+
+  it('bridge ports comprueban que la interfaz existe antes de añadir', () => {
+    const result = generateFromTemplate({ templateId: 'router_base_wireguard', ...WG_PARAMS });
+    expect(result.script).toContain('/interface find name="ether2"');
+    expect(result.script).toContain('/interface bridge port find interface="ether2"');
+  });
+
   it('genera apiUsername para plantillas con usuario API', () => {
     const result = generateFromTemplate({ templateId: 'router_base_wireguard', ...WG_PARAMS });
     expect(result.apiUsername).toBeTruthy();

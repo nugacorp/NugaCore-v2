@@ -57,6 +57,7 @@ import {
   groupValuesOf,
   isParameterVisible,
   countConfiguredParameters,
+  syncDhcpPoolsWithLanCidr,
 } from '../lib/templateParametersView';
 
 /** Clona el formulario por defecto con objetos anidados frescos (evita refs compartidas). */
@@ -158,7 +159,6 @@ export default function RouterOnboardingWizard({
       const schema = await api.get<TemplateParameterSchema>(
         `/api/router-templates/${templateId}/parameters`,
       );
-      setParamSchema(schema);
       const defaults = buildDefaultParameterValues(schema);
       if (templateId === 'nugacore_factory_onboarding') {
         if (form.siteName.trim()) defaults.zoneName = form.siteName.trim();
@@ -167,7 +167,10 @@ export default function RouterOnboardingWizard({
         defaults.lanCidr = form.lanCidr || defaults.lanCidr;
         if (form.lanInterfaces) defaults.lanInterfaces = form.lanInterfaces;
       }
-      setParamValues(defaults);
+      // Realinear pool DHCP al lanCidr efectivo (defaults del esquema o del form).
+      const lanForPool = String(defaults.lanCidr || '');
+      setParamValues(syncDhcpPoolsWithLanCidr(schema, defaults, lanForPool));
+      setParamSchema(schema);
     } catch {
       setParamSchema(null);
       setParamValues({});
@@ -177,7 +180,13 @@ export default function RouterOnboardingWizard({
   };
 
   const setParam = (group: TemplateParameterGroup, param: TemplateParameter, value: unknown) =>
-    setParamValues((v) => setParamValue(v, group, param.id, value));
+    setParamValues((v) => {
+      let next = setParamValue(v, group, param.id, value);
+      if (param.id === 'lanCidr' && typeof value === 'string') {
+        next = syncDhcpPoolsWithLanCidr(paramSchema, next, value);
+      }
+      return next;
+    });
 
   /** Renderiza un campo del formulario dinámico según el tipo del parámetro. */
   const renderField = (group: TemplateParameterGroup, param: TemplateParameter) => {

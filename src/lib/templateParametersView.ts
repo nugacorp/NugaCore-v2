@@ -128,6 +128,39 @@ export function groupValuesOf(
   return values;
 }
 
+/** Extrae prefijo /24 (.10–.254) desde un CIDR host tipo 192.168.88.1/24. */
+export function deriveDhcpPoolFromLanCidr(lanCidr: string): { start: string; end: string } | null {
+  const host = String(lanCidr || '').split('/')[0]?.trim();
+  if (!/^(\d{1,3}\.){3}\d{1,3}$/.test(host)) return null;
+  const prefix = host.split('.').slice(0, 3).join('.');
+  return { start: `${prefix}.10`, end: `${prefix}.254` };
+}
+
+/**
+ * Al cambiar lanCidr, realinea dhcpPoolStart/End si existen en el esquema
+ * (evita pool 192.168.88.x con LAN 192.168.6.x).
+ */
+export function syncDhcpPoolsWithLanCidr(
+  schema: TemplateParameterSchema | null | undefined,
+  values: TemplateParameterValues,
+  lanCidr: string,
+): TemplateParameterValues {
+  const pool = deriveDhcpPoolFromLanCidr(lanCidr);
+  if (!pool || !schema) return values;
+  let next = values;
+  for (const group of schema.groups) {
+    if (group.nested) continue;
+    const ids = new Set(group.parameters.map((p) => p.id));
+    if (ids.has('dhcpPoolStart')) {
+      next = setParamValue(next, group, 'dhcpPoolStart', pool.start);
+    }
+    if (ids.has('dhcpPoolEnd')) {
+      next = setParamValue(next, group, 'dhcpPoolEnd', pool.end);
+    }
+  }
+  return next;
+}
+
 // ── Resumen ─────────────────────────────────────────────────────────────
 
 /** Cuenta cuántos parámetros tienen un valor presente (para el resumen). */

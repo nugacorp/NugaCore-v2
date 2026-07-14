@@ -192,6 +192,11 @@ export interface StartEnrollmentInput {
   lanCidr?: string;
   lanGateway?: string;
   wanInterface?: string;
+  /** Puertos LAN (CSV o lista). El generador omite interfaces inexistentes. */
+  lanInterfaces?: string | string[];
+  dhcpPoolStart?: string;
+  dhcpPoolEnd?: string;
+  enableDhcp?: boolean;
   notes?: string;
 }
 
