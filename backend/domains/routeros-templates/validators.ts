@@ -3,7 +3,7 @@
 // Plantillas RouterOS (Fase 4.6.3).
 // ====================================================================
 
-import { TemplateLibraryId, TemplateLibraryParams, TEMPLATE_LIBRARY_IDS } from './types';
+import { TemplateLibraryId, TemplateLibraryParams, TEMPLATE_LIBRARY_IDS, TEMPLATE_APPLY_MODES } from './types';
 
 const CIDR_RE = /^(\d{1,3}\.){3}\d{1,3}\/\d{1,2}$/;
 const IP_RE = /^(\d{1,3}\.){3}\d{1,3}$/;
@@ -42,6 +42,18 @@ export function validateTemplateParams(params: Partial<TemplateLibraryParams>): 
   }
   if (!params.routerosVersion || !['6', '7'].includes(params.routerosVersion)) {
     errors.push('routerosVersion debe ser "6" o "7"');
+  }
+
+  // applyMode es obligatorio fuera de factory onboarding (la UI debe preguntar).
+  // La plantilla factory fuerza factory_reset en el generador.
+  if (params.templateId && params.templateId !== 'nugacore_factory_onboarding') {
+    if (!params.applyMode) {
+      errors.push(
+        'applyMode es requerido: "factory_reset" (wizard / router limpio) o "existing_config" (router en servicio)',
+      );
+    } else if (!(TEMPLATE_APPLY_MODES as string[]).includes(params.applyMode)) {
+      errors.push('applyMode inválido (usa factory_reset o existing_config)');
+    }
   }
 
   if (errors.length > 0) return { valid: false, errors };

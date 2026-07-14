@@ -2,7 +2,7 @@
 // Tipos de la Biblioteca de Plantillas RouterOS (Fase 4.6.3).
 // ====================================================================
 
-export const TEMPLATE_LIBRARY_VERSION = 'nugacore-templates-1.0.1';
+export const TEMPLATE_LIBRARY_VERSION = 'nugacore-templates-1.0.2';
 
 export type TemplateLibraryId =
   | 'router_base_wireguard'
@@ -58,10 +58,20 @@ export interface TemplateLibraryDescriptor {
   generatorVersion: string;
 }
 
+export type TemplateApplyMode = 'factory_reset' | 'existing_config';
+
+export const TEMPLATE_APPLY_MODES: TemplateApplyMode[] = ['factory_reset', 'existing_config'];
+
 export interface TemplateLibraryParams {
   templateId: TemplateLibraryId;
   routerName: string;
   routerosVersion: '6' | '7';
+  /**
+   * Cómo aplicar el .rsc:
+   * - factory_reset: wizard / onboarding — asume router limpio post-reset.
+   * - existing_config: biblioteca — solo objetos NugaCore; no toca identity/DNS/drop WAN.
+   */
+  applyMode?: TemplateApplyMode;
   // LAN
   lanBridgeName?: string;
   lanCidr?: string;

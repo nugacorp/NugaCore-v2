@@ -21,6 +21,7 @@ import { canGenerateTemplate, canViewTemplateHistory, canAccessTemplatesModule }
 const BASE_PARAMS = {
   routerName: 'test-router',
   routerosVersion: '7' as const,
+  applyMode: 'existing_config' as const,
 };
 
 const WG_PARAMS = {
@@ -29,6 +30,11 @@ const WG_PARAMS = {
   wgEndpoint: 'vpn.test.com:13231',
   wgRouterIp: '10.10.0.2/24',
   wgManagementCidr: '10.10.0.0/24',
+};
+
+const FACTORY_PARAMS = {
+  ...WG_PARAMS,
+  applyMode: 'factory_reset' as const,
 };
 
 // ── Catálogo ────────────────────────────────────────────────────────
@@ -99,6 +105,7 @@ describe('Generator — primera línea del script', () => {
     for (const id of ids) {
       let params: any = { templateId: id, ...BASE_PARAMS };
       if (['router_base_wireguard', 'tower_wisp', 'wireguard_client'].includes(id)) params = { ...params, ...WG_PARAMS };
+      if (id === 'nugacore_factory_onboarding') params = { ...params, ...FACTORY_PARAMS };
       if (id === 'router_base_sstp') params.sstpHost = 'vpn.test.com';
       if (id === 'wireguard_server') params.wgRouterIp = '10.10.0.1/24';
       if (['pcc_2wan', 'pcc_3wan', 'pcc_4wan', 'pcc_5wan'].includes(id)) {
@@ -183,6 +190,47 @@ describe('Generator — Core templates', () => {
     const result = generateFromTemplate({ templateId: 'router_base_wireguard', ...WG_PARAMS });
     expect(result.apiUsername).toBeTruthy();
     expect(result.apiUsername).toMatch(/^nugacore_/);
+  });
+
+  it('modo existing_config omite identity, DNS global y drop WAN', () => {
+    const result = generateFromTemplate({
+      templateId: 'router_base_wireguard',
+      ...WG_PARAMS,
+      applyMode: 'existing_config',
+    });
+    expect(result.script).toContain('ApplyMode : existing_config');
+    expect(result.script).toContain('MODO: existing_config');
+    expect(result.script).toContain('Identidad: omitida');
+    expect(result.script).toContain('DNS global: omitido');
+    expect(result.script).toContain('drop WAN: omitido');
+    expect(result.script).not.toContain('/system identity set');
+    expect(result.script).not.toMatch(/\/ip dns set allow-remote-requests/);
+    expect(result.script).not.toContain('NugaCore drop WAN');
+    expect(result.warnings.some((w) => /existing_config/i.test(w))).toBe(true);
+  });
+
+  it('modo factory_reset (wizard) incluye identity, DNS y drop WAN', () => {
+    const result = generateFromTemplate({
+      templateId: 'router_base_wireguard',
+      ...WG_PARAMS,
+      applyMode: 'factory_reset',
+    });
+    expect(result.script).toContain('ApplyMode : factory_reset');
+    expect(result.script).toContain('MODO: factory_reset');
+    expect(result.script).toContain('/system identity set');
+    expect(result.script).toContain('/ip dns set allow-remote-requests');
+    expect(result.script).toContain('NugaCore drop WAN');
+  });
+
+  it('plantilla factory onboarding fuerza factory_reset', () => {
+    const result = generateFromTemplate({
+      templateId: 'nugacore_factory_onboarding',
+      ...WG_PARAMS,
+      // applyMode omitido a propósito
+      snmpCommunity: 'nc-test',
+    } as any);
+    expect(result.script).toContain('ApplyMode : factory_reset');
+    expect(result.script).toContain('/system identity set');
   });
 });
 
@@ -405,6 +453,7 @@ describe('Security — scripts generados no contienen branding externo', () => {
       if (['router_base_wireguard', 'tower_wisp', 'wireguard_client'].includes(id)) {
         params = { ...params, ...WG_PARAMS };
       }
+      if (id === 'nugacore_factory_onboarding') params = { ...params, ...FACTORY_PARAMS };
       if (id === 'router_base_sstp') params.sstpHost = 'vpn.test.com';
       if (id === 'wireguard_server') params.wgRouterIp = '10.10.0.1/24';
       if (['pcc_2wan', 'pcc_3wan', 'pcc_4wan', 'pcc_5wan'].includes(id)) {
@@ -454,25 +503,64 @@ describe('Validators', () => {
   });
 
   it('valida correctamente params mínimos para noc_ready', () => {
-    const result = validateTemplateParams({ templateId: 'noc_ready', routerName: 'router-01', routerosVersion: '7' });
+    const result = validateTemplateParams({
+      templateId: 'noc_ready',
+      routerName: 'router-01',
+      routerosVersion: '7',
+      applyMode: 'existing_config',
+    });
     expect(result.valid).toBe(true);
     expect(result.errors).toHaveLength(0);
   });
 
+  it('exige applyMode fuera de factory onboarding', () => {
+    const result = validateTemplateParams({
+      templateId: 'router_base_wireguard',
+      routerName: 'r1',
+      routerosVersion: '7',
+    });
+    expect(result.valid).toBe(false);
+    expect(result.errors.some((e) => e.includes('applyMode'))).toBe(true);
+  });
+
+  it('factory onboarding no exige applyMode (siempre factory_reset)', () => {
+    const result = validateTemplateParams({
+      templateId: 'nugacore_factory_onboarding',
+      routerName: 'r1',
+      routerosVersion: '7',
+    });
+    expect(result.valid).toBe(true);
+  });
+
   it('permite router_base_wireguard sin datos WG para generar placeholders', () => {
-    const result = validateTemplateParams({ templateId: 'router_base_wireguard', routerName: 'r1', routerosVersion: '7' });
+    const result = validateTemplateParams({
+      templateId: 'router_base_wireguard',
+      routerName: 'r1',
+      routerosVersion: '7',
+      applyMode: 'existing_config',
+    });
     expect(result.valid).toBe(true);
     expect(result.errors).toHaveLength(0);
   });
 
   it('permite router_base_sstp sin host para generar placeholder', () => {
-    const result = validateTemplateParams({ templateId: 'router_base_sstp', routerName: 'r1', routerosVersion: '7' });
+    const result = validateTemplateParams({
+      templateId: 'router_base_sstp',
+      routerName: 'r1',
+      routerosVersion: '7',
+      applyMode: 'existing_config',
+    });
     expect(result.valid).toBe(true);
     expect(result.errors).toHaveLength(0);
   });
 
   it('requiere wanInterfaces y wanGateways para pcc_3wan', () => {
-    const result = validateTemplateParams({ templateId: 'pcc_3wan', routerName: 'r1', routerosVersion: '7' });
+    const result = validateTemplateParams({
+      templateId: 'pcc_3wan',
+      routerName: 'r1',
+      routerosVersion: '7',
+      applyMode: 'existing_config',
+    });
     expect(result.valid).toBe(false);
     expect(result.errors.some((e) => e.includes('wanInterfaces'))).toBe(true);
   });
@@ -482,6 +570,7 @@ describe('Validators', () => {
       templateId: 'noc_ready',
       routerName: 'r1',
       routerosVersion: '7',
+      applyMode: 'existing_config',
       lanCidr: 'not-a-cidr',
     });
     expect(result.valid).toBe(false);
@@ -492,6 +581,7 @@ describe('Validators', () => {
       templateId: 'noc_ready',
       routerName: 'r1',
       routerosVersion: '7',
+      applyMode: 'existing_config',
       apiPort: 99999,
     });
     expect(result.valid).toBe(false);
