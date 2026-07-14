@@ -84,7 +84,7 @@ describe('RouterOS Resources — POST /api/routeros-resources/generate', () => {
     expect(res.body).toHaveProperty('securityNotice');
   });
 
-  it('WireGuard sin datos reales genera placeholder + warnings, no 400 de UI', async () => {
+  it('WireGuard sin datos reales omite address/peer (sin placeholders inválidos) + warnings', async () => {
     const placeholderParams = { ...VALID_PARAMS };
     delete (placeholderParams as Partial<typeof VALID_PARAMS>).wgServerPublicKey;
     delete (placeholderParams as Partial<typeof VALID_PARAMS>).wgEndpoint;
@@ -94,8 +94,10 @@ describe('RouterOS Resources — POST /api/routeros-resources/generate', () => {
       .set(ADMIN)
       .send(placeholderParams);
     expect(res.status).toBe(200);
-    expect(res.body.script).toContain('<PEGAR_PUBLIC_KEY_DEL_SERVIDOR_NUGACORE>');
-    expect(res.body.script).toContain('<IP_DEL_ROUTER_EN_RED_WG>/32');
+    expect(res.body.script).not.toContain('<PEGAR_PUBLIC_KEY_DEL_SERVIDOR_NUGACORE>');
+    expect(res.body.script).not.toContain('<IP_DEL_ROUTER_EN_RED_WG>/32');
+    expect(res.body.script).not.toContain('<ENDPOINT_HOST>');
+    expect(res.body.script).toContain('NugaCoreWG');
     expect(res.body.warnings.length).toBeGreaterThan(0);
   });
 

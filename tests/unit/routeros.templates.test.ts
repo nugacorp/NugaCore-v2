@@ -155,6 +155,35 @@ describe('Generator — Core templates', () => {
     expect(result.script).not.toMatch(/do=\{\s*\n\s*add name="NugaCoreWG"/);
   });
 
+  it('sin datos WG omite address/peer (nunca placeholders RouterOS-inválidos)', () => {
+    const result = generateFromTemplate({ templateId: 'router_base_wireguard', ...BASE_PARAMS });
+    expect(result.script).toContain('NugaCoreWG');
+    expect(result.script).toContain('INCOMPLETO');
+    expect(result.script).not.toContain('<PEGAR_PUBLIC_KEY');
+    expect(result.script).not.toContain('<IP_PEER>');
+    expect(result.script).not.toContain('<ENDPOINT_HOST>');
+    expect(result.script).not.toContain('peers add');
+    expect(result.script).not.toMatch(/\/ip address add address=.*interface="NugaCoreWG"/);
+    expect(result.warnings.some((w) => /WireGuard incompleto/i.test(w))).toBe(true);
+  });
+
+  it('wgRouterIp sin prefijo se normaliza a /32', () => {
+    const result = generateFromTemplate({
+      templateId: 'router_base_wireguard',
+      ...WG_PARAMS,
+      wgRouterIp: '10.70.0.3',
+      wgManagementCidr: '10.70.0.0/16',
+    });
+    expect(result.script).toContain('address="10.70.0.3/32"');
+    expect(result.script).toContain('peers add');
+  });
+
+  it('CIDR gestión API por defecto es 10.70.0.0/16', () => {
+    const result = generateFromTemplate({ templateId: 'noc_ready', ...BASE_PARAMS });
+    expect(result.script).toContain('address="10.70.0.0/16"');
+  });
+
+
   it('corrige typo ehter→ether en WAN y omite ether5 por defecto', () => {
     const result = generateFromTemplate({
       templateId: 'router_base_wireguard',
@@ -532,7 +561,7 @@ describe('Validators', () => {
     expect(result.valid).toBe(true);
   });
 
-  it('permite router_base_wireguard sin datos WG para generar placeholders', () => {
+  it('permite router_base_wireguard sin datos WG (generador omite peer, no 400)', () => {
     const result = validateTemplateParams({
       templateId: 'router_base_wireguard',
       routerName: 'r1',
@@ -543,7 +572,7 @@ describe('Validators', () => {
     expect(result.errors).toHaveLength(0);
   });
 
-  it('permite router_base_sstp sin host para generar placeholder', () => {
+  it('permite router_base_sstp sin host (generador omite cliente SSTP, no 400)', () => {
     const result = validateTemplateParams({
       templateId: 'router_base_sstp',
       routerName: 'r1',

@@ -85,26 +85,34 @@ const buildWireguardScript = (input: ScriptGenerationInput, apiMode: ApiMode): {
   requireField(server.serverManagementCidr, 'server.serverManagementCidr');
 
   const apiCidr = apiCidrOf(server);
-  const wgServerPublicKey = server.wgServerPublicKey || '<PEGAR_PUBLIC_KEY_DEL_SERVIDOR_NUGACORE>';
-  const routerVpnIp = server.routerVpnIp || server.wgInterfaceAddress || '<ASIGNAR_IP_WG_DEL_ROUTER>/32';
+  const wgServerPublicKey = (server.wgServerPublicKey || '').trim();
+  const routerVpnIpRaw = (server.routerVpnIp || server.wgInterfaceAddress || '').trim();
+  const routerVpnIp = routerVpnIpRaw
+    ? (routerVpnIpRaw.includes('/') ? routerVpnIpRaw : `${routerVpnIpRaw}/32`)
+    : '';
   const wgAllowedAddress = server.wgAllowedAddress || server.serverManagementCidr;
   const keepalive = server.wgKeepalive ?? 25;
 
-  if (!server.wgServerPublicKey) warnings.push('Falta wgServerPublicKey: se dejó un placeholder en el script.');
-  if (!server.routerVpnIp && !server.wgInterfaceAddress) warnings.push('Falta routerVpnIp: asignar la IP WG del router.');
-
   // Endpoint del servidor: preferir vpnServerHost/Port; fallback wgEndpoint.
-  let endpointHost = server.vpnServerHost || '<ENDPOINT_HOST>';
+  let endpointHost = (server.vpnServerHost || '').trim();
   let endpointPort = String(server.vpnServerPort || '13231');
-  if (!server.vpnServerHost && server.wgEndpoint) {
+  if (!endpointHost && server.wgEndpoint) {
     if (server.wgEndpoint.includes(':')) {
-      const [h, p] = server.wgEndpoint.split(':');
-      endpointHost = h; endpointPort = p || endpointPort;
+      const idx = server.wgEndpoint.lastIndexOf(':');
+      endpointHost = server.wgEndpoint.slice(0, idx);
+      endpointPort = server.wgEndpoint.slice(idx + 1) || endpointPort;
     } else {
       endpointHost = server.wgEndpoint;
     }
   }
-  if (endpointHost === '<ENDPOINT_HOST>') warnings.push('Falta vpnServerHost/wgEndpoint: se dejó un placeholder.');
+
+  const wgComplete = Boolean(wgServerPublicKey && endpointHost && routerVpnIp);
+  if (!wgServerPublicKey) warnings.push('Falta wgServerPublicKey: se omite peer (evita fallo en /import).');
+  if (!routerVpnIp) warnings.push('Falta routerVpnIp: se omite address WG (evita fallo en /import).');
+  if (!endpointHost) warnings.push('Falta vpnServerHost/wgEndpoint: se omite peer (evita fallo en /import).');
+  if (!wgComplete) {
+    warnings.push('WireGuard incompleto: solo se crea la interfaz NugaCoreWG. Completa claves/endpoint/IP y regenera.');
+  }
 
   // Si el WireGuard Manager proveyó la private-key del router, la fijamos en la
   // interfaz (sin intercambio manual). Si no, RouterOS la autogenera.
@@ -121,6 +129,18 @@ const buildWireguardScript = (input: ScriptGenerationInput, apiMode: ApiMode): {
 #   2. Ejecuta  [/interface wireguard print]  y copia la public-key del router.
 #   3. Registra esa public-key del router en NugaCore para completar el tunel.`;
 
+  const wgTunnelBlock = wgComplete
+    ? `# --- 5. Direccion IP del router sobre la interfaz WG ---
+/ip address add address=${routerVpnIp} interface=NugaCoreWG comment="NugaCore WG address"
+
+# --- 6. Peer del servidor WireGuard de NugaCore ---
+/interface wireguard peers add interface=NugaCoreWG public-key="${wgServerPublicKey}"${presharedPart} endpoint-address="${endpointHost}" endpoint-port=${endpointPort} allowed-address=${wgAllowedAddress} persistent-keepalive=${keepalive}s comment="NugaCore WG server peer"
+
+# --- 7. Ruta hacia la red de administracion NugaCore ---
+/ip route add dst-address="${server.serverManagementCidr}" gateway=NugaCoreWG comment="NugaCore management route"`
+    : `# --- 5-7. WG incompleto: NO se emiten address/peer/route (placeholders abortaban /import) ---
+:log warning "NugaCore WG incompleto: regenerar con public-key, endpoint e IP peer reales"`;
+
   const script = `${header(routerName, 'WireGuard administrado', apiMode)}
 # WireGuard requiere RouterOS v7.
 ${keyNote}
@@ -134,14 +154,7 @@ ${userAndGroup(apiUser, apiPassword, apiMode, 'WireGuard')}
 # --- 4. Interfaz WireGuard ---
 ${interfaceLine}
 
-# --- 5. Direccion IP del router sobre la interfaz WG ---
-/ip address add address=${routerVpnIp} interface=NugaCoreWG comment="NugaCore WG address"
-
-# --- 6. Peer del servidor WireGuard de NugaCore ---
-/interface wireguard peers add interface=NugaCoreWG public-key="${wgServerPublicKey}"${presharedPart} endpoint-address=${endpointHost} endpoint-port=${endpointPort} allowed-address=${wgAllowedAddress} persistent-keepalive=${keepalive}s comment="NugaCore WG server peer"
-
-# --- 7. Ruta hacia la red de administracion NugaCore ---
-/ip route add dst-address="${server.serverManagementCidr}" gateway=NugaCoreWG comment="NugaCore management route"
+${wgTunnelBlock}
 
 # --- 8. API limitada a la red VPN de NugaCore ---
 /ip service set api port=${apiPort} address="${apiCidr}" disabled=no
@@ -154,7 +167,7 @@ ${interfaceLine}
 # Fin del script NugaCore (WireGuard). La API solo responde dentro de ${apiCidr}.
 # ============================================================`;
 
-  return { script, warnings, routerVpnIp };
+  return { script, warnings, routerVpnIp: routerVpnIp || 'pending' };
 };
 
 // ── SSTP administrado ─────────────────────────────────────────────────

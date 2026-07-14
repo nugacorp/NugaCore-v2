@@ -61,8 +61,8 @@ export function validateTemplateParams(params: Partial<TemplateLibraryParams>): 
   const id = params.templateId as TemplateLibraryId;
 
   // WireGuard templates (router_base_wireguard, wireguard_client, tower_wisp).
-  // Los campos WG pueden faltar: el generador produce placeholders explícitos
-  // y warnings para que el técnico complete el .rsc sin provocar 400 en la UI.
+  // Los campos WG pueden faltar: el generador OMITE address/peer/route (nunca
+  // placeholders inválidos en CHR) y emite warnings para regenerar con datos reales.
   if (WG_TEMPLATES.has(id)) {
     if (params.wgRouterIp && !isValidCidr(params.wgRouterIp)) {
       errors.push('wgRouterIp debe ser un CIDR válido (ej: 10.0.0.2/24)');
@@ -77,8 +77,7 @@ export function validateTemplateParams(params: Partial<TemplateLibraryParams>): 
     }
   }
 
-  // SSTP también permite placeholders explícitos cuando falta el host, igual que
-  // el generador. Si el usuario provee host, sí validamos el formato.
+  // SSTP también permite omitir host: el generador no emite cliente SSTP inválido.
   if (id === 'router_base_sstp') {
     if (params.sstpHost && !isValidHostname(params.sstpHost) && !isValidIp(params.sstpHost)) {
       errors.push('sstpHost debe ser un hostname o IP válidos');

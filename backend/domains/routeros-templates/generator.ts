@@ -75,7 +75,8 @@ const getDefaults = (p: TemplateLibraryParams): Defaults => {
     poolEnd,
     dns: p.dnsServers?.length ? p.dnsServers : ['8.8.8.8', '1.1.1.1'],
     apiPort: p.apiPort ?? 8728,
-    apiCidr: p.apiCidr || '10.0.0.0/24',
+    // Red de gestión NugaCore por defecto (VPN staging/prod: 10.70.0.0/16).
+    apiCidr: p.apiCidr || '10.70.0.0/16',
     enableDhcp: p.enableDhcp !== false,
   };
 };
@@ -93,9 +94,9 @@ const applyModeBanner = (mode: TemplateApplyMode): string => {
   if (mode === 'factory_reset') {
     return `# ============================================================
 # MODO: factory_reset (wizard / onboarding)
-# Asume router limpio tras /system reset-configuration (no-defaults=no
-# o con defaults mínimos). Instala LAN/VPN/API de gestión NugaCore.
-# NO usar en un router de producción con clients/VLANs ya activos.
+# Asume router limpio (factory reset / defaults mínimos). Instala LAN/VPN/API
+# de gestión NugaCore. NO usar en un router de producción con clients/VLANs
+# ya activos.
 # ============================================================`;
   }
   return `# ============================================================
@@ -354,28 +355,69 @@ interface WgSectionResult {
   warnings: string[];
 }
 
+/** Normaliza IP peer WG a CIDR /32 si viene sin prefijo. */
+const normalizeWgRouterIp = (ip: string): string => {
+  const trimmed = ip.trim();
+  return trimmed.includes('/') ? trimmed : `${trimmed}/32`;
+};
+
+/**
+ * Sección WireGuard client/tunnel.
+ * NUNCA emite placeholders RouterOS-inválidos (`<IP_PEER>`, `<PEGAR_...>`,
+ * `<ENDPOINT_HOST>`): en CHR provocan `invalid value for argument address` /
+ * `failure: invalid public key` y abortan el resto del import.
+ * Sin datos WG reales: solo crea la interfaz + log warning (LAN/API/SNMP sí
+ * aplican). Completar con Alta de Router o regenerar con parámetros WG.
+ */
 const sectionWireguard = (p: TemplateLibraryParams): WgSectionResult => {
   const warnings: string[] = [];
-  const pubKey = p.wgServerPublicKey || '<PEGAR_PUBLIC_KEY_DEL_SERVIDOR>';
-  const routerIp = p.wgRouterIp || '<IP_PEER>/32';
-  const mgmtCidr = p.wgManagementCidr || '10.10.0.0/24';
+  const pubKey = (p.wgServerPublicKey || '').trim();
+  const endpoint = (p.wgEndpoint || '').trim();
+  const routerIpRaw = (p.wgRouterIp || '').trim();
+  const mgmtCidr = (p.wgManagementCidr || '').trim() || '10.70.0.0/16';
   const keepalive = p.wgKeepalive ?? 25;
-
-  let epHost = '<ENDPOINT_HOST>';
-  let epPort = '13231';
-  if (p.wgEndpoint?.includes(':')) {
-    [epHost, epPort] = p.wgEndpoint.split(':');
-  } else if (p.wgEndpoint) {
-    epHost = p.wgEndpoint;
-  }
-
-  if (!p.wgServerPublicKey) warnings.push('wgServerPublicKey no configurada: el script usa un placeholder.');
-  if (!p.wgEndpoint) warnings.push('wgEndpoint no configurado: completar host:port del servidor WireGuard.');
-  if (!p.wgRouterIp) warnings.push('wgRouterIp no configurada: asignar la IP del peer en la red WG.');
+  const complete = Boolean(pubKey && endpoint && routerIpRaw);
 
   const ifaceLine = p.wgPrivateKey
     ? `/interface wireguard add name="NugaCoreWG" listen-port=13231 private-key="${p.wgPrivateKey}" comment="NugaCore WireGuard"`
     : `/interface wireguard add name="NugaCoreWG" listen-port=13231 comment="NugaCore WireGuard (RouterOS auto-genera private-key)"`;
+
+  const watchdog = `# --- Watchdog WireGuard ---
+:if ([:len [/system scheduler find name="NugaCore-WG-Watchdog"]] = 0) do={
+  /system scheduler add name="NugaCore-WG-Watchdog" interval=00:05:00 \\
+    on-event=":log info \\"NugaCore WG watchdog: peer activo\\"" \\
+    comment="NugaCore WG watchdog"
+}`;
+
+  if (!complete) {
+    if (!pubKey) warnings.push('wgServerPublicKey faltante: no se emite peer (evita fallo en /import).');
+    if (!endpoint) warnings.push('wgEndpoint faltante: no se emite peer (evita fallo en /import).');
+    if (!routerIpRaw) warnings.push('wgRouterIp faltante: no se emite address WG (evita fallo en /import).');
+    warnings.push(
+      'WireGuard incompleto: el script crea NugaCoreWG pero OMITE address/peer/route. Usa Alta de Router o completa Public Key, Endpoint e IP peer y regenera.',
+    );
+
+    const section = `
+# --- WireGuard tunnel NugaCore (INCOMPLETO — sin address/peer/route) ---
+# Faltan parámetros reales. NO se emiten comandos inválidos que aborten /import.
+# Completar: Alta de Router (enrollment) o Biblioteca con Public Key + Endpoint + IP peer.
+:if ([:len [/interface wireguard find name="NugaCoreWG"]] = 0) do={
+  ${ifaceLine}
+}
+:log warning "NugaCore WG incompleto: regenerar script con datos WG reales (Alta de Router)"
+${watchdog}`;
+
+    return { section, warnings };
+  }
+
+  let epHost = endpoint;
+  let epPort = '13231';
+  if (endpoint.includes(':')) {
+    const idx = endpoint.lastIndexOf(':');
+    epHost = endpoint.slice(0, idx);
+    epPort = endpoint.slice(idx + 1) || '13231';
+  }
+  const routerIp = normalizeWgRouterIp(routerIpRaw);
 
   const note = p.wgPrivateKey
     ? `# Peer pre-registrado en WireGuard Manager. El túnel se levanta automáticamente.`
@@ -395,7 +437,7 @@ ${note}
   /interface wireguard peers add \\
     interface="NugaCoreWG" \\
     public-key="${pubKey}" \\
-    endpoint-address=${epHost} \\
+    endpoint-address="${epHost}" \\
     endpoint-port=${epPort} \\
     allowed-address=${mgmtCidr} \\
     persistent-keepalive=${keepalive}s \\
@@ -404,12 +446,7 @@ ${note}
 :if ([:len [/ip route find dst-address="${mgmtCidr}" comment~"NugaCore"]] = 0) do={
   /ip route add dst-address="${mgmtCidr}" gateway=NugaCoreWG comment="NugaCore management route"
 }
-# --- Watchdog WireGuard ---
-:if ([:len [/system scheduler find name="NugaCore-WG-Watchdog"]] = 0) do={
-  /system scheduler add name="NugaCore-WG-Watchdog" interval=00:05:00 \\
-    on-event=":log info \\"NugaCore WG watchdog: peer activo\\"" \\
-    comment="NugaCore WG watchdog"
-}`;
+${watchdog}`;
 
   return { section, warnings };
 };
@@ -418,10 +455,30 @@ ${note}
 
 const sectionSstp = (p: TemplateLibraryParams, vpnUser: string, vpnPass: string): WgSectionResult => {
   const warnings: string[] = [];
-  const host = p.sstpHost || '<HOST_CONCENTRADOR_NUGACORE>';
-  const mgmtCidr = p.sstpManagementCidr || '10.10.0.0/24';
+  const host = (p.sstpHost || '').trim();
+  const mgmtCidr = (p.sstpManagementCidr || '').trim() || '10.70.0.0/16';
 
-  if (!p.sstpHost) warnings.push('sstpHost no configurado: completar el FQDN/IP del concentrador SSTP.');
+  const watchdog = `# --- Watchdog SSTP ---
+:if ([:len [/system scheduler find name="NugaCore-VPN-Watchdog"]] = 0) do={
+  /system scheduler add name="NugaCore-VPN-Watchdog" interval=00:01:00 \\
+    on-event="/interface sstp-client enable [find name=NugaCoreVPN disabled=yes]" \\
+    comment="NugaCore VPN watchdog"
+}`;
+
+  if (!host) {
+    warnings.push(
+      'sstpHost faltante: no se emite cliente SSTP (evita fallo en /import). Completa el FQDN/IP del concentrador y regenera.',
+    );
+    const section = `
+# --- SSTP tunnel NugaCore (INCOMPLETO — sin connect-to) ---
+# Falta sstpHost. NO se emite interfaz SSTP con host placeholder.
+:if ([:len [/ppp profile find name="nugacore-profile"]] = 0) do={
+  /ppp profile add name="nugacore-profile" comment="NugaCore VPN profile"
+}
+:log warning "NugaCore SSTP incompleto: regenerar con sstpHost real"
+${watchdog}`;
+    return { section, warnings };
+  }
 
   const section = `
 # --- SSTP tunnel NugaCore ---
@@ -441,12 +498,7 @@ const sectionSstp = (p: TemplateLibraryParams, vpnUser: string, vpnPass: string)
 :if ([:len [/ip route find dst-address="${mgmtCidr}" comment~"NugaCore"]] = 0) do={
   /ip route add dst-address="${mgmtCidr}" gateway=NugaCoreVPN comment="NugaCore management route"
 }
-# --- Watchdog SSTP ---
-:if ([:len [/system scheduler find name="NugaCore-VPN-Watchdog"]] = 0) do={
-  /system scheduler add name="NugaCore-VPN-Watchdog" interval=00:01:00 \\
-    on-event="/interface sstp-client enable [find name=NugaCoreVPN disabled=yes]" \\
-    comment="NugaCore VPN watchdog"
-}`;
+${watchdog}`;
 
   return { section, warnings };
 };
@@ -899,7 +951,7 @@ const genWireguardClient = (p: TemplateLibraryParams): GenResult => {
   const mode = resolveApplyMode(p);
   const { section: wgSection, warnings: wgWarnings } = sectionWireguard(p);
   const warnings = [...modeWarnings(mode), ...wgWarnings];
-  const vpnCidr = p.wgVpnCidr || p.wgManagementCidr || '10.10.0.0/24';
+  const vpnCidr = p.wgVpnCidr || p.wgManagementCidr || '10.70.0.0/16';
 
   const script = `${header(p, 'WireGuard Cliente', mode)}
 ${sectionIdentity(p.routerName, mode)}
@@ -925,8 +977,8 @@ const genWireguardServer = (p: TemplateLibraryParams): GenResult => {
   const mode = resolveApplyMode(p);
   const warnings: string[] = [...modeWarnings(mode)];
   const serverIp = p.wgRouterIp || '10.10.0.1/24';
-  const vpnCidr = p.wgVpnCidr || '10.10.0.0/24';
-  const apiCidr = p.nocApiCidr || p.apiCidr || '10.0.0.0/24';
+  const vpnCidr = p.wgVpnCidr || '10.70.0.0/16';
+  const apiCidr = p.nocApiCidr || p.apiCidr || '10.70.0.0/16';
   const apiPort = p.apiPort ?? 8728;
   const cred = generateApiCredential(p.routerName);
 
@@ -974,7 +1026,7 @@ ${sectionFileCleanup()}`;
 const genNocReady = (p: TemplateLibraryParams): GenResult => {
   const mode = resolveApplyMode(p);
   const warnings: string[] = [...modeWarnings(mode)];
-  const apiCidr = p.nocApiCidr || p.apiCidr || '10.0.0.0/24';
+  const apiCidr = p.nocApiCidr || p.apiCidr || '10.70.0.0/16';
   const apiPort = p.apiPort ?? 8728;
   const cred = generateApiCredential(p.routerName);
 

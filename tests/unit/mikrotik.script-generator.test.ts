@@ -119,10 +119,14 @@ describe('script WireGuard', () => {
     expect(policyOf(script)).toBe('read,write,api,test');
   });
 
-  it('emite warnings y placeholder cuando falta la public key del servidor', () => {
+  it('emite warnings y omite peer/address cuando falta la public key del servidor', () => {
     const res = generateProvisioningScript(baseInput({ connectionType: 'wireguard' }));
     expect(res.warnings.length).toBeGreaterThan(0);
-    expect(res.script).toContain('<PEGAR_PUBLIC_KEY_DEL_SERVIDOR_NUGACORE>');
+    expect(res.script).not.toContain('<PEGAR_PUBLIC_KEY_DEL_SERVIDOR_NUGACORE>');
+    expect(res.script).not.toContain('<ENDPOINT_HOST>');
+    expect(res.script).not.toContain('<ASIGNAR_IP_WG_DEL_ROUTER>');
+    expect(res.script).toContain('NugaCoreWG');
+    expect(res.script).toContain('WG incompleto');
   });
 });
 

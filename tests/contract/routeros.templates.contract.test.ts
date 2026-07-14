@@ -130,7 +130,7 @@ describe('Templates Library — POST /api/routeros-templates/generate', () => {
     expect(res.body).toHaveProperty('securityNotice');
   });
 
-  it('WireGuard sin datos reales genera placeholder + warnings, no 400 de UI', async () => {
+  it('WireGuard sin datos reales omite address/peer (sin placeholders inválidos) + warnings', async () => {
     const res = await request(app)
       .post('/api/routeros-templates/generate')
       .set(ADMIN)
@@ -141,8 +141,13 @@ describe('Templates Library — POST /api/routeros-templates/generate', () => {
         applyMode: 'existing_config',
       });
     expect(res.status).toBe(200);
-    expect(res.body.script).toContain('<PEGAR_PUBLIC_KEY_DEL_SERVIDOR>');
-    expect(res.body.script).toContain('<IP_PEER>/32');
+    expect(res.body.script).not.toContain('<PEGAR_PUBLIC_KEY_DEL_SERVIDOR>');
+    expect(res.body.script).not.toContain('<IP_PEER>/32');
+    expect(res.body.script).not.toContain('<ENDPOINT_HOST>');
+    expect(res.body.script).toContain('NugaCoreWG');
+    expect(res.body.script).toContain('INCOMPLETO');
+    expect(res.body.script).not.toMatch(/\/ip address add address=.*NugaCoreWG/);
+    expect(res.body.script).not.toContain('peers add');
     expect(res.body.warnings.length).toBeGreaterThan(0);
   });
 

@@ -591,7 +591,7 @@ export default function RouterOsTemplatesModule({ userRole, getAuthHeaders }: Ro
                     <FormField label="DHCP pool inicio" value={form.dhcpPoolStart || ''} onChange={(v) => setField('dhcpPoolStart', v)} placeholder="192.168.1.10" />
                     <FormField label="DHCP pool fin" value={form.dhcpPoolEnd || ''} onChange={(v) => setField('dhcpPoolEnd', v)} placeholder="192.168.1.254" />
                     <FormField label="DNS (separados por coma)" value={form.dnsServers || ''} onChange={(v) => setField('dnsServers', v)} placeholder="8.8.8.8,1.1.1.1" />
-                    <FormField label="API CIDR gestión" value={form.apiCidr || ''} onChange={(v) => setField('apiCidr', v)} placeholder="10.0.0.0/24" />
+                    <FormField label="API CIDR gestión" value={form.apiCidr || ''} onChange={(v) => setField('apiCidr', v)} placeholder="10.70.0.0/16" />
                   </div>
                 </>
               )}
@@ -601,10 +601,10 @@ export default function RouterOsTemplatesModule({ userRole, getAuthHeaders }: Ro
                 <>
                   <SectionLabel>WireGuard</SectionLabel>
                   <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
-                    <FormField label="Public Key del servidor" value={form.wgServerPublicKey || ''} onChange={(v) => setField('wgServerPublicKey', v)} placeholder="<Base64 public key>" className="sm:col-span-2" />
-                    <FormField label="Endpoint (host:port)" value={form.wgEndpoint || ''} onChange={(v) => setField('wgEndpoint', v)} placeholder="vpn.miempresa.com:13231" />
-                    <FormField label="IP del peer (CIDR)" value={form.wgRouterIp || ''} onChange={(v) => setField('wgRouterIp', v)} placeholder="10.10.0.2/24" />
-                    <FormField label="CIDR de gestión" value={form.wgManagementCidr || ''} onChange={(v) => setField('wgManagementCidr', v)} placeholder="10.10.0.0/24" />
+                    <FormField label="Public Key del servidor" value={form.wgServerPublicKey || ''} onChange={(v) => setField('wgServerPublicKey', v)} placeholder="Clave pública WireGuard del servidor NugaCore" className="sm:col-span-2" />
+                    <FormField label="Endpoint (host:port)" value={form.wgEndpoint || ''} onChange={(v) => setField('wgEndpoint', v)} placeholder="vpn.ejemplo.com:13231" />
+                    <FormField label="IP del peer (CIDR)" value={form.wgRouterIp || ''} onChange={(v) => setField('wgRouterIp', v)} placeholder="10.70.0.3/32" />
+                    <FormField label="CIDR de gestión" value={form.wgManagementCidr || ''} onChange={(v) => setField('wgManagementCidr', v)} placeholder="10.70.0.0/16" />
                     <FormField label="Keepalive (segundos)" value={form.wgKeepalive || ''} onChange={(v) => setField('wgKeepalive', v)} placeholder="25" />
                   </div>
                 </>
@@ -616,7 +616,7 @@ export default function RouterOsTemplatesModule({ userRole, getAuthHeaders }: Ro
                   <SectionLabel>SSTP</SectionLabel>
                   <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
                     <FormField label="Host concentrador SSTP *" value={form.sstpHost || ''} onChange={(v) => setField('sstpHost', v)} placeholder="vpn.miempresa.com" />
-                    <FormField label="CIDR de gestión" value={form.sstpManagementCidr || ''} onChange={(v) => setField('sstpManagementCidr', v)} placeholder="10.10.0.0/24" />
+                    <FormField label="CIDR de gestión" value={form.sstpManagementCidr || ''} onChange={(v) => setField('sstpManagementCidr', v)} placeholder="10.70.0.0/16" />
                   </div>
                 </>
               )}
@@ -692,7 +692,7 @@ export default function RouterOsTemplatesModule({ userRole, getAuthHeaders }: Ro
                 <>
                   <SectionLabel>NOC</SectionLabel>
                   <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
-                    <FormField label="CIDR gestión API" value={form.nocApiCidr || ''} onChange={(v) => setField('nocApiCidr', v)} placeholder="10.0.0.0/24" />
+                    <FormField label="CIDR gestión API" value={form.nocApiCidr || ''} onChange={(v) => setField('nocApiCidr', v)} placeholder="10.70.0.0/16" />
                     <FormField label="Puerto API" value={form.apiPort || ''} onChange={(v) => setField('apiPort', v)} placeholder="8728" />
                     <FormSelect label="API-SSL" value={form.enableApiSsl ?? 'false'} onChange={(v) => setField('enableApiSsl', v)} options={[{ value: 'false', label: 'Deshabilitado' }, { value: 'true', label: 'Habilitado' }]} />
                   </div>

@@ -171,61 +171,73 @@ const sectionApiService = (p: ResourceGeneratorParams, allowedCidr: string): str
 
 const sectionWireguard = (p: ResourceGeneratorParams): { section: string; warnings: string[] } => {
   const warnings: string[] = [];
-  const serverPublicKey = p.wgServerPublicKey || '<PEGAR_PUBLIC_KEY_DEL_SERVIDOR_NUGACORE>';
-  const routerIp = p.wgRouterIp || '<IP_DEL_ROUTER_EN_RED_WG>/32';
-  const managementCidr = p.wgManagementCidr || '10.10.0.0/24';
+  const serverPublicKey = (p.wgServerPublicKey || '').trim();
+  const routerIpRaw = (p.wgRouterIp || '').trim();
+  const managementCidr = (p.wgManagementCidr || '').trim() || '10.70.0.0/16';
   const keepalive = p.wgKeepalive ?? 25;
+  const endpoint = (p.wgEndpoint || '').trim();
 
-  let endpointHost = '<ENDPOINT_HOST>';
+  let endpointHost = '';
   let endpointPort = '13231';
-  if (p.wgEndpoint?.includes(':')) {
-    [endpointHost, endpointPort] = p.wgEndpoint.split(':');
-  } else if (p.wgEndpoint) {
-    endpointHost = p.wgEndpoint;
+  if (endpoint.includes(':')) {
+    const idx = endpoint.lastIndexOf(':');
+    endpointHost = endpoint.slice(0, idx);
+    endpointPort = endpoint.slice(idx + 1) || '13231';
+  } else if (endpoint) {
+    endpointHost = endpoint;
   }
 
-  if (!p.wgServerPublicKey) warnings.push('wgServerPublicKey no configurada: el script usa un placeholder.');
-  if (!p.wgEndpoint) warnings.push('wgEndpoint no configurado: completar host:port del servidor WireGuard de NugaCore.');
-  if (!p.wgRouterIp) warnings.push('wgRouterIp no configurada: asignar la IP que tendrá este router dentro de la red WireGuard.');
+  const routerIp = routerIpRaw
+    ? (routerIpRaw.includes('/') ? routerIpRaw : `${routerIpRaw}/32`)
+    : '';
+  const complete = Boolean(serverPublicKey && endpointHost && routerIp);
 
-  const ifaceAdd = p.wgPeerPrivateKey
-    ? `  add name="NugaCoreWG" listen-port=13231 private-key="${p.wgPeerPrivateKey}" comment="NugaCore WireGuard"`
-    : `  add name="NugaCoreWG" listen-port=13231 comment="NugaCore WireGuard"`;
+  if (!serverPublicKey) warnings.push('wgServerPublicKey faltante: no se emite peer (evita fallo en /import).');
+  if (!endpointHost) warnings.push('wgEndpoint faltante: no se emite peer (evita fallo en /import).');
+  if (!routerIp) warnings.push('wgRouterIp faltante: no se emite address WG (evita fallo en /import).');
+  if (!complete) {
+    warnings.push('WireGuard incompleto: solo se crea NugaCoreWG. Completa Public Key, Endpoint e IP peer y regenera.');
+  }
+
+  const ifaceLine = p.wgPeerPrivateKey
+    ? `/interface wireguard add name="NugaCoreWG" listen-port=13231 private-key="${p.wgPeerPrivateKey}" comment="NugaCore WireGuard"`
+    : `/interface wireguard add name="NugaCoreWG" listen-port=13231 comment="NugaCore WireGuard"`;
 
   const wgNote = p.wgPeerPrivateKey
     ? `# Peer pre-registrado en NugaCore WireGuard Manager.\n# El tunel se levantara automaticamente al importar el script.`
     : `# Paso 1: Este script crea la interfaz WireGuard. RouterOS generara la private-key automaticamente.\n# Paso 2: Tras ejecutar el script, copia la public-key del router:\n#   /interface wireguard print where name=NugaCoreWG\n# Paso 3: Registra esa public-key en NugaCore para completar el tunel.`;
 
-  const section = `
-# --- 15. WireGuard (RouterOS v7) ---
-${wgNote}
-/interface wireguard
-:if ([:len [find name="NugaCoreWG"]] = 0) do={
-${ifaceAdd}
-}
-/ip address
+  const tunnelBlock = complete
+    ? `/ip address
 :if ([:len [find interface="NugaCoreWG" comment~"NugaCore"]] = 0) do={
   add address="${routerIp}" interface="NugaCoreWG" comment="NugaCore WG address"
 }
-/interface wireguard peers
-:if ([:len [find comment~"NugaCore WG server"]] = 0) do={
-  add interface="NugaCoreWG" \\
+:if ([:len [/interface wireguard peers find comment~"NugaCore WG server"]] = 0) do={
+  /interface wireguard peers add interface="NugaCoreWG" \\
       public-key="${serverPublicKey}" \\
-      endpoint-address=${endpointHost} \\
+      endpoint-address="${endpointHost}" \\
       endpoint-port=${endpointPort} \\
       allowed-address=${managementCidr} \\
       persistent-keepalive=${keepalive}s \\
       comment="NugaCore WG server peer"
 }
-/ip route
-:if ([:len [find dst-address="${managementCidr}" comment~"NugaCore"]] = 0) do={
-  add dst-address="${managementCidr}" gateway=NugaCoreWG comment="NugaCore management route"
+:if ([:len [/ip route find dst-address="${managementCidr}" comment~"NugaCore"]] = 0) do={
+  /ip route add dst-address="${managementCidr}" gateway=NugaCoreWG comment="NugaCore management route"
+}`
+    : `# WG incompleto: NO se emiten address/peer/route (placeholders abortaban /import en CHR).
+:log warning "NugaCore WG incompleto: regenerar con datos WG reales"`;
+
+  const section = `
+# --- 15. WireGuard (RouterOS v7) ---
+${wgNote}
+:if ([:len [/interface wireguard find name="NugaCoreWG"]] = 0) do={
+  ${ifaceLine}
 }
+${tunnelBlock}
 
 # --- 16. Watchdog WireGuard ---
-/system scheduler
-:if ([:len [find name="NugaCore-WG-Watchdog"]] = 0) do={
-  add name="NugaCore-WG-Watchdog" interval=00:05:00 \\
+:if ([:len [/system scheduler find name="NugaCore-WG-Watchdog"]] = 0) do={
+  /system scheduler add name="NugaCore-WG-Watchdog" interval=00:05:00 \\
       comment="NugaCore WG watchdog" \\
       on-event="/interface wireguard print where name=NugaCoreWG; :log info \\"NugaCore WG peer status checked\\""
 }`;
@@ -239,20 +251,27 @@ const sectionSstp = (
   vpnPassword: string,
 ): { section: string; warnings: string[] } => {
   const warnings: string[] = [];
-  const host = p.sstpHost || '<HOST_CONCENTRADOR_NUGACORE>';
-  const managementCidr = p.sstpManagementCidr || '10.10.0.0/24';
+  const host = (p.sstpHost || '').trim();
+  const managementCidr = (p.sstpManagementCidr || '').trim() || '10.70.0.0/16';
 
-  if (!p.sstpHost) warnings.push('sstpHost no configurado: completar el FQDN/IP del concentrador SSTP de NugaCore.');
+  if (!host) {
+    warnings.push('sstpHost faltante: no se emite cliente SSTP (evita fallo en /import).');
+    const section = `
+# --- 15. SSTP (INCOMPLETO — sin connect-to) ---
+:if ([:len [/ppp profile find name="nugacore-profile"]] = 0) do={
+  /ppp profile add name="nugacore-profile" comment="NugaCore VPN profile"
+}
+:log warning "NugaCore SSTP incompleto: regenerar con sstpHost real"`;
+    return { section, warnings };
+  }
 
   const section = `
 # --- 15. SSTP ---
-/ppp profile
-:if ([:len [find name="nugacore-profile"]] = 0) do={
-  add name="nugacore-profile" comment="NugaCore VPN profile"
+:if ([:len [/ppp profile find name="nugacore-profile"]] = 0) do={
+  /ppp profile add name="nugacore-profile" comment="NugaCore VPN profile"
 }
-/interface sstp-client
-:if ([:len [find name="NugaCoreVPN"]] = 0) do={
-  add name="NugaCoreVPN" \\
+:if ([:len [/interface sstp-client find name="NugaCoreVPN"]] = 0) do={
+  /interface sstp-client add name="NugaCoreVPN" \\
       connect-to="${host}" \\
       user="${vpnUser}" \\
       password="${vpnPassword}" \\
@@ -261,15 +280,13 @@ const sectionSstp = (
       disabled=no \\
       comment="NugaCore VPN"
 }
-/ip route
-:if ([:len [find dst-address="${managementCidr}" comment~"NugaCore"]] = 0) do={
-  add dst-address="${managementCidr}" gateway=NugaCoreVPN comment="NugaCore management route"
+:if ([:len [/ip route find dst-address="${managementCidr}" comment~"NugaCore"]] = 0) do={
+  /ip route add dst-address="${managementCidr}" gateway=NugaCoreVPN comment="NugaCore management route"
 }
 
 # --- 16. Watchdog SSTP ---
-/system scheduler
-:if ([:len [find name="NugaCore-VPN-Watchdog"]] = 0) do={
-  add name="NugaCore-VPN-Watchdog" interval=00:01:00 \\
+:if ([:len [/system scheduler find name="NugaCore-VPN-Watchdog"]] = 0) do={
+  /system scheduler add name="NugaCore-VPN-Watchdog" interval=00:01:00 \\
       comment="NugaCore VPN watchdog" \\
       on-event="/interface sstp-client enable [find where name=\\"NugaCoreVPN\\" disabled=yes]"
 }`;
