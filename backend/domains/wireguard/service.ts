@@ -9,7 +9,7 @@
 import { encryptSecret, decryptSecret } from '../../services/crypto';
 import { logger } from '../../common/logger';
 import { useDbWireguard } from '../../config/feature-flags';
-import { NotFoundError } from '../../common/errors';
+import { BadRequestError, NotFoundError } from '../../common/errors';
 import { isSupabaseAdminConfigured, supabaseAdmin } from '../../services/supabase-admin';
 import { generatePresharedKey, generateWgKeyPair } from './keys';
 import { DEFAULT_SERVER_IP, DEFAULT_WG_POOL, nextFreeIp } from './ipam';
@@ -157,7 +157,12 @@ export class WireguardService {
 
     const allocations = await this.repo.listAllocations(server.id);
     const ip = nextFreeIp(allocations.map((a) => ({ ip: a.ip, status: a.status })), server.vpnCidr, [server.serverVpnIp]);
-    if (!ip) throw new Error('WireGuard IP pool exhausted');
+    if (!ip) {
+      throw new BadRequestError(
+        'Pool de IPs WireGuard agotado para este servidor.',
+        'WIREGUARD_IP_POOL_EXHAUSTED',
+      );
+    }
 
     const kp = generateWgKeyPair();
     const psk = generatePresharedKey();
@@ -169,9 +174,35 @@ export class WireguardService {
       status: 'active', createdBy: actorId, createdAt: nowIso(), updatedAt: nowIso(),
     };
     await this.repo.createPeer(rec);
-    const allocId = await this.repo.nextId('alloc');
-    await this.repo.createAllocation({ id: allocId, serverId: server.id, ip, peerId: id, status: 'allocated', allocatedAt: nowIso() });
-    logger.info('WireGuard: peer creado', { peerId: id, serverId: server.id, ip });
+
+    // Unique (server_id, ip) en Supabase: si la IP estaba released, UPDATE la fila;
+    // no INSERT (provocaba 500: duplicate key wireguard_ip_allocations_server_id_ip_key).
+    const existingAlloc = allocations.find((a) => a.ip === ip);
+    if (existingAlloc) {
+      await this.repo.updateAllocation(existingAlloc.id, {
+        status: 'allocated',
+        peerId: id,
+        releasedAt: '',
+        allocatedAt: nowIso(),
+      });
+    } else {
+      const allocId = await this.repo.nextId('alloc');
+      await this.repo.createAllocation({
+        id: allocId,
+        serverId: server.id,
+        ip,
+        peerId: id,
+        status: 'allocated',
+        allocatedAt: nowIso(),
+      });
+    }
+
+    logger.info('WireGuard: peer creado', {
+      peerId: id,
+      serverId: server.id,
+      ip,
+      reusedAllocation: Boolean(existingAlloc),
+    });
     return this.peerOnce(server, rec, kp.privateKey, psk);
   }
 

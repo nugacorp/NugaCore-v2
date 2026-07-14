@@ -179,8 +179,12 @@ export class SupabaseWireguardRepository implements WireguardRepository {
     const row: Record<string, unknown> = {};
     if (patch.status !== undefined) row.status = patch.status;
     if (patch.peerId !== undefined) row.peer_id = patch.peerId || null;
-    if (patch.releasedAt !== undefined) row.released_at = patch.releasedAt || null;
-    if (Object.keys(row).length) await this.client.from('wireguard_ip_allocations').update(row).eq('id', id);
+    if ('releasedAt' in patch) row.released_at = patch.releasedAt || null;
+    if (patch.allocatedAt !== undefined) row.allocated_at = patch.allocatedAt;
+    if (Object.keys(row).length) {
+      const { error } = await this.client.from('wireguard_ip_allocations').update(row).eq('id', id);
+      if (error) throw new Error(`updateAllocation: ${error.message}`);
+    }
   }
 
   async recordRotation(rec: WireguardKeyRotation) {
