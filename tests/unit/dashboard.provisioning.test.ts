@@ -26,9 +26,9 @@ describe('dashboard provisioning KPI', () => {
     expect(stats.provisioningPending).toBe(3);
   });
 
-  it('Dashboard ejecutivo no duplica el KPI (vive en Provisioning Center)', () => {
+  it('Dashboard ya no muestra Provisioning Pendiente (vive en módulo Provisioning)', () => {
     const source = readFileSync('src/components/Dashboard.tsx', 'utf8');
     expect(source).not.toContain('Provisioning Pendiente');
-    expect(source).not.toContain('provisioningPending');
+    expect(source).not.toContain('kpi-provisioning-pendiente');
   });
 });

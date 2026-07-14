@@ -8,7 +8,7 @@ import { describe, expect, it } from 'vitest';
 const dashboardSource = readFileSync('src/components/Dashboard.tsx', 'utf8');
 const appSource = readFileSync('src/App.tsx', 'utf8');
 
-describe('Dashboard — estructura ejecutiva', () => {
+describe('Dashboard — estructura ejecutiva V3', () => {
   it('renderiza las secciones núcleo (KPIs, zonas, alertas, acciones)', () => {
     expect(dashboardSource).toContain('id="dashboard-executive-kpis"');
     expect(dashboardSource).toContain('id="dashboard-zone-status"');
