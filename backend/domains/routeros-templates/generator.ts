@@ -44,19 +44,40 @@ interface Defaults {
   enableDhcp: boolean;
 }
 
-const getDefaults = (p: TemplateLibraryParams): Defaults => ({
-  bridge: p.lanBridgeName || 'bridge-lan',
-  lanCidr: p.lanCidr || '192.168.1.0/24',
-  lanGw: p.lanGateway || '192.168.1.1',
-  wan: p.wanInterface || 'ether1',
-  lanPorts: p.lanInterfaces?.length ? p.lanInterfaces : ['ether2', 'ether3', 'ether4', 'ether5'],
-  poolStart: p.dhcpPoolStart || '192.168.1.10',
-  poolEnd: p.dhcpPoolEnd || '192.168.1.254',
-  dns: p.dnsServers?.length ? p.dnsServers : ['8.8.8.8', '1.1.1.1'],
-  apiPort: p.apiPort ?? 8728,
-  apiCidr: p.apiCidr || '10.0.0.0/24',
-  enableDhcp: p.enableDhcp !== false,
-});
+/** Corrige typos comunes (ehter1 → ether1) en nombres de interfaz. */
+const normalizeIfaceName = (name: string): string =>
+  name.trim().replace(/\behter(\d+)\b/gi, 'ether$1');
+
+const ipv4Prefix3 = (ip: string): string => ip.split('.').slice(0, 3).join('.');
+
+const getDefaults = (p: TemplateLibraryParams): Defaults => {
+  const lanGw = p.lanGateway || '192.168.1.1';
+  const lanCidr = p.lanCidr || '192.168.1.0/24';
+  const lanPrefix = ipv4Prefix3(lanGw) || '192.168.1';
+  // Si el wizard envía pool de otra subred (p.ej. 192.168.1.x con LAN 192.168.6.x), realinear.
+  const poolStartRaw = p.dhcpPoolStart || `${lanPrefix}.10`;
+  const poolEndRaw = p.dhcpPoolEnd || `${lanPrefix}.254`;
+  const poolStart =
+    ipv4Prefix3(poolStartRaw) === lanPrefix ? poolStartRaw : `${lanPrefix}.10`;
+  const poolEnd = ipv4Prefix3(poolEndRaw) === lanPrefix ? poolEndRaw : `${lanPrefix}.254`;
+  const wan = normalizeIfaceName(p.wanInterface || 'ether1');
+  const lanPorts = (p.lanInterfaces?.length ? p.lanInterfaces : ['ether2', 'ether3', 'ether4']).map(
+    normalizeIfaceName,
+  );
+  return {
+    bridge: p.lanBridgeName || 'bridge-lan',
+    lanCidr,
+    lanGw,
+    wan,
+    lanPorts,
+    poolStart,
+    poolEnd,
+    dns: p.dnsServers?.length ? p.dnsServers : ['8.8.8.8', '1.1.1.1'],
+    apiPort: p.apiPort ?? 8728,
+    apiCidr: p.apiCidr || '10.0.0.0/24',
+    enableDhcp: p.enableDhcp !== false,
+  };
+};
 
 // ── Cabecera estándar ──────────────────────────────────────────────
 
@@ -87,8 +108,11 @@ const sectionIdentity = (name: string): string => `
 const sectionBridge = (d: Defaults): string => {
   const ports = d.lanPorts
     .map(
-      (p) => `:if ([:len [/interface bridge port find interface="${p}" bridge="${d.bridge}"]] = 0) do={
-  /interface bridge port add interface="${p}" bridge="${d.bridge}" comment="NugaCore"
+      (p) => `# Puerto LAN ${p} (omite si la interfaz no existe o ya está en un bridge)
+:if ([:len [/interface find name="${p}"]] > 0) do={
+  :if ([:len [/interface bridge port find interface="${p}"]] = 0) do={
+    /interface bridge port add interface="${p}" bridge="${d.bridge}" comment="NugaCore"
+  }
 }`,
     )
     .join('\n');
@@ -104,8 +128,10 @@ const sectionInterfaceLists = (d: Defaults): string => `
 # --- Interface Lists ---
 :if ([:len [/interface list find name=WAN]] = 0) do={ /interface list add name=WAN }
 :if ([:len [/interface list find name=LAN]] = 0) do={ /interface list add name=LAN }
-:if ([:len [/interface list member find interface="${d.wan}" list=WAN]] = 0) do={
-  /interface list member add interface="${d.wan}" list=WAN comment="NugaCore WAN"
+:if ([:len [/interface find name="${d.wan}"]] > 0) do={
+  :if ([:len [/interface list member find interface="${d.wan}" list=WAN]] = 0) do={
+    /interface list member add interface="${d.wan}" list=WAN comment="NugaCore WAN"
+  }
 }
 :if ([:len [/interface list member find interface="${d.bridge}" list=LAN]] = 0) do={
   /interface list member add interface="${d.bridge}" list=LAN comment="NugaCore LAN"
@@ -223,8 +249,10 @@ const sectionMinimalLan = (d: Defaults): string => {
   return `
 # --- WAN ---
 :if ([:len [/interface list find name=WAN]] = 0) do={ /interface list add name=WAN }
-:if ([:len [/interface list member find interface="${d.wan}" list=WAN]] = 0) do={
-  /interface list member add interface="${d.wan}" list=WAN comment="NugaCore WAN"
+:if ([:len [/interface find name="${d.wan}"]] > 0) do={
+  :if ([:len [/interface list member find interface="${d.wan}" list=WAN]] = 0) do={
+    /interface list member add interface="${d.wan}" list=WAN comment="NugaCore WAN"
+  }
 }
 ${sectionBridge(d)}
 ${sectionInterfaceLists(d)}
@@ -261,8 +289,8 @@ const sectionWireguard = (p: TemplateLibraryParams): WgSectionResult => {
   if (!p.wgRouterIp) warnings.push('wgRouterIp no configurada: asignar la IP del peer en la red WG.');
 
   const ifaceLine = p.wgPrivateKey
-    ? `  add name="NugaCoreWG" listen-port=13231 private-key="${p.wgPrivateKey}" comment="NugaCore WireGuard"`
-    : `  add name="NugaCoreWG" listen-port=13231 comment="NugaCore WireGuard (RouterOS auto-genera private-key)"`;
+    ? `/interface wireguard add name="NugaCoreWG" listen-port=13231 private-key="${p.wgPrivateKey}" comment="NugaCore WireGuard"`
+    : `/interface wireguard add name="NugaCoreWG" listen-port=13231 comment="NugaCore WireGuard (RouterOS auto-genera private-key)"`;
 
   const note = p.wgPrivateKey
     ? `# Peer pre-registrado en WireGuard Manager. El túnel se levanta automáticamente.`
@@ -273,7 +301,7 @@ const sectionWireguard = (p: TemplateLibraryParams): WgSectionResult => {
 # --- WireGuard tunnel NugaCore ---
 ${note}
 :if ([:len [/interface wireguard find name="NugaCoreWG"]] = 0) do={
-${ifaceLine}
+  ${ifaceLine}
 }
 :if ([:len [/ip address find interface="NugaCoreWG" comment~"NugaCore"]] = 0) do={
   /ip address add address="${routerIp}" interface="NugaCoreWG" comment="NugaCore WG address"
@@ -550,7 +578,7 @@ const genTowerWisp = (p: TemplateLibraryParams): GenResult => {
 const genPcc = (p: TemplateLibraryParams, wanCount: number): GenResult => {
   const d = getDefaults(p);
   const warnings: string[] = [];
-  const wanIfaces = (p.wanInterfaces || []).slice(0, wanCount);
+  const wanIfaces = (p.wanInterfaces || []).map(normalizeIfaceName).slice(0, wanCount);
   const wanGws = (p.wanGateways || []).slice(0, wanCount);
 
   // Pad with placeholders if not enough provided

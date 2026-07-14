@@ -153,7 +153,7 @@ export const DEFAULT_FORM: OnboardingForm = {
   dhcpStart:       '192.168.88.10',
   dhcpEnd:         '192.168.88.254',
   wanInterface:    'ether1',
-  lanInterfaces:   'ether2,ether3,ether4,ether5',
+  lanInterfaces:   'ether2,ether3,ether4',
 };
 
 // ── Helpers puros ───────────────────────────────────────────────────────

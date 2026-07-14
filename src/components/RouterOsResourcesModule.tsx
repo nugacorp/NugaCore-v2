@@ -126,7 +126,7 @@ const DEFAULT_PARAMS: FormParams = {
   dhcpPoolEnd: '192.168.88.254',
   dnsServers: '1.1.1.1,8.8.8.8',
   wanInterface: 'ether1',
-  lanInterfaces: 'ether2,ether3,ether4,ether5',
+  lanInterfaces: 'ether2,ether3,ether4',
   enableNat: true,
   enableBasicFirewall: true,
   enableDhcpServer: true,
