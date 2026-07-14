@@ -44,7 +44,8 @@ Load this skill when the task touches any of these areas:
 
 1. Identify the feature area and load companion skills:
    - Supabase/Postgres: `data-platform/supabase` and `supabase-postgres-best-practices`.
-   - React/Tailwind UI: `vercel-react-best-practices` and `tailwind-4-docs`.
+   - React/Tailwind UI: `vercel-react-best-practices`, `tailwind-4-docs`, and `web-design-guidelines`.
+   - New behavior / bugfixes: `test-driven-development`.
    - Debugging: `systematic-debugging`.
    - GitHub/PR work: `github-pr-workflow`.
 2. Inspect the current repo state and relevant docs before making changes.
