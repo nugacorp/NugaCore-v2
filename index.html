@@ -7,6 +7,12 @@
     <link rel="icon" type="image/png" sizes="256x256" href="/favicon.png" />
     <link rel="manifest" href="/manifest.json" />
     <meta name="theme-color" content="#4f46e5" />
+    <!-- PWA instalable en iOS (Safari ignora parte del manifest). -->
+    <link rel="apple-touch-icon" href="/favicon.png" />
+    <meta name="apple-mobile-web-app-capable" content="yes" />
+    <meta name="mobile-web-app-capable" content="yes" />
+    <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent" />
+    <meta name="apple-mobile-web-app-title" content="NugaCore" />
     <title>NugaCore</title>
   </head>
   <body>

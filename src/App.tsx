@@ -41,6 +41,7 @@ import UserMenu from './components/UserMenu';
 import { authSession, restoreSessionProfileFromSupabase } from './lib/authSession';
 import { UserSessionProfile, isSupabaseConfigured, supabase } from './lib/supabase';
 import { canAccessTab, getDefaultTabByRole } from './lib/rbac';
+import { getAppScope, resolveEntryTab } from './lib/appScope';
 import { fetchWithRateLimitBackoff, isApiRateLimitError } from './lib/apiBackoff';
 
 import { 
@@ -127,9 +128,13 @@ export default function App() {
   const [userSession, setUserSession] = useState<UserSessionProfile | null>(() => authSession.readProfile());
   const [sessionBootstrapped, setSessionBootstrapped] = useState<boolean>(!isSupabaseConfigured);
 
-  // El tab inicial siempre es 'dashboard' (permitido para todos los roles).
-  // El efecto de RBAC corrige a un módulo permitido si el rol no lo autoriza.
-  const [activeTab, setActiveTab] = useState<string>('dashboard');
+  // Tab inicial: 'dashboard' por defecto (permitido para todos los roles). Si
+  // hay sesión cacheada, se abre en la pantalla de entrada del scope de la PWA
+  // (`?app=tech|portal`). El efecto de RBAC corrige si el rol no lo autoriza.
+  const [activeTab, setActiveTab] = useState<string>(() => {
+    const cached = authSession.readProfile();
+    return cached ? resolveEntryTab(cached.role, getAppScope()) : 'dashboard';
+  });
 
   const [mobileMenuOpen, setMobileMenuOpen] = useState<boolean>(false);
   const [sidebarCollapsed, setSidebarCollapsed] = useState<boolean>(() => {
@@ -155,7 +160,7 @@ export default function App() {
   const handleLoginSuccess = (profile: UserSessionProfile, accessToken?: string) => {
     setUserSession(profile);
     authSession.save(profile, accessToken);
-    setActiveTab(getDefaultTabByRole(profile.role));
+    setActiveTab(resolveEntryTab(profile.role, getAppScope()));
   };
 
   const handleLogout = async () => {
@@ -179,7 +184,7 @@ export default function App() {
       if (!mounted) return;
       if (restored) {
         setUserSession(restored);
-        setActiveTab(getDefaultTabByRole(restored.role));
+        setActiveTab(resolveEntryTab(restored.role, getAppScope()));
       } else {
         // Sin sesión válida en Supabase: limpiar cualquier perfil cacheado
         // (evita mostrar el dashboard con una sesión obsoleta) -> login.

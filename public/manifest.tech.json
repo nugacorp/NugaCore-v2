@@ -1,16 +1,16 @@
 {
-  "id": "/?app=admin",
-  "name": "NugaCore",
-  "short_name": "NugaCore",
-  "description": "Plataforma de operación WISP/ISP — clientes, facturación, red y MikroTik",
-  "start_url": "/?app=admin",
+  "id": "/?app=tech",
+  "name": "NugaCore Técnicos",
+  "short_name": "NugaTech",
+  "description": "App de campo para técnicos WISP — órdenes, checklist y evidencias",
+  "start_url": "/?app=tech",
   "scope": "/",
   "display": "standalone",
   "background_color": "#0f172a",
   "theme_color": "#4f46e5",
   "lang": "es",
   "dir": "ltr",
-  "orientation": "any",
+  "orientation": "portrait-primary",
   "categories": ["business", "productivity", "utilities"],
   "icons": [
     {
