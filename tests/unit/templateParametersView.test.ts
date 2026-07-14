@@ -7,6 +7,8 @@ import {
   groupValuesOf,
   isParameterVisible,
   countConfiguredParameters,
+  deriveDhcpPoolFromLanCidr,
+  syncDhcpPoolsWithLanCidr,
 } from '../../src/lib/templateParametersView';
 
 // ── Esquema de prueba (espejo de pcc_2wan reducido) ────────────────────
@@ -169,5 +171,37 @@ describe('countConfiguredParameters', () => {
   it('boolean false cuenta como presente', () => {
     const v = { pbrEnabled: false };
     expect(countConfiguredParameters(SCHEMA, v)).toBe(1);
+  });
+});
+
+describe('deriveDhcpPoolFromLanCidr / syncDhcpPoolsWithLanCidr', () => {
+  it('deriva pool .10–.254 desde lanCidr', () => {
+    expect(deriveDhcpPoolFromLanCidr('192.168.6.1/24')).toEqual({
+      start: '192.168.6.10',
+      end: '192.168.6.254',
+    });
+  });
+
+  it('sync actualiza dhcpPool* en esquema flat', () => {
+    const schema: TemplateParameterSchema = {
+      templateId: 'nugacore_factory_onboarding',
+      templateName: 'Factory',
+      groups: [
+        {
+          id: 'network',
+          label: 'Red',
+          nested: false,
+          parameters: [
+            { id: 'lanCidr', label: 'LAN', type: 'cidr', required: true, defaultValue: '192.168.88.1/24' },
+            { id: 'dhcpPoolStart', label: 'DHCP start', type: 'ip', required: false, defaultValue: '192.168.88.10' },
+            { id: 'dhcpPoolEnd', label: 'DHCP end', type: 'ip', required: false, defaultValue: '192.168.88.254' },
+          ],
+        },
+      ],
+    };
+    const values = buildDefaultParameterValues(schema);
+    const synced = syncDhcpPoolsWithLanCidr(schema, values, '10.50.0.1/24');
+    expect(synced.dhcpPoolStart).toBe('10.50.0.10');
+    expect(synced.dhcpPoolEnd).toBe('10.50.0.254');
   });
 });

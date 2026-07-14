@@ -223,6 +223,8 @@ export function buildEnrollmentPayload(form: OnboardingForm): Record<string, unk
     lanBridgeName:    form.lanBridgeName.trim() || undefined,
     wanInterface:     form.wanInterface.trim()  || undefined,
     lanInterfaces:    form.lanInterfaces.trim() || undefined,
+    dhcpPoolStart:    form.dhcpStart?.trim()    || undefined,
+    dhcpPoolEnd:      form.dhcpEnd?.trim()      || undefined,
     notes:            buildNotesFromForm(form),
     // wgServerId omitido → usa DEFAULT_WIREGUARD_SERVER
   };
@@ -380,6 +382,8 @@ export function buildAdvancedEnrollmentPayload(
     lanGateway:   effectiveLanGateway,
     lanBridgeName: effectiveLanBridge,
     wanInterface:  effectiveWanIf,
+    dhcpStart: isAdvanced ? form.lanAdvanced.dhcpStart : form.dhcpStart,
+    dhcpEnd: isAdvanced ? form.lanAdvanced.dhcpEnd : form.dhcpEnd,
   });
 
   if (!isAdvanced) {
@@ -389,6 +393,7 @@ export function buildAdvancedEnrollmentPayload(
   return {
     ...base,
     configMode: 'advanced',
+    enableDhcp: form.lanAdvanced.enableDhcp,
     ...(isPccTemplate(form.templateId) && { wanConfigs: form.wanConfigs }),
     lanAdvanced: form.lanAdvanced,
     security:    form.security,

@@ -79,8 +79,8 @@ export const TEMPLATE_PARAMETER_REGISTRY: Record<string, TemplateParameterSchema
           }),
           lanCidrParam(),
           str('lanInterfaces', 'Puertos LAN', {
-            defaultValue: 'ether2,ether3,ether4,ether5',
-            description: 'Interfaces del bridge, separadas por coma.',
+            defaultValue: 'ether2,ether3,ether4',
+            description: 'Interfaces del bridge, separadas por coma (omite las que no existan en el CHR).',
           }),
           dhcpEnabledParam(),
           ip('dhcpPoolStart', 'Inicio pool DHCP', { defaultValue: '192.168.88.10' }),

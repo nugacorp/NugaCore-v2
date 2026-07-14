@@ -52,14 +52,46 @@ export function mapParametersToLibraryParams(
 
   // ── Global LAN ──────────────────────────────────────────────────────
   const lanCidr = asString(v.lanCidr);
+  let lanPrefix3: string | undefined;
   if (lanCidr) {
     out.lanGateway = ipPart(lanCidr);
     out.lanCidr = networkCidr(lanCidr);
+    lanPrefix3 = out.lanGateway.split('.').slice(0, 3).join('.');
   }
   const dnsServers = asString(v.dnsServers);
   if (dnsServers) {
     const list = dnsServers.split(',').map((s) => s.trim()).filter(Boolean);
     if (list.length) out.dnsServers = list;
+  }
+  if (typeof v.dhcpEnabled === 'boolean') out.enableDhcp = v.dhcpEnabled;
+
+  // WAN / LAN genéricos (cualquier plantilla core que los declare)
+  const wan = asString(v.wanInterface)?.replace(/\behter(\d+)\b/gi, 'ether$1');
+  if (wan) out.wanInterface = wan;
+  const bridge = asString(v.lanBridgeName);
+  if (bridge) out.lanBridgeName = bridge;
+  const lanIf = asString(v.lanInterfaces);
+  if (lanIf) {
+    out.lanInterfaces = lanIf
+      .split(',')
+      .map((s) => s.trim().replace(/\behter(\d+)\b/gi, 'ether$1'))
+      .filter(Boolean);
+  }
+  const poolStart = asString(v.dhcpPoolStart);
+  const poolEnd = asString(v.dhcpPoolEnd);
+  // Si el pool no coincide con el prefijo LAN (defaults viejos 192.168.88 / 192.168.1),
+  // realinear a .10–.254 de la LAN elegida.
+  if (poolStart && lanPrefix3) {
+    const ps = poolStart.split('.').slice(0, 3).join('.');
+    out.dhcpPoolStart = ps === lanPrefix3 ? poolStart : `${lanPrefix3}.10`;
+  } else if (poolStart) {
+    out.dhcpPoolStart = poolStart;
+  }
+  if (poolEnd && lanPrefix3) {
+    const pe = poolEnd.split('.').slice(0, 3).join('.');
+    out.dhcpPoolEnd = pe === lanPrefix3 ? poolEnd : `${lanPrefix3}.254`;
+  } else if (poolEnd) {
+    out.dhcpPoolEnd = poolEnd;
   }
 
   // ── PCC: WANs → wanInterfaces / wanGateways ────────────────────────
@@ -109,19 +141,6 @@ export function mapParametersToLibraryParams(
 
   // ── Factory onboarding (WISP) ─────────────────────────────────────────
   if (templateId === 'nugacore_factory_onboarding') {
-    const bridge = asString(v.lanBridgeName);
-    if (bridge) out.lanBridgeName = bridge;
-    const wan = asString(v.wanInterface);
-    if (wan) out.wanInterface = wan;
-    const lanIf = asString(v.lanInterfaces);
-    if (lanIf) {
-      out.lanInterfaces = lanIf.split(',').map((s) => s.trim()).filter(Boolean);
-    }
-    if (typeof v.dhcpEnabled === 'boolean') out.enableDhcp = v.dhcpEnabled;
-    const poolStart = asString(v.dhcpPoolStart);
-    const poolEnd = asString(v.dhcpPoolEnd);
-    if (poolStart) out.dhcpPoolStart = poolStart;
-    if (poolEnd) out.dhcpPoolEnd = poolEnd;
     const zoneName = asString(v.zoneName);
     if (zoneName) out.zoneName = zoneName;
     if (v.apiPort !== undefined && v.apiPort !== '') {

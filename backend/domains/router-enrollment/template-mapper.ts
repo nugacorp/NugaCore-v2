@@ -135,6 +135,12 @@ export function resolveTemplateParams(
 
   const needsWireGuard = WG_TEMPLATES.has(templateId);
 
+  const lanInterfaces = Array.isArray(input.lanInterfaces)
+    ? input.lanInterfaces.map((s) => s.trim()).filter(Boolean)
+    : typeof input.lanInterfaces === 'string'
+      ? input.lanInterfaces.split(',').map((s) => s.trim()).filter(Boolean)
+      : undefined;
+
   // ── Parámetros base comunes a todas las plantillas ─────────────────
   const baseParams: TemplateLibraryParams = {
     templateId: libId,
@@ -144,6 +150,10 @@ export function resolveTemplateParams(
     lanCidr:        input.lanCidr,
     lanGateway:     input.lanGateway,
     wanInterface:   input.wanInterface,
+    lanInterfaces,
+    dhcpPoolStart: input.dhcpPoolStart,
+    dhcpPoolEnd: input.dhcpPoolEnd,
+    enableDhcp: input.enableDhcp,
   };
 
   // ── Parámetros WireGuard (solo si la plantilla los incrusta) ───────

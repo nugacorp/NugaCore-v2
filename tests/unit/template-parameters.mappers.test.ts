@@ -25,6 +25,22 @@ describe('mapParametersToLibraryParams — global', () => {
     const out = mapParametersToLibraryParams('router_base_wireguard', { dhcpEnabled: true });
     expect(out).not.toHaveProperty('lanCidr');
     expect(out).not.toHaveProperty('lanGateway');
+    expect(out.enableDhcp).toBe(true);
+  });
+
+  it('realinea pool DHCP cuando no coincide con lanCidr', () => {
+    const out = mapParametersToLibraryParams('nugacore_factory_onboarding', {
+      lanCidr: '192.168.6.1/24',
+      dhcpPoolStart: '192.168.1.10',
+      dhcpPoolEnd: '192.168.1.254',
+      wanInterface: 'ehter1',
+      lanInterfaces: 'ether2,ehter3',
+    });
+    expect(out.lanGateway).toBe('192.168.6.1');
+    expect(out.dhcpPoolStart).toBe('192.168.6.10');
+    expect(out.dhcpPoolEnd).toBe('192.168.6.254');
+    expect(out.wanInterface).toBe('ether1');
+    expect(out.lanInterfaces).toEqual(['ether2', 'ether3']);
   });
 
   it('values vacíos → objeto vacío', () => {
