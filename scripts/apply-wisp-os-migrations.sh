@@ -8,6 +8,7 @@ MIGRATIONS=(
   "$ROOT/supabase/migrations/20260707000000_crm_erp_wisp_schema.sql"
   "$ROOT/supabase/migrations/20260707100000_wisp_os_schema.sql"
   "$ROOT/supabase/migrations/20260707120000_ola6_radius_tenancy.sql"
+  "$ROOT/supabase/migrations/20260708070000_inventory_config_snapshots.sql"
   "$ROOT/supabase/migrations/20260708100000_portal_user_bindings.sql"
 )
 
