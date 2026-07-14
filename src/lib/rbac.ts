@@ -49,19 +49,25 @@ const roleTabs: Record<UserRole, AppTab[]> = {
 
 // ====================================================================
 // Visibilidad en el sidebar ≠ acceso (RBAC). Algunos módulos siguen siendo
-// ACCESIBLES por su rol (canAccessTab = true, acceso directo por tab/URL y
-// render en App.tsx) pero NO se listan como módulos operativos normales en el
-// menú principal:
-//  - wireguard: infraestructura interna; los peers se crean automáticamente
-//    en el Router Enrollment, el WISP no los gestiona a mano.
-//  - manual-safe-mode / safe-command-queue: herramientas internas de seguridad
-//    para fases futuras (PROD-x); confunden en la operación diaria de un WISP.
+// ACCESIBLES por su rol (canAccessTab = true, acceso directo por tab/URL,
+// workspace in-page o enlaces internos) pero NO se listan en el menú WISP:
+//  - wireguard: infra interna; peers automáticos en Alta de Router.
+//  - manual-safe-mode / safe-command-queue: seguridad / dry-run interno.
+//  - mikrotik / routeros-resources: panel core y scripts avanzados; el flujo
+//    diario usa Routers + Plantillas + workspace in-page.
+//  - routeros-readonly / inventory-sync / provisioning: lab, sync y dry-run
+//    de aprovisionamiento; no son módulos operativos de un WISP LATAM.
 // No se eliminan ni se les quita acceso: solo se ocultan del sidebar.
 // ====================================================================
 const SIDEBAR_HIDDEN_TABS: ReadonlySet<AppTab> = new Set<AppTab>([
   'wireguard',
   'manual-safe-mode',
   'safe-command-queue',
+  'mikrotik',
+  'routeros-resources',
+  'routeros-readonly',
+  'inventory-sync',
+  'provisioning',
 ]);
 
 export function isSidebarHiddenTab(tab: string): boolean {
@@ -96,35 +102,35 @@ export function getDefaultTabByRole(role: UserRole): AppTab {
 // Etiquetas legibles por módulo (para el panel de perfil).
 export const MODULE_LABELS: Record<AppTab, string> = {
   dashboard: 'Dashboard',
-  noc: 'NOC Read-Only',
-  crm: 'CRM Clientes & Leads',
-  billing: 'Facturación & Cobros',
-  finance: 'Finanzas & EBITDA',
-  suspension: 'Suspensiones & Cortes',
-  network: 'Red WISP & FTTH',
-  mikrotik: 'MikroTik Core',
-  wireguard: 'WireGuard Manager',
-  'routeros-resources': 'Recursos MikroTik',
-  'routeros-templates': 'Templates RouterOS',
-  'router-enrollment': 'Enrollment WireGuard',
-  payments: 'Portal Pagos & Reactivación',
-  support: 'Soporte & OT',
-  inventory: 'Inventario / ERP',
-  'inventory-routers': 'Inventario Routers (RO)',
-  'inventory-sync': 'Inventory Sync (RO)',
-  provisioning: 'Provisioning Center',
-  gis: 'GIS & Cobertura',
-  owner: 'Owner & Automatizaciones',
+  noc: 'NOC',
+  crm: 'Clientes',
+  billing: 'Planes y Facturación',
+  finance: 'Finanzas',
+  suspension: 'Suspensiones',
+  network: 'Torres y Sitios',
+  mikrotik: 'Panel MikroTik',
+  wireguard: 'WireGuard (interno)',
+  'routeros-resources': 'Scripts RouterOS',
+  'routeros-templates': 'Plantillas RouterOS',
+  'router-enrollment': 'Alta de Router',
+  payments: 'Pagos',
+  support: 'Tickets',
+  inventory: 'Inventario',
+  'inventory-routers': 'Routers',
+  'inventory-sync': 'Sincronización Inventario',
+  provisioning: 'Centro de Aprovisionamiento',
+  gis: 'Mapa de Red',
+  owner: 'Configuración',
   'manual-safe-mode': 'Modo Seguro Manual',
   'safe-command-queue': 'Cola de Comandos (Dry-Run)',
-  'routeros-readonly': 'RouterOS Read-Only Lab',
-  automation: 'Automation Center',
-  notifications: 'Notification Center',
+  'routeros-readonly': 'Laboratorio MikroTik',
+  automation: 'Automatización',
+  notifications: 'Notificaciones',
   'user-manual': 'Manual de Usuario',
-  commercial: 'CRM Comercial / Ventas',
-  reports: 'Centro de Reportes',
-  portal: 'Portal del Cliente',
-  'tech-pwa': 'App Técnicos (PWA)',
+  commercial: 'Prospectos',
+  reports: 'Reportes',
+  portal: 'Portal Cliente',
+  'tech-pwa': 'App Técnicos',
 };
 
 export const getModuleLabel = (tab: string): string => MODULE_LABELS[tab as AppTab] || tab;

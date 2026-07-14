@@ -5,15 +5,12 @@ import {
   Users,
   CreditCard,
   Network,
-  Terminal,
   Wrench,
   Box,
   Map,
   Cpu,
   Shield,
-  DollarSign,
   Ban,
-  FileCode,
   BookOpen,
   Wifi,
   X,
@@ -21,15 +18,14 @@ import {
   ChevronLeft,
   ChevronRight,
   Banknote,
-  Server,
   BookText,
-  GitCompare,
   ClipboardList,
   Brain,
   Bell,
   TrendingUp,
   Globe,
   Smartphone,
+  DollarSign,
 } from 'lucide-react';
 import { UserSessionProfile } from '../lib/supabase';
 import { isVisibleInSidebar } from '../lib/rbac';
@@ -71,23 +67,21 @@ export default function Sidebar({
   userProfile,
   onLogout
 }: SidebarProps) {
-  // Reorganización UX WISP (pre PROD-5): los módulos se agrupan por flujo
-  // operativo de un WISP en 6 secciones con nombres claros en español. No se
-  // crean ni eliminan módulos; solo cambian nombre/orden/grupo visual y se
-  // conservan los IDs existentes (no rompe activeTab ni RBAC).
+  // Reorganización UX WISP LATAM (Wispro / WispHub / BlackAngus): flujo operativo
+  // diario de un ISP — clientes → cobranza → red → routers MikroTik. No se crean
+  // ni eliminan módulos; solo cambian nombre/orden/grupo visual (IDs intactos).
   //
-  // Módulos NO listados aquí a propósito (siguen accesibles por RBAC y por
-  // tab/URL directo, pero no son módulos operativos normales del WISP):
-  //  - wireguard → infraestructura interna (peers automáticos en Alta de Router).
-  //  - manual-safe-mode / safe-command-queue → herramientas internas de seguridad.
-  // El filtro `isVisibleInSidebar` los oculta de forma centralizada (rbac.ts).
+  // Módulos NO listados aquí (accesibles por RBAC, tab directo o workspace in-page):
+  //  - wireguard, manual-safe-mode, safe-command-queue → infra / seguridad interna.
+  //  - mikrotik, routeros-resources, routeros-readonly, inventory-sync, provisioning
+  //    → herramientas avanzadas / lab / dry-run; el WISP opera con Alta + Routers +
+  //    Plantillas. El filtro `isVisibleInSidebar` los oculta (rbac.ts).
   //
-  // Los badges de estado de cada módulo (NEW, DRY RUN, SAFE MODE, READ ONLY LAB)
-  // se muestran DENTRO de su propio módulo, no aquí en el sidebar.
+  // Los badges de estado (NEW, DRY RUN, READ ONLY LAB) viven dentro de cada módulo.
   const menuSections: MenuSection[] = [
     {
       id: 'inicio',
-      title: 'Control',
+      title: 'Inicio',
       items: [
         { id: 'dashboard', name: 'Dashboard', icon: Activity },
         { id: 'reports', name: 'Reportes', icon: ClipboardList },
@@ -98,19 +92,38 @@ export default function Sidebar({
       title: 'Clientes',
       items: [
         { id: 'crm', name: 'Clientes', icon: Users },
-        { id: 'commercial', name: 'Ventas / Prospectos', icon: TrendingUp },
+        { id: 'commercial', name: 'Prospectos', icon: TrendingUp },
         { id: 'portal', name: 'Portal Cliente', icon: Globe },
         { id: 'support', name: 'Tickets', icon: Wrench },
         { id: 'tech-pwa', name: 'App Técnicos', icon: Smartphone },
       ],
     },
     {
-      id: 'cobranza',
-      title: 'Cobranza',
+      id: 'facturacion',
+      title: 'Facturación',
       items: [
-        { id: 'billing', name: 'Facturación / Planes', icon: CreditCard },
+        { id: 'billing', name: 'Planes y Facturación', icon: CreditCard },
         { id: 'payments', name: 'Pagos', icon: Banknote },
         { id: 'suspension', name: 'Suspensiones', icon: Ban },
+        { id: 'finance', name: 'Finanzas', icon: DollarSign },
+      ],
+    },
+    {
+      id: 'red',
+      title: 'Red',
+      items: [
+        { id: 'noc', name: 'NOC', icon: ShieldAlert },
+        { id: 'gis', name: 'Mapa de Red', icon: Map },
+        { id: 'network', name: 'Torres y Sitios', icon: Network },
+      ],
+    },
+    {
+      id: 'equipos-mikrotik',
+      title: 'MikroTik',
+      items: [
+        { id: 'router-enrollment', name: 'Alta de Router', icon: Wifi },
+        { id: 'inventory-routers', name: 'Routers', icon: Cpu },
+        { id: 'routeros-templates', name: 'Plantillas', icon: BookOpen },
       ],
     },
     {
@@ -121,50 +134,17 @@ export default function Sidebar({
       ],
     },
     {
-      id: 'red',
-      title: 'Red',
-      items: [
-        { id: 'noc', name: 'NOC', icon: ShieldAlert },
-        { id: 'gis', name: 'Mapa / Infraestructura', icon: Map },
-        { id: 'network', name: 'Torres y Sitios', icon: Network },
-      ],
-    },
-    {
-      id: 'mikrotik',
-      title: 'MikroTik',
-      items: [
-        { id: 'inventory-routers', name: 'Routers', icon: Cpu },
-        { id: 'mikrotik', name: 'Panel MikroTik', icon: Terminal },
-        { id: 'router-enrollment', name: 'Alta de Router', icon: Wifi },
-        { id: 'routeros-templates', name: 'Plantillas', icon: BookOpen },
-        { id: 'routeros-resources', name: 'Scripts', icon: FileCode },
-        { id: 'routeros-readonly', name: 'Laboratorio MikroTik', icon: Server },
-        { id: 'inventory-sync', name: 'Inventory Sync', icon: GitCompare },
-        { id: 'provisioning', name: 'Provisioning Center', icon: ClipboardList },
-      ],
-    },
-    {
-      id: 'reportes',
-      title: 'Finanzas',
-      items: [
-        { id: 'finance', name: 'Analytics', icon: DollarSign },
-      ],
-    },
-    {
       id: 'sistema',
       title: 'Sistema',
       items: [
         { id: 'owner', name: 'Configuración', icon: Shield },
-        { id: 'automation', name: 'Automation Center', icon: Brain },
-        { id: 'notifications', name: 'Notification Center', icon: Bell },
+        { id: 'automation', name: 'Automatización', icon: Brain },
+        { id: 'notifications', name: 'Notificaciones', icon: Bell },
         { id: 'user-manual', name: 'Manual de Usuario', icon: BookText },
       ],
     },
   ];
 
-  // Filtra por VISIBILIDAD en sidebar: requiere acceso RBAC real y que el módulo
-  // no esté oculto (wireguard / manual-safe-mode / safe-command-queue). Los
-  // módulos ocultos siguen siendo accesibles por tab/URL directo (ver rbac.ts).
   const isAuthorizedTab = (tabId: string): boolean => {
     if (!userProfile) return false;
     return isVisibleInSidebar(userProfile.role, tabId);
@@ -179,7 +159,6 @@ export default function Sidebar({
 
   return (
     <>
-      {/* Mobile backdrop overlay only when open */}
       {isOpen && (
         <div
           className="fixed inset-0 bg-slate-950/80 backdrop-blur-sm z-40 md:hidden"
@@ -195,7 +174,6 @@ export default function Sidebar({
       >
         <div className={`${collapsed ? 'p-3' : 'p-6'} flex-1 overflow-y-auto flex flex-col justify-between`}>
           <div>
-            {/* Brand header */}
             <div className={`relative flex items-center ${collapsed ? 'justify-center mb-6' : 'justify-between mb-8'}`}>
               <div className={`flex items-center ${collapsed ? '' : 'space-x-3'}`}>
                 <div className="w-10 h-10 rounded-xl bg-gradient-to-tr from-indigo-600 via-sky-500 to-emerald-500 flex items-center justify-center shadow-lg shadow-indigo-500/20">
@@ -225,7 +203,6 @@ export default function Sidebar({
                     </button>
                   )}
 
-                  {/* Mobile close button */}
                   {onClose && (
                     <button
                       onClick={onClose}
@@ -251,7 +228,6 @@ export default function Sidebar({
               )}
             </div>
 
-            {/* Navigation list */}
             <nav className={collapsed ? 'space-y-2' : 'space-y-4'}>
               {!collapsed && (
                 <p className="text-[10px] text-slate-500 uppercase tracking-widest font-semibold px-3 mb-2 font-mono">Módulos Habilitados</p>
@@ -266,9 +242,9 @@ export default function Sidebar({
                   {section.items.map((item) => {
                     const Icon = item.icon;
                     const isActive = activeTab === item.id;
-                    const hasNetworkAlerts = item.id === 'network' && activeAlertsCount > 0;
+                    const hasNocAlerts = item.id === 'noc' && activeAlertsCount > 0;
                     const hasOpenTickets = item.id === 'support' && activeTicketsCount > 0;
-                    const hasIndicators = hasNetworkAlerts || hasOpenTickets;
+                    const hasIndicators = hasNocAlerts || hasOpenTickets;
 
                     return (
                       <button
@@ -295,7 +271,7 @@ export default function Sidebar({
 
                         {!collapsed && hasIndicators && (
                           <div className="flex items-center space-x-1.5 shrink-0">
-                            {hasNetworkAlerts && (
+                            {hasNocAlerts && (
                               <span className="bg-rose-500/15 text-rose-400 border border-rose-500/30 text-[10px] px-1.5 py-0.5 rounded-full font-mono">
                                 {activeAlertsCount}
                               </span>
@@ -315,7 +291,6 @@ export default function Sidebar({
             </nav>
           </div>
 
-          {/* Operator Profile Summary Card inside sidebar boundary */}
           {userProfile && (
             <div className={`${collapsed ? 'mt-6 pt-4' : 'mt-8 pt-5'} border-t border-slate-900/90 space-y-3.5`}>
               <div className={`bg-slate-950/80 border border-slate-900 rounded-2xl ${collapsed ? 'p-2.5 flex justify-center' : 'p-3 flex items-center space-x-3'}`}>
@@ -338,7 +313,6 @@ export default function Sidebar({
                     </h4>
                     <p className="text-[10px] text-slate-500 truncate font-mono mt-0.5">{userProfile.email}</p>
 
-                    {/* Dynamic Role Badge */}
                     <span className={`inline-flex items-center px-1.5 py-0.5 rounded text-[9px] font-mono font-bold mt-1.5 ${
                       userProfile.role === 'Super Admin' ? 'bg-indigo-950 text-indigo-400 border border-indigo-900' :
                       userProfile.role === 'Administrador' ? 'bg-sky-950 text-sky-400 border border-sky-900' :
@@ -352,7 +326,6 @@ export default function Sidebar({
                 )}
               </div>
 
-              {/* Redesigned Logout button */}
               {onLogout && (
                 <button
                   type="button"
@@ -369,7 +342,6 @@ export default function Sidebar({
           )}
         </div>
 
-        {/* Footer Info */}
         <div className={`border-t border-slate-900 bg-slate-950/60 font-mono text-[11px] text-slate-500 shrink-0 ${collapsed ? 'p-2.5' : 'p-4 space-y-1'}`}>
           <div className={`flex items-center ${collapsed ? 'justify-center' : 'justify-between'}`}>
             <span className={`flex items-center ${collapsed ? '' : 'space-x-1.5'} text-emerald-400`}>

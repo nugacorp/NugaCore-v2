@@ -10,8 +10,8 @@ const manualSource = readFileSync('src/modules/user-manual/UserManualModule.tsx'
 describe('Automation Center UI', () => {
   it('esta en Sistema, debajo de Configuracion y encima del Manual', () => {
     expect(sidebarSource).toContain("id: 'automation'");
-    expect(sidebarSource.indexOf("name: 'Configuración'")).toBeLessThan(sidebarSource.indexOf("name: 'Automation Center'"));
-    expect(sidebarSource.indexOf("name: 'Automation Center'")).toBeLessThan(sidebarSource.indexOf("name: 'Manual de Usuario'"));
+    expect(sidebarSource.indexOf("name: 'Configuración'")).toBeLessThan(sidebarSource.indexOf("name: 'Automatización'"));
+    expect(sidebarSource.indexOf("name: 'Automatización'")).toBeLessThan(sidebarSource.indexOf("name: 'Manual de Usuario'"));
   });
 
   it('muestra badge gated y el banner obligatorio', () => {

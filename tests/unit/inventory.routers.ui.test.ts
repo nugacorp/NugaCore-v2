@@ -52,7 +52,7 @@ describe('RBAC — visibilidad del tab inventory-routers', () => {
 
   it('está declarado en el tipo AppTab y en las etiquetas', () => {
     expect(rbac).toContain("| 'inventory-routers'");
-    expect(rbac).toContain("'inventory-routers': 'Inventario Routers (RO)'");
+    expect(rbac).toContain("'inventory-routers': 'Routers'");
   });
 
   it('está en el menú lateral', () => {

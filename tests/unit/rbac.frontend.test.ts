@@ -175,13 +175,22 @@ describe('Manual de Usuario — visible para todos los roles', () => {
 });
 
 describe('Visibilidad en sidebar ≠ acceso (módulos internos ocultos)', () => {
-  const HIDDEN = ['wireguard', 'manual-safe-mode', 'safe-command-queue'] as const;
+  const HIDDEN = [
+    'wireguard',
+    'manual-safe-mode',
+    'safe-command-queue',
+    'mikrotik',
+    'routeros-resources',
+    'routeros-readonly',
+    'inventory-sync',
+    'provisioning',
+  ] as const;
 
-  it('isSidebarHiddenTab marca exactamente los 3 módulos internos', () => {
+  it('isSidebarHiddenTab marca exactamente los 8 módulos ocultos del menú WISP', () => {
     for (const id of HIDDEN) {
       expect(isSidebarHiddenTab(id), `${id} debería estar oculto`).toBe(true);
     }
-    for (const id of ['dashboard', 'crm', 'mikrotik', 'inventory-routers', 'user-manual']) {
+    for (const id of ['dashboard', 'crm', 'inventory-routers', 'router-enrollment', 'user-manual']) {
       expect(isSidebarHiddenTab(id), `${id} NO debería estar oculto`).toBe(false);
     }
   });

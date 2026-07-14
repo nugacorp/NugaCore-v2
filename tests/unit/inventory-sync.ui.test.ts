@@ -49,21 +49,17 @@ describe('InventorySyncModule — integración', () => {
     expect(appSource).toContain('<InventorySyncModule');
   });
 
-  it('aparece en el sidebar (grupo MikroTik)', () => {
-    expect(sidebarSource).toContain("id: 'inventory-sync'");
-    expect(sidebarSource).toContain('Inventory Sync');
-  });
-
-  it('tiene etiqueta legible en rbac (MODULE_LABELS)', () => {
-    expect(getModuleLabel('inventory-sync')).toBe('Inventory Sync (RO)');
+  it('aparece oculto del sidebar pero accesible por RBAC (grupo MikroTik avanzado)', () => {
+    expect(sidebarSource).not.toContain("id: 'inventory-sync'");
+    expect(getModuleLabel('inventory-sync')).toBe('Sincronización Inventario');
   });
 });
 
 describe('InventorySyncModule — RBAC visual', () => {
-  it('visible para los 5 roles de operación', () => {
+  it('visible para los 5 roles de operación vía RBAC (oculto del sidebar)', () => {
     for (const role of READ_ROLES) {
       expect(canAccessTab(role, 'inventory-sync'), `${role} acceso`).toBe(true);
-      expect(isVisibleInSidebar(role, 'inventory-sync'), `${role} sidebar`).toBe(true);
+      expect(isVisibleInSidebar(role, 'inventory-sync'), `${role} sidebar`).toBe(false);
     }
   });
 

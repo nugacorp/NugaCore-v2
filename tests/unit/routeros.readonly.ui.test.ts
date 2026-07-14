@@ -37,13 +37,10 @@ describe('RouterOS Read-Only Lab UI contract', () => {
 });
 
 describe('RouterOS Read-Only Lab navigation integration', () => {
-  it('Sidebar incluye el item routeros-readonly', () => {
-    expect(sidebarSource).toContain("id: 'routeros-readonly'");
-    // Etiqueta visible en el sidebar (renombrada de "RouterOS Lab").
-    expect(sidebarSource).toContain('Laboratorio MikroTik');
-    // El badge interno "READ ONLY LAB" se documenta en el comentario del sidebar
-    // y vive dentro del módulo, no como item del menú.
-    expect(sidebarSource).toContain('READ ONLY LAB');
+  it('está oculto del sidebar pero accesible por RBAC (lab avanzado)', () => {
+    expect(sidebarSource).not.toContain("id: 'routeros-readonly'");
+    expect(rbacSource).toContain("'routeros-readonly'");
+    expect(rbacSource).toContain("'routeros-readonly',");
   });
 
   it('App importa y renderiza el módulo cuando el tab está activo', () => {

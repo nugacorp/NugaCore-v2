@@ -7,9 +7,9 @@ const appSource = readFileSync('src/App.tsx', 'utf8');
 const rbacSource = readFileSync('src/lib/rbac.ts', 'utf8');
 
 describe('Provisioning Center UI', () => {
-  it('esta ubicado en MikroTik debajo de Inventory Sync', () => {
-    expect(sidebarSource.indexOf("name: 'Inventory Sync'")).toBeLessThan(sidebarSource.indexOf("name: 'Provisioning Center'"));
-    expect(sidebarSource).toContain("id: 'provisioning'");
+  it('está oculto del sidebar (dry-run avanzado) pero declarado en RBAC', () => {
+    expect(sidebarSource).not.toContain("id: 'provisioning'");
+    expect(rbacSource).toContain("'provisioning'");
   });
 
   it('muestra badge gated y banner dry-run', () => {

@@ -8,9 +8,9 @@ const rbacSource = readFileSync('src/lib/rbac.ts', 'utf8');
 const manualSource = readFileSync('src/modules/user-manual/UserManualModule.tsx', 'utf8');
 
 describe('Notification Center UI', () => {
-  it('está en Sistema, debajo de Automation Center', () => {
+  it('está en Sistema, debajo de Automatización', () => {
     expect(sidebarSource).toContain("id: 'notifications'");
-    expect(sidebarSource.indexOf("name: 'Automation Center'")).toBeLessThan(sidebarSource.indexOf("name: 'Notification Center'"));
+    expect(sidebarSource.indexOf("name: 'Automatización'")).toBeLessThan(sidebarSource.indexOf("name: 'Notificaciones'"));
   });
 
   it('muestra badge gated y el banner obligatorio', () => {

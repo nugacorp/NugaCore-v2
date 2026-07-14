@@ -2,58 +2,41 @@ import { readFileSync } from 'node:fs';
 import { describe, expect, it } from 'vitest';
 
 // ====================================================================
-// UX Reorganization WISP (pre PROD-5) — contrato de navegación del sidebar.
+// UX Reorganization WISP LATAM — contrato de navegación del sidebar.
 //
-// Verifica que:
-//  - El sidebar se agrupa en las 6 secciones WISP finales, en orden.
-//  - Cada módulo VISIBLE queda en su sección correcta.
-//  - Routers (`inventory-routers`) vive dentro del grupo MikroTik.
-//  - Manual de Usuario (`user-manual`) vive en Sistema.
-//  - Los módulos internos (wireguard / manual-safe-mode / safe-command-queue)
-//    NO se renderizan en el sidebar, pero SÍ existen en el RBAC (siguen
-//    accesibles por tab/URL directo).
-//  - El sidebar ya no RENDERIZA badges de estado (sin campo `badge`,
-//    sin `getBadgeClasses`) ni usa anidamiento `parentId`.
-//  - WireGuard y Suspension quedan desacoplados del MikroTik Workspace
-//    in-page de App.tsx.
+// Inspirado en Wispro / WispHub / BlackAngus: flujo clientes → facturación
+// → red → routers MikroTik. Módulos avanzados (lab, sync, provisioning,
+// panel core, scripts) ocultos del menú pero accesibles por RBAC/tab directo.
 // ====================================================================
 
 const sidebarSource = readFileSync('src/components/Sidebar.tsx', 'utf8');
 const appSource = readFileSync('src/App.tsx', 'utf8');
 const rbacSource = readFileSync('src/lib/rbac.ts', 'utf8');
 
-// Estructura WISP OS: 8 secciones con módulos VISIBLES (ids existentes).
 const EXPECTED_SECTIONS: Array<{ title: string; ids: string[] }> = [
-  { title: 'Control', ids: ['dashboard', 'reports'] },
+  { title: 'Inicio', ids: ['dashboard', 'reports'] },
   { title: 'Clientes', ids: ['crm', 'commercial', 'portal', 'support', 'tech-pwa'] },
-  { title: 'Cobranza', ids: ['billing', 'payments', 'suspension'] },
-  { title: 'Operaciones', ids: ['inventory'] },
+  { title: 'Facturación', ids: ['billing', 'payments', 'suspension', 'finance'] },
   { title: 'Red', ids: ['noc', 'gis', 'network'] },
-  {
-    title: 'MikroTik',
-    ids: [
-      'inventory-routers',
-      'mikrotik',
-      'router-enrollment',
-      'routeros-templates',
-      'routeros-resources',
-      'routeros-readonly',
-      'inventory-sync',
-      'provisioning',
-    ],
-  },
-  { title: 'Finanzas', ids: ['finance'] },
+  { title: 'MikroTik', ids: ['router-enrollment', 'inventory-routers', 'routeros-templates'] },
+  { title: 'Operaciones', ids: ['inventory'] },
   { title: 'Sistema', ids: ['owner', 'automation', 'notifications', 'user-manual'] },
 ];
 
-// Módulos que existen y son accesibles, pero NO se listan en el sidebar.
-const HIDDEN_TAB_IDS = ['wireguard', 'manual-safe-mode', 'safe-command-queue'];
+const HIDDEN_TAB_IDS = [
+  'wireguard',
+  'manual-safe-mode',
+  'safe-command-queue',
+  'mikrotik',
+  'routeros-resources',
+  'routeros-readonly',
+  'inventory-sync',
+  'provisioning',
+];
 
 const VISIBLE_TAB_IDS = EXPECTED_SECTIONS.flatMap((s) => s.ids);
 const ALL_TAB_IDS = [...VISIBLE_TAB_IDS, ...HIDDEN_TAB_IDS];
 
-// Bloque de fuente de una sección: desde su `title: '...'` hasta el inicio del
-// siguiente `title: '...'` (o el final del archivo).
 function sectionBlock(title: string): string {
   const marker = `title: '${title}'`;
   const start = sidebarSource.indexOf(marker);
@@ -63,8 +46,8 @@ function sectionBlock(title: string): string {
   return next === -1 ? rest : rest.slice(0, next);
 }
 
-describe('Sidebar — secciones reorganizadas (WISP)', () => {
-  it('define las 8 secciones WISP OS en orden', () => {
+describe('Sidebar — secciones reorganizadas (WISP LATAM)', () => {
+  it('define las 7 secciones WISP en orden', () => {
     let cursor = -1;
     for (const { title } of EXPECTED_SECTIONS) {
       const idx = sidebarSource.indexOf(`title: '${title}'`);
@@ -74,7 +57,10 @@ describe('Sidebar — secciones reorganizadas (WISP)', () => {
     }
   });
 
-  it('ya NO usa los títulos de sección de reorganizaciones previas', () => {
+  it('ya NO usa los títulos de reorganizaciones previas', () => {
+    expect(sidebarSource).not.toContain("title: 'Control'");
+    expect(sidebarSource).not.toContain("title: 'Cobranza'");
+    expect(sidebarSource).not.toContain("title: 'Finanzas'");
     expect(sidebarSource).not.toContain("title: 'Red WISP'");
     expect(sidebarSource).not.toContain("title: 'Operaciones Seguras'");
     expect(sidebarSource).not.toContain("title: 'MikroTik Workspace'");
@@ -94,10 +80,15 @@ describe('Sidebar — secciones reorganizadas (WISP)', () => {
     });
   }
 
-  it('Routers (inventory-routers) vive en el grupo MikroTik', () => {
-    expect(sectionBlock('MikroTik')).toContain("id: 'inventory-routers'");
-    // y ya NO en Red
-    expect(sectionBlock('Red')).not.toContain("id: 'inventory-routers'");
+  it('MikroTik prioriza Alta de Router (flujo WISP)', () => {
+    const block = sectionBlock('MikroTik');
+    expect(block.indexOf("id: 'router-enrollment'")).toBeLessThan(block.indexOf("id: 'inventory-routers'"));
+    expect(block.indexOf("id: 'inventory-routers'")).toBeLessThan(block.indexOf("id: 'routeros-templates'"));
+  });
+
+  it('Finanzas vive en Facturación (no sección aparte)', () => {
+    expect(sectionBlock('Facturación')).toContain("id: 'finance'");
+    expect(sidebarSource).not.toContain("title: 'Finanzas'");
   });
 
   it('Manual de Usuario (user-manual) vive en Sistema', () => {
@@ -105,10 +96,18 @@ describe('Sidebar — secciones reorganizadas (WISP)', () => {
     expect(block).toContain("id: 'user-manual'");
     expect(block).toContain('Manual de Usuario');
   });
+
+  it('usa etiquetas en español en Sistema (no inglés)', () => {
+    const block = sectionBlock('Sistema');
+    expect(block).toContain("name: 'Automatización'");
+    expect(block).toContain("name: 'Notificaciones'");
+    expect(block).not.toContain('Automation Center');
+    expect(block).not.toContain('Notification Center');
+  });
 });
 
-describe('Sidebar — módulos internos ocultos pero conservados', () => {
-  it('NO renderiza wireguard / manual-safe-mode / safe-command-queue como items', () => {
+describe('Sidebar — módulos avanzados ocultos pero conservados', () => {
+  it('NO renderiza módulos internos/avanzados como items', () => {
     for (const id of HIDDEN_TAB_IDS) {
       expect(sidebarSource, `${id} no debería aparecer como item del sidebar`).not.toContain(
         `id: '${id}'`,
@@ -124,7 +123,6 @@ describe('Sidebar — módulos internos ocultos pero conservados', () => {
     for (const id of HIDDEN_TAB_IDS) {
       expect(rbacSource, `${id} debería seguir en el union AppTab`).toContain(`'${id}'`);
     }
-    // rbac.ts define el set de ocultos y el helper de visibilidad.
     expect(rbacSource).toContain('SIDEBAR_HIDDEN_TABS');
     expect(rbacSource).toContain('export function isVisibleInSidebar');
   });
@@ -132,7 +130,7 @@ describe('Sidebar — módulos internos ocultos pero conservados', () => {
 
 describe('Sidebar — no se elimina ningún módulo', () => {
   it('los módulos visibles están presentes en el sidebar', () => {
-    expect(VISIBLE_TAB_IDS.length).toBe(27);
+    expect(VISIBLE_TAB_IDS.length).toBe(22);
     for (const id of VISIBLE_TAB_IDS) {
       expect(sidebarSource, `falta el módulo visible ${id}`).toContain(`id: '${id}'`);
     }
@@ -148,7 +146,6 @@ describe('Sidebar — no se elimina ningún módulo', () => {
 
 describe('Sidebar — sin badges renderizados ni anidamiento', () => {
   it('no renderiza badges de estado en el sidebar (sin campo badge ni helper)', () => {
-    // Los badges viven dentro de cada módulo; el sidebar no los pinta.
     expect(sidebarSource).not.toContain('item.badge');
     expect(sidebarSource).not.toContain('getBadgeClasses');
     expect(sidebarSource).not.toContain('badgeTone');
@@ -158,9 +155,15 @@ describe('Sidebar — sin badges renderizados ni anidamiento', () => {
     expect(sidebarSource).not.toContain('parentId');
   });
 
-  it('conserva los indicadores dinámicos (alertas de red y tickets abiertos)', () => {
-    expect(sidebarSource).toContain('activeAlertsCount');
+  it('muestra alertas NOC en el item NOC (no en Torres)', () => {
+    expect(sidebarSource).toContain('hasNocAlerts');
+    expect(sidebarSource).toContain("item.id === 'noc'");
+    expect(sidebarSource).not.toContain("item.id === 'network' && activeAlertsCount");
+  });
+
+  it('conserva el indicador de tickets abiertos en Soporte', () => {
     expect(sidebarSource).toContain('activeTicketsCount');
+    expect(sidebarSource).toContain("item.id === 'support'");
   });
 });
 
