@@ -104,6 +104,7 @@ export default function InventoryRoutersModule({
   const [enrollmentByRouter, setEnrollmentByRouter] = useState<Record<string, EnrollmentListItem>>({});
   const [loading, setLoading] = useState(true);
   const [actionId, setActionId] = useState<string>('');
+  const [actionLabel, setActionLabel] = useState<string>('');
   const [error, setError] = useState<string>('');
   const [info, setInfo] = useState<string>('');
 
@@ -111,9 +112,13 @@ export default function InventoryRoutersModule({
   const canDelete = canRevokeEnrollment(userRole);
   const showEnrollment = panel === 'enrollment' && canEnroll;
 
-  const load = useCallback(async () => {
-    setLoading(true);
-    setError('');
+  /** Recarga inventario. Por defecto NO borra mensajes de Verificar/Reparar. */
+  const load = useCallback(async (opts?: { clearMessages?: boolean; quiet?: boolean }) => {
+    if (!opts?.quiet) setLoading(true);
+    if (opts?.clearMessages) {
+      setError('');
+      setInfo('');
+    }
     try {
       const api = createAuthorizedApi(getAuthHeaders);
       const [summaryData, routersData] = await Promise.all([
@@ -144,7 +149,7 @@ export default function InventoryRoutersModule({
     } catch (err) {
       setError(err instanceof Error ? err.message : 'Error desconocido al cargar el inventario.');
     } finally {
-      setLoading(false);
+      if (!opts?.quiet) setLoading(false);
     }
   }, [getAuthHeaders, canEnroll, canDelete]);
 
@@ -156,10 +161,12 @@ export default function InventoryRoutersModule({
   const handleCheckOnline = async (router: InventoryRouterView) => {
     const enrollment = enrollmentByRouter[router.id];
     if (!enrollment || enrollment.status === 'revoked') {
+      setInfo('');
       setError('No hay alta vinculada a este router. Usa Dar de alta o descarga el .rsc desde el asistente.');
       return;
     }
     setActionId(router.id);
+    setActionLabel(`Verificando ${router.name} vía API (puerto ${router.apiPort})…`);
     setError('');
     setInfo('');
     try {
@@ -170,27 +177,43 @@ export default function InventoryRoutersModule({
         snapshotSource?: string | null;
         apiTcpReachable?: boolean | null;
         repairHint?: string | null;
+        liveError?: string | null;
       }>(`/api/router-enrollment/${enrollment.id}/check-online`);
+      // Refrescar tabla SIN borrar el mensaje (bug: load() limpiaba setError).
+      await load({ quiet: true });
       if (data.isOnline) {
+        setError('');
         setInfo(data.message || `Router ${router.name} online (${data.snapshotSource ?? 'live'}).`);
       } else {
-        setError(data.message || data.repairHint || `Router ${router.name} aún no responde vía API.`);
+        const detail = [
+          data.message,
+          data.apiTcpReachable === true ? 'VPN/TCP API: reachable' : data.apiTcpReachable === false ? 'VPN/TCP API: no responde' : null,
+          data.liveError ? `Detalle: ${data.liveError}` : null,
+          data.repairHint,
+        ]
+          .filter(Boolean)
+          .join(' — ');
+        setInfo('');
+        setError(detail || `Router ${router.name} aún no responde vía API.`);
       }
-      await load();
     } catch (err) {
+      setInfo('');
       setError(err instanceof Error ? err.message : 'No se pudo verificar online.');
     } finally {
       setActionId('');
+      setActionLabel('');
     }
   };
 
   const handleRepairApi = async (router: InventoryRouterView) => {
     const enrollment = enrollmentByRouter[router.id];
     if (!enrollment || enrollment.status === 'revoked') {
+      setInfo('');
       setError('No hay alta vinculada a este router.');
       return;
     }
     setActionId(router.id);
+    setActionLabel(`Generando nc-api.rsc para ${router.name}…`);
     setError('');
     setInfo('');
     try {
@@ -203,13 +226,16 @@ export default function InventoryRoutersModule({
       a.download = 'nc-api.rsc';
       a.click();
       URL.revokeObjectURL(url);
+      setError('');
       setInfo(
-        `Descargado nc-api.rsc para ${router.name}. En el MikroTik: /import file-name=nc-api.rsc — luego pulsa Verificar. (No toca WireGuard.)`,
+        `Descargado nc-api.rsc para ${router.name}. En el MikroTik sube el archivo y ejecuta: /import file-name=nc-api.rsc — luego pulsa Verificar. (No toca WireGuard.)`,
       );
     } catch (err) {
+      setInfo('');
       setError(err instanceof Error ? err.message : 'No se pudo descargar el script de reparación API.');
     } finally {
       setActionId('');
+      setActionLabel('');
     }
   };
 
@@ -222,17 +248,19 @@ export default function InventoryRoutersModule({
     );
     if (!ok) return;
     setActionId(router.id);
+    setActionLabel(`Eliminando ${router.name}…`);
     setError('');
     setInfo('');
     try {
       const api = createAuthorizedApi(getAuthHeaders);
       await api.delete(`/api/mikrotik/routers/${router.id}`);
+      await load({ quiet: true });
       setInfo(`Router «${router.name}» eliminado.`);
-      await load();
     } catch (err) {
       setError(err instanceof Error ? err.message : 'No se pudo eliminar el router.');
     } finally {
       setActionId('');
+      setActionLabel('');
     }
   };
 
@@ -281,8 +309,8 @@ export default function InventoryRoutersModule({
           </span>
           <button
             type="button"
-            onClick={() => void load()}
-            disabled={loading}
+            onClick={() => void load({ clearMessages: true })}
+            disabled={loading || !!actionId}
             className="inline-flex items-center space-x-2 px-3 py-2 rounded-lg bg-slate-900 border border-slate-800 text-sm text-slate-300 hover:bg-slate-850 disabled:opacity-50"
           >
             <RefreshCw className={`w-4 h-4 ${loading ? 'animate-spin' : ''}`} />
@@ -302,16 +330,31 @@ export default function InventoryRoutersModule({
         </div>
       </div>
 
+      {actionLabel && (
+        <div
+          id="routers-action-status"
+          className="flex items-center space-x-2 p-3 rounded-lg bg-sky-950/40 border border-sky-800 text-sky-200 text-sm"
+        >
+          <RefreshCw className="w-4 h-4 shrink-0 animate-spin" />
+          <span>{actionLabel}</span>
+        </div>
+      )}
       {error && (
-        <div className="flex items-center space-x-2 p-3 rounded-lg bg-rose-950/40 border border-rose-900 text-rose-300 text-sm">
-          <AlertTriangle className="w-4 h-4 shrink-0" />
-          <span>{error}</span>
+        <div
+          id="routers-action-error"
+          className="flex items-start space-x-2 p-3 rounded-lg bg-rose-950/40 border border-rose-900 text-rose-300 text-sm"
+        >
+          <AlertTriangle className="w-4 h-4 shrink-0 mt-0.5" />
+          <span className="whitespace-pre-wrap break-words">{error}</span>
         </div>
       )}
       {info && (
-        <div className="flex items-center space-x-2 p-3 rounded-lg bg-emerald-950/30 border border-emerald-900/50 text-emerald-300 text-sm">
-          <CheckCircle className="w-4 h-4 shrink-0" />
-          <span>{info}</span>
+        <div
+          id="routers-action-info"
+          className="flex items-start space-x-2 p-3 rounded-lg bg-emerald-950/30 border border-emerald-900/50 text-emerald-300 text-sm"
+        >
+          <CheckCircle className="w-4 h-4 shrink-0 mt-0.5" />
+          <span className="whitespace-pre-wrap break-words">{info}</span>
         </div>
       )}
 

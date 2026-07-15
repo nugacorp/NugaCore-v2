@@ -35,6 +35,13 @@ describe('InventoryRoutersModule — inventario + acciones', () => {
     expect(module).toContain('canRevokeEnrollment');
   });
 
+  it('Conserva el mensaje de Verificar tras recargar (no lo borra load)', () => {
+    expect(module).toContain('clearMessages');
+    expect(module).toContain('quiet: true');
+    expect(module).toContain('routers-action-error');
+    expect(module).toContain('Verificando');
+  });
+
   it('renderiza las columnas principales del router', () => {
     for (const col of [
       'Nombre',
