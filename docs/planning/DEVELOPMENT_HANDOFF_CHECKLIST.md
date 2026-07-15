@@ -9,11 +9,25 @@
 > Esta sección es la fuente de verdad para un agente que arranca en frío.
 > Si está vacía o desactualizada, reconstruirla desde `ROADMAP.md`,
 > `docs/PRODUCTION_READINESS_CHECKLIST.md` y los documentos de resultado en `docs/`.
+>
+> **Handoff frío julio 2026:** leer primero
+> [`docs/reports/SPRINT_HANDOFF_2026-07-15.md`](../reports/SPRINT_HANDOFF_2026-07-15.md)
+> (RSC CHR-safe, UX Routers, inventario↔enrollment, WG host-apply automático).
+> HEAD de referencia: `c914439` en `main`.
 
 ### A. Fases cerradas / no retomar salvo regresión
 
 Estas fases están implementadas y mergeadas en `main`. **No retomarlas salvo que exista una regresión nueva documentada.**
 
+- **Sprint Router/WG julio 2026** (ver handoff arriba):
+  - Endurecimiento `/import` `.rsc` (`nc-wg.rsc`, private-key top-level, sin placeholders
+    WG inválidos, bridge LAN sin ports automáticos, `/ip service` ROS 7.19+).
+  - Alta de router **dentro** de MikroTik → Routers (botón Dar de alta).
+  - Sync enrollment ↔ inventario (`mikrotik_routers`) al revocar/eliminar.
+  - **WireGuard host-apply automático** a `wg0` (sin sync manual por alta).
+  - SPA: 404 real para assets `.js` faltantes (MIME).
+  - Evidencia: `docs/results/WG_HOST_APPLY_STAGING_RESULT.md`,
+    `docs/results/ROUTERS_MODULE_UX_STAGING_RESULT.md`.
 - WireGuard Auto Enrollment.
 - Router Onboarding Wizard.
 - Advanced Template Engine.
@@ -106,11 +120,16 @@ manda sobre la memoria, el roadmap y este checklist.
 
 ### C. Prioridad inmediata (absoluta)
 
+> **Actualización 2026-07-15:** la pista operativa WISP (alta router + VPN) quedó
+> usable en staging con host-apply automático. **No reintroducir sync manual de
+> peers** salvo recuperación de emergencia. **No activar `MIKROTIK_WORKER_LIVE`**
+> sin autorización explícita.
+>
 > **Reconciliación 2026-06-25 (post-PROD-9):** la pista de *foundations dry-run*
 > avanzó hasta PROD-9. Estado de validación Hermes: PROD-7 ✅, ARCH-1 ✅, PROD-9 ✅;
 > **PROD-8 Automation queda pendiente de Hermes** (sin `STAGING_RESULT`). Siguiente
 > fase recomendada en esa pista = **PROD-10 Worker Engine Dry-Run** (propuesta
-> gated; NO implementar sin autorización explícita de Ramiro; no activar
+> gated; NO implementar sin autorización explícita; no activar
 > `MIKROTIK_WORKER_LIVE`, sin RouterOS Write). La prioridad de la **pista RouterOS**
 > sigue siendo PROD-4 (abajo), también gated. Ninguna se inicia sin aprobación.
 

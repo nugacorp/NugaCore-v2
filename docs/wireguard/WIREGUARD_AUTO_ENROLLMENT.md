@@ -3,6 +3,16 @@
 **Módulo:** Enrollment WireGuard Auto  
 **Roles:** Super Admin, Administrador (inicio + revocación), Técnico (inicio + descarga)
 
+**UI (julio 2026):** MikroTik → **Routers** → botón **Dar de alta** (no hay ítem
+separado “Alta de Router” en el sidebar). Ver
+[`docs/frontend/ROUTERS_MODULE_UX.md`](../frontend/ROUTERS_MODULE_UX.md).
+
+**Host WG:** al crear el peer, NugaCore aplica automáticamente en `wg0` del VPS.
+Ver [`WIREGUARD_HOST_APPLY.md`](./WIREGUARD_HOST_APPLY.md).
+
+**Handoff completo del sprint:**
+[`docs/reports/SPRINT_HANDOFF_2026-07-15.md`](../reports/SPRINT_HANDOFF_2026-07-15.md).
+
 ---
 
 ## ¿Qué hace este módulo?

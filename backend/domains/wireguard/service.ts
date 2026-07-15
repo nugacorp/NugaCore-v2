@@ -1,9 +1,12 @@
 // ====================================================================
-// WireGuard Manager Service (Fase 4.6.1).
+// WireGuard Manager Service (Fase 4.6.1 + host-apply 2026-07).
 //
 // Orquesta generación de claves + IPAM + cifrado + repositorio. Expone vistas
 // SANEADAS (sin secretos) y devuelve secretos (private/preshared key) UNA sola
 // vez al crear/rotar. No ejecuta nada en routers.
+//
+// Tras create/rotate/revoke: sincroniza peers activos al host wg0 vía
+// host-apply (ver host-apply.ts y docs/wireguard/WIREGUARD_HOST_APPLY.md).
 // ====================================================================
 
 import { encryptSecret, decryptSecret } from '../../services/crypto';
