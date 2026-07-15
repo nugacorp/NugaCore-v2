@@ -29,7 +29,6 @@ const SuspensionModule = lazyWithRetry(() => import('./components/SuspensionModu
 const WireguardManagerModule = lazyWithRetry(() => import('./components/WireguardManagerModule'));
 const RouterOsResourcesModule = lazyWithRetry(() => import('./components/RouterOsResourcesModule'));
 const RouterOsTemplatesModule = lazyWithRetry(() => import('./components/RouterOsTemplatesModule'));
-const RouterEnrollmentWizard = lazyWithRetry(() => import('./components/RouterEnrollmentWizard'));
 const PaymentsModule = lazyWithRetry(() => import('./components/PaymentsModule'));
 const CommercialModule = lazyWithRetry(() => import('./components/CommercialModule'));
 const ReportsModule = lazyWithRetry(() => import('./components/ReportsModule'));
@@ -135,6 +134,21 @@ export default function App() {
     const cached = authSession.readProfile();
     return cached ? resolveEntryTab(cached.role, getAppScope()) : 'dashboard';
   });
+
+  // Alta embebida en Routers (el tab router-enrollment se redirige aquí).
+  const [routersOpenEnrollment, setRoutersOpenEnrollment] = useState(false);
+
+  const navigateToTab = useCallback((tab: string) => {
+    if (tab === 'router-enrollment') {
+      setRoutersOpenEnrollment(true);
+      setActiveTab('inventory-routers');
+      return;
+    }
+    if (tab === 'inventory-routers') {
+      setRoutersOpenEnrollment(false);
+    }
+    setActiveTab(tab);
+  }, []);
 
   const [mobileMenuOpen, setMobileMenuOpen] = useState<boolean>(false);
   const [sidebarCollapsed, setSidebarCollapsed] = useState<boolean>(() => {
@@ -472,7 +486,7 @@ export default function App() {
           setSuspensionPolicy(null);
         }
       }
-      if (activeTab === 'wireguard' || activeTab === 'router-enrollment') {
+      if (activeTab === 'wireguard' || routersOpenEnrollment) {
         attemptedFetch = true;
         try {
           const [servers, peers] = await Promise.all([
@@ -500,6 +514,7 @@ export default function App() {
     sessionBootstrapped,
     userSession,
     activeTab,
+    routersOpenEnrollment,
     fetchJson,
     setRateLimitMessage,
     rateLimitUntilMs,
@@ -929,7 +944,9 @@ export default function App() {
   // Find system critical unacknowledged alerts to show in high-prominence top ticker
   const activeUnackCriticalAlert = alerts.find(a => !a.acknowledged && a.severity === 'critical');
   const activeTicketsCount = tickets.filter(t => t.status === 'open' || t.status === 'assigned').length;
-  const isMikrotikFunctionTab = isMikrotikWorkspaceTab(activeTab);
+  // Routers (inventario + alta embebida) también muestra la franja del workspace.
+  const isMikrotikFunctionTab =
+    isMikrotikWorkspaceTab(activeTab) || activeTab === 'inventory-routers';
   const mikrotikWorkspaceTabsForRole = userSession
     ? MIKROTIK_WORKSPACE_TABS.filter(tab => canAccessTab(userSession.role, tab.id))
     : [];
@@ -966,7 +983,7 @@ export default function App() {
       {/* Sidebar Controller */}
       <Sidebar 
         activeTab={activeTab} 
-        setActiveTab={setActiveTab} 
+        setActiveTab={navigateToTab} 
         activeAlertsCount={alerts.filter(a => !a.acknowledged).length}
         activeTicketsCount={activeTicketsCount}
         collapsed={sidebarCollapsed}
@@ -1095,12 +1112,16 @@ export default function App() {
                   </div>
                   <div className="flex flex-wrap gap-1.5">
                     {mikrotikWorkspaceTabsForRole.map(tab => {
-                      const isActiveWorkspaceTab = activeTab === tab.id;
+                      const isActiveWorkspaceTab =
+                        activeTab === tab.id ||
+                        (tab.id === 'router-enrollment' &&
+                          activeTab === 'inventory-routers' &&
+                          routersOpenEnrollment);
                       return (
                         <button
                           key={tab.id}
                           type="button"
-                          onClick={() => setActiveTab(tab.id)}
+                          onClick={() => navigateToTab(tab.id)}
                           className={`px-2.5 py-1.5 rounded-lg text-[11px] font-mono border transition ${
                             isActiveWorkspaceTab
                               ? 'bg-indigo-600/20 border-indigo-500/40 text-indigo-200'
@@ -1124,7 +1145,7 @@ export default function App() {
                 alerts={alerts}
                 onRefresh={handleRefresh}
                 getAuthHeaders={getAuthHeaders}
-                onNavigate={setActiveTab}
+                onNavigate={navigateToTab}
               />
             )}
 
@@ -1187,7 +1208,7 @@ export default function App() {
                 canCreateClient={['Super Admin', 'Administrador', 'Técnico', 'Soporte'].includes(userSession.role)}
                 canManageClientLifecycle={['Super Admin', 'Administrador', 'Cobranza'].includes(userSession.role)}
                 userRole={userSession.role}
-                onNavigate={setActiveTab}
+                onNavigate={navigateToTab}
               />
             )}
 
@@ -1253,13 +1274,6 @@ export default function App() {
               />
             )}
 
-            {activeTab === 'router-enrollment' && (
-              <RouterEnrollmentWizard
-                userRole={userSession.role}
-                getAuthHeaders={getAuthHeaders}
-              />
-            )}
-
             {activeTab === 'support' && (
               <SupportModule
                 tickets={tickets}
@@ -1312,8 +1326,20 @@ export default function App() {
               </div>
             )}
 
-            {activeTab === 'inventory-routers' && (
-              <InventoryRoutersModule getAuthHeaders={getAuthHeaders} />
+            {(activeTab === 'inventory-routers' || activeTab === 'router-enrollment') && (
+              <InventoryRoutersModule
+                userRole={userSession.role}
+                getAuthHeaders={getAuthHeaders}
+                panel={
+                  activeTab === 'router-enrollment' || routersOpenEnrollment
+                    ? 'enrollment'
+                    : 'inventory'
+                }
+                onPanelChange={(panel) => {
+                  setRoutersOpenEnrollment(panel === 'enrollment');
+                  setActiveTab('inventory-routers');
+                }}
+              />
             )}
 
             {activeTab === 'gis' && (
