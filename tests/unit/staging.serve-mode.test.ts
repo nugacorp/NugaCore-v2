@@ -38,4 +38,10 @@ describe('serve mode (staging UI host block)', () => {
     // El import de vite es perezoso (no eager en el bundle de producción).
     expect(serverTs).toContain("await import('vite')");
   });
+
+  it('SPA fallback NO sirve index.html para assets .js/.css faltantes (MIME fix)', () => {
+    expect(serverTs).toContain('looksLikeStaticFile');
+    expect(serverTs).toContain("status(404)");
+    expect(serverTs).toMatch(/Not found/);
+  });
 });

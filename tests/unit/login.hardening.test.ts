@@ -102,4 +102,9 @@ describe('Hardening — cache busting', () => {
     expect(serverTs).toContain('immutable');
     expect(serverTs).toContain('31536000');
   });
+
+  it('chunks faltantes responden 404 y no HTML (evita MIME module error)', () => {
+    expect(serverTs).toContain('looksLikeStaticFile');
+    expect(serverTs).toMatch(/status\(404\)/);
+  });
 });

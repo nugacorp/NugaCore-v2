@@ -78,9 +78,25 @@ async function startServer() {
       }),
     );
 
-    // SPA fallback: el HTML del shell nunca se cachea de forma agresiva.
-    app.get('*', (_req, res) => {
+    // SPA fallback solo para rutas de navegación (sin extensión de archivo).
+    // Si un chunk .js/.css viejo ya no existe tras un deploy, devolver 404
+    // (NO index.html): si no, el navegador recibe text/html y falla con
+    // "Expected a JavaScript module script but the server responded with
+    // MIME type text/html".
+    app.get('*', (req, res) => {
+      const pathname = (req.path || '').split('?')[0] || '';
+      const looksLikeStaticFile =
+        /\.[a-zA-Z0-9]+$/.test(pathname) && !pathname.toLowerCase().endsWith('.html');
+      if (looksLikeStaticFile) {
+        res
+          .status(404)
+          .setHeader('Cache-Control', 'no-store')
+          .type('text/plain')
+          .send('Not found');
+        return;
+      }
       res.setHeader('Cache-Control', 'no-cache, no-store, must-revalidate');
+      res.setHeader('Pragma', 'no-cache');
       res.sendFile(path.join(distPath, 'index.html'));
     });
   }
