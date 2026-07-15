@@ -18,6 +18,13 @@ describe('SupabaseCustomersRepository.remove — limpieza de dependencias FK', (
     expect(source).toContain('suspension_orders');
     expect(source).toContain('client_timeline');
     expect(source).toContain('onus');
+    // payment_applications no tiene client_id; se borra por payment_id / invoice_id
+    expect(source).toContain("delIn('payment_applications', 'payment_id'");
+    expect(source).toContain("delIn('credit_applications', 'credit_note_id'");
+    // motor de suspensión usa customer_id
+    expect(source).toContain("'customer_id'");
+    // Supabase no lanza: se lee error del resultado
+    expect(source).toContain('warn(');
   });
 
   it('lanza ConflictError con mensaje en español para FK 23503', () => {

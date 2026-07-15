@@ -94,3 +94,11 @@ describe('forcedTabForScope', () => {
     expect(forcedTabForScope('admin')).toBeNull();
   });
 });
+
+describe('portal/tech no aparecen en el sidebar WISP', () => {
+  it('portal y tech-pwa están tabs ocultos del menú admin', async () => {
+    const { isSidebarHiddenTab } = await import('../../src/lib/rbac');
+    expect(isSidebarHiddenTab('portal')).toBe(true);
+    expect(isSidebarHiddenTab('tech-pwa')).toBe(true);
+  });
+});

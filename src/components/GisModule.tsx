@@ -2,6 +2,7 @@ import React, { useMemo, useState } from 'react';
 import { Map as MapIcon, Sliders, Activity, Compass, Cable, Database, Info } from 'lucide-react';
 import { Client, NapBox, OnuFTTH, OltFTTH } from '../types';
 import GisLeafletMap from './gis/GisLeafletMap';
+import FtthInfrastructurePanel from './gis/FtthInfrastructurePanel';
 
 interface GisModuleProps {
   towers?: unknown[];
@@ -263,6 +264,8 @@ export default function GisModule({
           </div>
         </div>
       </div>
+
+      <FtthInfrastructurePanel naps={naps} olts={olts} />
     </div>
   );
 }

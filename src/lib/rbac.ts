@@ -62,6 +62,9 @@ const roleTabs: Record<UserRole, AppTab[]> = {
 //  - automation / notifications: labs DRY RUN de motores internos; retirados
 //    de la UI operativa del WISP (sin acceso por rol). Las alertas del operador
 //    viven en la campana de la barra superior (NOC alerts), no en esos módulos.
+//  - portal / tech-pwa: apps aisladas (`/?app=portal` y `/?app=tech`). No van
+//    en el menú WISP para evitar que un operador “entre al portal” y vea el
+//    shell admin; el enlace se copia desde CRM / ficha cliente.
 // No se eliminan ni se les quita acceso (salvo automation/notifications):
 // solo se ocultan del sidebar.
 // ====================================================================
@@ -77,6 +80,8 @@ const SIDEBAR_HIDDEN_TABS: ReadonlySet<AppTab> = new Set<AppTab>([
   'provisioning',
   'automation',
   'notifications',
+  'portal',
+  'tech-pwa',
 ]);
 
 export function isSidebarHiddenTab(tab: string): boolean {

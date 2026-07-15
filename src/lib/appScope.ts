@@ -70,8 +70,15 @@ export function getAppScope(): AppScope {
   try {
     const params = new URLSearchParams(window.location.search);
     const fromQuery = params.get(APP_SCOPE_QUERY_KEY);
+    // Enlace de portal con `client=` sin `app=` → forzar scope portal
+    // (evita que sessionStorage de una sesión WISP deje al abonado en admin).
+    const hasPortalClient =
+      Boolean((params.get('client') || params.get('clientId') || '').trim());
     if (fromQuery) {
       scope = parseAppScope(fromQuery);
+      window.sessionStorage.setItem(APP_SCOPE_STORAGE_KEY, scope);
+    } else if (hasPortalClient) {
+      scope = 'portal';
       window.sessionStorage.setItem(APP_SCOPE_STORAGE_KEY, scope);
     } else {
       scope = parseAppScope(window.sessionStorage.getItem(APP_SCOPE_STORAGE_KEY));

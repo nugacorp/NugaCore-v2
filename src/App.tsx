@@ -387,7 +387,18 @@ export default function App() {
       if (activeTab === 'portal' || getAppScope() === 'portal') {
         attemptedFetch = true;
         try {
-          setClients(await fetchJson<Client[]>('/api/clients'));
+          const all = await fetchJson<Client[]>('/api/clients');
+          if (getAppScope() === 'portal') {
+            try {
+              const params = new URLSearchParams(window.location.search);
+              const bound = (params.get('client') || params.get('clientId') || '').trim();
+              setClients(bound ? all.filter((c) => c.id === bound) : all.slice(0, 1));
+            } catch {
+              setClients(all.slice(0, 1));
+            }
+          } else {
+            setClients(all);
+          }
         } catch {
           setClients([]);
         }
