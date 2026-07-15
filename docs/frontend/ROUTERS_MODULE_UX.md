@@ -7,23 +7,26 @@ Estado: en `main` (`521c5fc`).
 
 El alta de router **no** es un ítem separado del sidebar. El flujo WISP diario es:
 
-**MikroTik → Routers → Dar de alta** → wizard de enrollment existente.
+**Sistema → Routers → Dar de alta** → wizard de enrollment existente.
 
 ## Comportamiento
 
 | Superficie | Comportamiento |
 | --- | --- |
-| Sidebar MikroTik | `Routers`, `Plantillas` |
-| `InventoryRoutersModule` | Inventario + botón **Dar de alta** (roles con `canStartEnrollment`) |
+| Sidebar Sistema | `Routers`, `Plantillas`, Configuración, … (un solo lugar para equipos MikroTik) |
+| `InventoryRoutersModule` | Inventario + **Dar de alta** + **Verificar** + **Eliminar** |
+| Eliminar | `DELETE /api/mikrotik/routers/:id` → revoca WG + borra alta + inventario |
 | Panel enrollment | Renderiza `RouterEnrollmentWizard` (`startInWizard`, `onBack` → inventario) |
 | Tab `router-enrollment` | Oculto del sidebar (`SIDEBAR_HIDDEN_TABS`); deep-link / workspace redirige a Routers con alta abierta |
 | Dashboard “Alta router” | Navega a Routers + abre enrollment |
-| Manual de usuario | Instrucciones actualizadas a “Routers → Dar de alta” |
+| Manual de usuario | Instrucciones actualizadas a “Sistema → Routers → Dar de alta” |
+| NOC | Solo lectura; no elimina routers |
 
 ## RBAC
 
 - Inventario (`inventory-routers`): visible según rol (incl. Soporte / Solo lectura).
-- Alta: Super Admin / Administrador / Técnico (`canStartEnrollment`).
+- Alta / Verificar: Super Admin / Administrador / Técnico (`canStartEnrollment`).
+- Eliminar / Revocar: Super Admin / Administrador (`canRevokeEnrollment`).
 - Si un rol sin permiso llega con panel enrollment, se muestra inventario.
 
 ## Archivos
@@ -37,5 +40,5 @@ El alta de router **no** es un ítem separado del sidebar. El flujo WISP diario 
 
 ## Contrato de navegación
 
-MikroTik sidebar ids esperados: `inventory-routers`, `routeros-templates`.  
+Sistema sidebar ids de routers: `inventory-routers`, `routeros-templates` (antes de Configuración).  
 `router-enrollment` permanece en el union `AppTab` y en role tabs, pero no se lista.

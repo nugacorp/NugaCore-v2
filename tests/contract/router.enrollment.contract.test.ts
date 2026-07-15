@@ -909,6 +909,62 @@ describe('Enrollment — Administrador puede iniciar y revocar', () => {
   });
 });
 
+describe('Enrollment — DELETE inventario purga alta + WG', () => {
+  let app: Express;
+  let serverId: string;
+
+  beforeAll(async () => {
+    app = createApp();
+    const srvRes = await request(app)
+      .post('/api/wireguard/servers')
+      .set(ADMIN)
+      .send({
+        name: 'VPN Purge Test',
+        endpointHost: 'vpn.purge.local',
+        endpointPort: 13233,
+        isDefault: true,
+      });
+    serverId = srvRes.body.server.id;
+  });
+
+  it('DELETE /api/mikrotik/routers/:id elimina inventory + enrollment', async () => {
+    const start = await request(app)
+      .post('/api/router-enrollment/start')
+      .set(ADMIN)
+      .send({
+        routerName: 'Router Purge',
+        wgServerId: serverId,
+        routerosVersion: '7',
+      });
+    expect(start.status).toBe(201);
+    const enrollmentId = start.body.enrollment.id as string;
+    const routerId = start.body.enrollment.routerId as string;
+
+    expect(store.MIKROTIK_ROUTERS.find((r) => r.id === routerId)).toBeDefined();
+
+    const del = await request(app).delete(`/api/mikrotik/routers/${routerId}`).set(ADMIN);
+    expect(del.status).toBe(204);
+    expect(store.MIKROTIK_ROUTERS.find((r) => r.id === routerId)).toBeUndefined();
+
+    const get = await request(app).get(`/api/router-enrollment/${enrollmentId}`).set(ADMIN);
+    expect(get.status).toBe(404);
+  });
+
+  it('DELETE /api/mikrotik/routers/:id con Técnico → 403', async () => {
+    const start = await request(app)
+      .post('/api/router-enrollment/start')
+      .set(ADMIN)
+      .send({
+        routerName: 'Router Purge Tec',
+        wgServerId: serverId,
+        routerosVersion: '7',
+      });
+    const routerId = start.body.enrollment.routerId as string;
+    const res = await request(app).delete(`/api/mikrotik/routers/${routerId}`).set(TEC);
+    expect(res.status).toBe(403);
+  });
+});
+
 // ── FIX-3 (Fase 4.9.2 hotfix): download sobrevive restart vía routerSnapshot ──
 
 describe('Enrollment — download sobrevive restart vía routerSnapshot', () => {

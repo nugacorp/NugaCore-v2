@@ -66,9 +66,10 @@ export default function Sidebar({
   userProfile,
   onLogout
 }: SidebarProps) {
-  // Reorganización UX WISP LATAM (Wispro / WispHub / BlackAngus): flujo operativo
-  // diario de un ISP — clientes → cobranza → red → routers MikroTik. No se crean
-  // ni eliminan módulos; solo cambian nombre/orden/grupo visual (IDs intactos).
+  // Reorganización UX WISP LATAM (referencia WispHub): flujo diario
+  // clientes → facturación → red → operaciones; routers MikroTik viven en
+  // Sistema → Routers (un solo lugar). No se crean ni eliminan módulos; solo
+  // cambian nombre/orden/grupo visual (IDs intactos).
   //
   // Módulos NO listados aquí (accesibles por RBAC, tab directo o workspace in-page):
   //  - wireguard, manual-safe-mode, safe-command-queue → infra / seguridad interna.
@@ -117,14 +118,6 @@ export default function Sidebar({
       ],
     },
     {
-      id: 'equipos-mikrotik',
-      title: 'MikroTik',
-      items: [
-        { id: 'inventory-routers', name: 'Routers', icon: Cpu },
-        { id: 'routeros-templates', name: 'Plantillas', icon: BookOpen },
-      ],
-    },
-    {
       id: 'operaciones',
       title: 'Operaciones',
       items: [
@@ -135,6 +128,8 @@ export default function Sidebar({
       id: 'sistema',
       title: 'Sistema',
       items: [
+        { id: 'inventory-routers', name: 'Routers', icon: Cpu },
+        { id: 'routeros-templates', name: 'Plantillas', icon: BookOpen },
         { id: 'owner', name: 'Configuración', icon: Shield },
         { id: 'automation', name: 'Automatización', icon: Brain },
         { id: 'notifications', name: 'Notificaciones', icon: Bell },

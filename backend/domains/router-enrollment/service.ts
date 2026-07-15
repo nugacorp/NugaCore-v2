@@ -904,4 +904,47 @@ export const enrollmentService = {
 
     return { deleted: true, id };
   },
+
+  /**
+   * Borra un router del inventario y limpia enrollments / peers WG asociados.
+   * Usado desde Inventario → Eliminar (un solo lugar para “quitar este equipo”).
+   */
+  async purgeByRouterId(
+    routerId: string,
+    actorId: string,
+  ): Promise<{ found: boolean; routerId: string; enrollmentsPurged: number }> {
+    const repo = getEnrollmentRepository();
+    const enrollments = await repo.findByRouterId(routerId);
+    const inInventory = store.MIKROTIK_ROUTERS.some((r) => r.id === routerId);
+
+    if (enrollments.length === 0 && !inInventory) {
+      const removed = await deleteMikrotikRouter(routerId);
+      return { found: removed, routerId, enrollmentsPurged: 0 };
+    }
+
+    let enrollmentsPurged = 0;
+    for (const rec of enrollments) {
+      if (rec.status !== 'revoked') {
+        await this.revoke(rec.id, actorId);
+      }
+      // revoke ya quitó el inventario; remove limpia el registro de enrollment.
+      const still = await repo.findById(rec.id);
+      if (still?.status === 'revoked') {
+        await this.remove(rec.id, actorId);
+        enrollmentsPurged += 1;
+      } else if (!still) {
+        enrollmentsPurged += 1;
+      }
+    }
+
+    await deleteMikrotikRouter(routerId);
+
+    logger.info('Router purgado desde inventario', {
+      routerId,
+      enrollmentsPurged,
+      purgedBy: actorId,
+    });
+
+    return { found: true, routerId, enrollmentsPurged };
+  },
 };

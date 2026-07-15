@@ -18,6 +18,7 @@ import { processPendingOrders, readRouterSnapshot, listWorkerRuns } from './work
 import { getWireguardService } from '../wireguard/service';
 import type { PeerCreatedOnce } from '../wireguard/types';
 import { persistMikrotikRouter } from './repository';
+import { enrollmentService } from '../router-enrollment/service';
 
 const router = Router();
 
@@ -382,15 +383,18 @@ router.put('/api/mikrotik/routers/:id', requireRoles(['super admin', 'administra
   res.json(fullRouterView(store.MIKROTIK_ROUTERS[index]));
 });
 
-router.delete('/api/mikrotik/routers/:id', requireRoles(['super admin', 'administrador']), (req, res) => {
-  const existing = store.MIKROTIK_ROUTERS.find((row) => row.id === req.params.id);
-  if (!existing) {
-    return res.status(404).json({ error: 'Router not found' });
-  }
-
-  store.MIKROTIK_ROUTERS = store.MIKROTIK_ROUTERS.filter((row) => row.id !== req.params.id);
-  res.status(204).send();
-});
+router.delete(
+  '/api/mikrotik/routers/:id',
+  requireRoles(['super admin', 'administrador']),
+  asyncHandler(async (req, res) => {
+    const actorId = req.authContext?.userId ?? 'unknown';
+    const result = await enrollmentService.purgeByRouterId(req.params.id, actorId);
+    if (!result.found) {
+      return res.status(404).json({ error: 'Router not found' });
+    }
+    res.status(204).send();
+  }),
+);
 
 router.get('/api/mikrotik/routers/:id/health', requireRoles(['super admin', 'administrador', 'tecnico', 'soporte']), (req, res) => {
   const routerItem = store.MIKROTIK_ROUTERS.find((row) => row.id === req.params.id);

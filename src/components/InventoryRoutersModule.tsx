@@ -10,9 +10,11 @@ import {
   ServerCrash,
   Server,
   Plus,
+  Trash2,
+  CheckCircle,
 } from 'lucide-react';
 import type { UserRole } from '../lib/supabase';
-import { canStartEnrollment } from '../lib/enrollmentRbac';
+import { canStartEnrollment, canRevokeEnrollment } from '../lib/enrollmentRbac';
 import RouterEnrollmentWizard from './RouterEnrollmentWizard';
 
 // ====================================================================
@@ -20,7 +22,8 @@ import RouterEnrollmentWizard from './RouterEnrollmentWizard';
 //
 // Vista del inventario (`mikrotik_routers`) y botón "Dar de alta" que abre
 // el flujo existente de enrollment (RouterEnrollmentWizard), sin sección
-// separada en el sidebar.
+// separada en el sidebar. Acciones: verificar online / eliminar (limpia
+// enrollment + peer WG + fila de inventario).
 // ====================================================================
 
 type RouterOnlineStatus = 'online' | 'offline';
@@ -59,6 +62,12 @@ interface InventorySummary {
   lastSeenCount: number;
 }
 
+interface EnrollmentListItem {
+  id: string;
+  routerId: string;
+  status: string;
+}
+
 interface Props {
   getAuthHeaders: () => Promise<Record<string, string>>;
   userRole: UserRole;
@@ -74,6 +83,13 @@ const PROV_BADGE: Record<RouterProvisioningStatus, string> = {
   error: 'bg-rose-500/15 text-rose-400 border-rose-500/20',
 };
 
+const PROV_LABEL: Record<RouterProvisioningStatus, string> = {
+  connected: 'conectado',
+  provisioned: 'aprovisionado',
+  pending: 'pendiente',
+  error: 'error',
+};
+
 const dash = (value?: string): string => (value && value.trim() !== '' ? value : '—');
 
 export default function InventoryRoutersModule({
@@ -84,10 +100,14 @@ export default function InventoryRoutersModule({
 }: Props) {
   const [routers, setRouters] = useState<InventoryRouterView[]>([]);
   const [summary, setSummary] = useState<InventorySummary | null>(null);
+  const [enrollmentByRouter, setEnrollmentByRouter] = useState<Record<string, EnrollmentListItem>>({});
   const [loading, setLoading] = useState(true);
+  const [actionId, setActionId] = useState<string>('');
   const [error, setError] = useState<string>('');
+  const [info, setInfo] = useState<string>('');
 
   const canEnroll = canStartEnrollment(userRole);
+  const canDelete = canRevokeEnrollment(userRole);
   const showEnrollment = panel === 'enrollment' && canEnroll;
 
   const load = useCallback(async () => {
@@ -101,17 +121,87 @@ export default function InventoryRoutersModule({
       ]);
       setSummary(summaryData);
       setRouters(routersData);
+
+      if (canEnroll || canDelete) {
+        try {
+          const enrollments = await api.get<EnrollmentListItem[]>('/api/router-enrollment');
+          const map: Record<string, EnrollmentListItem> = {};
+          for (const enr of enrollments) {
+            if (!enr.routerId) continue;
+            // Preferir enrollment no revocado si hay varios.
+            if (!map[enr.routerId] || enr.status !== 'revoked') {
+              map[enr.routerId] = enr;
+            }
+          }
+          setEnrollmentByRouter(map);
+        } catch {
+          setEnrollmentByRouter({});
+        }
+      } else {
+        setEnrollmentByRouter({});
+      }
     } catch (err) {
       setError(err instanceof Error ? err.message : 'Error desconocido al cargar el inventario.');
     } finally {
       setLoading(false);
     }
-  }, [getAuthHeaders]);
+  }, [getAuthHeaders, canEnroll, canDelete]);
 
   useEffect(() => {
     if (showEnrollment) return;
     void load();
   }, [load, showEnrollment]);
+
+  const handleCheckOnline = async (router: InventoryRouterView) => {
+    const enrollment = enrollmentByRouter[router.id];
+    if (!enrollment || enrollment.status === 'revoked') {
+      setError('No hay alta vinculada a este router. Usa Dar de alta o descarga el .rsc desde el asistente.');
+      return;
+    }
+    setActionId(router.id);
+    setError('');
+    setInfo('');
+    try {
+      const api = createAuthorizedApi(getAuthHeaders);
+      const data = await api.post<{ isOnline?: boolean; message?: string; snapshotSource?: string | null }>(
+        `/api/router-enrollment/${enrollment.id}/check-online`,
+      );
+      setInfo(
+        data.message ||
+          (data.isOnline
+            ? `Router ${router.name} online (${data.snapshotSource ?? 'live'}).`
+            : `Router ${router.name} aún no responde.`),
+      );
+      await load();
+    } catch (err) {
+      setError(err instanceof Error ? err.message : 'No se pudo verificar online.');
+    } finally {
+      setActionId('');
+    }
+  };
+
+  const handleDelete = async (router: InventoryRouterView) => {
+    if (!canDelete) return;
+    const ok = confirm(
+      `¿Eliminar «${router.name}» del inventario?\n\n` +
+        'Se revocará el peer WireGuard y se borrará el alta asociada. ' +
+        'Esta acción no se puede deshacer.',
+    );
+    if (!ok) return;
+    setActionId(router.id);
+    setError('');
+    setInfo('');
+    try {
+      const api = createAuthorizedApi(getAuthHeaders);
+      await api.delete(`/api/mikrotik/routers/${router.id}`);
+      setInfo(`Router «${router.name}» eliminado.`);
+      await load();
+    } catch (err) {
+      setError(err instanceof Error ? err.message : 'No se pudo eliminar el router.');
+    } finally {
+      setActionId('');
+    }
+  };
 
   if (showEnrollment) {
     return (
@@ -147,8 +237,8 @@ export default function InventoryRoutersModule({
             <span>Routers</span>
           </h2>
           <p className="text-sm text-slate-400 mt-1">
-            Inventario de routers MikroTik. Usa <span className="text-indigo-300">Dar de alta</span> para
-            incorporar un equipo nuevo.
+            Inventario de routers MikroTik (Sistema → Routers). Usa{' '}
+            <span className="text-indigo-300">Dar de alta</span> para incorporar un equipo nuevo.
           </p>
         </div>
         <div className="flex items-center gap-3 flex-wrap">
@@ -183,6 +273,12 @@ export default function InventoryRoutersModule({
         <div className="flex items-center space-x-2 p-3 rounded-lg bg-rose-950/40 border border-rose-900 text-rose-300 text-sm">
           <AlertTriangle className="w-4 h-4 shrink-0" />
           <span>{error}</span>
+        </div>
+      )}
+      {info && (
+        <div className="flex items-center space-x-2 p-3 rounded-lg bg-emerald-950/30 border border-emerald-900/50 text-emerald-300 text-sm">
+          <CheckCircle className="w-4 h-4 shrink-0" />
+          <span>{info}</span>
         </div>
       )}
 
@@ -238,41 +334,86 @@ export default function InventoryRoutersModule({
                   <th className="text-left px-4 py-3 font-medium">API</th>
                   <th className="text-left px-4 py-3 font-medium">RouterOS</th>
                   <th className="text-left px-4 py-3 font-medium">Last seen</th>
+                  {(canEnroll || canDelete) && (
+                    <th className="text-right px-4 py-3 font-medium sticky right-0 bg-slate-950/90">
+                      Acciones
+                    </th>
+                  )}
                 </tr>
               </thead>
               <tbody className="divide-y divide-slate-800">
-                {routers.map((router) => (
-                  <tr key={router.id} className="hover:bg-slate-850/40">
-                    <td className="px-4 py-3 font-medium text-slate-200">{router.name}</td>
-                    <td className="px-4 py-3">
-                      <span
-                        className={`inline-flex items-center space-x-1.5 ${
-                          router.isOnline ? 'text-emerald-400' : 'text-slate-500'
-                        }`}
-                      >
+                {routers.map((router) => {
+                  const enrollment = enrollmentByRouter[router.id];
+                  const busy = actionId === router.id;
+                  const canVerify =
+                    canEnroll &&
+                    !!enrollment &&
+                    enrollment.status !== 'revoked' &&
+                    enrollment.status !== 'online';
+                  return (
+                    <tr key={router.id} className="hover:bg-slate-850/40">
+                      <td className="px-4 py-3 font-medium text-slate-200">{router.name}</td>
+                      <td className="px-4 py-3">
                         <span
-                          className={`w-2 h-2 rounded-full ${
-                            router.isOnline ? 'bg-emerald-500' : 'bg-slate-600'
+                          className={`inline-flex items-center space-x-1.5 ${
+                            router.isOnline ? 'text-emerald-400' : 'text-slate-500'
                           }`}
-                        />
-                        <span>{router.status}</span>
-                      </span>
-                    </td>
-                    <td className="px-4 py-3">
-                      <span
-                        className={`px-2 py-0.5 rounded text-xs border ${PROV_BADGE[router.provisioningStatus]}`}
-                      >
-                        {router.provisioningStatus}
-                      </span>
-                    </td>
-                    <td className="px-4 py-3 text-slate-300">{router.connectionType}</td>
-                    <td className="px-4 py-3 font-mono text-xs text-slate-300">{dash(router.managementIp)}</td>
-                    <td className="px-4 py-3 font-mono text-xs text-slate-300">{dash(router.vpnIp)}</td>
-                    <td className="px-4 py-3 font-mono text-xs text-slate-400">{router.apiPort}</td>
-                    <td className="px-4 py-3 text-slate-300">{dash(router.routerOsVersion)}</td>
-                    <td className="px-4 py-3 font-mono text-xs text-slate-400">{dash(router.lastSeenAt)}</td>
-                  </tr>
-                ))}
+                        >
+                          <span
+                            className={`w-2 h-2 rounded-full ${
+                              router.isOnline ? 'bg-emerald-500' : 'bg-slate-600'
+                            }`}
+                          />
+                          <span>{router.status}</span>
+                        </span>
+                      </td>
+                      <td className="px-4 py-3">
+                        <span
+                          className={`px-2 py-0.5 rounded text-xs border ${PROV_BADGE[router.provisioningStatus]}`}
+                          title="Pendiente = script generado, aún sin confirmación online vía API"
+                        >
+                          {PROV_LABEL[router.provisioningStatus]}
+                        </span>
+                      </td>
+                      <td className="px-4 py-3 text-slate-300">{router.connectionType}</td>
+                      <td className="px-4 py-3 font-mono text-xs text-slate-300">{dash(router.managementIp)}</td>
+                      <td className="px-4 py-3 font-mono text-xs text-slate-300">{dash(router.vpnIp)}</td>
+                      <td className="px-4 py-3 font-mono text-xs text-slate-400">{router.apiPort}</td>
+                      <td className="px-4 py-3 text-slate-300">{dash(router.routerOsVersion)}</td>
+                      <td className="px-4 py-3 font-mono text-xs text-slate-400">{dash(router.lastSeenAt)}</td>
+                      {(canEnroll || canDelete) && (
+                        <td className="px-4 py-3 sticky right-0 bg-slate-900/95">
+                          <div className="flex items-center justify-end gap-2 flex-wrap">
+                            {canVerify && (
+                              <button
+                                type="button"
+                                disabled={busy || loading}
+                                onClick={() => void handleCheckOnline(router)}
+                                className="inline-flex items-center gap-1 text-xs px-2 py-1 rounded bg-emerald-900 hover:bg-emerald-800 text-emerald-200 disabled:opacity-50"
+                                title="Verificar online vía API WireGuard"
+                              >
+                                <CheckCircle className="w-3 h-3" />
+                                Verificar
+                              </button>
+                            )}
+                            {canDelete && (
+                              <button
+                                type="button"
+                                disabled={busy || loading}
+                                onClick={() => void handleDelete(router)}
+                                className="inline-flex items-center gap-1 text-xs px-2 py-1 rounded bg-rose-950 hover:bg-rose-900 text-rose-300 border border-rose-900/50 disabled:opacity-50"
+                                title="Eliminar router, alta y peer WireGuard"
+                              >
+                                <Trash2 className="w-3 h-3" />
+                                Eliminar
+                              </button>
+                            )}
+                          </div>
+                        </td>
+                      )}
+                    </tr>
+                  );
+                })}
               </tbody>
             </table>
           </div>
@@ -280,7 +421,8 @@ export default function InventoryRoutersModule({
       </div>
 
       <p className="text-xs text-slate-600">
-        El inventario es de consulta. El alta de routers abre el asistente de enrollment existente.
+        «Pendiente» significa que aún no se confirmó online con la API. Eliminar quita inventario +
+        alta + peer WireGuard. El NOC es solo lectura; gestiona equipos aquí en Sistema → Routers.
       </p>
     </div>
   );

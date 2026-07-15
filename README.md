@@ -11,7 +11,7 @@ NugaCore is a WISP/FTTH operations platform built with React + Vite + TypeScript
 
 Current high-level status:
 - Core platform, Auth/RBAC, Customers, Plans, Billing, Payment Engine and Suspension Engine are functionally advanced.
-- **Router onboarding (julio 2026):** `.rsc` CHR-safe, alta dentro de **MikroTik → Routers**, inventario sync con enrollment, y **WireGuard host-apply automático** al `wg0` del VPS (sin sync manual). Ver [docs/reports/SPRINT_HANDOFF_2026-07-15.md](./docs/reports/SPRINT_HANDOFF_2026-07-15.md).
+- **Router onboarding (julio 2026):** `.rsc` CHR-safe, alta dentro de **Sistema → Routers**, inventario sync con enrollment, y **WireGuard host-apply automático** al `wg0` del VPS (sin sync manual). Ver [docs/reports/SPRINT_HANDOFF_2026-07-15.md](./docs/reports/SPRINT_HANDOFF_2026-07-15.md).
 - WireGuard Manager, Router Enrollment, Template Engine and Dynamic Parameters are advanced; staging flags DB ON; production-readiness gates still apply.
 - MikroTik **live** execution (`MIKROTIK_WORKER_LIVE`), deeper NOC, full ERP, AI Ops and SaaS Multiempresa remain gated / future work.
 - Production requires the checklist gates: persistence after restart, tests, build, backups/restore, secret hygiene, RBAC, and no RouterOS live actions without approval.

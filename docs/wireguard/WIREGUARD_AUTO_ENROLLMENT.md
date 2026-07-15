@@ -3,7 +3,7 @@
 **Módulo:** Enrollment WireGuard Auto  
 **Roles:** Super Admin, Administrador (inicio + revocación), Técnico (inicio + descarga)
 
-**UI (julio 2026):** MikroTik → **Routers** → botón **Dar de alta** (no hay ítem
+**UI (julio 2026):** Sistema → **Routers** → botón **Dar de alta** (no hay ítem
 separado “Alta de Router” en el sidebar). Ver
 [`docs/frontend/ROUTERS_MODULE_UX.md`](../frontend/ROUTERS_MODULE_UX.md).
 

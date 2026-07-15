@@ -4,9 +4,10 @@ import { describe, expect, it } from 'vitest';
 // ====================================================================
 // UX Reorganization WISP LATAM — contrato de navegación del sidebar.
 //
-// Inspirado en Wispro / WispHub / BlackAngus: flujo clientes → facturación
-// → red → routers MikroTik. Módulos avanzados (lab, sync, provisioning,
-// panel core, scripts) ocultos del menú pero accesibles por RBAC/tab directo.
+// Inspirado en Wispro / WispHub: flujo clientes → facturación → red →
+// operaciones; routers MikroTik en Sistema → Routers (un solo lugar).
+// Módulos avanzados (lab, sync, provisioning, panel core, scripts) ocultos
+// del menú pero accesibles por RBAC/tab directo.
 // ====================================================================
 
 const sidebarSource = readFileSync('src/components/Sidebar.tsx', 'utf8');
@@ -18,9 +19,18 @@ const EXPECTED_SECTIONS: Array<{ title: string; ids: string[] }> = [
   { title: 'Clientes', ids: ['crm', 'commercial', 'portal', 'support', 'tech-pwa'] },
   { title: 'Facturación', ids: ['billing', 'payments', 'suspension', 'finance'] },
   { title: 'Red', ids: ['noc', 'gis', 'network'] },
-  { title: 'MikroTik', ids: ['inventory-routers', 'routeros-templates'] },
   { title: 'Operaciones', ids: ['inventory'] },
-  { title: 'Sistema', ids: ['owner', 'automation', 'notifications', 'user-manual'] },
+  {
+    title: 'Sistema',
+    ids: [
+      'inventory-routers',
+      'routeros-templates',
+      'owner',
+      'automation',
+      'notifications',
+      'user-manual',
+    ],
+  },
 ];
 
 const HIDDEN_TAB_IDS = [
@@ -48,7 +58,7 @@ function sectionBlock(title: string): string {
 }
 
 describe('Sidebar — secciones reorganizadas (WISP LATAM)', () => {
-  it('define las 7 secciones WISP en orden', () => {
+  it('define las 6 secciones WISP en orden', () => {
     let cursor = -1;
     for (const { title } of EXPECTED_SECTIONS) {
       const idx = sidebarSource.indexOf(`title: '${title}'`);
@@ -65,6 +75,7 @@ describe('Sidebar — secciones reorganizadas (WISP LATAM)', () => {
     expect(sidebarSource).not.toContain("title: 'Red WISP'");
     expect(sidebarSource).not.toContain("title: 'Operaciones Seguras'");
     expect(sidebarSource).not.toContain("title: 'MikroTik Workspace'");
+    expect(sidebarSource).not.toContain("title: 'MikroTik'");
     expect(sidebarSource).not.toContain("title: 'Administración'");
     expect(sidebarSource).not.toContain("title: 'Operations'");
     expect(sidebarSource).not.toContain("title: 'Management'");
@@ -81,12 +92,13 @@ describe('Sidebar — secciones reorganizadas (WISP LATAM)', () => {
     });
   }
 
-  it('MikroTik prioriza Routers; el alta vive dentro del módulo (no item aparte)', () => {
-    const block = sectionBlock('MikroTik');
+  it('Sistema prioriza Routers; el alta vive dentro del módulo (no item aparte)', () => {
+    const block = sectionBlock('Sistema');
     expect(block).toContain("id: 'inventory-routers'");
     expect(block).toContain("id: 'routeros-templates'");
     expect(block).not.toContain("id: 'router-enrollment'");
     expect(block.indexOf("id: 'inventory-routers'")).toBeLessThan(block.indexOf("id: 'routeros-templates'"));
+    expect(block.indexOf("id: 'inventory-routers'")).toBeLessThan(block.indexOf("id: 'owner'"));
     expect(rbacSource).toContain("'router-enrollment'");
     expect(rbacSource).toContain('SIDEBAR_HIDDEN_TABS');
     expect(appSource).toContain('routersOpenEnrollment');

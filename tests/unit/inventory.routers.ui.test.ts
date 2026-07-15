@@ -2,9 +2,8 @@ import { readFileSync } from 'node:fs';
 import { describe, it, expect } from 'vitest';
 
 // ====================================================================
-// Fase 4.11.1 — UI/RBAC del Inventory Read-Only (scan de fuente, mismo
-// patrón que mikrotik.modes-ui). Verifica que el módulo es read-only, se
-// muestra a los roles de operación y NO a Cobranza.
+// UI/RBAC del inventario de routers. Inventario de consulta + acciones
+// de alta/verificar/eliminar (admin) desde un solo módulo.
 // ====================================================================
 
 const module = readFileSync('src/components/InventoryRoutersModule.tsx', 'utf8');
@@ -14,22 +13,37 @@ const sidebar = readFileSync('src/components/Sidebar.tsx', 'utf8');
 const lineWith = (src: string, needle: string): string =>
   src.split('\n').find((l) => l.includes(needle)) ?? '';
 
-describe('InventoryRoutersModule — read-only', () => {
-  it('marca explícitamente la vista como READ-ONLY', () => {
-    expect(module).toContain('READ-ONLY');
+describe('InventoryRoutersModule — inventario + acciones', () => {
+  it('marca la vista como INVENTARIO (gestión en un solo lugar)', () => {
+    expect(module).toContain('INVENTARIO');
+    expect(module).toContain('Sistema → Routers');
   });
 
-  it('consume solo los endpoints read-only de inventory', () => {
+  it('consume summary/routers y DELETE de mikrotik para eliminar', () => {
     expect(module).toContain('/api/inventory/summary');
     expect(module).toContain('/api/inventory/routers');
+    expect(module).toContain('/api/mikrotik/routers/');
+    expect(module).toContain('api.delete');
   });
 
-  it('no realiza llamadas de escritura (POST/PUT/DELETE/PATCH)', () => {
-    expect(module).not.toMatch(/method:\s*['"](POST|PUT|DELETE|PATCH)['"]/i);
+  it('expone Verificar y Eliminar en la columna Acciones', () => {
+    expect(module).toContain('Acciones');
+    expect(module).toContain('Eliminar');
+    expect(module).toContain('Verificar');
+    expect(module).toContain('canRevokeEnrollment');
   });
 
   it('renderiza las columnas principales del router', () => {
-    for (const col of ['Nombre', 'Estado', 'Provisioning', 'Conexión', 'IP gestión', 'IP VPN', 'RouterOS', 'Last seen']) {
+    for (const col of [
+      'Nombre',
+      'Estado',
+      'Provisioning',
+      'Conexión',
+      'IP gestión',
+      'IP VPN',
+      'RouterOS',
+      'Last seen',
+    ]) {
       expect(module, `falta columna ${col}`).toContain(col);
     }
   });
@@ -37,12 +51,25 @@ describe('InventoryRoutersModule — read-only', () => {
   it('tiene empty state cuando no hay routers', () => {
     expect(module).toContain('No hay routers en el inventario');
   });
+
+  it('embebidos el alta con Dar de alta', () => {
+    expect(module).toContain('Dar de alta');
+    expect(module).toContain('RouterEnrollmentWizard');
+  });
 });
 
 describe('RBAC — visibilidad del tab inventory-routers', () => {
   it('es visible para los roles de operación', () => {
-    for (const role of ["'Super Admin'", "'Administrador'", "'Técnico'", "'Soporte'", "'Solo lectura'"]) {
-      expect(lineWith(rbac, role), `${role} debería ver inventory-routers`).toContain('inventory-routers');
+    for (const role of [
+      "'Super Admin'",
+      "'Administrador'",
+      "'Técnico'",
+      "'Soporte'",
+      "'Solo lectura'",
+    ]) {
+      expect(lineWith(rbac, role), `${role} debería ver inventory-routers`).toContain(
+        'inventory-routers',
+      );
     }
   });
 
@@ -55,7 +82,12 @@ describe('RBAC — visibilidad del tab inventory-routers', () => {
     expect(rbac).toContain("'inventory-routers': 'Routers'");
   });
 
-  it('está en el menú lateral', () => {
+  it('está en Sistema (no sección MikroTik aparte)', () => {
     expect(sidebar).toContain("id: 'inventory-routers'");
+    expect(sidebar).toContain("title: 'Sistema'");
+    expect(sidebar).not.toContain("title: 'MikroTik'");
+    const sistemaIdx = sidebar.indexOf("title: 'Sistema'");
+    const routersIdx = sidebar.indexOf("id: 'inventory-routers'");
+    expect(routersIdx).toBeGreaterThan(sistemaIdx);
   });
 });

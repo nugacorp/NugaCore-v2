@@ -162,9 +162,9 @@ const SECTIONS: ManualSection[] = [
     icon: Terminal,
     summary: 'Inventario de routers y panel operativo MikroTik (lectura y provisioning seguro).',
     steps: [
-      'Entra a "MikroTik → Routers" para ver el inventario read-only de routers.',
-      'Abre "MikroTik → Panel MikroTik" para consultar logs, copiloto y el estado de los routers provisionados.',
-      'El panel no ejecuta cambios destructivos: trabaja en modo lectura/seguro.',
+      'Entra a "Sistema → Routers" para ver el inventario, verificar online o eliminar equipos.',
+      'El NOC (Red → NOC) es solo lectura: no borra routers; gestiona el inventario aquí.',
+      'El panel avanzado MikroTik (si tu rol lo abre) trabaja en modo lectura/seguro.',
     ],
   },
   {
@@ -173,7 +173,7 @@ const SECTIONS: ManualSection[] = [
     icon: Wifi,
     summary: 'Onboarding guiado de un router nuevo. El acceso VPN se prepara automáticamente.',
     steps: [
-      'Entra a "MikroTik → Routers" y pulsa "Dar de alta".',
+      'Entra a "Sistema → Routers" y pulsa "Dar de alta".',
       'Completa el asistente con los datos del router y el tipo de conexión.',
       'El sistema genera el script de provisioning y prepara el acceso interno por VPN sin pasos manuales.',
     ],
@@ -184,8 +184,8 @@ const SECTIONS: ManualSection[] = [
     icon: BookOpen,
     summary: 'Plantillas RouterOS y scripts/recursos reutilizables para configurar routers.',
     steps: [
-      'Entra a "MikroTik → Plantillas" para elegir o parametrizar una plantilla RouterOS.',
-      'Entra a "MikroTik → Scripts" para revisar los recursos y scripts disponibles.',
+      'Entra a "Sistema → Plantillas" para elegir o parametrizar una plantilla RouterOS.',
+      'Los scripts avanzados viven en el workspace MikroTik (acceso por rol), no en el menú diario.',
       'Estas vistas generan configuración; no aplican cambios en routers reales por sí solas.',
     ],
   },
@@ -195,7 +195,7 @@ const SECTIONS: ManualSection[] = [
     icon: Server,
     summary: 'Laboratorio de solo lectura para inspeccionar un RouterOS sin ejecutar comandos.',
     steps: [
-      'Entra a "MikroTik → Laboratorio MikroTik".',
+      'Si tu rol tiene acceso, abre el laboratorio MikroTik desde el workspace avanzado.',
       'Consulta identidad, sistema, interfaces, rutas y WireGuard del equipo de laboratorio.',
       'Es estrictamente de lectura: no ejecuta ni modifica nada en RouterOS.',
     ],
@@ -232,7 +232,7 @@ const SECTIONS: ManualSection[] = [
     steps: [
       '¿Dónde está WireGuard? Es infraestructura interna: el peer se crea solo al dar de alta un router, no se administra a mano.',
       '¿Por qué no veo Modo Seguro Manual ni Cola Dry-Run? Son herramientas internas de seguridad para fases futuras; no son operación diaria.',
-      '¿Dónde están los Routers? Dentro de "MikroTik → Routers".',
+      '¿Dónde están los Routers? Dentro de "Sistema → Routers".',
       '¿Qué rol veo? Tu menú se filtra por permisos (RBAC): solo aparecen los módulos que tu rol puede usar.',
     ],
   },

@@ -468,12 +468,11 @@ export default function RouterEnrollmentWizard({
                         Verificar online
                       </button>
                     )}
-                  {canRevokeEnrollment(userRole) &&
-                    enr.status !== 'revoked' &&
-                    enr.status !== 'online' && (
+                  {canRevokeEnrollment(userRole) && enr.status !== 'revoked' && (
                       <button
                         onClick={() => handleRevoke(enr.id)}
                         className="text-xs px-2 py-1 bg-red-900 hover:bg-red-800 text-red-300 rounded"
+                        title="Revoca peer WireGuard y quita el router del inventario"
                       >
                         Revocar
                       </button>
