@@ -170,8 +170,12 @@ describe('Sidebar — sin badges renderizados ni anidamiento', () => {
     expect(sidebarSource).not.toContain('badgeTone');
   });
 
-  it('usa estructura plana por secciones (sin anidamiento parentId)', () => {
+  it('usa categorías desplegables (sin anidamiento parentId)', () => {
     expect(sidebarSource).not.toContain('parentId');
+    expect(sidebarSource).toContain('toggleSection');
+    expect(sidebarSource).toContain('aria-expanded');
+    expect(sidebarSource).toContain('ChevronDown');
+    expect(sidebarSource).toContain('openSectionId');
   });
 
   it('muestra alertas NOC en el item NOC (no en Torres)', () => {

@@ -1,4 +1,4 @@
-import React from 'react';
+import React, { useState } from 'react';
 import {
   Activity,
   ShieldAlert,
@@ -16,6 +16,7 @@ import {
   LogOut,
   ChevronLeft,
   ChevronRight,
+  ChevronDown,
   Banknote,
   BookText,
   ClipboardList,
@@ -25,6 +26,8 @@ import {
   Globe,
   Smartphone,
   DollarSign,
+  LayoutDashboard,
+  Settings,
 } from 'lucide-react';
 import { UserSessionProfile } from '../lib/supabase';
 import { isVisibleInSidebar } from '../lib/rbac';
@@ -51,6 +54,7 @@ type MenuItem = {
 type MenuSection = {
   id: string;
   title: string;
+  icon: React.ComponentType<{ className?: string }>;
   items: MenuItem[];
 };
 
@@ -66,22 +70,14 @@ export default function Sidebar({
   userProfile,
   onLogout
 }: SidebarProps) {
-  // Reorganización UX WISP LATAM (referencia WispHub): flujo diario
-  // clientes → facturación → red → operaciones; routers MikroTik viven en
-  // Sistema → Routers (un solo lugar). No se crean ni eliminan módulos; solo
-  // cambian nombre/orden/grupo visual (IDs intactos).
-  //
-  // Módulos NO listados aquí (accesibles por RBAC, tab directo o workspace in-page):
-  //  - wireguard, manual-safe-mode, safe-command-queue → infra / seguridad interna.
-  //  - mikrotik, routeros-resources, routeros-readonly, inventory-sync, provisioning
-  //    → herramientas avanzadas / lab / dry-run; el WISP opera con Alta + Routers +
-  //    Plantillas. El filtro `isVisibleInSidebar` los oculta (rbac.ts).
-  //
-  // Los badges de estado (NEW, DRY RUN, READ ONLY LAB) viven dentro de cada módulo.
+  // Reorganización UX WISP LATAM (referencia WispHub): categorías desplegables
+  // para no saturar al operador. routers MikroTik viven en Sistema → Routers.
+  // Módulos avanzados siguen ocultos via isVisibleInSidebar (rbac.ts).
   const menuSections: MenuSection[] = [
     {
       id: 'inicio',
       title: 'Inicio',
+      icon: LayoutDashboard,
       items: [
         { id: 'dashboard', name: 'Dashboard', icon: Activity },
         { id: 'reports', name: 'Reportes', icon: ClipboardList },
@@ -90,6 +86,7 @@ export default function Sidebar({
     {
       id: 'clientes',
       title: 'Clientes',
+      icon: Users,
       items: [
         { id: 'crm', name: 'Clientes', icon: Users },
         { id: 'commercial', name: 'Prospectos', icon: TrendingUp },
@@ -101,6 +98,7 @@ export default function Sidebar({
     {
       id: 'facturacion',
       title: 'Facturación',
+      icon: CreditCard,
       items: [
         { id: 'billing', name: 'Planes y Facturación', icon: CreditCard },
         { id: 'payments', name: 'Pagos', icon: Banknote },
@@ -111,6 +109,7 @@ export default function Sidebar({
     {
       id: 'red',
       title: 'Red',
+      icon: Network,
       items: [
         { id: 'noc', name: 'NOC', icon: ShieldAlert },
         { id: 'gis', name: 'Mapa de Red', icon: Map },
@@ -120,6 +119,7 @@ export default function Sidebar({
     {
       id: 'operaciones',
       title: 'Operaciones',
+      icon: Box,
       items: [
         { id: 'inventory', name: 'Inventario', icon: Box },
       ],
@@ -127,6 +127,7 @@ export default function Sidebar({
     {
       id: 'sistema',
       title: 'Sistema',
+      icon: Settings,
       items: [
         { id: 'inventory-routers', name: 'Routers', icon: Cpu },
         { id: 'routeros-templates', name: 'Plantillas', icon: BookOpen },
@@ -149,6 +150,40 @@ export default function Sidebar({
       items: section.items.filter(item => isAuthorizedTab(item.id))
     }))
     .filter(section => section.items.length > 0);
+
+  const sectionIdForTab = (tabId: string): string | null =>
+    filteredSections.find((section) => section.items.some((item) => item.id === tabId))?.id ?? null;
+
+  // Acordeón: una categoría abierta. Sigue al tab activo; el operador puede
+  // abrir/cerrar otras sin perder el contexto del módulo actual.
+  const [openSectionId, setOpenSectionId] = useState<string | null>(null);
+  const [lastActiveTab, setLastActiveTab] = useState(activeTab);
+  const preferredSectionId = sectionIdForTab(activeTab) ?? filteredSections[0]?.id ?? null;
+
+  // Sincroniza acordeón con tab activo / login (cuando aparecen secciones).
+  if (activeTab !== lastActiveTab) {
+    setLastActiveTab(activeTab);
+    if (preferredSectionId) setOpenSectionId(preferredSectionId);
+  } else if (openSectionId === null && preferredSectionId) {
+    setOpenSectionId(preferredSectionId);
+  } else if (
+    openSectionId !== null &&
+    preferredSectionId &&
+    !filteredSections.some((section) => section.id === openSectionId)
+  ) {
+    setOpenSectionId(preferredSectionId);
+  }
+
+  const toggleSection = (sectionId: string) => {
+    setOpenSectionId((prev) => (prev === sectionId ? null : sectionId));
+  };
+
+  const sectionAlertCount = (section: MenuSection): number => {
+    let count = 0;
+    if (section.items.some((item) => item.id === 'noc')) count += activeAlertsCount;
+    if (section.items.some((item) => item.id === 'support')) count += activeTicketsCount;
+    return count;
+  };
 
   return (
     <>
@@ -221,66 +256,151 @@ export default function Sidebar({
               )}
             </div>
 
-            <nav className={collapsed ? 'space-y-2' : 'space-y-4'}>
+            <nav className={collapsed ? 'space-y-2' : 'space-y-1'} aria-label="Navegación principal">
               {!collapsed && (
-                <p className="text-[10px] text-slate-500 uppercase tracking-widest font-semibold px-3 mb-2 font-mono">Módulos Habilitados</p>
+                <p className="text-[10px] text-slate-500 uppercase tracking-widest font-semibold px-3 mb-3 font-mono">
+                  Menú
+                </p>
               )}
-              {filteredSections.map(section => (
-                <div key={section.id} className={collapsed ? 'space-y-1' : 'space-y-1.5'}>
-                  {!collapsed && (
-                    <p className="text-[10px] text-slate-600 uppercase tracking-widest font-semibold px-3 font-mono">
-                      {section.title}
-                    </p>
-                  )}
-                  {section.items.map((item) => {
-                    const Icon = item.icon;
-                    const isActive = activeTab === item.id;
-                    const hasNocAlerts = item.id === 'noc' && activeAlertsCount > 0;
-                    const hasOpenTickets = item.id === 'support' && activeTicketsCount > 0;
-                    const hasIndicators = hasNocAlerts || hasOpenTickets;
+              {filteredSections.map((section) => {
+                const SectionIcon = section.icon;
+                const hasActiveItem = section.items.some((item) => item.id === activeTab);
+                const isSectionOpen = collapsed || openSectionId === section.id;
+                const alerts = sectionAlertCount(section);
 
-                    return (
-                      <button
-                        key={item.id}
-                        id={`sidebar-tab-${item.id}`}
-                        onClick={() => {
-                          setActiveTab(item.id);
-                          if (onClose) onClose();
-                        }}
-                        title={collapsed ? item.name : undefined}
-                        aria-label={item.name}
-                        className={`w-full flex items-center ${collapsed ? 'justify-center px-2.5 py-2.5' : 'justify-between px-3.5 py-2.5 text-sm'} rounded-lg transition-all duration-200 group text-left ${
-                          isActive
-                            ? 'bg-indigo-600/15 border border-indigo-500/30 text-white font-medium shadow-sm'
-                            : 'text-slate-400 hover:bg-slate-900 hover:text-slate-100 border border-transparent'
-                        }`}
-                      >
-                        <div className={`flex items-center ${collapsed ? '' : 'space-x-3 min-w-0'}`}>
-                          <Icon className={`w-4 h-4 transition-transform group-hover:scale-110 shrink-0 ${
-                            isActive ? 'text-indigo-400' : 'text-slate-500 group-hover:text-slate-300'
-                          }`} />
-                          {!collapsed && <span className="truncate">{item.name}</span>}
-                        </div>
+                if (collapsed) {
+                  return (
+                    <div key={section.id} className="space-y-1">
+                      {section.items.map((item) => {
+                        const Icon = item.icon;
+                        const isActive = activeTab === item.id;
+                        return (
+                          <button
+                            key={item.id}
+                            id={`sidebar-tab-${item.id}`}
+                            type="button"
+                            onClick={() => {
+                              setActiveTab(item.id);
+                              if (onClose) onClose();
+                            }}
+                            title={item.name}
+                            aria-label={item.name}
+                            className={`w-full flex items-center justify-center px-2.5 py-2.5 rounded-lg transition-all duration-200 group ${
+                              isActive
+                                ? 'bg-indigo-600/15 border border-indigo-500/30 text-white shadow-sm'
+                                : 'text-slate-400 hover:bg-slate-900 hover:text-slate-100 border border-transparent'
+                            }`}
+                          >
+                            <Icon
+                              className={`w-4 h-4 shrink-0 ${
+                                isActive ? 'text-indigo-400' : 'text-slate-500 group-hover:text-slate-300'
+                              }`}
+                            />
+                          </button>
+                        );
+                      })}
+                    </div>
+                  );
+                }
 
-                        {!collapsed && hasIndicators && (
-                          <div className="flex items-center space-x-1.5 shrink-0">
-                            {hasNocAlerts && (
-                              <span className="bg-rose-500/15 text-rose-400 border border-rose-500/30 text-[10px] px-1.5 py-0.5 rounded-full font-mono">
-                                {activeAlertsCount}
-                              </span>
-                            )}
-                            {hasOpenTickets && (
-                              <span className="bg-indigo-500/15 text-indigo-300 border border-indigo-500/30 text-[10px] px-1.5 py-0.5 rounded-full font-mono">
-                                {activeTicketsCount}
-                              </span>
-                            )}
-                          </div>
+                return (
+                  <div key={section.id} className="rounded-lg">
+                    <button
+                      type="button"
+                      id={`sidebar-section-${section.id}`}
+                      onClick={() => toggleSection(section.id)}
+                      aria-expanded={isSectionOpen}
+                      aria-controls={`sidebar-section-panel-${section.id}`}
+                      className={`w-full flex items-center justify-between px-3 py-2.5 rounded-lg text-sm transition-colors duration-200 group ${
+                        hasActiveItem
+                          ? 'bg-slate-900/80 text-white border border-slate-700/80'
+                          : 'text-slate-300 hover:bg-slate-900 hover:text-white border border-transparent'
+                      }`}
+                    >
+                      <div className="flex items-center space-x-3 min-w-0">
+                        <SectionIcon
+                          className={`w-4 h-4 shrink-0 ${
+                            hasActiveItem ? 'text-emerald-400' : 'text-slate-500 group-hover:text-slate-300'
+                          }`}
+                        />
+                        <span className="font-medium truncate">{section.title}</span>
+                        {alerts > 0 && (
+                          <span className="bg-rose-500/15 text-rose-400 border border-rose-500/30 text-[10px] px-1.5 py-0.5 rounded-full font-mono">
+                            {alerts}
+                          </span>
                         )}
-                      </button>
-                    );
-                  })}
-                </div>
-              ))}
+                      </div>
+                      <ChevronDown
+                        className={`w-4 h-4 shrink-0 text-slate-500 transition-transform duration-200 ${
+                          isSectionOpen ? 'rotate-180 text-emerald-400' : ''
+                        }`}
+                      />
+                    </button>
+
+                    <div
+                      id={`sidebar-section-panel-${section.id}`}
+                      role="region"
+                      aria-labelledby={`sidebar-section-${section.id}`}
+                      className={`overflow-hidden transition-[grid-template-rows] duration-200 ease-out grid ${
+                        isSectionOpen ? 'grid-rows-[1fr] mt-1' : 'grid-rows-[0fr]'
+                      }`}
+                    >
+                      <div className="min-h-0 space-y-0.5 pl-2">
+                        {section.items.map((item) => {
+                          const Icon = item.icon;
+                          const isActive = activeTab === item.id;
+                          const hasNocAlerts = item.id === 'noc' && activeAlertsCount > 0;
+                          const hasOpenTickets = item.id === 'support' && activeTicketsCount > 0;
+                          const hasIndicators = hasNocAlerts || hasOpenTickets;
+
+                          return (
+                            <button
+                              key={item.id}
+                              id={`sidebar-tab-${item.id}`}
+                              type="button"
+                              onClick={() => {
+                                setActiveTab(item.id);
+                                setOpenSectionId(section.id);
+                                if (onClose) onClose();
+                              }}
+                              aria-label={item.name}
+                              className={`w-full flex items-center justify-between px-3 py-2 text-sm rounded-lg transition-all duration-200 group text-left ${
+                                isActive
+                                  ? 'bg-indigo-600/15 border border-indigo-500/30 text-white font-medium shadow-sm'
+                                  : 'text-slate-400 hover:bg-slate-900 hover:text-slate-100 border border-transparent'
+                              }`}
+                            >
+                              <div className="flex items-center space-x-3 min-w-0">
+                                <Icon
+                                  className={`w-3.5 h-3.5 transition-transform group-hover:scale-110 shrink-0 ${
+                                    isActive ? 'text-indigo-400' : 'text-slate-500 group-hover:text-slate-300'
+                                  }`}
+                                />
+                                <span className="truncate">{item.name}</span>
+                              </div>
+
+                              {hasIndicators && (
+                                <div className="flex items-center space-x-1.5 shrink-0">
+                                  {hasNocAlerts && (
+                                    <span className="bg-rose-500/15 text-rose-400 border border-rose-500/30 text-[10px] px-1.5 py-0.5 rounded-full font-mono">
+                                      {activeAlertsCount}
+                                    </span>
+                                  )}
+                                  {hasOpenTickets && (
+                                    <span className="bg-indigo-500/15 text-indigo-300 border border-indigo-500/30 text-[10px] px-1.5 py-0.5 rounded-full font-mono">
+                                      {activeTicketsCount}
+                                    </span>
+                                  )}
+                                </div>
+                              )}
+                            </button>
+                          );
+                        })}
+                      </div>
+                    </div>
+                  </div>
+                );
+              })}
             </nav>
           </div>
 

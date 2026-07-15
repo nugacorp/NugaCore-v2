@@ -13,7 +13,7 @@ El alta de router **no** es un ítem separado del sidebar. El flujo WISP diario 
 
 | Superficie | Comportamiento |
 | --- | --- |
-| Sidebar Sistema | `Routers`, `Plantillas`, Configuración, … (un solo lugar para equipos MikroTik) |
+| Sidebar Sistema | Categoría desplegable → `Routers`, `Plantillas`, Configuración, … (un solo lugar) |
 | `InventoryRoutersModule` | Inventario + **Dar de alta** + **Verificar** + **Eliminar** |
 | Eliminar | `DELETE /api/mikrotik/routers/:id` → revoca WG + borra alta + inventario |
 | Panel enrollment | Renderiza `RouterEnrollmentWizard` (`startInWizard`, `onBack` → inventario) |
