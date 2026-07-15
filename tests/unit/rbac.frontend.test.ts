@@ -6,10 +6,11 @@ import type { UserRole } from '../../src/lib/supabase';
 const ALL_ROLES: UserRole[] = ['Super Admin', 'Administrador', 'Cobranza', 'Técnico', 'Soporte', 'Solo lectura'];
 
 describe('RBAC visual por rol (frontend)', () => {
-  it('Super Admin ve todos los módulos (30)', () => {
+  it('Super Admin ve todos los módulos operativos (29)', () => {
     const t = getAllowedTabsByRole('Super Admin');
-    expect(t.length).toBe(30);
-    expect(t).toEqual(expect.arrayContaining(['mikrotik', 'wireguard', 'commercial', 'reports', 'portal', 'tech-pwa', 'routeros-resources', 'routeros-templates', 'router-enrollment', 'payments', 'owner', 'finance', 'billing', 'inventory', 'inventory-routers', 'suspension', 'manual-safe-mode', 'safe-command-queue', 'routeros-readonly', 'inventory-sync', 'provisioning', 'automation', 'notifications', 'user-manual']));
+    expect(t.length).toBe(29);
+    expect(t).toEqual(expect.arrayContaining(['mikrotik', 'wireguard', 'commercial', 'reports', 'portal', 'tech-pwa', 'routeros-resources', 'routeros-templates', 'router-enrollment', 'payments', 'owner', 'finance', 'billing', 'inventory', 'inventory-routers', 'suspension', 'manual-safe-mode', 'safe-command-queue', 'routeros-readonly', 'inventory-sync', 'provisioning', 'notifications', 'user-manual']));
+    expect(t).not.toContain('automation');
   });
 
   it('Administrador NO ve mikrotik / finance / owner', () => {
@@ -21,7 +22,7 @@ describe('RBAC visual por rol (frontend)', () => {
   });
 
   it('Cobranza ve billing/finance/payments/commercial/reports; no mikrotik, red ni inventory-routers', () => {
-    expect(getAllowedTabsByRole('Cobranza')).toEqual(['dashboard', 'crm', 'commercial', 'billing', 'finance', 'suspension', 'payments', 'reports', 'portal', 'provisioning', 'automation', 'notifications', 'user-manual']);
+    expect(getAllowedTabsByRole('Cobranza')).toEqual(['dashboard', 'crm', 'commercial', 'billing', 'finance', 'suspension', 'payments', 'reports', 'portal', 'provisioning', 'notifications', 'user-manual']);
     expect(canAccessTab('Cobranza', 'mikrotik')).toBe(false);
     expect(canAccessTab('Cobranza', 'network')).toBe(false);
     expect(canAccessTab('Cobranza', 'inventory-routers')).toBe(false);
@@ -35,14 +36,14 @@ describe('RBAC visual por rol (frontend)', () => {
   });
 
   it('Soporte: dashboard/noc/crm/commercial/support/tech-pwa; no billing ni mikrotik', () => {
-    expect(getAllowedTabsByRole('Soporte')).toEqual(['dashboard', 'noc', 'crm', 'commercial', 'support', 'tech-pwa', 'inventory-routers', 'gis', 'portal', 'manual-safe-mode', 'safe-command-queue', 'routeros-readonly', 'inventory-sync', 'provisioning', 'automation', 'notifications', 'user-manual']);
+    expect(getAllowedTabsByRole('Soporte')).toEqual(['dashboard', 'noc', 'crm', 'commercial', 'support', 'tech-pwa', 'inventory-routers', 'gis', 'portal', 'manual-safe-mode', 'safe-command-queue', 'routeros-readonly', 'inventory-sync', 'provisioning', 'notifications', 'user-manual']);
     expect(canAccessTab('Soporte', 'billing')).toBe(false);
     expect(canAccessTab('Soporte', 'mikrotik')).toBe(false);
     expect(canAccessTab('Soporte', 'inventory-routers')).toBe(true);
   });
 
   it('Solo lectura: lectura básica + noc + inventory-routers; sin mikrotik/support/owner', () => {
-    expect(getAllowedTabsByRole('Solo lectura')).toEqual(['dashboard', 'noc', 'crm', 'commercial', 'billing', 'suspension', 'network', 'inventory-routers', 'gis', 'reports', 'portal', 'manual-safe-mode', 'safe-command-queue', 'routeros-readonly', 'inventory-sync', 'provisioning', 'automation', 'notifications', 'user-manual']);
+    expect(getAllowedTabsByRole('Solo lectura')).toEqual(['dashboard', 'noc', 'crm', 'commercial', 'billing', 'suspension', 'network', 'inventory-routers', 'gis', 'reports', 'portal', 'manual-safe-mode', 'safe-command-queue', 'routeros-readonly', 'inventory-sync', 'provisioning', 'notifications', 'user-manual']);
     expect(canAccessTab('Solo lectura', 'mikrotik')).toBe(false);
     expect(canAccessTab('Solo lectura', 'owner')).toBe(false);
     expect(canAccessTab('Solo lectura', 'support')).toBe(false);
@@ -198,10 +199,14 @@ describe('Visibilidad en sidebar ≠ acceso (módulos internos ocultos)', () => 
   });
 
   it('Super Admin: módulos internos accesibles pero ocultos del sidebar', () => {
-    for (const id of HIDDEN) {
+    const accessibleHidden = HIDDEN.filter((id) => id !== 'automation');
+    for (const id of accessibleHidden) {
       expect(canAccessTab('Super Admin', id), `${id} accesible`).toBe(true);
       expect(isVisibleInSidebar('Super Admin', id), `${id} oculto en sidebar`).toBe(false);
     }
+    // automation: retirado de la UI WISP (sin acceso por rol)
+    expect(canAccessTab('Super Admin', 'automation')).toBe(false);
+    expect(isVisibleInSidebar('Super Admin', 'automation')).toBe(false);
   });
 
   it('isVisibleInSidebar respeta el RBAC: false si el rol no tiene acceso', () => {

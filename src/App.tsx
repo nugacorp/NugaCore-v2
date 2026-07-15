@@ -18,7 +18,6 @@ const NocOperationsPanel = lazyWithRetry(() => import('./components/NocOperation
 const ManualSafeModeModule = lazyWithRetry(() => import('./modules/manual-safe-mode/ManualSafeModeModule'));
 const SafeCommandQueueModule = lazyWithRetry(() => import('./modules/safe-command-queue/SafeCommandQueueModule'));
 const ProvisioningCenterModule = lazyWithRetry(() => import('./modules/provisioning/ProvisioningCenterModule'));
-const AutomationCenterModule = lazyWithRetry(() => import('./modules/automation/AutomationCenterModule'));
 const NotificationCenterModule = lazyWithRetry(() => import('./modules/notifications/NotificationCenterModule'));
 const RouterOSReadOnlyModule = lazyWithRetry(() => import('./modules/routeros-readonly/RouterOSReadOnlyModule'));
 const UserManualModule = lazyWithRetry(() => import('./modules/user-manual/UserManualModule'));
@@ -1176,10 +1175,6 @@ export default function App() {
 
             {activeTab === 'provisioning' && (
               <ProvisioningCenterModule userRole={userSession.role} getAuthHeaders={getAuthHeaders} />
-            )}
-
-            {activeTab === 'automation' && (
-              <AutomationCenterModule userRole={userSession.role} getAuthHeaders={getAuthHeaders} />
             )}
 
             {activeTab === 'notifications' && (
