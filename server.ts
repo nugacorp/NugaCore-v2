@@ -6,6 +6,8 @@ import { logger } from './backend/common/logger';
 import { startNocPoller } from './backend/domains/noc-poller/service';
 import { startSnmpPoller } from './backend/domains/snmp-poller/service';
 import { hydrateMikrotikRoutersFromDb } from './backend/domains/mikrotik/repository';
+import { startWireguardHostApplyReconcile } from './backend/domains/wireguard/host-apply';
+import { getWireguardService } from './backend/domains/wireguard/service';
 
 // ── Modo de servido (Fase 4.5.2) ─────────────────────────────────────
 // El Vite dev server bloquea hosts desconocidos ("This host is not allowed")
@@ -113,6 +115,15 @@ async function startServer() {
     logger.info(`NugaCore server running on http://0.0.0.0:${env.PORT}`, { mode: env.NODE_ENV });
     startNocPoller();
     startSnmpPoller();
+    // Asegura loader + reconcile periódico peers → host wg0 (si apply está habilitado).
+    try {
+      getWireguardService();
+    } catch (err) {
+      logger.warn('WireGuard service no disponible al arrancar host-apply', {
+        error: err instanceof Error ? err.message : String(err),
+      });
+    }
+    startWireguardHostApplyReconcile();
   });
 }
 

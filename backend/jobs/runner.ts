@@ -87,3 +87,21 @@ registerJob('daily-collections-report', async () => {
   const summary = await getCollectionsService().getCashRegisterSummary();
   logger.info('daily_collections_report', { totalCents: summary.totalCents, entries: summary.entryCount });
 });
+
+registerJob('wireguard-host-apply', async () => {
+  const { isHostApplyEnabled, syncActivePeersToHost } = await import('../domains/wireguard/host-apply');
+  if (!isHostApplyEnabled()) {
+    logger.info('wireguard_host_apply_job_skipped', { reason: 'disabled' });
+    return;
+  }
+  const { getWireguardService } = await import('../domains/wireguard/service');
+  getWireguardService();
+  const result = await syncActivePeersToHost();
+  if (!result.ok) {
+    throw new Error(result.detail || 'wireguard host apply failed');
+  }
+  logger.info('wireguard_host_apply_job_ok', {
+    peersApplied: result.peersApplied,
+    skipped: result.skipped,
+  });
+});

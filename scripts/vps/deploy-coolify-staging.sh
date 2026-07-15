@@ -56,7 +56,39 @@ foreach (\$rows as \$row) { \$row->delete(); }
 \$v->resourceable_id = \$appId;
 \$v->save();
 " >/dev/null
-  log "env ${key}=${val}"
+  case "$key" in
+    *TOKEN*|*PASSWORD*|*SECRET*|*KEY*) log "env ${key}=***" ;;
+    *) log "env ${key}=${val}" ;;
+  esac
+}
+
+# WireGuard host-apply: peers → wg0 sin sync manual en cada alta.
+ensure_wg_host_apply_env() {
+  local token_file="${WG_HOST_APPLY_TOKEN_FILE:-/root/.wireguard/host-apply.token}"
+  local port="${WG_HOST_APPLY_PORT:-18765}"
+  local token="" gw="" url=""
+
+  if [[ ! -f "$token_file" ]]; then
+    log "WG host-apply: token ausente (${token_file}); omitiendo env (instala el agente)"
+    return 0
+  fi
+  if ! systemctl is-active --quiet nugacore-wg-host-apply.service 2>/dev/null; then
+    log "WG host-apply: servicio inactivo; omitiendo env"
+    return 0
+  fi
+
+  token="$(tr -d '\n\r' <"$token_file")"
+  [[ -n "$token" ]] || return 0
+
+  gw="$(ip -4 addr show docker0 2>/dev/null | awk '/inet /{print $2}' | cut -d/ -f1 || true)"
+  gw="${gw:-172.17.0.1}"
+  url="http://${gw}:${port}/apply"
+
+  upsert_env "WIREGUARD_HOST_APPLY_URL" "$url"
+  upsert_env "WIREGUARD_HOST_APPLY_TOKEN" "$token"
+  upsert_env "WIREGUARD_HOST_APPLY_ENABLED" "true"
+  upsert_env "WIREGUARD_HOST_APPLY_INTERVAL_MS" "60000"
+  log "WG host-apply automático → ${url}"
 }
 
 if [[ "$ADD_SNMP_ENV" == "true" ]]; then
@@ -75,6 +107,7 @@ if [[ "$ADD_SNMP_ENV" == "true" ]]; then
   upsert_env "SNMP_POLLER_INTERVAL_MS" "120000"
   upsert_env "NOC_POLLER_ENABLED" "false"
   # MIKROTIK_WORKER_LIVE queda false (piloto CHR lo activará)
+  ensure_wg_host_apply_env
 fi
 
 log "limpiando cola de deploy..."

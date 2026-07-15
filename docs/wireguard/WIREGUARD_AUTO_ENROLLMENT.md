@@ -23,9 +23,10 @@ LAN opcional, luego llama a este endpoint.
 **Lo que hace NugaCore internamente:**
 1. Crea el router en el registry (`provisioningStatus: 'pending'`)
 2. Llama a `WireGuard Manager.getPeerConfigForRouter()` — asigna IP del pool y genera keypair
-3. Genera el script `.rsc` con `router_base_wireguard` (todas las claves incrustadas)
-4. Crea el registro de enrollment (`status: 'script_generated'`)
-5. Devuelve el script **UNA sola vez** — nunca se persiste
+3. **Aplica el peer en el VPS (`wg0`) vía host-apply automático** — sin sync manual
+4. Genera el script `.rsc` con `router_base_wireguard` (todas las claves incrustadas)
+5. Crea el registro de enrollment (`status: 'script_generated'`)
+6. Devuelve el script **UNA sola vez** — nunca se persiste
 
 **Campos de respuesta:**
 ```json

@@ -29,6 +29,10 @@ import {
 } from './types';
 
 import { nowIso } from '../../common/time';
+import {
+  configureHostApplyPeerLoader,
+  flushHostPeerSync,
+} from './host-apply';
 
 /** CIDR de gestión/API: preferir el pool del servidor WG, no un default desalineado. */
 const peerAllowedCidr = (server: WireguardServerRecord, override?: string): string =>
@@ -52,7 +56,35 @@ export interface CreatePeerInput {
 }
 
 export class WireguardService {
-  constructor(private readonly repo: WireguardRepository) {}
+  constructor(private readonly repo: WireguardRepository) {
+    // El loader se reconfigura en cada instancia (incl. tests / reset).
+    configureHostApplyPeerLoader(async () => {
+      const peers = await this.repo.listPeers({ status: 'active' });
+      return peers.map((p) => ({
+        publicKey: p.publicKey,
+        allocatedIp: p.allocatedIp,
+        name: p.name,
+      }));
+    });
+  }
+
+  /** Sincroniza peers activos → host wg0 (await). No falla el flujo de negocio. */
+  private async syncHostAfterMutation(reason: string): Promise<void> {
+    try {
+      const result = await flushHostPeerSync();
+      if (!result.ok && !result.skipped) {
+        logger.warn('WireGuard: host-apply no aplicado tras mutación', {
+          reason,
+          detail: result.detail,
+        });
+      }
+    } catch (err) {
+      logger.warn('WireGuard: host-apply error tras mutación', {
+        reason,
+        error: err instanceof Error ? err.message : String(err),
+      });
+    }
+  }
 
   // ── saneado ────────────────────────────────────────────────────────
   private toServerView(rec: WireguardServerRecord, peersCount: number): WireguardServerView {
@@ -203,6 +235,8 @@ export class WireguardService {
       ip,
       reusedAllocation: Boolean(existingAlloc),
     });
+    // Await: el WISP debe poder importar el .rsc con el peer ya en wg0.
+    await this.syncHostAfterMutation('createPeer');
     return this.peerOnce(server, rec, kp.privateKey, psk);
   }
 
@@ -224,6 +258,8 @@ export class WireguardService {
     const rotId = await this.repo.nextId('rotation');
     await this.repo.recordRotation({ id: rotId, peerId, oldPublicKey: oldPub, newPublicKey: kp.publicKey, reason, actorId, createdAt: nowIso() });
     logger.info('WireGuard: peer rotado', { peerId, serverId: server.id });
+    // Full reconcile: quita pubkey vieja y aplica la nueva (evita peers huérfanos).
+    await this.syncHostAfterMutation('rotatePeer');
     return this.peerOnce(server, updated!, kp.privateKey, psk);
   }
 
@@ -236,6 +272,7 @@ export class WireguardService {
     const alloc = allocations.find((a) => a.ip === peer.allocatedIp && a.status === 'allocated');
     if (alloc) await this.repo.updateAllocation(alloc.id, { status: 'released', releasedAt: nowIso() });
     logger.info('WireGuard: peer revocado', { peerId });
+    await this.syncHostAfterMutation('revokePeer');
     return true;
   }
 

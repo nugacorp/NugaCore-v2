@@ -130,4 +130,12 @@ else
 fi
 
 wg show wg0 | sed 's/^/  /'
-log "siguiente paso: bash scripts/vps/sync-wireguard-peers.sh (tras crear peers)"
+
+# Agente de apply automático (alta/revocación/rotación sin sync manual).
+SETUP_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+if [[ -f "${SETUP_DIR}/install-wg-host-apply-agent.sh" ]]; then
+  log "instalando agente host-apply..."
+  bash "${SETUP_DIR}/install-wg-host-apply-agent.sh"
+else
+  log "aviso: install-wg-host-apply-agent.sh no encontrado; el apply automático queda pendiente"
+fi
