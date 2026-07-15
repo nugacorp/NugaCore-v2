@@ -5,6 +5,14 @@ export type AppRole = 'super admin' | 'administrador' | 'cobranza' | 'tecnico' |
 
 export const READ_ROLES: AppRole[] = ['super admin', 'administrador', 'cobranza', 'tecnico', 'soporte', 'solo lectura'];
 
+// Lectura de datos financieros (facturación, pagos, saldos, CFDI, P&L operativo):
+// solo roles de dinero. Técnico/Soporte/Solo-lectura → 403 (hardening P0 RBAC).
+export const BILLING_READ_ROLES: AppRole[] = ['super admin', 'administrador', 'cobranza'];
+
+// Lectura de operación de red (inventario/telemetría/worker MikroTik):
+// excluye Cobranza y Solo-lectura (hardening P0 RBAC).
+export const NETWORK_VIEW_ROLES: AppRole[] = ['super admin', 'administrador', 'tecnico', 'soporte'];
+
 export const normalizeRole = (value: string | string[] | undefined): AppRole | null => {
   const raw = Array.isArray(value) ? value[0] : value;
   const role = (raw || '').trim().toLowerCase();

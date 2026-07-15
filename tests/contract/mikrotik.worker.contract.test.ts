@@ -25,8 +25,8 @@ describe('Worker MikroTik — RBAC', () => {
   it('soporte NO puede correr el worker (403)', async () => {
     expect((await request(app).post('/api/mikrotik/worker/run').set(SOP).send({})).status).toBe(403);
   });
-  it('solo lectura puede ver runs pero no correr (403)', async () => {
-    expect((await request(app).get('/api/mikrotik/worker/runs').set(READER)).status).toBe(200);
+  it('solo lectura NO puede ver runs ni correr (403)', async () => {
+    expect((await request(app).get('/api/mikrotik/worker/runs').set(READER)).status).toBe(403);
     expect((await request(app).post('/api/mikrotik/worker/run').set(READER).send({})).status).toBe(403);
   });
 });

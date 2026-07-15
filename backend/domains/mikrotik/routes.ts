@@ -25,7 +25,9 @@ import { filterRoutersByTenant, findRouterForTenant } from './tenant-filter';
 const router = Router();
 
 // RBAC del provisioning (Fase 4.4)
-const PROV_VIEW_ROLES = ['super admin', 'administrador', 'tecnico', 'soporte', 'solo lectura'] as const;
+// Vista de provisioning/inventario MikroTik: excluye Cobranza y Solo-lectura
+// (hardening P0 RBAC — la lectura de red es de operación técnica).
+const PROV_VIEW_ROLES = ['super admin', 'administrador', 'tecnico', 'soporte'] as const;
 const PROV_SCRIPT_ROLES = ['super admin', 'administrador', 'tecnico'] as const;
 const PROV_ROTATE_ROLES = ['super admin', 'administrador'] as const;
 

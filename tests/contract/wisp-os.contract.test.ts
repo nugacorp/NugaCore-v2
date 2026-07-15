@@ -58,7 +58,7 @@ describe('API — MikroTik config audit', () => {
   beforeAll(() => { app = createApp(); });
 
   it('POST backup dry-run on router', async () => {
-    const routers = await request(app).get('/api/mikrotik/routers').set(READER);
+    const routers = await request(app).get('/api/mikrotik/routers').set(ADMIN);
     const routerId = routers.body[0]?.id;
     if (!routerId) return;
     const res = await request(app).post(`/api/mikrotik/${routerId}/backups`).set(ADMIN).send({
@@ -138,7 +138,7 @@ describe('API — CFDI stub', () => {
   beforeAll(() => { app = createApp(); });
 
   it('GET /api/finance/cfdi/status -> stub', async () => {
-    const res = await request(app).get('/api/finance/cfdi/status').set(READER);
+    const res = await request(app).get('/api/finance/cfdi/status').set(ADMIN);
     expect(res.status).toBe(200);
     expect(res.body.mode).toBe('stub');
     expect(res.body.timbrado).toBe(false);
