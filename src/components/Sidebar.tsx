@@ -107,7 +107,7 @@ export default function Sidebar({
       icon: Network,
       items: [
         { id: 'noc', name: 'NOC', icon: ShieldAlert },
-        { id: 'gis', name: 'Mapa de Red', icon: Map },
+        { id: 'gis', name: 'Mapa FTTH', icon: Map },
         { id: 'network', name: 'Torres y Sitios', icon: Network },
       ],
     },

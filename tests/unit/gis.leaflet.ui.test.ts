@@ -6,8 +6,9 @@ describe('GIS Co-Map Leaflet', () => {
   const mapSource = readFileSync('src/components/gis/GisLeafletMap.tsx', 'utf8');
   const csp = readFileSync('backend/common/http-security.ts', 'utf8');
 
-  it('usa Leaflet en el visualizador central', () => {
+  it('usa Leaflet en el visualizador FTTH', () => {
     expect(moduleSource).toContain('GisLeafletMap');
+    expect(moduleSource).toContain('Mapa FTTH');
     expect(mapSource).toContain('MapContainer');
     expect(mapSource).toContain('basemaps.cartocdn.com');
     expect(mapSource).toContain('scrollWheelZoom');

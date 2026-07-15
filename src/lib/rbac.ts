@@ -128,7 +128,7 @@ export const MODULE_LABELS: Record<AppTab, string> = {
   'inventory-routers': 'Routers',
   'inventory-sync': 'Sincronización Inventario',
   provisioning: 'Centro de Aprovisionamiento',
-  gis: 'Mapa de Red',
+  gis: 'Mapa FTTH',
   owner: 'Configuración',
   'manual-safe-mode': 'Modo Seguro Manual',
   'safe-command-queue': 'Cola de Comandos (Dry-Run)',
