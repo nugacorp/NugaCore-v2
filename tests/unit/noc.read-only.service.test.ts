@@ -25,9 +25,9 @@ afterEach(() => {
 });
 
 describe('nocReadOnlyService', () => {
-  it('summary es estable con 0 routers', () => {
+  it('summary es estable con 0 routers', async () => {
     setRouters([]);
-    expect(nocReadOnlyService.getSummary()).toEqual({
+    expect(await nocReadOnlyService.getSummary()).toEqual({
       totalRouters: 0,
       onlineRouters: 0,
       offlineRouters: 0,
@@ -41,7 +41,7 @@ describe('nocReadOnlyService', () => {
     });
   });
 
-  it('routers devuelve campos operativos requeridos y sin secretos', () => {
+  it('routers devuelve campos operativos requeridos y sin secretos', async () => {
     setRouters([
       mockRouter({
         id: 'r1',
@@ -54,7 +54,7 @@ describe('nocReadOnlyService', () => {
       }),
     ]);
 
-    const rows = nocReadOnlyService.listRouters();
+    const rows = await nocReadOnlyService.listRouters();
     expect(rows.length).toBe(1);
     expect(rows[0]).toMatchObject({
       id: 'r1',
@@ -76,14 +76,14 @@ describe('nocReadOnlyService', () => {
     expect(serialized).not.toContain('username');
   });
 
-  it('alertas derivadas son determinísticas para el mismo dataset', () => {
+  it('alertas derivadas son determinísticas para el mismo dataset', async () => {
     setRouters([
       mockRouter({ id: 'r-off', name: 'Offline', isOnline: false, lastHealthCheckAt: '2026-06-18 09:00' }),
       mockRouter({ id: 'r-hot', name: 'Hot', isOnline: true, cpuUsagePct: 95, memoryUsagePct: 85, lastHealthCheckAt: '2026-06-18 10:00' }),
     ]);
 
-    const first = nocReadOnlyService.listAlerts();
-    const second = nocReadOnlyService.listAlerts();
+    const first = await nocReadOnlyService.listAlerts();
+    const second = await nocReadOnlyService.listAlerts();
 
     expect(second).toEqual(first);
     expect(first.length).toBeGreaterThan(0);

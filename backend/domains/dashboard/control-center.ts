@@ -42,7 +42,7 @@ export async function buildControlCenter() {
     return { towerId: t.id, towerName: t.name, clientsCount: clientsOnTower, sectorCount: sectors.length, status: t.status };
   });
 
-  const nocSummary = nocReadOnlyService.getSummary();
+  const nocSummary = await nocReadOnlyService.getSummary();
 
   const activePromises = await getCollectionsService().getActivePromisesCount();
 
