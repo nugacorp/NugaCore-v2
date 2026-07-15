@@ -173,7 +173,7 @@ const SECTIONS: ManualSection[] = [
     icon: Wifi,
     summary: 'Onboarding guiado de un router nuevo. El acceso VPN se prepara automáticamente.',
     steps: [
-      'Entra a "MikroTik → Alta de Router".',
+      'Entra a "MikroTik → Routers" y pulsa "Dar de alta".',
       'Completa el asistente con los datos del router y el tipo de conexión.',
       'El sistema genera el script de provisioning y prepara el acceso interno por VPN sin pasos manuales.',
     ],

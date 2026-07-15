@@ -12,7 +12,6 @@ import {
   Shield,
   Ban,
   BookOpen,
-  Wifi,
   X,
   LogOut,
   ChevronLeft,
@@ -121,7 +120,6 @@ export default function Sidebar({
       id: 'equipos-mikrotik',
       title: 'MikroTik',
       items: [
-        { id: 'router-enrollment', name: 'Alta de Router', icon: Wifi },
         { id: 'inventory-routers', name: 'Routers', icon: Cpu },
         { id: 'routeros-templates', name: 'Plantillas', icon: BookOpen },
       ],

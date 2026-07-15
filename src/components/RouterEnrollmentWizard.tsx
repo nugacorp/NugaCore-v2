@@ -102,6 +102,10 @@ interface WizardForm {
 interface Props {
   userRole: UserRole;
   getAuthHeaders: () => Promise<Record<string, string>>;
+  /** Cuando el wizard se embebe en Routers, permite volver al inventario. */
+  onBack?: () => void;
+  /** Si true, abre directo en el asistente (sin lista previa). */
+  startInWizard?: boolean;
 }
 
 // ── Helpers ────────────────────────────────────────────────────────────
@@ -134,8 +138,13 @@ const sanitizeScript = (script: string): string =>
 
 // ── Componente principal ───────────────────────────────────────────────
 
-export default function RouterEnrollmentWizard({ userRole, getAuthHeaders }: Props) {
-  const [view, setView] = useState<'list' | 'wizard'>('list');
+export default function RouterEnrollmentWizard({
+  userRole,
+  getAuthHeaders,
+  onBack,
+  startInWizard = false,
+}: Props) {
+  const [view, setView] = useState<'list' | 'wizard'>(startInWizard ? 'wizard' : 'list');
   const [step, setStep] = useState(1);
   const [servers, setServers] = useState<WgServer[]>([]);
   const [enrollments, setEnrollments] = useState<EnrollmentView[]>([]);
@@ -182,6 +191,13 @@ export default function RouterEnrollmentWizard({ userRole, getAuthHeaders }: Pro
     loadEnrollments();
   }, [loadServers, loadEnrollments]);
 
+  // Si arranca embebido en paso 1, asignar WG server cuando cargue el catálogo.
+  useEffect(() => {
+    if (!startInWizard || view !== 'wizard') return;
+    if (form.wgServerId || servers.length === 0) return;
+    setForm((prev) => ({ ...prev, wgServerId: servers[0].id }));
+  }, [startInWizard, view, form.wgServerId, servers]);
+
   // ── Wizard: acciones ─────────────────────────────────────────────
 
   const startWizard = () => {
@@ -195,6 +211,11 @@ export default function RouterEnrollmentWizard({ userRole, getAuthHeaders }: Pro
     setStep(1);
     setError('');
     setView('wizard');
+  };
+
+  const leaveToParent = () => {
+    if (onBack) onBack();
+    else setView('list');
   };
 
   const handleGenerate = async () => {
@@ -304,11 +325,21 @@ export default function RouterEnrollmentWizard({ userRole, getAuthHeaders }: Pro
   if (view === 'list') {
     return (
       <div className="p-6 space-y-6">
-        <div className="flex items-center justify-between">
+        <div className="flex items-center justify-between flex-wrap gap-3">
           <div className="flex items-center gap-3">
+            {onBack && (
+              <button
+                type="button"
+                onClick={onBack}
+                className="inline-flex items-center gap-1.5 px-3 py-2 rounded-lg bg-slate-900 border border-slate-700 text-sm text-slate-300 hover:bg-slate-800"
+              >
+                <ChevronLeft size={16} />
+                Routers
+              </button>
+            )}
             <Wifi className="text-green-400" size={24} />
             <div>
-              <h2 className="text-xl font-bold text-white">Enrollment WireGuard Auto</h2>
+              <h2 className="text-xl font-bold text-white">Alta de Router</h2>
               <p className="text-sm text-gray-400">
                 Incorpora routers MikroTik a NugaCore via WireGuard automáticamente.
               </p>
@@ -409,16 +440,28 @@ export default function RouterEnrollmentWizard({ userRole, getAuthHeaders }: Pro
   return (
     <div className="p-6 space-y-6">
       {/* Cabecera wizard */}
-      <div className="flex items-center gap-3">
+      <div className="flex items-center gap-3 flex-wrap">
+        {onBack && (
+          <button
+            type="button"
+            onClick={leaveToParent}
+            className="inline-flex items-center gap-1.5 px-3 py-2 rounded-lg bg-slate-900 border border-slate-700 text-sm text-slate-300 hover:bg-slate-800"
+          >
+            <ChevronLeft size={16} />
+            Routers
+          </button>
+        )}
         <button
+          type="button"
           onClick={() => setView('list')}
           className="p-2 hover:bg-gray-700 rounded-lg transition-colors"
+          title="Ver enrollments"
         >
           <List size={18} className="text-gray-400" />
         </button>
         <Wifi className="text-green-400" size={22} />
         <div>
-          <h2 className="text-lg font-bold text-white">Nuevo Enrollment WireGuard</h2>
+          <h2 className="text-lg font-bold text-white">Alta de Router</h2>
           <p className="text-xs text-gray-400">Paso {step} de {STEP_LABELS.length}: {STEP_LABELS[step - 1]}</p>
         </div>
       </div>

@@ -18,13 +18,14 @@ const EXPECTED_SECTIONS: Array<{ title: string; ids: string[] }> = [
   { title: 'Clientes', ids: ['crm', 'commercial', 'portal', 'support', 'tech-pwa'] },
   { title: 'Facturación', ids: ['billing', 'payments', 'suspension', 'finance'] },
   { title: 'Red', ids: ['noc', 'gis', 'network'] },
-  { title: 'MikroTik', ids: ['router-enrollment', 'inventory-routers', 'routeros-templates'] },
+  { title: 'MikroTik', ids: ['inventory-routers', 'routeros-templates'] },
   { title: 'Operaciones', ids: ['inventory'] },
   { title: 'Sistema', ids: ['owner', 'automation', 'notifications', 'user-manual'] },
 ];
 
 const HIDDEN_TAB_IDS = [
   'wireguard',
+  'router-enrollment',
   'manual-safe-mode',
   'safe-command-queue',
   'mikrotik',
@@ -80,10 +81,16 @@ describe('Sidebar — secciones reorganizadas (WISP LATAM)', () => {
     });
   }
 
-  it('MikroTik prioriza Alta de Router (flujo WISP)', () => {
+  it('MikroTik prioriza Routers; el alta vive dentro del módulo (no item aparte)', () => {
     const block = sectionBlock('MikroTik');
-    expect(block.indexOf("id: 'router-enrollment'")).toBeLessThan(block.indexOf("id: 'inventory-routers'"));
+    expect(block).toContain("id: 'inventory-routers'");
+    expect(block).toContain("id: 'routeros-templates'");
+    expect(block).not.toContain("id: 'router-enrollment'");
     expect(block.indexOf("id: 'inventory-routers'")).toBeLessThan(block.indexOf("id: 'routeros-templates'"));
+    expect(rbacSource).toContain("'router-enrollment'");
+    expect(rbacSource).toContain('SIDEBAR_HIDDEN_TABS');
+    expect(appSource).toContain('routersOpenEnrollment');
+    expect(appSource).toContain("activeTab === 'inventory-routers' || activeTab === 'router-enrollment'");
   });
 
   it('Finanzas vive en Facturación (no sección aparte)', () => {
@@ -130,7 +137,7 @@ describe('Sidebar — módulos avanzados ocultos pero conservados', () => {
 
 describe('Sidebar — no se elimina ningún módulo', () => {
   it('los módulos visibles están presentes en el sidebar', () => {
-    expect(VISIBLE_TAB_IDS.length).toBe(22);
+    expect(VISIBLE_TAB_IDS.length).toBe(21);
     for (const id of VISIBLE_TAB_IDS) {
       expect(sidebarSource, `falta el módulo visible ${id}`).toContain(`id: '${id}'`);
     }

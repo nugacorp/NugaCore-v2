@@ -9,18 +9,23 @@ import {
   AlertTriangle,
   ServerCrash,
   Server,
+  Plus,
 } from 'lucide-react';
+import type { UserRole } from '../lib/supabase';
+import { canStartEnrollment } from '../lib/enrollmentRbac';
+import RouterEnrollmentWizard from './RouterEnrollmentWizard';
 
 // ====================================================================
-// Inventory Read-Only de routers MikroTik (Fase 4.11.1).
+// Inventario de routers MikroTik + alta embebida.
 //
-// Vista SOLO LECTURA del inventario de routers, derivada de `mikrotik_routers`
-// (modelo canónico DB-1). No ejecuta RouterOS, no envía comandos, no escribe.
-// `USE_DB_MIKROTIK` permanece apagado: los datos vienen del backend local.
+// Vista del inventario (`mikrotik_routers`) y botón "Dar de alta" que abre
+// el flujo existente de enrollment (RouterEnrollmentWizard), sin sección
+// separada en el sidebar.
 // ====================================================================
 
 type RouterOnlineStatus = 'online' | 'offline';
 type RouterProvisioningStatus = 'pending' | 'provisioned' | 'connected' | 'error';
+export type RoutersPanel = 'inventory' | 'enrollment';
 
 interface InventoryRouterView {
   id: string;
@@ -56,6 +61,10 @@ interface InventorySummary {
 
 interface Props {
   getAuthHeaders: () => Promise<Record<string, string>>;
+  userRole: UserRole;
+  /** Panel activo controlado por App (inventario vs alta). */
+  panel: RoutersPanel;
+  onPanelChange: (panel: RoutersPanel) => void;
 }
 
 const PROV_BADGE: Record<RouterProvisioningStatus, string> = {
@@ -67,11 +76,19 @@ const PROV_BADGE: Record<RouterProvisioningStatus, string> = {
 
 const dash = (value?: string): string => (value && value.trim() !== '' ? value : '—');
 
-export default function InventoryRoutersModule({ getAuthHeaders }: Props) {
+export default function InventoryRoutersModule({
+  getAuthHeaders,
+  userRole,
+  panel,
+  onPanelChange,
+}: Props) {
   const [routers, setRouters] = useState<InventoryRouterView[]>([]);
   const [summary, setSummary] = useState<InventorySummary | null>(null);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string>('');
+
+  const canEnroll = canStartEnrollment(userRole);
+  const showEnrollment = panel === 'enrollment' && canEnroll;
 
   const load = useCallback(async () => {
     setLoading(true);
@@ -92,8 +109,20 @@ export default function InventoryRoutersModule({ getAuthHeaders }: Props) {
   }, [getAuthHeaders]);
 
   useEffect(() => {
+    if (showEnrollment) return;
     void load();
-  }, [load]);
+  }, [load, showEnrollment]);
+
+  if (showEnrollment) {
+    return (
+      <RouterEnrollmentWizard
+        userRole={userRole}
+        getAuthHeaders={getAuthHeaders}
+        startInWizard
+        onBack={() => onPanelChange('inventory')}
+      />
+    );
+  }
 
   const summaryCards: { label: string; value: number; icon: React.ElementType }[] = summary
     ? [
@@ -115,17 +144,17 @@ export default function InventoryRoutersModule({ getAuthHeaders }: Props) {
         <div>
           <h2 className="text-2xl font-bold flex items-center space-x-2">
             <Boxes className="w-6 h-6 text-indigo-400" />
-            <span>Inventario de Routers</span>
+            <span>Routers</span>
           </h2>
           <p className="text-sm text-slate-400 mt-1">
-            Vista derivada de <code className="text-indigo-300">mikrotik_routers</code>. Solo lectura.
-            Al revocar/eliminar en Alta de Router se quita también de aquí.
+            Inventario de routers MikroTik. Usa <span className="text-indigo-300">Dar de alta</span> para
+            incorporar un equipo nuevo.
           </p>
         </div>
-        <div className="flex items-center gap-3">
+        <div className="flex items-center gap-3 flex-wrap">
           <span className="inline-flex items-center space-x-1.5 px-2.5 py-1 rounded-lg bg-slate-900 border border-slate-800 text-xs text-slate-400 font-mono">
             <Lock className="w-3.5 h-3.5 text-emerald-400" />
-            <span>READ-ONLY</span>
+            <span>INVENTARIO</span>
           </span>
           <button
             type="button"
@@ -136,6 +165,17 @@ export default function InventoryRoutersModule({ getAuthHeaders }: Props) {
             <RefreshCw className={`w-4 h-4 ${loading ? 'animate-spin' : ''}`} />
             <span>Actualizar</span>
           </button>
+          {canEnroll && (
+            <button
+              type="button"
+              id="routers-dar-de-alta-btn"
+              onClick={() => onPanelChange('enrollment')}
+              className="inline-flex items-center space-x-2 px-4 py-2 rounded-lg bg-green-600 hover:bg-green-700 text-sm font-medium text-white transition-colors"
+            >
+              <Plus className="w-4 h-4" />
+              <span>Dar de alta</span>
+            </button>
+          )}
         </div>
       </div>
 
@@ -172,7 +212,17 @@ export default function InventoryRoutersModule({ getAuthHeaders }: Props) {
           <div className="flex flex-col items-center justify-center py-16 text-center text-slate-500">
             <Boxes className="w-10 h-10 mb-3 text-slate-700" />
             <p className="font-medium text-slate-400">No hay routers en el inventario</p>
-            <p className="text-xs mt-1">Los routers registrados en <code>mikrotik_routers</code> aparecerán aquí.</p>
+            <p className="text-xs mt-1">Da de alta un router para que aparezca aquí tras generar el script.</p>
+            {canEnroll && (
+              <button
+                type="button"
+                onClick={() => onPanelChange('enrollment')}
+                className="mt-4 inline-flex items-center gap-2 px-4 py-2 rounded-lg bg-green-600 hover:bg-green-700 text-sm font-medium text-white"
+              >
+                <Plus className="w-4 h-4" />
+                Dar de alta
+              </button>
+            )}
           </div>
         ) : (
           <div className="overflow-x-auto">
@@ -230,7 +280,7 @@ export default function InventoryRoutersModule({ getAuthHeaders }: Props) {
       </div>
 
       <p className="text-xs text-slate-600">
-        Solo lectura: esta vista no modifica routers, no ejecuta RouterOS ni envía comandos.
+        El inventario es de consulta. El alta de routers abre el asistente de enrollment existente.
       </p>
     </div>
   );

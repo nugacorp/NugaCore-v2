@@ -52,6 +52,8 @@ const roleTabs: Record<UserRole, AppTab[]> = {
 // ACCESIBLES por su rol (canAccessTab = true, acceso directo por tab/URL,
 // workspace in-page o enlaces internos) pero NO se listan en el menú WISP:
 //  - wireguard: infra interna; peers automáticos en Alta de Router.
+//  - router-enrollment: el alta vive dentro de MikroTik → Routers (botón
+//    "Dar de alta"); sigue accesible por tab/workspace/RBAC.
 //  - manual-safe-mode / safe-command-queue: seguridad / dry-run interno.
 //  - mikrotik / routeros-resources: panel core y scripts avanzados; el flujo
 //    diario usa Routers + Plantillas + workspace in-page.
@@ -61,6 +63,7 @@ const roleTabs: Record<UserRole, AppTab[]> = {
 // ====================================================================
 const SIDEBAR_HIDDEN_TABS: ReadonlySet<AppTab> = new Set<AppTab>([
   'wireguard',
+  'router-enrollment',
   'manual-safe-mode',
   'safe-command-queue',
   'mikrotik',
