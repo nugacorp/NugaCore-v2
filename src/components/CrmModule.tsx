@@ -22,11 +22,14 @@ import {
   PackageCheck,
   Crosshair,
   MoreVertical,
-  Copy
+  Copy,
+  Link2,
+  Check,
 } from 'lucide-react';
 import { Client, Plan } from '../types';
 import type { UserRole } from '../lib/supabase';
 import { clientActionCaps } from '../lib/rbac';
+import { buildPortalShareUrl } from '../lib/portalLinks';
 import ClientActionsMenu, { ClientQuickAction } from './ClientActionsMenu';
 import Client360Panel, { ClientHistoryEntry, ClientBillingSummary, ClientServiceStatusView } from './Client360Panel';
 import {
@@ -170,6 +173,7 @@ export default function CrmModule({
   const [equipmentError, setEquipmentError] = useState('');
   const [isLeadForm, setIsLeadForm] = useState(false);
   const [selectedClient, setSelectedClient] = useState<Client | null>(null);
+  const [portalLinkCopied, setPortalLinkCopied] = useState(false);
 
   // ── Client 360 + acciones rápidas ───────────────────────────────────
   const caps = clientActionCaps(userRole);
@@ -1102,6 +1106,32 @@ export default function CrmModule({
                       Abrir Mapa ↗
                     </a>
                   </div>
+                </div>
+
+                <div>
+                  <span className="text-slate-500 block uppercase text-[9px] font-mono mb-1">Portal del cliente</span>
+                  <button
+                    id="crm-copy-portal-link"
+                    type="button"
+                    onClick={() => {
+                      try {
+                        const url = buildPortalShareUrl(window.location.origin, selectedClient.id);
+                        void navigator.clipboard.writeText(url).then(() => {
+                          setPortalLinkCopied(true);
+                          window.setTimeout(() => setPortalLinkCopied(false), 2000);
+                        });
+                      } catch {
+                        /* ignore */
+                      }
+                    }}
+                    className="w-full py-2 px-3 bg-sky-950/50 hover:bg-sky-900/40 border border-sky-800/40 text-sky-200 rounded-xl transition text-[11px] font-semibold flex items-center justify-center gap-1.5"
+                  >
+                    {portalLinkCopied ? <Check className="w-3.5 h-3.5" /> : <Link2 className="w-3.5 h-3.5" />}
+                    <span>{portalLinkCopied ? 'Enlace copiado' : 'Copiar enlace del portal'}</span>
+                  </button>
+                  <p className="text-[10px] text-slate-600 font-mono mt-1 leading-snug">
+                    Compártelo para que el abonado abra su portal (`/?app=portal&client=…`).
+                  </p>
                 </div>
 
                 {/* Docs / Photos Placeholder */}
