@@ -87,13 +87,29 @@ crear/rotar/revocar peer. Modal que muestra los secretos **una sola vez** con co
 | `npm test` | ✅ 322 passed / 34 skipped (20 nuevos) |
 | `npm run build` | ✅ |
 
-## 10. Riesgos restantes
+## 10. Host-apply automático (wg0)
 
-- El servidor WireGuard físico (VPS) y el registro real del peer en `wg0` se operan fuera de NugaCore (esta fase deja el modelo y la generación listos; la sincronización automática con el servidor real es trabajo posterior).
+Tras `createPeer` / `rotatePeer` / `revokePeer`, NugaCore empuja el **conjunto completo**
+de peers activos al agente del VPS (`WIREGUARD_HOST_APPLY_URL`). El agente reescribe
+`/etc/wireguard/wg0.conf` y aplica con `wg syncconf` (sin teardown). Un reconcile
+periódico (`WIREGUARD_HOST_APPLY_INTERVAL_MS`, default 60s) corrige drift y claves viejas.
+
+| Pieza | Rol |
+|---|---|
+| `backend/domains/wireguard/host-apply.ts` | Cliente HTTP + reconcile |
+| `scripts/vps/wg-host-apply-agent.py` | Agente root en el VPS |
+| `scripts/vps/install-wg-host-apply-agent.sh` | systemd `nugacore-wg-host-apply` |
+| Env Coolify | `WIREGUARD_HOST_APPLY_URL`, `WIREGUARD_HOST_APPLY_TOKEN` |
+
+`scripts/vps/sync-wireguard-peers.sh` queda solo como recuperación manual.
+
+## 11. Riesgos restantes
+
+- El agente host-apply debe estar instalado y alcanzable desde el contenedor de la app.
 - Por defecto en memoria (`USE_DB_WIREGUARD=false`): se reinicia con el proceso. Activar DB para persistencia.
 - No hay ejecución en routers; sin live read-only ni commit mode.
 
-## 11. Instrucciones para Hermes
+## 12. Instrucciones para Hermes
 
 1. **RBAC**: con Técnico/Cobranza, `/api/wireguard/*` → 403; con SA/Admin → 200.
 2. **Servidor**: `POST /api/wireguard/servers {name, endpointHost}` → `server.publicKey` + `serverPrivateKey` (una vez).
