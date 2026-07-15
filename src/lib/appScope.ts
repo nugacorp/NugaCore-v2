@@ -87,3 +87,23 @@ export function getAppScope(): AppScope {
 export function __resetAppScopeCache(): void {
   cachedScope = null;
 }
+
+/**
+ * Los scopes portal y tech son "aislados": se renderizan con shell propio
+ * (IsolatedAppShell) y no muestran el Sidebar ni los menús de WISP admin.
+ */
+export function isIsolatedScope(scope: AppScope): boolean {
+  return scope === 'portal' || scope === 'tech';
+}
+
+/**
+ * Devuelve el tab forzado para scopes aislados, o null para admin.
+ * El tab no debe cambiar mientras dure la sesión en ese scope.
+ */
+export function forcedTabForScope(scope: AppScope): 'portal' | 'tech-pwa' | null {
+  switch (scope) {
+    case 'portal': return 'portal';
+    case 'tech': return 'tech-pwa';
+    default: return null;
+  }
+}

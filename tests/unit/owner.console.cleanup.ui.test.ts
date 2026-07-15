@@ -19,4 +19,20 @@ describe('Consola del propietario — sin simulador ni workflows IA', () => {
     expect(source).toContain('Consola del Propietario');
     expect(source).toContain('Seguridad (MFA & API Logs)');
   });
+
+  it('no contiene emails de auditoría hardcoded (fake audit logs)', () => {
+    expect(source).not.toContain('rnrgool@gmail.com');
+    expect(source).not.toContain('miriam.valdez@nuga.com');
+    expect(source).not.toContain('carlos.ortiz@nuga.com');
+    expect(source).not.toContain('audit-1');
+  });
+
+  it('no muestra Stripe Gateway como "Conectado (Live)" — sin datos mock', () => {
+    expect(source).not.toContain('Conectado (Live)');
+    expect(source).toContain('No conectado');
+  });
+
+  it('MFA toggle etiqueta preferencia local pendiente de backend', () => {
+    expect(source).toContain('pendiente de backend');
+  });
 });

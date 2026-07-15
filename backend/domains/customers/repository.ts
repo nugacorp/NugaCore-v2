@@ -14,6 +14,7 @@ import type { SupabaseClient } from '@supabase/supabase-js';
 import { Client } from '../../../src/types';
 import { ClientTimelineEvent, store } from '../../state/store';
 import { logger } from '../../common/logger';
+import { ConflictError } from '../../common/errors';
 import {
   ClientRow,
   TimelineRow,
@@ -166,12 +167,57 @@ export class SupabaseCustomersRepository implements CustomersRepository {
   }
 
   async remove(id: string): Promise<boolean> {
-    // client_timeline / invoices / onus en DB caen por FK ON DELETE CASCADE.
+    // Attempt to clean up RESTRICT-FK dependents in dependency order so that
+    // the final clients DELETE does not hit a 23503 FK violation.
+    const depTables: string[] = [
+      'payment_applications',
+      'payment_receipts',
+      'payments',
+      'credit_applications',
+      'credit_notes',
+      'adjustments',
+      'invoice_payments',
+      'invoice_items',
+      'invoices',
+      'service_subscriptions',
+      'customer_service_state',
+      'suspension_orders',
+      'suspension_events',
+      'client_timeline',
+      'client_documents',
+      'client_tags',
+      'client_alternate_contacts',
+      'client_activity_log',
+      'payment_promises',
+      'onus',
+    ];
+
+    for (const table of depTables) {
+      try {
+        await this.client.from(table).delete().eq('client_id', id);
+      } catch {
+        // Table may not exist yet or FK column differs — continue to next
+      }
+    }
+
     const { error, count } = await this.client
       .from(CLIENTS_TABLE)
       .delete({ count: 'exact' })
       .eq('id', id);
-    if (error) return fail('remove', error);
+
+    if (error) {
+      if (
+        typeof error === 'object' &&
+        error !== null &&
+        'code' in error &&
+        (error as { code: string }).code === '23503'
+      ) {
+        throw new ConflictError(
+          'No se puede eliminar: el cliente tiene historial financiero o relaciones bloqueantes. Baja comercial o limpia dependencias primero.',
+        );
+      }
+      return fail('remove', error);
+    }
     return (count ?? 0) > 0;
   }
 

@@ -113,14 +113,6 @@ export default function FinanceOwnerModule({
   // --- Sub-Tab 5: Security & API Config ---
   const [mfaEnabled, setMfaEnabled] = useState(true);
   const [selectedRoleFilter, setSelectedRoleFilter] = useState<'all' | 'Admin' | 'Tecnico' | 'Cajero'>('all');
-  const [auditLogs] = useState([
-    { id: 'audit-1', user: 'rnrgool@gmail.com', role: 'Admin', action: 'Provisionó ONU GPON cliente Sofia', ip: '189.201.2.22', timestamp: '2026-05-31 04:30:15' },
-    { id: 'audit-2', user: 'miriam.valdez@nuga.com', role: 'Cajero', action: 'Registró Pago Invoice fac-101 (SPEI)', ip: '189.201.2.45', timestamp: '2026-05-31 02:15:10' },
-    { id: 'audit-3', user: 'carlos.ortiz@nuga.com', role: 'Tecnico', action: 'Actualizó estatus Orden de Trabajo #12 a "Completada"', ip: '172.56.12.89', timestamp: '2026-05-30 18:22:04' },
-    { id: 'audit-4', user: 'rnrgool@gmail.com', role: 'Admin', action: 'Editó límites de velocidad en perfil de plan empresarial', ip: '189.201.2.22', timestamp: '2026-05-30 16:40:02' },
-  ]);
-
-  const filteredAuditLogs = auditLogs.filter(log => selectedRoleFilter === 'all' || log.role === selectedRoleFilter);
 
   // Math totals for Finanzas
   const totalIngresosFacturados = invoices.reduce((acc, current) => acc + current.amount, 0);
@@ -538,26 +530,17 @@ export default function FinanceOwnerModule({
                 </select>
               </div>
 
-              <div className="space-y-3.5 max-h-[380px] overflow-y-auto">
-                {filteredAuditLogs.map(log => (
-                  <div key={log.id} className="p-3 bg-slate-900/40 border border-slate-900 rounded-xl flex items-start justify-between gap-3 text-xs font-mono">
-                    <div className="space-y-1">
-                      <div className="flex items-center space-x-2">
-                        <span className="font-bold text-white">{log.user}</span>
-                        <span className="text-[9px] bg-slate-800 text-slate-400 border border-slate-700 px-1.5 py-0.2 rounded font-bold uppercase">
-                          {log.role}
-                        </span>
-                      </div>
-                      <p className="text-slate-300 text-xs leading-relaxed font-sans">{log.action}</p>
-                      <span className="text-[9px] text-slate-500">Origen IP: {log.ip}</span>
-                    </div>
-
-                    <span className="text-[9px] text-slate-500 shrink-0 flex items-center">
-                      <Clock className="w-3.5 h-3.5 text-slate-600 inline-block mr-1" />
-                      {log.timestamp}
+              <div className="flex flex-col items-center justify-center py-10 text-center space-y-2 text-slate-500 font-mono text-xs">
+                <Clock className="w-8 h-8 text-slate-700 mb-1" />
+                <p className="text-slate-400 font-semibold">Sin bitácora real todavía.</p>
+                <p className="text-slate-600 leading-relaxed max-w-xs">
+                  Cuando exista auditoría persistida, aparecerá aquí.
+                  {selectedRoleFilter !== 'all' && (
+                    <span className="block mt-1 text-amber-500/70">
+                      Filtro de rol activo: {selectedRoleFilter}
                     </span>
-                  </div>
-                ))}
+                  )}
+                </p>
               </div>
             </div>
 
@@ -574,7 +557,7 @@ export default function FinanceOwnerModule({
                 <div className="flex justify-between items-center text-xs">
                   <div>
                     <span className="font-bold text-white block">Autenticación MFA / SSO</span>
-                    <span className="text-[10px] text-slate-500 block leading-tight mt-0.5">Fuerza verificación OAuth/OAuth2</span>
+                    <span className="text-[10px] text-slate-500 block leading-tight mt-0.5">Preferencia local — pendiente de backend</span>
                   </div>
                   <label className="relative inline-flex items-center cursor-pointer">
                     <input
@@ -588,26 +571,26 @@ export default function FinanceOwnerModule({
                 </div>
               </div>
 
-              {/* API Integration Key Mock Statuses */}
+              {/* API Integration Status — no fake data */}
               <div className="bg-slate-950 border border-slate-800 p-5 rounded-2xl space-y-3.5">
-                <span className="text-xs font-mono font-bold text-indigo-400 block uppercase tracking-wider">Servicio de APIs Externas</span>
-                <h3 className="text-sm font-bold text-white font-mono uppercase">Estado de Integraciones</h3>
+                <span className="text-xs font-mono font-bold text-indigo-400 block uppercase tracking-wider">Integraciones Externas</span>
+                <h3 className="text-sm font-bold text-white font-mono uppercase">Estado de Conexiones</h3>
 
                 <div className="space-y-2.5 text-xs font-mono font-semibold">
                   <div className="flex justify-between items-center bg-slate-900/60 p-2 rounded-lg border border-slate-900">
                     <div className="flex items-center space-x-1.5">
-                      <Key className="w-3.5 h-3.5 text-indigo-400" />
+                      <Key className="w-3.5 h-3.5 text-slate-500" />
                       <span>Stripe Gateway</span>
                     </div>
-                    <span className="text-[9px] text-slate-500 uppercase">Conectado (Live)</span>
+                    <span className="text-[9px] text-amber-500 uppercase">No conectado — sin datos mock</span>
                   </div>
 
                   <div className="flex justify-between items-center bg-slate-900/60 p-2 rounded-lg border border-slate-900">
                     <div className="flex items-center space-x-1.5">
-                      <Key className="w-3.5 h-3.5 text-emerald-400" />
+                      <Key className="w-3.5 h-3.5 text-slate-500" />
                       <span>WhatsApp Cloud API</span>
                     </div>
-                    <span className="text-[9px] text-slate-500 uppercase">Conectado (Live)</span>
+                    <span className="text-[9px] text-amber-500 uppercase">No conectado — sin datos mock</span>
                   </div>
 
                   <div className="flex justify-between items-center bg-slate-900/60 p-2 rounded-lg border border-slate-900">
@@ -615,15 +598,15 @@ export default function FinanceOwnerModule({
                       <Key className="w-3.5 h-3.5 text-amber-400" />
                       <span>Mikrotik ROS API</span>
                     </div>
-                    <span className="text-[9px] text-slate-500 uppercase">Port 8728 (Activa)</span>
+                    <span className="text-[9px] text-slate-500 uppercase">Port 8728 — ver módulo Red</span>
                   </div>
 
                   <div className="flex justify-between items-center bg-slate-900/60 p-2 rounded-lg border border-slate-900">
                     <div className="flex items-center space-x-1.5">
-                      <Key className="w-3.5 h-3.5 text-sky-400" />
-                      <span>UISP API</span>
+                      <Key className="w-3.5 h-3.5 text-slate-500" />
+                      <span>Telegram Bot</span>
                     </div>
-                    <span className="text-[9px] text-slate-500 uppercase">Conectado</span>
+                    <span className="text-[9px] text-amber-500 uppercase">No conectado — sin datos mock</span>
                   </div>
                 </div>
               </div>
