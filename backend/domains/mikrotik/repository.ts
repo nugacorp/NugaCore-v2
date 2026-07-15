@@ -112,3 +112,25 @@ export const persistMikrotikRouter = async (
   if (!isDomainOnDb('mikrotik')) return router;
   return getMikrotikRoutersRepository().upsert(router);
 };
+
+/**
+ * Quita el router del inventario (memoria + DB si USE_DB_MIKROTIK).
+ * Usado al revocar/eliminar un enrollment para no dejar huérfanos en
+ * Inventario de Routers.
+ */
+export const deleteMikrotikRouter = async (id: string): Promise<boolean> => {
+  const before = store.MIKROTIK_ROUTERS.length;
+  store.MIKROTIK_ROUTERS = store.MIKROTIK_ROUTERS.filter((r) => r.id !== id);
+  const removedMem = store.MIKROTIK_ROUTERS.length < before;
+  if (isDomainOnDb('mikrotik')) {
+    try {
+      await getMikrotikRoutersRepository().remove(id);
+    } catch (err) {
+      logger.warn('mikrotik_routers: no se pudo borrar en Supabase', {
+        id,
+        error: err instanceof Error ? err.message : String(err),
+      });
+    }
+  }
+  return removedMem;
+};

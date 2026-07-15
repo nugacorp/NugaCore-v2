@@ -11,6 +11,8 @@
 
 import { createHash } from 'crypto';
 import { generateApiCredential } from '../mikrotik/provisioning/credentials';
+import { ENCRYPTION_VERSION, type GeneratedCredential } from '../mikrotik/provisioning/types';
+import { encryptSecret } from '../../services/crypto';
 import { generateSnmpCommunity } from '../mikrotik/provisioning/snmp-credentials';
 import { NUGACORE_GROUP_POLICY } from '../mikrotik/provisioning/script-generator';
 import {
@@ -538,14 +540,30 @@ ${watchdog}`;
 interface GenResult {
   script: string;
   apiUsername?: string;
+  apiEncryptedPassword?: string;
   snmpCommunity?: string;
   warnings: string[];
 }
 
+/** Credencial API fija (enrollment/download) o nueva aleatoria. */
+const resolveApiCredential = (p: TemplateLibraryParams): GeneratedCredential => {
+  const user = (p.apiUsername || '').trim();
+  const pass = (p.apiPassword || '').trim();
+  if (user && pass) {
+    return {
+      username: user,
+      plainPassword: pass,
+      encryptedPassword: encryptSecret(pass),
+      encryptionVersion: ENCRYPTION_VERSION,
+    };
+  }
+  return generateApiCredential(p.routerName);
+};
+
 const genRouterBaseWireguard = (p: TemplateLibraryParams): GenResult => {
   const mode = resolveApplyMode(p);
   const d = getDefaults(p);
-  const cred = generateApiCredential(p.routerName);
+  const cred = resolveApiCredential(p);
   const { section: wgSection, warnings: wgWarnings } = sectionWireguard(p);
   const allowedCidr = p.wgVpnCidr || p.wgManagementCidr || d.apiCidr;
   const enableLanStack = p.enableLanStack !== false;
@@ -584,13 +602,13 @@ const genRouterBaseWireguard = (p: TemplateLibraryParams): GenResult => {
     sectionFileCleanup(),
   ].join('\n');
 
-  return { script, apiUsername: cred.username, warnings };
+  return { script, apiUsername: cred.username, apiEncryptedPassword: cred.encryptedPassword, warnings };
 };
 
 const genFactoryOnboarding = (p: TemplateLibraryParams): GenResult => {
   const mode = resolveApplyMode(p); // siempre factory_reset
   const d = getDefaults(p);
-  const cred = generateApiCredential(p.routerName);
+  const cred = resolveApiCredential(p);
   const snmpCommunity = p.snmpCommunity || generateSnmpCommunity(p.routerName);
   const { section: wgSection, warnings: wgWarnings } = sectionWireguard(p);
   const vpnCidr = p.wgVpnCidr || p.wgManagementCidr || d.apiCidr;
@@ -630,13 +648,13 @@ const genFactoryOnboarding = (p: TemplateLibraryParams): GenResult => {
     sectionFileCleanup(),
   ].join('\n');
 
-  return { script, apiUsername: cred.username, snmpCommunity, warnings };
+  return { script, apiUsername: cred.username, apiEncryptedPassword: cred.encryptedPassword, snmpCommunity, warnings };
 };
 
 const genRouterBaseSstp = (p: TemplateLibraryParams): GenResult => {
   const mode = resolveApplyMode(p);
   const d = getDefaults(p);
-  const cred = generateApiCredential(p.routerName);
+  const cred = resolveApiCredential(p);
   const vpnCred = generateApiCredential(`vpn_${p.routerName}`);
   const { section: sstpSection, warnings: sstpWarnings } = sectionSstp(p, vpnCred.username, vpnCred.plainPassword);
   const allowedCidr = p.sstpManagementCidr || d.apiCidr;
@@ -672,7 +690,7 @@ const genRouterBaseSstp = (p: TemplateLibraryParams): GenResult => {
     sectionFileCleanup(),
   ].join('\n');
 
-  return { script, apiUsername: cred.username, warnings };
+  return { script, apiUsername: cred.username, apiEncryptedPassword: cred.encryptedPassword, warnings };
 };
 
 const genClientResidential = (p: TemplateLibraryParams): GenResult => {
@@ -710,7 +728,7 @@ const genClientResidential = (p: TemplateLibraryParams): GenResult => {
 const genTowerWisp = (p: TemplateLibraryParams): GenResult => {
   const mode = resolveApplyMode(p);
   const d = getDefaults(p);
-  const cred = generateApiCredential(p.routerName);
+  const cred = resolveApiCredential(p);
   const { section: wgSection, warnings: wgWarnings } = sectionWireguard(p);
   const warnings = [...modeWarnings(mode), ...wgWarnings];
   const mgmtVlan = p.vlanManagement ?? 100;
@@ -762,7 +780,7 @@ const genTowerWisp = (p: TemplateLibraryParams): GenResult => {
     sectionFileCleanup(),
   ].join('\n');
 
-  return { script, apiUsername: cred.username, warnings };
+  return { script, apiUsername: cred.username, apiEncryptedPassword: cred.encryptedPassword, warnings };
 };
 
 // ── PCC Generator (genérico para N WANs) ─────────────────────────
@@ -1054,7 +1072,7 @@ const genWireguardServer = (p: TemplateLibraryParams): GenResult => {
   const vpnCidr = p.wgVpnCidr || '10.70.0.0/16';
   const apiCidr = p.nocApiCidr || p.apiCidr || '10.70.0.0/16';
   const apiPort = p.apiPort ?? 8728;
-  const cred = generateApiCredential(p.routerName);
+  const cred = resolveApiCredential(p);
 
   const serverPk = (p.wgPrivateKey || '').trim();
   const serverPkValid = isWgKey(serverPk);
@@ -1093,7 +1111,7 @@ ${sectionApiUser(cred.username, cred.plainPassword, apiCidr, apiPort)}
 ${sectionSystemNote(p.routerName, 'WireGuard Servidor', mode)}
 ${sectionFileCleanup()}`;
 
-  return { script, apiUsername: cred.username, warnings };
+  return { script, apiUsername: cred.username, apiEncryptedPassword: cred.encryptedPassword, warnings };
 };
 
 const genNocReady = (p: TemplateLibraryParams): GenResult => {
@@ -1101,7 +1119,7 @@ const genNocReady = (p: TemplateLibraryParams): GenResult => {
   const warnings: string[] = [...modeWarnings(mode)];
   const apiCidr = p.nocApiCidr || p.apiCidr || '10.70.0.0/16';
   const apiPort = p.apiPort ?? 8728;
-  const cred = generateApiCredential(p.routerName);
+  const cred = resolveApiCredential(p);
 
   const apiSslSection = p.enableApiSsl
     ? `
@@ -1156,7 +1174,7 @@ ${apiSslSection}
 ${sectionSystemNote(p.routerName, 'NOC Ready', mode)}
 ${sectionFileCleanup()}`;
 
-  return { script, apiUsername: cred.username, warnings };
+  return { script, apiUsername: cred.username, apiEncryptedPassword: cred.encryptedPassword, warnings };
 };
 
 // ── Dispatcher principal ──────────────────────────────────────────
@@ -1183,7 +1201,7 @@ const dispatch = (p: TemplateLibraryParams): GenResult => {
 // ── Punto de entrada público ──────────────────────────────────────
 
 export function generateFromTemplate(params: TemplateLibraryParams): TemplateGeneratedResource {
-  const { script, apiUsername, snmpCommunity, warnings } = dispatch(params);
+  const { script, apiUsername, apiEncryptedPassword, snmpCommunity, warnings } = dispatch(params);
 
   assertNoBrandViolation(script);
   assertNoForbiddenPolicies(script);
@@ -1201,6 +1219,7 @@ export function generateFromTemplate(params: TemplateLibraryParams): TemplateGen
     warnings,
     generatedAt: new Date().toISOString(),
     apiUsername,
+    apiEncryptedPassword,
     snmpCommunity,
   };
 }

@@ -19,7 +19,8 @@ import { buildTemplateFilename } from '../routeros-templates/validators';
 import { store } from '../../state/store';
 import { readRouterSnapshot } from '../mikrotik/worker/worker';
 import { isLiveWorkerEnabled } from '../mikrotik/worker/connector';
-import { persistMikrotikRouter } from '../mikrotik/repository';
+import { deleteMikrotikRouter, persistMikrotikRouter } from '../mikrotik/repository';
+import { generateApiCredential } from '../mikrotik/provisioning/credentials';
 import { getWireguardService } from '../wireguard/service';
 import type { PeerCreatedOnce, WireguardPeerView } from '../wireguard/types';
 import { encryptSecret, decryptSecret } from '../../services/crypto';
@@ -245,6 +246,8 @@ interface BuildScriptResult {
   wgServerPublicKey: string;
   peerConfig: PeerCreatedOnce | null;
   snmpCommunity?: string;
+  apiUsername?: string;
+  apiEncryptedPassword?: string;
 }
 
 /**
@@ -289,6 +292,33 @@ const buildScript = async (
   const dynamicParams = mapParametersToLibraryParams(effectiveTemplateId, input.templateParameters);
   const generatorParams = { ...resolved.params, ...dynamicParams };
 
+  // Credenciales API: en create se generan y se persisten en mikrotik_routers;
+  // en download se reutilizan (mismo user/pass que en el .rsc original).
+  let apiUsername: string | undefined;
+  let apiEncryptedPassword: string | undefined;
+  if (opts.mode === 'create') {
+    const apiCred = generateApiCredential(input.routerName);
+    generatorParams.apiUsername = apiCred.username;
+    generatorParams.apiPassword = apiCred.plainPassword;
+    apiUsername = apiCred.username;
+    apiEncryptedPassword = apiCred.encryptedPassword;
+  } else {
+    const existing = store.MIKROTIK_ROUTERS.find((r) => r.id === routerId);
+    if (existing?.username && existing.encryptedPassword) {
+      try {
+        generatorParams.apiUsername = existing.username;
+        generatorParams.apiPassword = decryptSecret(existing.encryptedPassword);
+        apiUsername = existing.username;
+        apiEncryptedPassword = existing.encryptedPassword;
+      } catch (err) {
+        logger.warn('Enrollment download: no se pudo descifrar password API; se regenera', {
+          routerId,
+          error: String(err),
+        });
+      }
+    }
+  }
+
   const needsSnmp = effectiveTemplateId === 'nugacore_factory_onboarding';
   let snmpCommunityPlain: string | undefined;
   if (needsSnmp) {
@@ -308,6 +338,8 @@ const buildScript = async (
 
   const resource = generateFromTemplate(generatorParams);
   const filename = buildTemplateFilename(input.routerName, resolved.libraryId);
+  apiUsername = apiUsername || resource.apiUsername;
+  apiEncryptedPassword = apiEncryptedPassword || resource.apiEncryptedPassword;
 
   logger.info('Enrollment: script generado', {
     routerId,
@@ -331,6 +363,8 @@ const buildScript = async (
     wgServerPublicKey: peerConfig?.serverPublicKey ?? '',
     peerConfig,
     snmpCommunity: snmpCommunityPlain,
+    apiUsername,
+    apiEncryptedPassword,
   };
 };
 
@@ -424,16 +458,32 @@ export const enrollmentService = {
       throw err;
     }
 
-    const { script, scriptFilename, scriptHash, templateId: resolvedTemplateId, templateName, generatorVersion, wgPeerId, wgAssignedIp, wgServerPublicKey, peerConfig, snmpCommunity } = buildResult;
+    const {
+      script,
+      scriptFilename,
+      scriptHash,
+      templateId: resolvedTemplateId,
+      templateName,
+      generatorVersion,
+      wgPeerId,
+      wgAssignedIp,
+      wgServerPublicKey,
+      peerConfig,
+      snmpCommunity,
+      apiUsername,
+      apiEncryptedPassword,
+    } = buildResult;
 
-    // Push al store SOLO tras buildScript exitoso → no hay router huérfano
+    // Push al store SOLO tras buildScript exitoso → no hay router huérfano.
+    // Credenciales API del .rsc se persisten cifradas para check-online live
+    // y para regenerar el mismo password en /download.
     const enrolledRouter = {
       id: routerId,
       name: input.routerName.trim(),
       ipAddress: wgAssignedIp || input.ipAddress || '0.0.0.0',
       apiPort: input.apiPort || 8728,
-      username: '',
-      encryptedPassword: '',
+      username: apiUsername || '',
+      encryptedPassword: apiEncryptedPassword || '',
       isOnline: false,
       cpuUsagePct: 0,
       memoryUsagePct: 0,
@@ -647,6 +697,14 @@ export const enrollmentService = {
         router.provisioningStatus = 'connected';
         router.lastSeenAt = nowIso();
         router.lastHealthCheckAt = nowIso();
+        try {
+          await persistMikrotikRouter(router);
+        } catch (persistErr) {
+          logger.warn('Enrollment online: no se pudo persistir router', {
+            routerId: rec.routerId,
+            error: String(persistErr),
+          });
+        }
       }
 
       const updated = await repo.update(id, {
@@ -716,10 +774,14 @@ export const enrollmentService = {
     const wgService = getWireguardService();
     await wgService.revokePeer(rec.wgPeerId);
 
-    const router = store.MIKROTIK_ROUTERS.find((r) => r.id === rec.routerId);
-    if (router) {
-      router.isOnline = false;
-      router.provisioningStatus = 'error';
+    // Quitar del Inventario de Routers (memoria + DB) — antes solo marcaba error.
+    try {
+      await deleteMikrotikRouter(rec.routerId);
+    } catch (err) {
+      logger.warn('Enrollment revoke: no se pudo borrar router del inventario', {
+        routerId: rec.routerId,
+        error: String(err),
+      });
     }
 
     const updated = await repo.update(id, {
@@ -751,6 +813,16 @@ export const enrollmentService = {
       throw new BadRequestError(
         'Solo se pueden eliminar enrollments revocados. Usa Revocar primero.',
       );
+    }
+
+    // Por si el revoke anterior rompió a medias: asegurar que no quede huérfano.
+    try {
+      await deleteMikrotikRouter(rec.routerId);
+    } catch (err) {
+      logger.warn('Enrollment delete: no se pudo borrar router del inventario', {
+        routerId: rec.routerId,
+        error: String(err),
+      });
     }
 
     const deleted = await repo.delete(id);

@@ -119,6 +119,7 @@ export default function InventoryRoutersModule({ getAuthHeaders }: Props) {
           </h2>
           <p className="text-sm text-slate-400 mt-1">
             Vista derivada de <code className="text-indigo-300">mikrotik_routers</code>. Solo lectura.
+            Al revocar/eliminar en Alta de Router se quita también de aquí.
           </p>
         </div>
         <div className="flex items-center gap-3">

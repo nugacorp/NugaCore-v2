@@ -82,6 +82,7 @@ describe('Enrollment — flujo start → download → check-online → revoke', 
   let app: Express;
   let serverId: string;
   let enrollmentId: string;
+  let enrolledRouterId: string;
   let scriptFilename: string;
   let scriptHash: string;
   let scriptContent: string;
@@ -126,6 +127,7 @@ describe('Enrollment — flujo start → download → check-online → revoke', 
 
     // Datos WireGuard originales
     expect(body.routerId).toBeTruthy();
+    enrolledRouterId = body.routerId;
     expect(body.wgPeerId).toBeTruthy();
     expect(body.wgAssignedIp).toBeTruthy();
     expect(body.wgServerPublicKey).toBeTruthy();
@@ -397,13 +399,18 @@ describe('Enrollment — flujo start → download → check-online → revoke', 
     expect(res.status).toBe(403);
   });
 
-  it('POST /:id/revoke con Admin → 200, status = revoked', async () => {
+  it('POST /:id/revoke con Admin → 200, status = revoked y sale del inventario', async () => {
+    const beforeRouter = store.MIKROTIK_ROUTERS.find((r) => r.id === enrolledRouterId);
+    expect(beforeRouter).toBeDefined();
+
     const res = await request(app)
       .post(`/api/router-enrollment/${enrollmentId}/revoke`)
       .set(ADMIN);
     expect(res.status).toBe(200);
     expect(res.body.status).toBe('revoked');
     expect(res.body.revokedAt).toBeTruthy();
+    // Inventario de Routers debe quedar limpio (ya no huérfano offline).
+    expect(store.MIKROTIK_ROUTERS.find((r) => r.id === enrolledRouterId)).toBeUndefined();
   });
 
   it('POST /:id/revoke doble → 400 (ya revocado)', async () => {
@@ -663,6 +670,18 @@ describe('Enrollment — DEFAULT_WIREGUARD_SERVER', () => {
     expect(router).toBeDefined();
     expect(router?.vpnIp).toBeTruthy();
     expect(router?.vpnIp).toBe(res.body.assignedIp);
+  });
+
+  it('start() persiste credenciales API cifradas (para inventario / check-online)', async () => {
+    const res = await request(app)
+      .post('/api/router-enrollment/start')
+      .set(ADMIN)
+      .send({ routerName: 'Router Creds Test', routerosVersion: '7' });
+    expect(res.status).toBe(201);
+    const router = store.MIKROTIK_ROUTERS.find((r) => r.id === res.body.routerId);
+    expect(router?.username).toMatch(/^nugacore_/);
+    expect(router?.encryptedPassword).toBeTruthy();
+    expect(router?.encryptedPassword.length).toBeGreaterThan(10);
   });
 
   it('solo se crea UN peer por router (no duplicados)', async () => {

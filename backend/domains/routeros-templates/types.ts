@@ -133,6 +133,9 @@ export interface TemplateLibraryParams {
   apiMode?: 'readonly' | 'operator';
   apiPort?: number;
   apiCidr?: string;
+  /** Si se pasan, el generador NO crea nuevas credenciales (re-download enrollment). */
+  apiUsername?: string;
+  apiPassword?: string;
   enableDhcp?: boolean;
   // SNMP (factory onboarding)
   snmpCommunity?: string;
@@ -149,6 +152,8 @@ export interface TemplateGeneratedResource {
   warnings: string[];
   generatedAt: string;
   apiUsername?: string;
+  /** Password API cifrado (para persistir en mikrotik_routers). Nunca loguear. */
+  apiEncryptedPassword?: string;
   snmpCommunity?: string;
 }
 
