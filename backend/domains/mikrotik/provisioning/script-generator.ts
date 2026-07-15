@@ -77,6 +77,50 @@ const userAndGroup = (apiUser: string, apiPassword: string, apiMode: ApiMode, ta
 # --- 3. Usuario API NugaCore ---
 /user add name="${apiUser}" password="${apiPassword}" group=nugacore comment="NugaCore API user (${tag})"`;
 
+/**
+ * Script mínimo para alinear el usuario API del CHR con las credenciales
+ * ya persistidas en NugaCore. No toca WireGuard ni la LAN (túnel intacto).
+ */
+export const buildApiRepairScript = (input: {
+  routerName: string;
+  apiUser: string;
+  apiPassword: string;
+  apiPort?: number;
+  allowedApiCidr?: string;
+  apiMode?: ApiMode;
+}): { script: string; filename: string } => {
+  const apiMode: ApiMode = input.apiMode ?? 'operator';
+  const apiPort = input.apiPort || 8728;
+  const apiCidr = (input.allowedApiCidr || '10.70.0.0/16').trim();
+  const apiUser = input.apiUser.trim();
+  const apiPassword = input.apiPassword.trim();
+  requireField(apiUser, 'apiUser');
+  requireField(apiPassword, 'apiPassword');
+
+  const script = `# NugaCore
+# ============================================================
+# NugaCore — Reparar API (sin tocar WireGuard)  ${SCRIPT_VERSION}
+# Router: ${input.routerName}
+# ============================================================
+# Importar en el CHR cuando el túnel WG responde (ping 10.70.0.1)
+# pero la web sigue offline por usuario/password API desfasados:
+#   /import file-name=nc-api.rsc
+# Luego en NugaCore: Sistema → Routers → Verificar.
+
+# Limpia SOLO usuario/grupo API NugaCore (no peer WG)
+/user remove [find where name~"nugacore_"]
+/user group remove [find where name="nugacore"]
+
+${userAndGroup(apiUser, apiPassword, apiMode, 'API repair')}
+
+# API solo desde red VPN NugaCore
+/ip service set [find where name="api" and dynamic=no] port=${apiPort} address=${apiCidr} disabled=no
+/ip service set [find where name="api-ssl" and dynamic=no] disabled=yes
+`;
+
+  return { script, filename: 'nc-api.rsc' };
+};
+
 // ── WireGuard administrado ────────────────────────────────────────────
 const buildWireguardScript = (input: ScriptGenerationInput, apiMode: ApiMode): { script: string; warnings: string[]; routerVpnIp: string } => {
   const { routerName, apiUser, apiPassword, apiPort, server } = input;

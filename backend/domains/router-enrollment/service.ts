@@ -19,9 +19,17 @@ import { buildTemplateFilename } from '../routeros-templates/validators';
 import { store } from '../../state/store';
 import { readRouterSnapshot } from '../mikrotik/worker/worker';
 import { isLiveWorkerEnabled } from '../mikrotik/worker/connector';
-import { deleteMikrotikRouter, persistMikrotikRouter } from '../mikrotik/repository';
+import {
+  deleteMikrotikRouter,
+  persistMikrotikRouter,
+  hydrateMikrotikRoutersFromDb,
+  getMikrotikRoutersRepository,
+} from '../mikrotik/repository';
 import { generateApiCredential } from '../mikrotik/provisioning/credentials';
+import { buildApiRepairScript } from '../mikrotik/provisioning/script-generator';
 import { getWireguardService } from '../wireguard/service';
+import net from 'node:net';
+import { isDomainOnDb } from '../../config/feature-flags';
 import type { PeerCreatedOnce, WireguardPeerView } from '../wireguard/types';
 import { encryptSecret, decryptSecret } from '../../services/crypto';
 import { getEnrollmentRepository } from './repository';
@@ -51,6 +59,33 @@ import {
 import { generateSnmpCommunity } from '../mikrotik/provisioning/snmp-credentials';
 import { nowIso } from '../../common/time';
 const MAX_CHECK_ATTEMPTS = 10;
+
+const probeTcp = (host: string, port: number, timeoutMs = 2500): Promise<boolean> =>
+  new Promise((resolve) => {
+    const socket = net.connect({ host, port }, () => {
+      socket.end();
+      resolve(true);
+    });
+    socket.setTimeout(timeoutMs, () => {
+      socket.destroy();
+      resolve(false);
+    });
+    socket.on('error', () => resolve(false));
+  });
+
+const ensureRouterInventoryLoaded = async (routerId: string) => {
+  if (isDomainOnDb('mikrotik')) {
+    const fromDb = await getMikrotikRoutersRepository().findById(routerId);
+    if (fromDb) {
+      const idx = store.MIKROTIK_ROUTERS.findIndex((r) => r.id === routerId);
+      if (idx >= 0) store.MIKROTIK_ROUTERS[idx] = fromDb;
+      else store.MIKROTIK_ROUTERS.push(fromDb);
+      return fromDb;
+    }
+    await hydrateMikrotikRoutersFromDb();
+  }
+  return store.MIKROTIK_ROUTERS.find((r) => r.id === routerId);
+};
 
 const toView = (rec: RouterEnrollmentRecord): RouterEnrollmentView => {
   const router = store.MIKROTIK_ROUTERS.find((r) => r.id === rec.routerId);
@@ -748,24 +783,37 @@ export const enrollmentService = {
         isOnline: true,
         snapshotSource: null,
         message: 'El router ya está confirmado como online.',
+        apiTcpReachable: true,
+        liveError: null,
+        repairHint: null,
       };
     }
     if (rec.status === 'revoked') throw new BadRequestError('El enrollment ha sido revocado.');
     if (rec.status === 'failed') throw new BadRequestError('El enrollment está en estado fallido.');
 
+    const router = await ensureRouterInventoryLoaded(rec.routerId);
+    const host = router?.vpnIp || router?.managementIp || router?.ipAddress;
+    const port = router?.apiPort || 8728;
+    const apiTcpReachable = host ? await probeTcp(host, port) : false;
+
     const snapshot = await readRouterSnapshot(rec.routerId);
     const attempts = rec.checkOnlineAttempts + 1;
+    const liveError =
+      snapshot?.reads.map((r) => r.error).find((e) => e && e.startsWith('live_failed:'))?.replace(
+        /^live_failed:/,
+        '',
+      ) ?? null;
 
     // Solo source=live puede confirmar online
     if (snapshot && snapshot.source === 'live' && snapshot.reads.some((r) => r.ok)) {
-      const router = store.MIKROTIK_ROUTERS.find((r) => r.id === rec.routerId);
-      if (router) {
-        router.isOnline = true;
-        router.provisioningStatus = 'connected';
-        router.lastSeenAt = nowIso();
-        router.lastHealthCheckAt = nowIso();
+      const onlineRouter = store.MIKROTIK_ROUTERS.find((r) => r.id === rec.routerId);
+      if (onlineRouter) {
+        onlineRouter.isOnline = true;
+        onlineRouter.provisioningStatus = 'connected';
+        onlineRouter.lastSeenAt = nowIso();
+        onlineRouter.lastHealthCheckAt = nowIso();
         try {
-          await persistMikrotikRouter(router);
+          await persistMikrotikRouter(onlineRouter);
         } catch (persistErr) {
           logger.warn('Enrollment online: no se pudo persistir router', {
             routerId: rec.routerId,
@@ -792,6 +840,9 @@ export const enrollmentService = {
         isOnline: true,
         snapshotSource: 'live',
         message: 'Router online confirmado (fuente: live).',
+        apiTcpReachable: true,
+        liveError: null,
+        repairHint: null,
       };
     }
 
@@ -811,15 +862,27 @@ export const enrollmentService = {
       failureReason,
     });
 
+    const authHint =
+      liveError && /invalid user|authentication failed|password/i.test(liveError);
+    const repairHint = authHint
+      ? 'El túnel WireGuard responde, pero el usuario API del CHR no coincide. Usa «Reparar API», importa nc-api.rsc en el MikroTik y vuelve a Verificar.'
+      : apiTcpReachable
+        ? 'Puerto API alcanzable por VPN, pero la lectura live falló. Prueba «Reparar API» e importa nc-api.rsc.'
+        : 'No hay TCP al puerto API por VPN. Revisa peer WireGuard / firewall del CHR.';
+
     let message: string;
     if (nextStatus === 'failed') {
-      message = `Enrollment fallido: sin confirmación live tras ${attempts} intentos.`;
+      message = `Enrollment fallido: sin confirmación live tras ${attempts} intentos. ${repairHint}`;
     } else if (isSimulated) {
-      message = isLiveWorkerEnabled()
-        ? `Lectura simulada (live falló con fallback). No se puede confirmar online. Intento ${attempts}/${MAX_CHECK_ATTEMPTS}.`
-        : `MIKROTIK_WORKER_LIVE desactivado — lectura simulada. Solo source=live puede confirmar online. Intento ${attempts}/${MAX_CHECK_ATTEMPTS}.`;
+      if (!isLiveWorkerEnabled()) {
+        message = `MIKROTIK_WORKER_LIVE desactivado — lectura simulada. Solo source=live puede confirmar online. Intento ${attempts}/${MAX_CHECK_ATTEMPTS}.`;
+      } else if (authHint) {
+        message = `VPN OK (API TCP ${apiTcpReachable ? 'abierto' : 'cerrado'}) pero login API rechazado. ${repairHint} Intento ${attempts}/${MAX_CHECK_ATTEMPTS}.`;
+      } else {
+        message = `Lectura simulada (live falló: ${liveError || 'sin detalle'}). ${repairHint} Intento ${attempts}/${MAX_CHECK_ATTEMPTS}.`;
+      }
     } else {
-      message = `Router aún no responde. Intento ${attempts}/${MAX_CHECK_ATTEMPTS}.`;
+      message = `Router aún no responde. ${repairHint} Intento ${attempts}/${MAX_CHECK_ATTEMPTS}.`;
     }
 
     return {
@@ -827,7 +890,68 @@ export const enrollmentService = {
       isOnline: false,
       snapshotSource: snapshot?.source ?? null,
       message,
+      apiTcpReachable,
+      liveError,
+      repairHint,
     };
+  },
+
+  /**
+   * Descarga .rsc mínimo que recrea SOLO el usuario API NugaCore
+   * (no modifica WireGuard). Usa las credenciales ya persistidas.
+   */
+  async downloadApiRepair(
+    id: string,
+    actorId: string,
+  ): Promise<{ script: string; filename: string } | null> {
+    const repo = getEnrollmentRepository();
+    const rec = await repo.findById(id);
+    if (!rec) return null;
+    if (rec.status === 'revoked') {
+      throw new BadRequestError('No se puede reparar un enrollment revocado.');
+    }
+
+    const router = await ensureRouterInventoryLoaded(rec.routerId);
+    if (!router) {
+      throw new NotFoundError('Router del enrollment no encontrado en inventario.');
+    }
+
+    let username = router.username;
+    let encryptedPassword = router.encryptedPassword;
+    if (!username || !encryptedPassword) {
+      // Regenerar una vez si faltaban (mismo camino que download completo).
+      const cred = generateApiCredential(router.name);
+      username = cred.username;
+      encryptedPassword = cred.encryptedPassword;
+      const withCreds = {
+        ...router,
+        username,
+        encryptedPassword,
+        hasCredentials: true,
+      };
+      const idx = store.MIKROTIK_ROUTERS.findIndex((r) => r.id === router.id);
+      if (idx >= 0) store.MIKROTIK_ROUTERS[idx] = withCreds;
+      else store.MIKROTIK_ROUTERS.push(withCreds);
+      await persistMikrotikRouter(withCreds);
+    }
+
+    const plainPassword = decryptSecret(encryptedPassword);
+    const { script, filename } = buildApiRepairScript({
+      routerName: router.name,
+      apiUser: username,
+      apiPassword: plainPassword,
+      apiPort: router.apiPort || 8728,
+      allowedApiCidr: process.env.MIKROTIK_ALLOWED_API_CIDR || process.env.MIKROTIK_VPN_CIDR || '10.70.0.0/16',
+    });
+
+    logger.info('Enrollment: script reparación API descargado', {
+      enrollmentId: id,
+      routerId: rec.routerId,
+      actorId,
+      apiUsername: username,
+    });
+
+    return { script, filename };
   },
 
   /** Revoca el peer WireGuard y marca el enrollment como revocado. */

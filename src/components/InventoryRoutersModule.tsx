@@ -12,6 +12,7 @@ import {
   Plus,
   Trash2,
   CheckCircle,
+  Wrench,
 } from 'lucide-react';
 import type { UserRole } from '../lib/supabase';
 import { canStartEnrollment, canRevokeEnrollment } from '../lib/enrollmentRbac';
@@ -163,18 +164,50 @@ export default function InventoryRoutersModule({
     setInfo('');
     try {
       const api = createAuthorizedApi(getAuthHeaders);
-      const data = await api.post<{ isOnline?: boolean; message?: string; snapshotSource?: string | null }>(
-        `/api/router-enrollment/${enrollment.id}/check-online`,
-      );
-      setInfo(
-        data.message ||
-          (data.isOnline
-            ? `Router ${router.name} online (${data.snapshotSource ?? 'live'}).`
-            : `Router ${router.name} aún no responde.`),
-      );
+      const data = await api.post<{
+        isOnline?: boolean;
+        message?: string;
+        snapshotSource?: string | null;
+        apiTcpReachable?: boolean | null;
+        repairHint?: string | null;
+      }>(`/api/router-enrollment/${enrollment.id}/check-online`);
+      if (data.isOnline) {
+        setInfo(data.message || `Router ${router.name} online (${data.snapshotSource ?? 'live'}).`);
+      } else {
+        setError(data.message || data.repairHint || `Router ${router.name} aún no responde vía API.`);
+      }
       await load();
     } catch (err) {
       setError(err instanceof Error ? err.message : 'No se pudo verificar online.');
+    } finally {
+      setActionId('');
+    }
+  };
+
+  const handleRepairApi = async (router: InventoryRouterView) => {
+    const enrollment = enrollmentByRouter[router.id];
+    if (!enrollment || enrollment.status === 'revoked') {
+      setError('No hay alta vinculada a este router.');
+      return;
+    }
+    setActionId(router.id);
+    setError('');
+    setInfo('');
+    try {
+      const api = createAuthorizedApi(getAuthHeaders);
+      const text = await api.get<string>(`/api/router-enrollment/${enrollment.id}/repair-api`);
+      const blob = new Blob([text], { type: 'text/plain' });
+      const url = URL.createObjectURL(blob);
+      const a = document.createElement('a');
+      a.href = url;
+      a.download = 'nc-api.rsc';
+      a.click();
+      URL.revokeObjectURL(url);
+      setInfo(
+        `Descargado nc-api.rsc para ${router.name}. En el MikroTik: /import file-name=nc-api.rsc — luego pulsa Verificar. (No toca WireGuard.)`,
+      );
+    } catch (err) {
+      setError(err instanceof Error ? err.message : 'No se pudo descargar el script de reparación API.');
     } finally {
       setActionId('');
     }
@@ -390,12 +423,27 @@ export default function InventoryRoutersModule({
                                 disabled={busy || loading}
                                 onClick={() => void handleCheckOnline(router)}
                                 className="inline-flex items-center gap-1 text-xs px-2 py-1 rounded bg-emerald-900 hover:bg-emerald-800 text-emerald-200 disabled:opacity-50"
-                                title="Verificar online vía API WireGuard"
+                                title="Verificar online vía API RouterOS sobre WireGuard"
                               >
                                 <CheckCircle className="w-3 h-3" />
                                 Verificar
                               </button>
                             )}
+                            {canEnroll &&
+                              !!enrollment &&
+                              enrollment.status !== 'revoked' &&
+                              enrollment.status !== 'online' && (
+                                <button
+                                  type="button"
+                                  disabled={busy || loading}
+                                  onClick={() => void handleRepairApi(router)}
+                                  className="inline-flex items-center gap-1 text-xs px-2 py-1 rounded bg-amber-900/80 hover:bg-amber-800 text-amber-100 disabled:opacity-50"
+                                  title="Descarga nc-api.rsc: recrea solo el usuario API (no toca WG)"
+                                >
+                                  <Wrench className="w-3 h-3" />
+                                  Reparar API
+                                </button>
+                              )}
                             {canDelete && (
                               <button
                                 type="button"
@@ -421,8 +469,10 @@ export default function InventoryRoutersModule({
       </div>
 
       <p className="text-xs text-slate-600">
-        «Pendiente» significa que aún no se confirmó online con la API. Eliminar quita inventario +
-        alta + peer WireGuard. El NOC es solo lectura; gestiona equipos aquí en Sistema → Routers.
+        Ping al servidor WG ≠ online en NugaCore: hace falta login API (puerto 8728). Si el túnel
+        responde pero sigue offline, usa <span className="text-amber-500/80">Reparar API</span>,
+        importa <span className="font-mono">nc-api.rsc</span> en el MikroTik y vuelve a Verificar.
+        El NOC es solo lectura.
       </p>
     </div>
   );

@@ -1,4 +1,5 @@
 import { Router } from 'express';
+import { asyncHandler } from '../../common/errors';
 import { AppRole, requireRoles } from '../../common/rbac';
 import { nocReadOnlyService } from './service';
 
@@ -13,16 +14,28 @@ const NOC_READ_ROLES: AppRole[] = ['super admin', 'administrador', 'tecnico', 's
 
 const router = Router();
 
-router.get('/api/noc/summary', requireRoles(NOC_READ_ROLES), (_req, res) => {
-  res.json(nocReadOnlyService.getSummary());
-});
+router.get(
+  '/api/noc/summary',
+  requireRoles(NOC_READ_ROLES),
+  asyncHandler(async (_req, res) => {
+    res.json(await nocReadOnlyService.getSummary());
+  }),
+);
 
-router.get('/api/noc/routers', requireRoles(NOC_READ_ROLES), (_req, res) => {
-  res.json(nocReadOnlyService.listRouters());
-});
+router.get(
+  '/api/noc/routers',
+  requireRoles(NOC_READ_ROLES),
+  asyncHandler(async (_req, res) => {
+    res.json(await nocReadOnlyService.listRouters());
+  }),
+);
 
-router.get('/api/noc/alerts', requireRoles(NOC_READ_ROLES), (_req, res) => {
-  res.json(nocReadOnlyService.listAlerts());
-});
+router.get(
+  '/api/noc/alerts',
+  requireRoles(NOC_READ_ROLES),
+  asyncHandler(async (_req, res) => {
+    res.json(await nocReadOnlyService.listAlerts());
+  }),
+);
 
 export default router;

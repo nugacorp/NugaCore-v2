@@ -909,6 +909,48 @@ describe('Enrollment — Administrador puede iniciar y revocar', () => {
   });
 });
 
+describe('Enrollment — repair-api script', () => {
+  let app: Express;
+  let serverId: string;
+
+  beforeAll(async () => {
+    app = createApp();
+    const srvRes = await request(app)
+      .post('/api/wireguard/servers')
+      .set(ADMIN)
+      .send({
+        name: 'VPN Repair API',
+        endpointHost: 'vpn.repair.local',
+        endpointPort: 13234,
+        isDefault: true,
+      });
+    serverId = srvRes.body.server.id;
+  });
+
+  it('GET /repair-api entrega nc-api.rsc con usuario API', async () => {
+    const start = await request(app)
+      .post('/api/router-enrollment/start')
+      .set(ADMIN)
+      .send({
+        routerName: 'Router Repair',
+        wgServerId: serverId,
+        routerosVersion: '7',
+      });
+    expect(start.status).toBe(201);
+    const enrollmentId = start.body.enrollment.id as string;
+
+    const res = await request(app)
+      .get(`/api/router-enrollment/${enrollmentId}/repair-api`)
+      .set(ADMIN);
+    expect(res.status).toBe(200);
+    expect(res.headers['content-disposition']).toContain('nc-api.rsc');
+    expect(res.text).toContain('# NugaCore');
+    expect(res.text).toContain('/user add name=');
+    expect(res.text).toContain('nugacore');
+    expect(res.text).not.toContain('wireguard');
+  });
+});
+
 describe('Enrollment — DELETE inventario purga alta + WG', () => {
   let app: Express;
   let serverId: string;

@@ -84,12 +84,20 @@ export class DefaultRouterConnector implements RouterConnector {
         return { command, ok: true, source: 'live', data: JSON.stringify(rows) };
       } catch (err) {
         // Fallback simulado. Nunca logueamos el password (redactado por si acaso).
+        const raw = err instanceof Error ? err.message : 'unknown';
+        const safe = redactString(raw);
         logger.warn('Worker: lectura live falló, usando simulado', {
           routerId: router.id,
           command,
-          error: redactString(err instanceof Error ? err.message : 'unknown'),
+          error: safe,
         });
-        return { command, ok: true, source: 'simulated', data: simulate(command, router), error: 'live_failed_fallback_simulated' };
+        return {
+          command,
+          ok: true,
+          source: 'simulated',
+          data: simulate(command, router),
+          error: `live_failed:${safe}`,
+        };
       }
     }
 

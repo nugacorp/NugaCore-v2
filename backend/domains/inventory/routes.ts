@@ -56,22 +56,34 @@ router.post(
 // ====================================================================
 const INVENTORY_ROUTERS_READ_ROLES = ['super admin', 'administrador', 'tecnico', 'soporte', 'solo lectura'] as const;
 
-router.get('/api/inventory/routers', requireRoles([...INVENTORY_ROUTERS_READ_ROLES]), (_req, res) => {
-  res.json(inventoryRoutersService.listRouters());
-});
+router.get(
+  '/api/inventory/routers',
+  requireRoles([...INVENTORY_ROUTERS_READ_ROLES]),
+  asyncHandler(async (_req, res) => {
+    res.json(await inventoryRoutersService.listRouters());
+  }),
+);
 
-router.get('/api/inventory/summary', requireRoles([...INVENTORY_ROUTERS_READ_ROLES]), (_req, res) => {
-  res.json(inventoryRoutersService.getSummary());
-});
+router.get(
+  '/api/inventory/summary',
+  requireRoles([...INVENTORY_ROUTERS_READ_ROLES]),
+  asyncHandler(async (_req, res) => {
+    res.json(await inventoryRoutersService.getSummary());
+  }),
+);
 
-router.get('/api/inventory/routers/:id', requireRoles([...INVENTORY_ROUTERS_READ_ROLES]), (req, res) => {
-  const view = inventoryRoutersService.getRouter(req.params.id);
-  if (!view) {
-    res.status(404).json({ error: 'Router not found in inventory' });
-    return;
-  }
-  res.json(view);
-});
+router.get(
+  '/api/inventory/routers/:id',
+  requireRoles([...INVENTORY_ROUTERS_READ_ROLES]),
+  asyncHandler(async (req, res) => {
+    const view = await inventoryRoutersService.getRouter(req.params.id);
+    if (!view) {
+      res.status(404).json({ error: 'Router not found in inventory' });
+      return;
+    }
+    res.json(view);
+  }),
+);
 
 // ====================================================================
 // Almacenes (Fase 5.1) — entidad de primera clase. Rutas literales antes

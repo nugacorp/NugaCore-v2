@@ -6,6 +6,7 @@
 // ====================================================================
 
 import { MikrotikRouterRegistryItem, store } from '../../state/store';
+import { hydrateMikrotikRoutersFromDb } from '../mikrotik/repository';
 import {
   HIGH_CPU_CRITICAL_PCT,
   HIGH_CPU_WARNING_PCT,
@@ -112,8 +113,13 @@ const deriveAlerts = (routers: MikrotikRouterRegistryItem[]): NocDerivedAlert[] 
   return sortAlerts(alerts);
 };
 
+const refreshNocCache = async (): Promise<void> => {
+  await hydrateMikrotikRoutersFromDb();
+};
+
 export const nocReadOnlyService = {
-  listRouters(): NocRouterView[] {
+  async listRouters(): Promise<NocRouterView[]> {
+    await refreshNocCache();
     const routers = nocReadOnlyRepository.listRouters();
     const referenceTimestampMs = resolveReferenceTimestampMs(routers);
     const towerNameById = new Map(store.TOWERS.map((tower) => [tower.id, tower.name]));
@@ -127,11 +133,13 @@ export const nocReadOnlyService = {
     });
   },
 
-  listAlerts(): NocDerivedAlert[] {
+  async listAlerts(): Promise<NocDerivedAlert[]> {
+    await refreshNocCache();
     return deriveAlerts(nocReadOnlyRepository.listRouters());
   },
 
-  getSummary(): NocSummary {
+  async getSummary(): Promise<NocSummary> {
+    await refreshNocCache();
     const routers = nocReadOnlyRepository.listRouters();
     const referenceTimestampMs = resolveReferenceTimestampMs(routers);
     const alerts = deriveAlerts(routers);

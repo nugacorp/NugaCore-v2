@@ -7,6 +7,7 @@
 // ====================================================================
 
 import { MikrotikRouterRegistryItem } from '../../../state/store';
+import { hydrateMikrotikRoutersFromDb } from '../../mikrotik/repository';
 import { inventoryRoutersRepository } from './repository';
 import { toInventoryRouterView } from './mappers';
 import { InventoryRouterView, InventorySummary } from './types';
@@ -17,20 +18,28 @@ const provisioningOf = (r: MikrotikRouterRegistryItem): string =>
 const hasCredentials = (r: MikrotikRouterRegistryItem): boolean =>
   r.hasCredentials ?? Boolean(r.encryptedPassword);
 
+/** Relee Supabase → store para que inventario/NOC no queden con filas fantasma. */
+const refreshInventoryCache = async (): Promise<void> => {
+  await hydrateMikrotikRoutersFromDb();
+};
+
 export const inventoryRoutersService = {
   /** Lista saneada de todos los routers del inventario. */
-  listRouters(): InventoryRouterView[] {
+  async listRouters(): Promise<InventoryRouterView[]> {
+    await refreshInventoryCache();
     return inventoryRoutersRepository.list().map(toInventoryRouterView);
   },
 
   /** Detalle saneado de un router, o null si no existe. */
-  getRouter(id: string): InventoryRouterView | null {
+  async getRouter(id: string): Promise<InventoryRouterView | null> {
+    await refreshInventoryCache();
     const item = inventoryRoutersRepository.getById(id);
     return item ? toInventoryRouterView(item) : null;
   },
 
   /** Resumen agregado. Estable aunque no haya routers (todo en 0). */
-  getSummary(): InventorySummary {
+  async getSummary(): Promise<InventorySummary> {
+    await refreshInventoryCache();
     const rows = inventoryRoutersRepository.list();
     return {
       totalRouters: rows.length,

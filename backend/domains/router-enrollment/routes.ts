@@ -6,6 +6,7 @@
 // GET   /api/router-enrollment/:id          → detalle
 // GET   /api/router-enrollment/:id/download → descargar script .rsc
 // POST  /api/router-enrollment/:id/check-online → confirmar online
+// GET   /api/router-enrollment/:id/repair-api → .rsc mínimo (solo usuario API)
 // POST  /api/router-enrollment/:id/revoke   → revocar
 // DELETE /api/router-enrollment/:id         → eliminar (solo revocados)
 //
@@ -85,6 +86,25 @@ router.post(
   asyncHandler(async (req, res) => {
     const result = await enrollmentService.checkOnline(req.params.id);
     res.json(result);
+  }),
+);
+
+// ── GET /:id/repair-api ───────────────────────────────────────────────
+
+router.get(
+  '/api/router-enrollment/:id/repair-api',
+  requireRoles([...CAN_ENROLL]),
+  asyncHandler(async (req, res) => {
+    const actorId = req.authContext?.userId ?? 'unknown';
+    const result = await enrollmentService.downloadApiRepair(req.params.id, actorId);
+    if (!result) return res.status(404).json({ error: 'Enrollment no encontrado.' });
+
+    res
+      .status(200)
+      .setHeader('Content-Type', 'text/plain; charset=utf-8')
+      .setHeader('Content-Disposition', `attachment; filename="${result.filename}"`)
+      .setHeader('Cache-Control', 'no-store')
+      .send(result.script);
   }),
 );
 

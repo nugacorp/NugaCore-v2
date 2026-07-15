@@ -26,10 +26,12 @@ describe('InventoryRoutersModule — inventario + acciones', () => {
     expect(module).toContain('api.delete');
   });
 
-  it('expone Verificar y Eliminar en la columna Acciones', () => {
+  it('expone Verificar, Reparar API y Eliminar en Acciones', () => {
     expect(module).toContain('Acciones');
     expect(module).toContain('Eliminar');
     expect(module).toContain('Verificar');
+    expect(module).toContain('Reparar API');
+    expect(module).toContain('/repair-api');
     expect(module).toContain('canRevokeEnrollment');
   });
 

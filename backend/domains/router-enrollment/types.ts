@@ -235,4 +235,10 @@ export interface CheckOnlineResult {
   isOnline: boolean;
   snapshotSource: 'live' | 'simulated' | null;
   message: string;
+  /** true si el puerto API del router responde por TCP (VPN/ruta OK). */
+  apiTcpReachable?: boolean | null;
+  /** Motivo corto del fallo live (sin secretos), p.ej. invalid user/password. */
+  liveError?: string | null;
+  /** Sugerencia operativa para el WISP. */
+  repairHint?: string | null;
 }
