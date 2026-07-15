@@ -619,6 +619,11 @@ export default function App() {
     }
   };
 
+  const handleDeleteClient = async (id: string) => {
+    await fetchJson(`/api/clients/${id}`, { method: 'DELETE' });
+    await fetchData();
+  };
+
   // BILLING TRANSAC CONTROLS
   // `amount` opcional: si se omite, el backend liquida el saldo completo;
   // si se envía, registra un pago parcial. Los errores se RELANZAN para que
@@ -1200,13 +1205,15 @@ export default function App() {
 
             {activeTab === 'crm' && (
               <CrmModule 
-                clients={clients} 
-                plans={plans} 
+                clients={clients}
+                plans={plans}
                 onAddClient={handleAddClient}
                 onUpdateClientStatus={handleUpdateClientStatus}
+                onDeleteClient={handleDeleteClient}
                 getAuthHeaders={getAuthHeaders}
                 canCreateClient={['Super Admin', 'Administrador', 'Técnico', 'Soporte'].includes(userSession.role)}
                 canManageClientLifecycle={['Super Admin', 'Administrador', 'Cobranza'].includes(userSession.role)}
+                canDeleteClient={['Super Admin', 'Administrador'].includes(userSession.role)}
                 userRole={userSession.role}
                 onNavigate={navigateToTab}
               />
