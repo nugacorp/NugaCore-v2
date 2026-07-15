@@ -8,7 +8,7 @@
 // RESTRICCIONES:
 //  - NO commit mode. NO comandos reales al router.
 //  - Script NUNCA persistido. Solo scriptHash para auditoría.
-//  - Worker usado solo para lectura (readRouterSnapshot).
+//  - Worker usado solo para lectura (probe liviano: resource/print).
 //  - Solo source=live puede marcar enrollment como online.
 // ====================================================================
 
@@ -17,8 +17,7 @@ import { BadRequestError, NotFoundError } from '../../common/errors';
 import { generateFromTemplate } from '../routeros-templates/generator';
 import { buildTemplateFilename } from '../routeros-templates/validators';
 import { store } from '../../state/store';
-import { readRouterSnapshot } from '../mikrotik/worker/worker';
-import { isLiveWorkerEnabled } from '../mikrotik/worker/connector';
+import { getRouterConnector, isLiveWorkerEnabled } from '../mikrotik/worker/connector';
 import {
   deleteMikrotikRouter,
   persistMikrotikRouter,
@@ -796,16 +795,19 @@ export const enrollmentService = {
     const port = router?.apiPort || 8728;
     const apiTcpReachable = host ? await probeTcp(host, port) : false;
 
-    const snapshot = await readRouterSnapshot(rec.routerId);
+    // Un solo login + /system/resource/print bastan para confirmar online.
+    // El snapshot completo (varios prints) se reserva para inventario/NOC.
+    const probe = router
+      ? await getRouterConnector().read(router, '/system/resource/print')
+      : null;
     const attempts = rec.checkOnlineAttempts + 1;
     const liveError =
-      snapshot?.reads.map((r) => r.error).find((e) => e && e.startsWith('live_failed:'))?.replace(
-        /^live_failed:/,
-        '',
-      ) ?? null;
+      probe?.error?.startsWith('live_failed:')
+        ? probe.error.replace(/^live_failed:/, '')
+        : null;
 
     // Solo source=live puede confirmar online
-    if (snapshot && snapshot.source === 'live' && snapshot.reads.some((r) => r.ok)) {
+    if (probe && probe.source === 'live' && probe.ok) {
       const onlineRouter = store.MIKROTIK_ROUTERS.find((r) => r.id === rec.routerId);
       if (onlineRouter) {
         onlineRouter.isOnline = true;
@@ -846,8 +848,8 @@ export const enrollmentService = {
       };
     }
 
-    // No confirmado: simulated o sin snapshot
-    const isSimulated = snapshot?.source === 'simulated';
+    // No confirmado: simulated o sin lectura live
+    const isSimulated = probe?.source === 'simulated';
     const nextStatus: EnrollmentStatus =
       attempts > MAX_CHECK_ATTEMPTS ? 'failed' : 'waiting_for_router';
     const failureReason =
@@ -888,7 +890,7 @@ export const enrollmentService = {
     return {
       enrollment: toView(updated!),
       isOnline: false,
-      snapshotSource: snapshot?.source ?? null,
+      snapshotSource: probe?.source ?? null,
       message,
       apiTcpReachable,
       liveError,
