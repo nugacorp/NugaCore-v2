@@ -2,7 +2,9 @@
 
 > Documentación pública de lo implementado y validado hasta **2026-07-15**.
 > Sanitizada: sin contraseñas, tokens, JWTs, claves privadas ni logs operativos crudos.
-> HEAD de referencia en `main` al cerrar este handoff: `c914439`.
+> HEAD de referencia en `main` al cerrar este handoff: `c914439` (jul 2026 sprint router/WG).
+> HEAD `main` posterior: `cebcc6d`. Rama UI cleanup desplegada en staging: `b66e0b1` (PR #31).
+> Auditoría producción: [`PRODUCTION_GAP_REPORT.md`](./PRODUCTION_GAP_REPORT.md) (2026-07-15).
 
 ## 1. Objetivo del periodo
 
