@@ -22,12 +22,8 @@ export const sanitizeScriptForPreview = (script: string): string => {
   return sanitized;
 };
 
-/** Nombre de archivo seguro para el .rsc descargable. */
-export const buildFilename = (routerName: string, templateId: string): string => {
-  const safe = routerName.replace(/[^a-zA-Z0-9_-]/g, '-').substring(0, 32);
-  const date = new Date().toISOString().slice(0, 10);
-  return `nugacore-${templateId.replace(/_/g, '-')}-${safe}-${date}.rsc`;
-};
+/** Nombre corto para descarga /import (nc-wg-chr.rsc). */
+export { buildTemplateFilename as buildFilename } from '../routeros-templates/rsc-filename';
 
 /** Verifica que el script no contiene branding externo prohibido. */
 export const assertNoBrandViolation = (script: string): void => {

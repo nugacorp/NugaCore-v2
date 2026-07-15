@@ -813,7 +813,7 @@ export default function RouterEnrollmentWizard({ userRole, getAuthHeaders }: Pro
               <div>
                 <p className="font-medium">Elimina el archivo del router</p>
                 <pre className="mt-1 bg-gray-900 px-3 py-1.5 rounded text-xs font-mono text-green-300">
-                  /file remove [find name~"nugacore-tpl-"]
+                  /file remove [find name~"^(nc-|nugacore-)"]
                 </pre>
               </div>
             </div>

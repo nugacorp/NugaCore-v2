@@ -35,7 +35,7 @@ describe('RouterOS Resource Generator — script base_wisp_wireguard', () => {
     const result = generateResource(BASE_PARAMS);
     expect(result.script.length).toBeGreaterThan(500);
     expect(result.scriptHash).toHaveLength(64);
-    expect(result.filename).toMatch(/^nugacore-base-wisp-wireguard-/);
+    expect(result.filename).toMatch(/^nc-[a-z0-9]+-[a-z0-9]+\.rsc$/);
   });
 
   it('el script contiene configuración LAN', () => {
@@ -179,13 +179,14 @@ describe('safe-rsc — sanitizeScriptForPreview', () => {
 });
 
 describe('safe-rsc — buildFilename', () => {
-  it('genera nombre de archivo con prefijo nugacore y fecha', () => {
+  it('genera nombre corto nc-{abbr}-{slug}.rsc', () => {
     const name = buildFilename('MI-ROUTER', 'base_wisp_wireguard');
-    expect(name).toMatch(/^nugacore-base-wisp-wireguard-MI-ROUTER-\d{4}-\d{2}-\d{2}\.rsc$/);
+    expect(name).toBe('nc-basewi-mirouter.rsc');
   });
 
   it('sanitiza caracteres especiales en el nombre', () => {
     const name = buildFilename('Router Test #1!', 'base_wisp_sstp');
+    expect(name).toBe('nc-basewi-routertest1.rsc');
     expect(name).not.toContain('#');
     expect(name).not.toContain('!');
     expect(name).not.toContain(' ');

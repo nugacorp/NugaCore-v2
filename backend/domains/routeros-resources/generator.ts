@@ -305,7 +305,7 @@ const sectionSystemNote = (p: ResourceGeneratorParams, templateLabel: string): s
 const sectionFileCleanup = (): string => `
 # --- 18. Limpieza del archivo .rsc (si se importo desde el almacenamiento del router) ---
 :delay 2
-/file remove [find name~"nugacore-"]
+/file remove [find name~"^(nc-|nugacore-)"]
 :log info "NugaCore: configuracion aplicada correctamente."`;
 
 // ── Punto de entrada ──────────────────────────────────────────────────

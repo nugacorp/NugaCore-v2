@@ -873,7 +873,7 @@ export default function RouterOnboardingWizard({
                   ['Haz un backup (recomendado):', '/system backup save name=pre-nugacore'],
                   ['Sube el archivo .rsc a Files (drag & drop en WinBox).', null],
                   ['En Terminal, importa el script:', `/import file-name=${fileName}`],
-                  ['Elimina el archivo tras importarlo:', '/file remove [find name~"nugacore-tpl-"]'],
+                  ['Elimina el archivo tras importarlo:', '/file remove [find name~"^(nc-|nugacore-)"]'],
                 ].map(([text, code], i) => (
                   <div key={i} className="flex gap-2.5">
                     <span className="shrink-0 w-5 h-5 bg-indigo-500/20 text-indigo-300 border border-indigo-500/20 rounded-full flex items-center justify-center text-[10px] font-bold">

@@ -21,6 +21,7 @@ import {
 } from './types';
 import {
   buildTemplateFilename,
+  RSC_FILE_CLEANUP_FIND,
   assertNoBrandViolation,
   assertNoForbiddenPolicies,
   assertNoForbiddenKeywords,
@@ -295,7 +296,7 @@ const sectionSystemNote = (
 const sectionFileCleanup = (): string => `
 # --- Limpieza del archivo tras importar ---
 :delay 2
-/file remove [find name~"nugacore-tpl-"]
+/file remove [find ${RSC_FILE_CLEANUP_FIND}]
 :log info "NugaCore Templates: script aplicado correctamente."`;
 
 // ── Sección SNMP (factory onboarding) ───────────────────────────────

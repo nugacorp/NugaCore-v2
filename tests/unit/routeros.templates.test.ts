@@ -126,7 +126,7 @@ describe('Generator — Core templates', () => {
     expect(result.templateId).toBe('router_base_wireguard');
     expect(result.generatorVersion).toBe(TEMPLATE_LIBRARY_VERSION);
     expect(result.scriptHash).toHaveLength(32);
-    expect(result.filename).toMatch(/^nugacore-tpl-/);
+    expect(result.filename).toMatch(/^nc-/);
     expect(result.filename).toMatch(/\.rsc$/);
   });
 
@@ -230,7 +230,7 @@ describe('Generator — Core templates', () => {
       enableLanStack: false,
       lanInterfaces: [],
     });
-    expect(result.script).toContain('nugacore-templates-1.0.5');
+    expect(result.script).toContain('nugacore-templates-1.0.6');
     expect(result.script).toContain('LAN/DHCP/NAT/firewall: omitidos');
     expect(result.script).not.toContain('ether2');
     expect(result.script).not.toContain('bridge-lan');
@@ -316,7 +316,7 @@ describe('Generator — Tower template', () => {
   it('genera script tower_wisp', () => {
     const result = generateFromTemplate({ templateId: 'tower_wisp', ...WG_PARAMS });
     expect(result.script).toContain('NugaCore');
-    expect(result.filename).toContain('tower-wisp');
+    expect(result.filename).toBe('nc-tower-testrouter.rsc');
   });
 
   it('tower_wisp con VLANs incluye sección vlan', () => {
@@ -658,17 +658,20 @@ describe('Validators', () => {
 // ── Filename ──────────────────────────────────────────────────────
 
 describe('buildTemplateFilename', () => {
-  it('genera nombre válido', () => {
+  it('genera nombre corto nc-{abbr}-{slug}.rsc', () => {
     const name = buildTemplateFilename('mi-router', 'noc_ready');
-    expect(name).toMatch(/^nugacore-tpl-/);
-    expect(name).toMatch(/\.rsc$/);
-    expect(name).toContain('mi-router');
+    expect(name).toBe('nc-noc-mirouter.rsc');
   });
 
   it('sanitiza caracteres especiales del routerName', () => {
     const name = buildTemplateFilename('router con espacios!', 'tower_wisp');
+    expect(name).toBe('nc-tower-routerconesp.rsc');
     expect(name).not.toContain(' ');
     expect(name).not.toContain('!');
+  });
+
+  it('acorta CHR -CHR a nc-wg-chrchr.rsc', () => {
+    expect(buildTemplateFilename('CHR -CHR', 'router_base_wireguard')).toBe('nc-wg-chrchr.rsc');
   });
 });
 

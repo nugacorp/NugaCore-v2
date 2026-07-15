@@ -203,7 +203,7 @@ describe('Enrollment — flujo start → download → check-online → revoke', 
   });
 
   it('scriptFilename tiene formato correcto (guiones, no underscores en templateId)', () => {
-    expect(scriptFilename).toMatch(/^nugacore-tpl-router-base-wireguard-.*\.rsc$/);
+    expect(scriptFilename).toMatch(/^nc-wg-.+\.rsc$/);
   });
 
   it('Enrollment view NO contiene script ni claves privadas', () => {

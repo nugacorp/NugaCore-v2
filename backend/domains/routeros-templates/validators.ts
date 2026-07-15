@@ -177,9 +177,11 @@ export function sanitizeForPreview(script: string): string {
   return s;
 }
 
-/** Nombre de archivo seguro para el .rsc. */
-export function buildTemplateFilename(routerName: string, templateId: string): string {
-  const safe = routerName.replace(/[^a-zA-Z0-9_-]/g, '-').substring(0, 32);
-  const date = new Date().toISOString().slice(0, 10);
-  return `nugacore-tpl-${templateId.replace(/_/g, '-')}-${safe}-${date}.rsc`;
-}
+export {
+  buildTemplateFilename,
+  buildShortRouterSlug,
+  templateFilenameAbbr,
+  RSC_FILE_PREFIX,
+  RSC_FILE_CLEANUP_FIND,
+  TEMPLATE_FILENAME_ABBR,
+} from './rsc-filename';

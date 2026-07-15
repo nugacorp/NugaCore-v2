@@ -2,7 +2,7 @@
 // Tipos de la Biblioteca de Plantillas RouterOS (Fase 4.6.3).
 // ====================================================================
 
-export const TEMPLATE_LIBRARY_VERSION = 'nugacore-templates-1.0.5';
+export const TEMPLATE_LIBRARY_VERSION = 'nugacore-templates-1.0.6';
 
 export type TemplateLibraryId =
   | 'router_base_wireguard'
