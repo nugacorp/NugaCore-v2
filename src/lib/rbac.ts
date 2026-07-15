@@ -39,12 +39,12 @@ export type AppTab =
 // la VISIBILIDAD del módulo.
 // ====================================================================
 const roleTabs: Record<UserRole, AppTab[]> = {
-  'Super Admin':  ['dashboard', 'noc', 'crm', 'commercial', 'billing', 'finance', 'suspension', 'payments', 'network', 'mikrotik', 'wireguard', 'routeros-resources', 'routeros-templates', 'router-enrollment', 'support', 'tech-pwa', 'inventory', 'inventory-routers', 'gis', 'owner', 'reports', 'portal', 'manual-safe-mode', 'safe-command-queue', 'routeros-readonly', 'inventory-sync', 'provisioning', 'notifications', 'user-manual'],
-  'Administrador':['dashboard', 'noc', 'crm', 'commercial', 'billing', 'suspension', 'payments', 'network', 'wireguard', 'routeros-resources', 'routeros-templates', 'router-enrollment', 'support', 'tech-pwa', 'inventory', 'inventory-routers', 'gis', 'reports', 'portal', 'manual-safe-mode', 'safe-command-queue', 'routeros-readonly', 'inventory-sync', 'provisioning', 'notifications', 'user-manual'],
-  'Cobranza':     ['dashboard', 'crm', 'commercial', 'billing', 'finance', 'suspension', 'payments', 'reports', 'portal', 'provisioning', 'notifications', 'user-manual'],
-  'Técnico':      ['dashboard', 'noc', 'crm', 'suspension', 'network', 'mikrotik', 'routeros-resources', 'routeros-templates', 'router-enrollment', 'support', 'tech-pwa', 'inventory', 'inventory-routers', 'gis', 'portal', 'manual-safe-mode', 'safe-command-queue', 'routeros-readonly', 'inventory-sync', 'provisioning', 'notifications', 'user-manual'],
-  'Soporte':      ['dashboard', 'noc', 'crm', 'commercial', 'support', 'tech-pwa', 'inventory-routers', 'gis', 'portal', 'manual-safe-mode', 'safe-command-queue', 'routeros-readonly', 'inventory-sync', 'provisioning', 'notifications', 'user-manual'],
-  'Solo lectura': ['dashboard', 'noc', 'crm', 'commercial', 'billing', 'suspension', 'network', 'inventory-routers', 'gis', 'reports', 'portal', 'manual-safe-mode', 'safe-command-queue', 'routeros-readonly', 'inventory-sync', 'provisioning', 'notifications', 'user-manual'],
+  'Super Admin':  ['dashboard', 'noc', 'crm', 'commercial', 'billing', 'finance', 'suspension', 'payments', 'network', 'mikrotik', 'wireguard', 'routeros-resources', 'routeros-templates', 'router-enrollment', 'support', 'tech-pwa', 'inventory', 'inventory-routers', 'gis', 'owner', 'reports', 'portal', 'manual-safe-mode', 'safe-command-queue', 'routeros-readonly', 'inventory-sync', 'provisioning', 'user-manual'],
+  'Administrador':['dashboard', 'noc', 'crm', 'commercial', 'billing', 'suspension', 'payments', 'network', 'wireguard', 'routeros-resources', 'routeros-templates', 'router-enrollment', 'support', 'tech-pwa', 'inventory', 'inventory-routers', 'gis', 'reports', 'portal', 'manual-safe-mode', 'safe-command-queue', 'routeros-readonly', 'inventory-sync', 'provisioning', 'user-manual'],
+  'Cobranza':     ['dashboard', 'crm', 'commercial', 'billing', 'finance', 'suspension', 'payments', 'reports', 'portal', 'provisioning', 'user-manual'],
+  'Técnico':      ['dashboard', 'noc', 'crm', 'suspension', 'network', 'mikrotik', 'routeros-resources', 'routeros-templates', 'router-enrollment', 'support', 'tech-pwa', 'inventory', 'inventory-routers', 'gis', 'portal', 'manual-safe-mode', 'safe-command-queue', 'routeros-readonly', 'inventory-sync', 'provisioning', 'user-manual'],
+  'Soporte':      ['dashboard', 'noc', 'crm', 'commercial', 'support', 'tech-pwa', 'inventory-routers', 'gis', 'portal', 'manual-safe-mode', 'safe-command-queue', 'routeros-readonly', 'inventory-sync', 'provisioning', 'user-manual'],
+  'Solo lectura': ['dashboard', 'noc', 'crm', 'commercial', 'billing', 'suspension', 'network', 'inventory-routers', 'gis', 'reports', 'portal', 'manual-safe-mode', 'safe-command-queue', 'routeros-readonly', 'inventory-sync', 'provisioning', 'user-manual'],
 };
 
 // ====================================================================
@@ -59,9 +59,11 @@ const roleTabs: Record<UserRole, AppTab[]> = {
 //    diario usa Routers + Plantillas + workspace in-page.
 //  - routeros-readonly / inventory-sync / provisioning: lab, sync y dry-run
 //    de aprovisionamiento; no son módulos operativos de un WISP LATAM.
-//  - automation: DRY RUN / lab interno; retirado de la UI operativa del WISP
-//    (sin acceso por rol; el motor backend puede seguir existiendo).
-// No se eliminan ni se les quita acceso (salvo automation): solo se ocultan del sidebar.
+//  - automation / notifications: labs DRY RUN de motores internos; retirados
+//    de la UI operativa del WISP (sin acceso por rol). Las alertas del operador
+//    viven en la campana de la barra superior (NOC alerts), no en esos módulos.
+// No se eliminan ni se les quita acceso (salvo automation/notifications):
+// solo se ocultan del sidebar.
 // ====================================================================
 const SIDEBAR_HIDDEN_TABS: ReadonlySet<AppTab> = new Set<AppTab>([
   'wireguard',
@@ -74,6 +76,7 @@ const SIDEBAR_HIDDEN_TABS: ReadonlySet<AppTab> = new Set<AppTab>([
   'inventory-sync',
   'provisioning',
   'automation',
+  'notifications',
 ]);
 
 export function isSidebarHiddenTab(tab: string): boolean {
