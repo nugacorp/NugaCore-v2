@@ -59,6 +59,7 @@ const roleTabs: Record<UserRole, AppTab[]> = {
 //    diario usa Routers + Plantillas + workspace in-page.
 //  - routeros-readonly / inventory-sync / provisioning: lab, sync y dry-run
 //    de aprovisionamiento; no son módulos operativos de un WISP LATAM.
+//  - automation: workflows/IA de desarrollo, no operativa diaria del WISP.
 // No se eliminan ni se les quita acceso: solo se ocultan del sidebar.
 // ====================================================================
 const SIDEBAR_HIDDEN_TABS: ReadonlySet<AppTab> = new Set<AppTab>([
@@ -71,6 +72,7 @@ const SIDEBAR_HIDDEN_TABS: ReadonlySet<AppTab> = new Set<AppTab>([
   'routeros-readonly',
   'inventory-sync',
   'provisioning',
+  'automation',
 ]);
 
 export function isSidebarHiddenTab(tab: string): boolean {
