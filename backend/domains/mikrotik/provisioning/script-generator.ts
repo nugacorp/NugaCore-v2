@@ -160,8 +160,9 @@ ${privateKeySet}
 ${wgTunnelBlock}
 
 # --- 8. API limitada a la red VPN de NugaCore ---
-/ip service set api port=${apiPort} address="${apiCidr}" disabled=no
-/ip service set api-ssl address="${apiCidr}"
+# find !dynamic: ROS 7.19+ rechaza set api cuando hay sesiones dinámicas.
+/ip service set [find where name="api" and dynamic=no] port=${apiPort} address=${apiCidr} disabled=no
+/ip service set [find where name="api-ssl" and dynamic=no] address=${apiCidr}
 
 # --- 9. Scheduler watchdog (imprime la public-key para registrarla) ---
 /system scheduler add name=NugaCore-WG-Watchdog interval=00:05:00 comment="NugaCore WG watchdog" on-event="/interface wireguard print where name=NugaCoreWG"
@@ -203,8 +204,8 @@ ${userAndGroup(apiUser, apiPassword, apiMode, 'SSTP')}
 /ip route add dst-address="${server.serverManagementCidr}" gateway=NugaCoreVPN comment="NugaCore management route"
 
 # --- 7. API limitada a la red VPN de NugaCore ---
-/ip service set api port=${apiPort} address="${apiCidr}" disabled=no
-/ip service set api-ssl address="${apiCidr}"
+/ip service set [find where name="api" and dynamic=no] port=${apiPort} address=${apiCidr} disabled=no
+/ip service set [find where name="api-ssl" and dynamic=no] address=${apiCidr}
 
 # --- 8. Scheduler de reconexion VPN ---
 /system scheduler add name=NugaCore-VPN-Watchdog interval=00:01:00 comment="NugaCore VPN reconnect watchdog" on-event="/interface sstp-client enable [find where name=\\"NugaCoreVPN\\" disabled=yes]"

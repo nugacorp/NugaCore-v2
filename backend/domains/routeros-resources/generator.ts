@@ -165,7 +165,8 @@ const sectionUserAndGroup = (apiUser: string, apiPassword: string): string => `
 
 const sectionApiService = (p: ResourceGeneratorParams, allowedCidr: string): string => `
 # --- 14. API limitada al CIDR de la red VPN/gestion de NugaCore ---
-/ip service set api port=${p.apiPort} address="${allowedCidr}" disabled=no`;
+# find !dynamic: ROS 7.19+ rechaza set api cuando hay sesiones dinámicas.
+/ip service set [find where name="api" and dynamic=no] port=${p.apiPort} address=${allowedCidr} disabled=no`;
 
 // ── Secciones específicas por plantilla ──────────────────────────────
 

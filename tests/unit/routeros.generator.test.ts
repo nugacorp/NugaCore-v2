@@ -78,7 +78,7 @@ describe('RouterOS Resource Generator — script base_wisp_wireguard', () => {
   it('el script limita la API al CIDR VPN', () => {
     const { script } = generateResource(BASE_PARAMS);
     expect(script).toContain('10.10.0.0/24');
-    expect(script).toContain('ip service set api');
+    expect(script).toContain('ip service set [find where name="api" and dynamic=no]');
   });
 
   it('el script contiene watchdog scheduler', () => {

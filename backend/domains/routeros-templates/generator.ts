@@ -63,9 +63,10 @@ const getDefaults = (p: TemplateLibraryParams): Defaults => {
     ipv4Prefix3(poolStartRaw) === lanPrefix ? poolStartRaw : `${lanPrefix}.10`;
   const poolEnd = ipv4Prefix3(poolEndRaw) === lanPrefix ? poolEndRaw : `${lanPrefix}.254`;
   const wan = normalizeIfaceName(p.wanInterface || 'ether1');
-  const lanPorts = (p.lanInterfaces?.length ? p.lanInterfaces : ['ether2', 'ether3', 'ether4']).map(
-    normalizeIfaceName,
-  );
+  // Array vacío (enrollment sin LAN) ≠ undefined (biblioteca → ether2/3/4 por defecto).
+  const lanPorts = Array.isArray(p.lanInterfaces)
+    ? p.lanInterfaces.map(normalizeIfaceName)
+    : ['ether2', 'ether3', 'ether4'].map(normalizeIfaceName);
   return {
     bridge: p.lanBridgeName || 'bridge-lan',
     lanCidr,
@@ -167,8 +168,8 @@ const sectionBridge = (d: Defaults): string => {
   const ports = d.lanPorts
     .map(
       (p) => `# Puerto LAN ${p} (omite si la interfaz no existe o ya está en un bridge)
-:if ([:len [/interface find name="${p}"]] > 0) do={
-  :if ([:len [/interface bridge port find interface="${p}"]] = 0) do={
+:if ([:len [/interface find where name="${p}"]] > 0) do={
+  :if ([:len [/interface bridge port find where interface="${p}"]] = 0) do={
     /interface bridge port add interface="${p}" bridge="${d.bridge}" comment="NugaCore"
   }
 }`,
@@ -176,7 +177,7 @@ const sectionBridge = (d: Defaults): string => {
     .join('\n');
   return `
 # --- Bridge LAN ---
-:if ([:len [/interface bridge find name="${d.bridge}"]] = 0) do={
+:if ([:len [/interface bridge find where name="${d.bridge}"]] = 0) do={
   /interface bridge add name="${d.bridge}" fast-forward=no comment="NugaCore LAN bridge"
 }
 ${ports}`;
@@ -184,14 +185,14 @@ ${ports}`;
 
 const sectionInterfaceLists = (d: Defaults): string => `
 # --- Interface Lists ---
-:if ([:len [/interface list find name=WAN]] = 0) do={ /interface list add name=WAN }
-:if ([:len [/interface list find name=LAN]] = 0) do={ /interface list add name=LAN }
-:if ([:len [/interface find name="${d.wan}"]] > 0) do={
-  :if ([:len [/interface list member find interface="${d.wan}" list=WAN]] = 0) do={
+:if ([:len [/interface list find where name=WAN]] = 0) do={ /interface list add name=WAN }
+:if ([:len [/interface list find where name=LAN]] = 0) do={ /interface list add name=LAN }
+:if ([:len [/interface find where name="${d.wan}"]] > 0) do={
+  :if ([:len [/interface list member find where interface="${d.wan}" and list=WAN]] = 0) do={
     /interface list member add interface="${d.wan}" list=WAN comment="NugaCore WAN"
   }
 }
-:if ([:len [/interface list member find interface="${d.bridge}" list=LAN]] = 0) do={
+:if ([:len [/interface list member find where interface="${d.bridge}" and list=LAN]] = 0) do={
   /interface list member add interface="${d.bridge}" list=LAN comment="NugaCore LAN"
 }`;
 
@@ -257,15 +258,25 @@ const sectionFirewall = (mode: TemplateApplyMode): string => {
 ${dropWan}`;
 };
 
+/**
+ * Restringe /ip service sin "preceding keyword" (api como argumento posicional)
+ * y sin tocar entradas dinámicas de sesión (ROS 7.19+ falla con set api address=...).
+ */
+const ipServiceSetStatic = (name: string, props: string): string =>
+  `/ip service set [find where name="${name}" and dynamic=no] ${props}`;
+
+const ipServiceDisableStatic = (name: string): string =>
+  `/ip service disable [find where name="${name}" and dynamic=no]`;
+
 const sectionApiUser = (user: string, pass: string, apiCidr: string, apiPort: number): string => `
 # --- Grupo y usuario API NugaCore (permisos mínimos) ---
-:if ([:len [/user group find name="nugacore"]] = 0) do={
+:if ([:len [/user group find where name="nugacore"]] = 0) do={
   /user group add name="nugacore" policy="${NUGACORE_GROUP_POLICY}" comment="NugaCore minimal API group"
 }
 /user add name="${user}" password="${pass}" group="nugacore" comment="NugaCore API user"
-# --- API Service (solo desde red de gestión) ---
-/ip service set api port=${apiPort} address="${apiCidr}" disabled=no
-/ip service disable telnet`;
+# --- API Service (solo desde red de gestión; find !dynamic evita fallo ROS 7.19+) ---
+${ipServiceSetStatic('api', `port=${apiPort} address=${apiCidr} disabled=no`)}
+${ipServiceDisableStatic('telnet')}`;
 
 const sectionSystemNote = (
   routerName: string,
@@ -335,9 +346,9 @@ const sectionMinimalLan = (d: Defaults, mode: TemplateApplyMode): string => {
     : '\n# --- DHCP: deshabilitado por configuración WISP ---';
   return `
 # --- WAN ---
-:if ([:len [/interface list find name=WAN]] = 0) do={ /interface list add name=WAN }
-:if ([:len [/interface find name="${d.wan}"]] > 0) do={
-  :if ([:len [/interface list member find interface="${d.wan}" list=WAN]] = 0) do={
+:if ([:len [/interface list find where name=WAN]] = 0) do={ /interface list add name=WAN }
+:if ([:len [/interface find where name="${d.wan}"]] > 0) do={
+  :if ([:len [/interface list member find where interface="${d.wan}" and list=WAN]] = 0) do={
     /interface list member add interface="${d.wan}" list=WAN comment="NugaCore WAN"
   }
 }
@@ -392,11 +403,11 @@ const sectionWireguard = (p: TemplateLibraryParams): WgSectionResult => {
     );
   }
   const privateKeySet = hasValidPrivateKey
-    ? `/interface wireguard set [find name="NugaCoreWG"] private-key="${privateKey}"`
+    ? `/interface wireguard set [find where name="NugaCoreWG"] private-key="${privateKey}"`
     : '';
 
   const watchdog = `# --- Watchdog WireGuard ---
-:if ([:len [/system scheduler find name="NugaCore-WG-Watchdog"]] = 0) do={
+:if ([:len [/system scheduler find where name="NugaCore-WG-Watchdog"]] = 0) do={
   /system scheduler add name="NugaCore-WG-Watchdog" interval=00:05:00 \\
     on-event=":log info \\"NugaCore WG watchdog: peer activo\\"" \\
     comment="NugaCore WG watchdog"
@@ -414,7 +425,7 @@ const sectionWireguard = (p: TemplateLibraryParams): WgSectionResult => {
 # --- WireGuard tunnel NugaCore (INCOMPLETO — sin address/peer/route) ---
 # Faltan parámetros reales. NO se emiten comandos inválidos que aborten /import.
 # Completar: Alta de Router (enrollment) o Biblioteca con Public Key + Endpoint + IP peer.
-:if ([:len [/interface wireguard find name="NugaCoreWG"]] = 0) do={
+:if ([:len [/interface wireguard find where name="NugaCoreWG"]] = 0) do={
   ${ifaceCreate}
 }
 ${privateKeySet}
@@ -443,17 +454,17 @@ ${watchdog}`;
   const section = `
 # --- WireGuard tunnel NugaCore ---
 ${note}
-:if ([:len [/interface wireguard find name="NugaCoreWG"]] = 0) do={
+:if ([:len [/interface wireguard find where name="NugaCoreWG"]] = 0) do={
   ${ifaceCreate}
 }
 ${privateKeySet}
-:if ([:len [/ip address find interface="NugaCoreWG" comment~"NugaCore"]] = 0) do={
+:if ([:len [/ip address find where interface="NugaCoreWG" and comment~"NugaCore"]] = 0) do={
   /ip address add address="${routerIp}" interface="NugaCoreWG" comment="NugaCore WG address"
 }
-:if ([:len [/interface wireguard peers find comment~"NugaCore WG server"]] = 0) do={
+:if ([:len [/interface wireguard peers find where comment~"NugaCore WG server"]] = 0) do={
   /interface wireguard peers add interface="NugaCoreWG" public-key="${pubKey}" endpoint-address="${epHost}" endpoint-port=${epPort} allowed-address=${mgmtCidr} persistent-keepalive=${keepalive}s comment="NugaCore WG server peer"
 }
-:if ([:len [/ip route find dst-address="${mgmtCidr}" comment~"NugaCore"]] = 0) do={
+:if ([:len [/ip route find where dst-address="${mgmtCidr}" and comment~"NugaCore"]] = 0) do={
   /ip route add dst-address="${mgmtCidr}" gateway=NugaCoreWG comment="NugaCore management route"
 }
 ${watchdog}`;
@@ -528,18 +539,32 @@ const genRouterBaseWireguard = (p: TemplateLibraryParams): GenResult => {
   const cred = generateApiCredential(p.routerName);
   const { section: wgSection, warnings: wgWarnings } = sectionWireguard(p);
   const allowedCidr = p.wgVpnCidr || p.wgManagementCidr || d.apiCidr;
+  const enableLanStack = p.enableLanStack !== false;
   const warnings = [...modeWarnings(mode), ...wgWarnings];
+  if (!enableLanStack) {
+    warnings.push(
+      'LAN omitida (enableLanStack=false): solo identity (según modo) + API + WireGuard. Ideal para CHR/Alta sin parámetros LAN.',
+    );
+  }
+
+  const lanSections = enableLanStack
+    ? [
+        sectionBridge(d),
+        sectionInterfaceLists(d),
+        sectionLanIp(d),
+        sectionDhcp(d, mode),
+        sectionNat(d),
+        sectionFirewall(mode),
+      ]
+    : [
+        `\n# --- LAN/DHCP/NAT/firewall: omitidos (enrollment sin parámetros LAN) ---`,
+      ];
 
   const script = [
     header(p, 'Router Base WISP + WireGuard NugaCore', mode),
     sectionCleanupNugaCore(),
     sectionIdentity(p.routerName, mode),
-    sectionBridge(d),
-    sectionInterfaceLists(d),
-    sectionLanIp(d),
-    sectionDhcp(d, mode),
-    sectionNat(d),
-    sectionFirewall(mode),
+    ...lanSections,
     sectionApiUser(cred.username, cred.plainPassword, allowedCidr, d.apiPort),
     wgSection,
     sectionSystemNote(p.routerName, 'Router Base WISP + WireGuard', mode),
@@ -558,13 +583,21 @@ const genFactoryOnboarding = (p: TemplateLibraryParams): GenResult => {
   const vpnCidr = p.wgVpnCidr || p.wgManagementCidr || d.apiCidr;
   const snmpCidr = p.snmpMgmtCidr || vpnCidr;
   const zoneName = p.zoneName || p.routerName;
+  const enableLanStack = p.enableLanStack !== false;
   const warnings = [...modeWarnings(mode), ...wgWarnings];
+  if (!enableLanStack) {
+    warnings.push(
+      'LAN omitida (enableLanStack=false): factory aplica API + WG + SNMP + firewall de gestión, sin bridge/DHCP.',
+    );
+  }
 
   const script = [
     header(p, 'Factory Reset — WG + API + SNMP', mode),
     sectionCleanupNugaCore({ snmp: true }),
     sectionIdentity(p.routerName, mode),
-    sectionMinimalLan(d, mode),
+    enableLanStack
+      ? sectionMinimalLan(d, mode)
+      : `\n# --- LAN mínima: omitida (sin parámetros LAN) ---`,
     sectionApiUser(cred.username, cred.plainPassword, vpnCidr, d.apiPort),
     wgSection,
     sectionSnmp(snmpCommunity, snmpCidr, zoneName),
@@ -590,18 +623,28 @@ const genRouterBaseSstp = (p: TemplateLibraryParams): GenResult => {
   const vpnCred = generateApiCredential(`vpn_${p.routerName}`);
   const { section: sstpSection, warnings: sstpWarnings } = sectionSstp(p, vpnCred.username, vpnCred.plainPassword);
   const allowedCidr = p.sstpManagementCidr || d.apiCidr;
+  const enableLanStack = p.enableLanStack !== false;
   const warnings = [...modeWarnings(mode), ...sstpWarnings];
+  if (!enableLanStack) {
+    warnings.push('LAN omitida (enableLanStack=false): solo API + SSTP.');
+  }
+
+  const lanSections = enableLanStack
+    ? [
+        sectionBridge(d),
+        sectionInterfaceLists(d),
+        sectionLanIp(d),
+        sectionDhcp(d, mode),
+        sectionNat(d),
+        sectionFirewall(mode),
+      ]
+    : [`\n# --- LAN/DHCP/NAT/firewall: omitidos (sin parámetros LAN) ---`];
 
   const script = [
     header(p, 'Router Base WISP + SSTP NugaCore', mode),
     sectionCleanupNugaCore(),
     sectionIdentity(p.routerName, mode),
-    sectionBridge(d),
-    sectionInterfaceLists(d),
-    sectionLanIp(d),
-    sectionDhcp(d, mode),
-    sectionNat(d),
-    sectionFirewall(mode),
+    ...lanSections,
     sectionApiUser(cred.username, cred.plainPassword, allowedCidr, d.apiPort),
     sstpSection,
     sectionSystemNote(p.routerName, 'Router Base WISP + SSTP', mode),
@@ -1042,21 +1085,21 @@ const genNocReady = (p: TemplateLibraryParams): GenResult => {
   const apiSslSection = p.enableApiSsl
     ? `
 # --- API-SSL habilitada ---
-/ip service set api-ssl address="${apiCidr}" disabled=no`
+${ipServiceSetStatic('api-ssl', `address=${apiCidr} disabled=no`)}`
     : `
 # --- API-SSL deshabilitada (usar api sobre VPN) ---
-/ip service disable api-ssl`;
+${ipServiceDisableStatic('api-ssl')}`;
 
   const script = `${header(p, 'NOC Ready', mode)}
 ${sectionIdentity(p.routerName, mode)}
 
 # --- Servicios seguros: desactivar lo que no se usa ---
-/ip service disable telnet
-/ip service disable www
-/ip service disable www-ssl
+${ipServiceDisableStatic('telnet')}
+${ipServiceDisableStatic('www')}
+${ipServiceDisableStatic('www-ssl')}
 
 # --- Grupo NOC con permisos mínimos ---
-:if ([:len [/user group find name="nugacore"]] = 0) do={
+:if ([:len [/user group find where name="nugacore"]] = 0) do={
   /user group add name="nugacore" policy="${NUGACORE_GROUP_POLICY}" comment="NugaCore NOC group"
 }
 
@@ -1065,7 +1108,7 @@ ${sectionIdentity(p.routerName, mode)}
 /user add name="${cred.username}" password="${cred.plainPassword}" group="nugacore" comment="NugaCore NOC API user"
 
 # --- API limitada al CIDR de gestión ---
-/ip service set api port=${apiPort} address="${apiCidr}" disabled=no
+${ipServiceSetStatic('api', `port=${apiPort} address=${apiCidr} disabled=no`)}
 ${apiSslSection}
 
 # --- Logging estructurado ---

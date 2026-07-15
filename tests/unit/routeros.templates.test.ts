@@ -156,7 +156,7 @@ describe('Generator — Core templates', () => {
     expect(result.script).not.toMatch(/do=\{\s*\n\s*add name="NugaCoreWG"/);
     // private-key fuera del bloque :if do={...} (paste-safe en Terminal CHR)
     expect(result.script).toContain(
-      '/interface wireguard set [find name="NugaCoreWG"] private-key="AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA="',
+      '/interface wireguard set [find where name="NugaCoreWG"] private-key="AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA="',
     );
     expect(result.script).not.toMatch(
       /do=\{\s*\n\s*\/interface wireguard add[^\n]*private-key=/,
@@ -219,8 +219,36 @@ describe('Generator — Core templates', () => {
 
   it('bridge ports comprueban que la interfaz existe antes de añadir', () => {
     const result = generateFromTemplate({ templateId: 'router_base_wireguard', ...WG_PARAMS });
-    expect(result.script).toContain('/interface find name="ether2"');
-    expect(result.script).toContain('/interface bridge port find interface="ether2"');
+    expect(result.script).toContain('/interface find where name="ether2"');
+    expect(result.script).toContain('/interface bridge port find where interface="ether2"');
+  });
+
+  it('enableLanStack=false omite bridge/DHCP y no referencia ether2', () => {
+    const result = generateFromTemplate({
+      templateId: 'router_base_wireguard',
+      ...WG_PARAMS,
+      enableLanStack: false,
+      lanInterfaces: [],
+    });
+    expect(result.script).toContain('nugacore-templates-1.0.5');
+    expect(result.script).toContain('LAN/DHCP/NAT/firewall: omitidos');
+    expect(result.script).not.toContain('ether2');
+    expect(result.script).not.toContain('bridge-lan');
+    expect(result.script).not.toContain('NugaCore-pool-LAN');
+    expect(result.script).toContain('/ip service set [find where name="api" and dynamic=no]');
+    expect(result.script).toContain('address=10.10.0.0/24');
+    expect(result.script).not.toMatch(/\/ip service set api /);
+    expect(result.warnings.some((w) => /LAN omitida/i.test(w))).toBe(true);
+  });
+
+  it('API service usa find !dynamic (compatible ROS 7.19+)', () => {
+    const result = generateFromTemplate({ templateId: 'router_base_wireguard', ...WG_PARAMS });
+    expect(result.script).toContain(
+      '/ip service set [find where name="api" and dynamic=no] port=8728 address=10.10.0.0/24 disabled=no',
+    );
+    expect(result.script).toContain(
+      '/ip service disable [find where name="telnet" and dynamic=no]',
+    );
   });
 
   it('genera apiUsername para plantillas con usuario API', () => {
@@ -407,7 +435,9 @@ describe('Generator — NOC Ready', () => {
       ...BASE_PARAMS,
       enableApiSsl: false,
     });
-    expect(result.script).toContain('disable api-ssl');
+    expect(result.script).toContain(
+      '/ip service disable [find where name="api-ssl" and dynamic=no]',
+    );
   });
 });
 

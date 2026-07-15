@@ -136,6 +136,20 @@ describe('resolveTemplateParams — router_base_wireguard', () => {
   it('params.routerosVersion viene del input', () => {
     expect(r.params.routerosVersion).toBe('7');
   });
+
+  it('con LAN en el input habilita enableLanStack', () => {
+    expect(r.params.enableLanStack).toBe(true);
+  });
+
+  it('sin parámetros LAN desactiva enableLanStack y usa lanInterfaces=[]', () => {
+    const lean = resolveTemplateParams(
+      'router_base_wireguard',
+      { routerName: 'CHR', routerosVersion: '7' },
+      MOCK_PEER,
+    );
+    expect(lean.params.enableLanStack).toBe(false);
+    expect(lean.params.lanInterfaces).toEqual([]);
+  });
 });
 
 // ── resolveTemplateParams — tower_wisp ───────────────────────────────────

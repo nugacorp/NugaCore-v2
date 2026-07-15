@@ -141,6 +141,17 @@ export function resolveTemplateParams(
       ? input.lanInterfaces.split(',').map((s) => s.trim()).filter(Boolean)
       : undefined;
 
+  // LAN del wizard es opcional. Si no hay datos, no inventar ether2/3/4 ni
+  // DHCP 192.168.1.0/24 (en CHR eso aborta /import o ensucia el router).
+  const enableLanStack = Boolean(
+    (input.lanCidr && input.lanCidr.trim()) ||
+      (input.lanGateway && input.lanGateway.trim()) ||
+      (input.lanBridgeName && input.lanBridgeName.trim()) ||
+      (lanInterfaces && lanInterfaces.length > 0) ||
+      (input.dhcpPoolStart && input.dhcpPoolStart.trim()) ||
+      (input.dhcpPoolEnd && input.dhcpPoolEnd.trim()),
+  );
+
   // ── Parámetros base comunes a todas las plantillas ─────────────────
   const baseParams: TemplateLibraryParams = {
     templateId: libId,
@@ -152,10 +163,12 @@ export function resolveTemplateParams(
     lanCidr:        input.lanCidr,
     lanGateway:     input.lanGateway,
     wanInterface:   input.wanInterface,
-    lanInterfaces,
+    // [] explícito evita el default ether2/3/4 del generador.
+    lanInterfaces: enableLanStack ? lanInterfaces : [],
     dhcpPoolStart: input.dhcpPoolStart,
     dhcpPoolEnd: input.dhcpPoolEnd,
     enableDhcp: input.enableDhcp,
+    enableLanStack,
   };
 
   // ── Parámetros WireGuard (solo si la plantilla los incrusta) ───────

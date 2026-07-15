@@ -74,8 +74,8 @@ describe('script SSTP', () => {
   });
 
   it('limita la API a la red VPN de NugaCore', () => {
-    expect(script).toContain('/ip service set api');
-    expect(script).toContain('address="10.10.0.0/24"');
+    expect(script).toContain('/ip service set [find where name="api" and dynamic=no]');
+    expect(script).toContain('address=10.10.0.0/24');
   });
 
   it('agrega scheduler de reconexión y ruta de administración', () => {

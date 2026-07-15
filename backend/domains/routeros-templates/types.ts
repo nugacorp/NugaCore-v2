@@ -2,7 +2,7 @@
 // Tipos de la Biblioteca de Plantillas RouterOS (Fase 4.6.3).
 // ====================================================================
 
-export const TEMPLATE_LIBRARY_VERSION = 'nugacore-templates-1.0.4';
+export const TEMPLATE_LIBRARY_VERSION = 'nugacore-templates-1.0.5';
 
 export type TemplateLibraryId =
   | 'router_base_wireguard'
@@ -83,6 +83,12 @@ export interface TemplateLibraryParams {
   dnsServers?: string[];
   enableNat?: boolean;
   enableBasicFirewall?: boolean;
+  /**
+   * Si es false, omite bridge/LAN/DHCP/NAT/firewall y solo deja identity (según modo) + API + VPN.
+   * Útil en Alta de Router / CHR cuando el paso LAN queda vacío (opcional).
+   * Default: true (comportamiento biblioteca / WISP completo).
+   */
+  enableLanStack?: boolean;
   // WireGuard
   wgServerPublicKey?: string;
   wgEndpoint?: string;

@@ -53,8 +53,8 @@ describe('wireguard_managed', () => {
     expect(r.script).toMatch(/interface wireguard remove \[find where name~"NugaCore"\]/);
     expect(r.script).toContain('/system scheduler remove [find where comment~"NugaCore"]');
     expect(r.script).toContain('allowed-address=');
-    expect(r.script).toContain('/ip service set api');
-    expect(r.script).toContain('address="10.10.0.0/24"');
+    expect(r.script).toContain('/ip service set [find where name="api" and dynamic=no]');
+    expect(r.script).toContain('address=10.10.0.0/24');
   });
   it('permisos operator + sin prohibidos + sin wisphub', () => {
     expect(policyOf(r.script)).toBe('read,write,api,test');
@@ -68,7 +68,7 @@ describe('sstp_managed', () => {
     expect(r.mode).toBe('sstp_managed');
     expect(r.script).toContain('interface sstp-client add name="NugaCoreVPN"');
     expect(r.script).toContain('NugaCore-VPN-Watchdog');
-    expect(r.script).toContain('address="10.10.0.0/24"');
+    expect(r.script).toContain('address=10.10.0.0/24');
     noForbidden(r.script);
   });
 });
