@@ -249,7 +249,7 @@ describe('Templates Library — POST /api/routeros-templates/generate', () => {
       .post('/api/routeros-templates/generate')
       .set(ADMIN)
       .send(VALID_NOC);
-    expect(res.body.filename).toMatch(/^nc-[a-z0-9]+-[a-z0-9]+\.rsc$/);
+    expect(res.body.filename).toMatch(/^nc-[a-z0-9]+\.rsc$/);
   });
 
   it('apiUsername presente para plantillas con usuario API', async () => {

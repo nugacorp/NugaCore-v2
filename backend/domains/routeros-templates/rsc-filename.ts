@@ -1,8 +1,9 @@
 // ====================================================================
-// Nombres cortos de archivo .rsc para import fácil en Terminal CHR/Winbox.
+// Nombres cortos y genéricos de archivo .rsc (fáciles de /import).
 //
 // Antes : nugacore-tpl-router-base-wireguard-CHR--CHR-2026-07-15.rsc
-// Ahora : nc-wg-chr.rsc
+// Luego : nc-wg-chrchr.rsc  (todavía atado al nombre del equipo)
+// Ahora : nc-wg.rsc         (genérico por plantilla, reusable en cualquier router)
 // ====================================================================
 
 /** Abreviaturas estables por plantilla (fácil de teclear en RouterOS). */
@@ -31,8 +32,8 @@ export const RSC_FILE_CLEANUP_FIND =
   'name~"^(nc-|nugacore-tpl-|nugacore-)"';
 
 /**
- * Slug corto del router: minúsculas, solo [a-z0-9], sin dobles guiones.
- * "CHR -CHR" → "chrchr"  |  "Torre Norte #2" → "torrenorte2"
+ * @deprecated El nombre del archivo ya no incluye el router (es genérico).
+ * Se conserva por compatibilidad de firmas/tests.
  */
 export function buildShortRouterSlug(routerName: string, maxLen = 12): string {
   const slug = routerName
@@ -47,11 +48,13 @@ export function templateFilenameAbbr(templateId: string): string {
 }
 
 /**
- * Nombre corto para descarga /import:
- *   nc-{abbr}-{slug}.rsc   →   nc-wg-chr.rsc
+ * Nombre corto y genérico (sin nombre de equipo):
+ *   nc-{abbr}.rsc   →   nc-wg.rsc
+ *
+ * Así el mismo /import sirve en CHR, CCR, RB, etc.
+ * `routerName` se ignora a propósito (firma estable para callers existentes).
  */
-export function buildTemplateFilename(routerName: string, templateId: string): string {
+export function buildTemplateFilename(_routerName: string, templateId: string): string {
   const abbr = templateFilenameAbbr(templateId);
-  const slug = buildShortRouterSlug(routerName);
-  return `${RSC_FILE_PREFIX}${abbr}-${slug}.rsc`;
+  return `${RSC_FILE_PREFIX}${abbr}.rsc`;
 }

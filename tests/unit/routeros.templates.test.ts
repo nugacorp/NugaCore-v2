@@ -329,7 +329,7 @@ describe('Generator — Tower template', () => {
   it('genera script tower_wisp', () => {
     const result = generateFromTemplate({ templateId: 'tower_wisp', ...WG_PARAMS });
     expect(result.script).toContain('NugaCore');
-    expect(result.filename).toBe('nc-tower-testrouter.rsc');
+    expect(result.filename).toBe('nc-tower.rsc');
   });
 
   it('tower_wisp con VLANs incluye sección vlan', () => {
@@ -671,20 +671,14 @@ describe('Validators', () => {
 // ── Filename ──────────────────────────────────────────────────────
 
 describe('buildTemplateFilename', () => {
-  it('genera nombre corto nc-{abbr}-{slug}.rsc', () => {
-    const name = buildTemplateFilename('mi-router', 'noc_ready');
-    expect(name).toBe('nc-noc-mirouter.rsc');
+  it('genera nombre genérico nc-{abbr}.rsc (sin nombre de equipo)', () => {
+    expect(buildTemplateFilename('mi-router', 'noc_ready')).toBe('nc-noc.rsc');
+    expect(buildTemplateFilename('tower_wisp', 'tower_wisp')).toBe('nc-tower.rsc');
   });
 
-  it('sanitiza caracteres especiales del routerName', () => {
-    const name = buildTemplateFilename('router con espacios!', 'tower_wisp');
-    expect(name).toBe('nc-tower-routerconesp.rsc');
-    expect(name).not.toContain(' ');
-    expect(name).not.toContain('!');
-  });
-
-  it('acorta CHR -CHR a nc-wg-chrchr.rsc', () => {
-    expect(buildTemplateFilename('CHR -CHR', 'router_base_wireguard')).toBe('nc-wg-chrchr.rsc');
+  it('no incluye CHR ni el routerName en el archivo', () => {
+    expect(buildTemplateFilename('CHR -CHR', 'router_base_wireguard')).toBe('nc-wg.rsc');
+    expect(buildTemplateFilename('Torre Norte #2', 'router_base_wireguard')).toBe('nc-wg.rsc');
   });
 });
 
