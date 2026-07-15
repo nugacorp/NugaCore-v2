@@ -38,6 +38,7 @@ Use [`agent/skills/README.md`](agent/skills/README.md) or [`agent/skills/MANIFES
 
 - Do not commit secrets, tokens, JWTs, host passwords, private deployment IDs, or detailed private ops logs.
 - Keep GitHub-facing documentation sanitized and current: what exists, what is missing, production-readiness gates, roadmap direction, and handoff checklists.
+- Cold-start handoff (Router/WG julio 2026): `docs/reports/SPRINT_HANDOFF_2026-07-15.md` and `docs/reports/PROJECT_STATUS_CURRENT.md`.
 - For NugaCore staging validations, confirm the requested commit is on `origin/main` first; if it is missing, report `NO APROBADA`.
 - Do not change shared staging passwords unless explicitly requested.
 - Respect strict no-router/no-live/no-migration boundaries unless explicitly authorized by the user.
