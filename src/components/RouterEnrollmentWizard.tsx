@@ -247,23 +247,58 @@ export default function RouterEnrollmentWizard({
     }
   };
 
+  const downloadEnrollmentScript = async (enrollmentId: string, filename = 'nc-wg.rsc') => {
+    const api = createAuthorizedApi(getAuthHeaders);
+    // El endpoint devuelve text/plain: apiClient entrega el cuerpo como string.
+    const text = await api.get<string>(`/api/router-enrollment/${enrollmentId}/download`);
+    const blob = new Blob([text], { type: 'text/plain' });
+    const url = URL.createObjectURL(blob);
+    const a = document.createElement('a');
+    a.href = url;
+    a.download = filename;
+    a.click();
+    URL.revokeObjectURL(url);
+    loadEnrollments();
+  };
+
   const handleDownload = async () => {
     if (!startResult) return;
-    const enrollmentId = startResult.enrollment.id;
     try {
-      const api = createAuthorizedApi(getAuthHeaders);
-      // El endpoint devuelve text/plain: apiClient entrega el cuerpo como string.
-      const text = await api.get<string>(`/api/router-enrollment/${enrollmentId}/download`);
-      const blob = new Blob([text], { type: 'text/plain' });
-      const url = URL.createObjectURL(blob);
-      const a = document.createElement('a');
-      a.href = url;
-      a.download = startResult.scriptFilename;
-      a.click();
-      URL.revokeObjectURL(url);
-      loadEnrollments();
+      await downloadEnrollmentScript(startResult.enrollment.id, startResult.scriptFilename);
     } catch (e: unknown) {
       setError(e instanceof Error ? e.message : 'Error al descargar');
+    }
+  };
+
+  const handleListDownload = async (enrollmentId: string) => {
+    setLoading(true);
+    setError('');
+    try {
+      await downloadEnrollmentScript(enrollmentId);
+    } catch (e: unknown) {
+      setError(e instanceof Error ? e.message : 'Error al descargar');
+    } finally {
+      setLoading(false);
+    }
+  };
+
+  const handleListCheckOnline = async (enrollmentId: string) => {
+    setLoading(true);
+    setError('');
+    try {
+      const api = createAuthorizedApi(getAuthHeaders);
+      const data = await api.post<CheckOnlineResult>(
+        `/api/router-enrollment/${enrollmentId}/check-online`,
+      );
+      setCheckResult(data);
+      if (!data.isOnline) {
+        setError(data.message || 'Aún no se confirma online (¿re-importaste el .rsc?)');
+      }
+      loadEnrollments();
+    } catch (e: unknown) {
+      setError(e instanceof Error ? e.message : 'Error al verificar online');
+    } finally {
+      setLoading(false);
     }
   };
 
@@ -398,13 +433,41 @@ export default function RouterEnrollmentWizard({
                     )}
                   </div>
                 </div>
-                <div className="flex items-center gap-3">
+                <div className="flex items-center gap-3 flex-wrap justify-end">
                   <span className={`text-xs px-2 py-1 rounded font-medium ${STATUS_COLORS[enr.status]}`}>
                     {enr.statusLabel}
                   </span>
                   {enr.checkOnlineAttempts > 0 && (
                     <span className="text-xs text-gray-500">{enr.checkOnlineAttempts} intentos</span>
                   )}
+                  {canStartEnrollment(userRole) &&
+                    enr.status !== 'revoked' &&
+                    enr.status !== 'online' && (
+                      <button
+                        type="button"
+                        disabled={loading}
+                        onClick={() => void handleListDownload(enr.id)}
+                        className="inline-flex items-center gap-1 text-xs px-2 py-1 bg-indigo-900 hover:bg-indigo-800 text-indigo-200 rounded"
+                        title="Descargar .rsc (regenera API user si faltaba)"
+                      >
+                        <Download size={12} />
+                        Descargar .rsc
+                      </button>
+                    )}
+                  {canStartEnrollment(userRole) &&
+                    enr.status !== 'revoked' &&
+                    enr.status !== 'online' && (
+                      <button
+                        type="button"
+                        disabled={loading}
+                        onClick={() => void handleListCheckOnline(enr.id)}
+                        className="inline-flex items-center gap-1 text-xs px-2 py-1 bg-emerald-900 hover:bg-emerald-800 text-emerald-200 rounded"
+                        title="Verificar online via API WireGuard"
+                      >
+                        <CheckCircle size={12} />
+                        Verificar online
+                      </button>
+                    )}
                   {canRevokeEnrollment(userRole) &&
                     enr.status !== 'revoked' &&
                     enr.status !== 'online' && (
