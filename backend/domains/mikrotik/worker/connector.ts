@@ -6,6 +6,10 @@
 //     credenciales: usa routeros-client. Cualquier fallo → fallback simulado.
 //
 // Allowlist estricta: solo comandos de lectura "print". Nada destructivo.
+//
+// Sesión API: un login por lote (snapshot), no un login por cada `print`.
+// Polling periódico (NOC poller) hace ciclos cortos: login → lectura → logout.
+// No se mantiene TCP permanente (RouterOS limita sesiones y es más frágil).
 // ====================================================================
 
 import { productionGates } from '../../../config/production-gates';
@@ -13,7 +17,7 @@ import { decryptSecret } from '../../../services/crypto';
 import { logger } from '../../../common/logger';
 import { redactString } from '../../../common/secret-redaction';
 import { MikrotikRouterRegistryItem } from '../../../state/store';
-import { resolveRouterApiEndpoint, routerOsRead } from './routeros-client';
+import { resolveRouterApiEndpoint, routerOsRead, routerOsReadMany } from './routeros-client';
 import {
   READ_ONLY_COMMANDS,
   ReadOnlyCommand,
@@ -30,6 +34,34 @@ export const isWorkerApiTlsPreferred = (): boolean =>
 
 const isReadOnly = (command: string): command is ReadOnlyCommand =>
   (READ_ONLY_COMMANDS as readonly string[]).includes(command);
+
+const resolveHost = (router: MikrotikRouterRegistryItem): string =>
+  router.vpnIp || router.managementIp || router.ipAddress;
+
+type LiveEndpoint = {
+  host: string;
+  port: number;
+  username: string;
+  password: string;
+  useTls: boolean;
+};
+
+const resolveLiveEndpoint = (router: MikrotikRouterRegistryItem): LiveEndpoint | null => {
+  if (!isLiveWorkerEnabled() || !router.encryptedPassword) return null;
+  const password = decryptSecret(router.encryptedPassword);
+  const endpoint = resolveRouterApiEndpoint({
+    apiPort: router.apiPort,
+    apiSslPort: router.apiSslPort,
+    preferTls: isWorkerApiTlsPreferred(),
+  });
+  return {
+    host: resolveHost(router),
+    port: endpoint.port,
+    username: router.username,
+    password,
+    useTls: endpoint.useTls,
+  };
+};
 
 // ── Salida simulada por comando ───────────────────────────────────────
 const simulate = (command: string, router: MikrotikRouterRegistryItem): string => {
@@ -51,8 +83,13 @@ const simulate = (command: string, router: MikrotikRouterRegistryItem): string =
   }
 };
 
-const resolveHost = (router: MikrotikRouterRegistryItem): string =>
-  router.vpnIp || router.managementIp || router.ipAddress;
+const simulatedRead = (command: string, router: MikrotikRouterRegistryItem, error?: string): RouterReadResult => ({
+  command,
+  ok: true,
+  source: 'simulated',
+  data: simulate(command, router),
+  ...(error ? { error } : {}),
+});
 
 export interface RouterConnector {
   read(router: MikrotikRouterRegistryItem, command: string): Promise<RouterReadResult>;
@@ -65,25 +102,12 @@ export class DefaultRouterConnector implements RouterConnector {
       return { command, ok: false, source: 'simulated', data: '', error: 'Command not allowed (read-only only).' };
     }
 
-    const canLive = isLiveWorkerEnabled() && !!router.encryptedPassword;
-    if (canLive) {
+    const live = resolveLiveEndpoint(router);
+    if (live) {
       try {
-        const password = decryptSecret(router.encryptedPassword);
-        const endpoint = resolveRouterApiEndpoint({
-          apiPort: router.apiPort,
-          apiSslPort: router.apiSslPort,
-          preferTls: isWorkerApiTlsPreferred(),
-        });
-        const rows = await routerOsRead(command, {
-          host: resolveHost(router),
-          port: endpoint.port,
-          username: router.username,
-          password,
-          useTls: endpoint.useTls,
-        });
+        const rows = await routerOsRead(command, live);
         return { command, ok: true, source: 'live', data: JSON.stringify(rows) };
       } catch (err) {
-        // Fallback simulado. Nunca logueamos el password (redactado por si acaso).
         const raw = err instanceof Error ? err.message : 'unknown';
         const safe = redactString(raw);
         logger.warn('Worker: lectura live falló, usando simulado', {
@@ -91,25 +115,58 @@ export class DefaultRouterConnector implements RouterConnector {
           command,
           error: safe,
         });
-        return {
+        return simulatedRead(command, router, `live_failed:${safe}`);
+      }
+    }
+
+    return simulatedRead(command, router);
+  }
+
+  /**
+   * Un login API → todos los prints allowlisted → un logout.
+   * Antes cada `print` abría sesión propia (spam en log del CHR).
+   */
+  async snapshot(router: MikrotikRouterRegistryItem): Promise<RouterSnapshot> {
+    const live = resolveLiveEndpoint(router);
+
+    if (live) {
+      try {
+        const batches = await routerOsReadMany(READ_ONLY_COMMANDS, live);
+        const reads: RouterReadResult[] = READ_ONLY_COMMANDS.map((command, i) => ({
           command,
           ok: true,
+          source: 'live' as const,
+          data: JSON.stringify(batches[i] ?? []),
+        }));
+        return {
+          routerId: router.id,
+          routerName: router.name,
+          generatedAt: new Date().toISOString(),
+          source: 'live',
+          reads,
+        };
+      } catch (err) {
+        const raw = err instanceof Error ? err.message : 'unknown';
+        const safe = redactString(raw);
+        logger.warn('Worker: snapshot live falló, usando simulado', {
+          routerId: router.id,
+          error: safe,
+        });
+        const reads = READ_ONLY_COMMANDS.map((cmd) =>
+          simulatedRead(cmd, router, `live_failed:${safe}`),
+        );
+        return {
+          routerId: router.id,
+          routerName: router.name,
+          generatedAt: new Date().toISOString(),
           source: 'simulated',
-          data: simulate(command, router),
-          error: `live_failed:${safe}`,
+          reads,
         };
       }
     }
 
-    return { command, ok: true, source: 'simulated', data: simulate(command, router) };
-  }
-
-  async snapshot(router: MikrotikRouterRegistryItem): Promise<RouterSnapshot> {
-    const reads: RouterReadResult[] = [];
-    for (const cmd of READ_ONLY_COMMANDS) {
-      reads.push(await this.read(router, cmd));
-    }
-    const source: WorkerMode = reads.some((r) => r.source === 'live') ? 'live' : 'simulated';
+    const reads = READ_ONLY_COMMANDS.map((cmd) => simulatedRead(cmd, router));
+    const source: WorkerMode = 'simulated';
     return {
       routerId: router.id,
       routerName: router.name,
