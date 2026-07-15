@@ -90,7 +90,7 @@ describe('Client 360 — UI de acciones rápidas', () => {
 
   it('App pasa userRole y onNavigate a CrmModule', () => {
     expect(appSource).toContain('userRole={userSession.role}');
-    expect(appSource).toContain('onNavigate={setActiveTab}');
+    expect(appSource).toContain('onNavigate={navigateToTab}');
   });
 });
 

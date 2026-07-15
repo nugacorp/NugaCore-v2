@@ -26,8 +26,6 @@ const EXPECTED_SECTIONS: Array<{ title: string; ids: string[] }> = [
       'inventory-routers',
       'routeros-templates',
       'owner',
-      'automation',
-      'notifications',
       'user-manual',
     ],
   },
@@ -43,6 +41,8 @@ const HIDDEN_TAB_IDS = [
   'routeros-readonly',
   'inventory-sync',
   'provisioning',
+  'automation',
+  'notifications',
 ];
 
 const VISIBLE_TAB_IDS = EXPECTED_SECTIONS.flatMap((s) => s.ids);
@@ -118,8 +118,9 @@ describe('Sidebar — secciones reorganizadas (WISP LATAM)', () => {
 
   it('usa etiquetas en español en Sistema (no inglés)', () => {
     const block = sectionBlock('Sistema');
-    expect(block).toContain("name: 'Automatización'");
-    expect(block).toContain("name: 'Notificaciones'");
+    expect(block).toContain("name: 'Configuración'");
+    expect(block).not.toContain('Automatización');
+    expect(block).not.toContain('Notificaciones');
     expect(block).not.toContain('Automation Center');
     expect(block).not.toContain('Notification Center');
   });
@@ -149,7 +150,7 @@ describe('Sidebar — módulos avanzados ocultos pero conservados', () => {
 
 describe('Sidebar — no se elimina ningún módulo', () => {
   it('los módulos visibles están presentes en el sidebar', () => {
-    expect(VISIBLE_TAB_IDS.length).toBe(21);
+    expect(VISIBLE_TAB_IDS.length).toBe(19);
     for (const id of VISIBLE_TAB_IDS) {
       expect(sidebarSource, `falta el módulo visible ${id}`).toContain(`id: '${id}'`);
     }
