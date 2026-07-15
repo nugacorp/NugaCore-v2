@@ -28,8 +28,29 @@ export class StoreMikrotikRoutersRepository implements MikrotikRoutersRepository
   }
   async upsert(router: MikrotikRouterRegistryItem) {
     const idx = store.MIKROTIK_ROUTERS.findIndex((r) => r.id === router.id);
-    if (idx >= 0) store.MIKROTIK_ROUTERS[idx] = { ...store.MIKROTIK_ROUTERS[idx], ...router };
-    else store.MIKROTIK_ROUTERS.push(router);
+    if (idx >= 0) {
+      const prev = store.MIKROTIK_ROUTERS[idx];
+      const merged: MikrotikRouterRegistryItem = {
+        ...prev,
+        ...router,
+        username:
+          router.username && router.username.trim() !== ''
+            ? router.username
+            : prev.username,
+        encryptedPassword:
+          router.encryptedPassword && router.encryptedPassword.trim() !== ''
+            ? router.encryptedPassword
+            : prev.encryptedPassword,
+        hasCredentials:
+          !!(router.encryptedPassword && router.encryptedPassword.trim() !== '')
+          || !!prev.encryptedPassword
+          || router.hasCredentials
+          || prev.hasCredentials,
+      };
+      store.MIKROTIK_ROUTERS[idx] = merged;
+      return merged;
+    }
+    store.MIKROTIK_ROUTERS.push(router);
     return router;
   }
   async remove(id: string) {
@@ -59,7 +80,27 @@ export class SupabaseMikrotikRoutersRepository implements MikrotikRoutersReposit
   }
 
   async upsert(router: MikrotikRouterRegistryItem) {
-    const row = routerToRow(router);
+    // No pisar credenciales API existentes con username/password vacíos
+    // (p. ej. check-online / updates parciales).
+    const existing = await this.findById(router.id);
+    const merged: MikrotikRouterRegistryItem = {
+      ...existing,
+      ...router,
+      username:
+        router.username && router.username.trim() !== ''
+          ? router.username
+          : existing?.username || router.username || 'admin',
+      encryptedPassword:
+        router.encryptedPassword && router.encryptedPassword.trim() !== ''
+          ? router.encryptedPassword
+          : existing?.encryptedPassword || '',
+      hasCredentials:
+        !!(router.encryptedPassword && router.encryptedPassword.trim() !== '')
+        || !!(existing?.encryptedPassword && existing.encryptedPassword.trim() !== '')
+        || router.hasCredentials
+        || existing?.hasCredentials,
+    };
+    const row = routerToRow(merged);
     const { data, error } = await this.db.from(TABLE).upsert(row, { onConflict: 'id' }).select('*').single();
     if (error) this.fail('upsert', error);
     return rowToRouter(data as MikrotikRouterRow);
