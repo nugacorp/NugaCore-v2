@@ -248,6 +248,8 @@ interface BuildScriptResult {
   snmpCommunity?: string;
   apiUsername?: string;
   apiEncryptedPassword?: string;
+  /** true si download tuvo que emitir user/pass nuevos (re-importar .rsc). */
+  apiCredentialsRegenerated?: boolean;
 }
 
 /**
@@ -294,8 +296,11 @@ const buildScript = async (
 
   // Credenciales API: en create se generan y se persisten en mikrotik_routers;
   // en download se reutilizan (mismo user/pass que en el .rsc original).
+  // Si faltan (enrollment antiguo / persist fallido), se regeneran para que
+  // check-online live y /download vuelvan a estar alineados con el router.
   let apiUsername: string | undefined;
   let apiEncryptedPassword: string | undefined;
+  let apiCredentialsRegenerated = false;
   if (opts.mode === 'create') {
     const apiCred = generateApiCredential(input.routerName);
     generatorParams.apiUsername = apiCred.username;
@@ -316,6 +321,18 @@ const buildScript = async (
           error: String(err),
         });
       }
+    }
+    if (!apiUsername || !apiEncryptedPassword) {
+      const apiCred = generateApiCredential(input.routerName);
+      generatorParams.apiUsername = apiCred.username;
+      generatorParams.apiPassword = apiCred.plainPassword;
+      apiUsername = apiCred.username;
+      apiEncryptedPassword = apiCred.encryptedPassword;
+      apiCredentialsRegenerated = true;
+      logger.warn('Enrollment download: credenciales API ausentes; regeneradas (re-importar .rsc)', {
+        routerId,
+        apiUsername,
+      });
     }
   }
 
@@ -365,6 +382,7 @@ const buildScript = async (
     snmpCommunity: snmpCommunityPlain,
     apiUsername,
     apiEncryptedPassword,
+    apiCredentialsRegenerated,
   };
 };
 
@@ -649,20 +667,69 @@ export const enrollmentService = {
 
     // mode 'download': para plantillas no-WG NO se consulta el WG store; para
     // plantillas WG se usa el snapshot cifrado (o el store como fallback).
-    const { script, scriptFilename } = await buildScript(rec.routerId, input, rec.wgServerId, actorId, {
+    const built = await buildScript(rec.routerId, input, rec.wgServerId, actorId, {
       mode: 'download',
       wgSnapshot: rec.wireguardSnapshot,
       snmpSnapshot: rec.snmpSnapshot,
     });
+
+    // Persistir credenciales API (reutilizadas o regeneradas) en inventario.
+    if (built.apiUsername && built.apiEncryptedPassword) {
+      const existingIdx = store.MIKROTIK_ROUTERS.findIndex((r) => r.id === rec.routerId);
+      const base =
+        existingIdx >= 0
+          ? store.MIKROTIK_ROUTERS[existingIdx]
+          : {
+              id: rec.routerId,
+              name: routerName,
+              ipAddress: input.ipAddress || snapshot?.vpnIp || '0.0.0.0',
+              apiPort: input.apiPort || 8728,
+              username: '',
+              encryptedPassword: '',
+              isOnline: false,
+              cpuUsagePct: 0,
+              memoryUsagePct: 0,
+              routerOsVersion: rec.routerosVersion || 'unknown',
+              lastHealthCheckAt: nowIso(),
+              connectionType: 'wireguard' as const,
+              provisioningStatus: 'pending' as const,
+              managementIp: snapshot?.vpnIp || input.ipAddress,
+              vpnIp: snapshot?.vpnIp,
+              notes: input.notes,
+            };
+      const withCreds = {
+        ...base,
+        username: built.apiUsername,
+        encryptedPassword: built.apiEncryptedPassword,
+        hasCredentials: true,
+        apiPort: input.apiPort || base.apiPort || 8728,
+        vpnIp: base.vpnIp || snapshot?.vpnIp,
+        managementIp: base.managementIp || snapshot?.vpnIp || input.ipAddress,
+        connectionType: 'wireguard' as const,
+      };
+      if (existingIdx >= 0) store.MIKROTIK_ROUTERS[existingIdx] = withCreds;
+      else store.MIKROTIK_ROUTERS.push(withCreds);
+      try {
+        await persistMikrotikRouter(withCreds);
+      } catch (persistErr) {
+        logger.warn('Enrollment download: no se pudo persistir credenciales API', {
+          routerId: rec.routerId,
+          error: String(persistErr),
+        });
+      }
+    }
 
     const updated = await repo.update(id, {
       scriptDownloadedAt: nowIso(),
       status: rec.status === 'script_generated' ? 'script_downloaded' : rec.status,
     });
 
-    logger.info('Enrollment: script descargado', { enrollmentId: id });
+    logger.info('Enrollment: script descargado', {
+      enrollmentId: id,
+      apiCredentialsRegenerated: Boolean(built.apiCredentialsRegenerated),
+    });
 
-    return { script, filename: scriptFilename, enrollment: toView(updated!) };
+    return { script: built.script, filename: built.scriptFilename, enrollment: toView(updated!) };
   },
 
   /**

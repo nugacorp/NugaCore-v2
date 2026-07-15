@@ -684,6 +684,37 @@ describe('Enrollment — DEFAULT_WIREGUARD_SERVER', () => {
     expect(router?.encryptedPassword.length).toBeGreaterThan(10);
   });
 
+  it('download regenera y persiste credenciales API si faltan (reparación CHR)', async () => {
+    const startRes = await request(app)
+      .post('/api/router-enrollment/start')
+      .set(ADMIN)
+      .send({ routerName: 'Router Repair Creds', routerosVersion: '7' });
+    expect(startRes.status).toBe(201);
+    const enrollmentId = startRes.body.enrollmentId || startRes.body.enrollment?.id;
+    const routerId = startRes.body.routerId;
+
+    // Simula inventario sin password (caso staging: row con admin y pass vacío).
+    const idx = store.MIKROTIK_ROUTERS.findIndex((r) => r.id === routerId);
+    expect(idx).toBeGreaterThanOrEqual(0);
+    store.MIKROTIK_ROUTERS[idx] = {
+      ...store.MIKROTIK_ROUTERS[idx],
+      username: 'admin',
+      encryptedPassword: '',
+      hasCredentials: false,
+    };
+
+    const dl = await request(app)
+      .get(`/api/router-enrollment/${enrollmentId}/download`)
+      .set(ADMIN);
+    expect(dl.status).toBe(200);
+    expect(String(dl.text || '')).toContain('/interface wireguard');
+
+    const router = store.MIKROTIK_ROUTERS.find((r) => r.id === routerId);
+    expect(router?.username).toMatch(/^nugacore_/);
+    expect(router?.encryptedPassword).toBeTruthy();
+    expect(router?.encryptedPassword.length).toBeGreaterThan(10);
+  });
+
   it('solo se crea UN peer por router (no duplicados)', async () => {
     const startRes = await request(app)
       .post('/api/router-enrollment/start')

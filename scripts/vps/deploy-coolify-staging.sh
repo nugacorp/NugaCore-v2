@@ -106,7 +106,14 @@ if [[ "$ADD_SNMP_ENV" == "true" ]]; then
   upsert_env "SNMP_POLLER_ENABLED" "false"
   upsert_env "SNMP_POLLER_INTERVAL_MS" "120000"
   upsert_env "NOC_POLLER_ENABLED" "false"
-  # MIKROTIK_WORKER_LIVE queda false (piloto CHR lo activará)
+  # Lectura live al CHR por VPN (check-online / inventario). Writes siguen gated.
+  # FORCE_MIKROTIK_WORKER_LIVE=false para apagar en un deploy.
+  if [[ "${FORCE_MIKROTIK_WORKER_LIVE:-true}" == "true" ]]; then
+    upsert_env "MIKROTIK_WORKER_LIVE" "true"
+    upsert_env "MIKROTIK_WORKER_COMMIT" "false"
+  else
+    upsert_env "MIKROTIK_WORKER_LIVE" "false"
+  fi
   ensure_wg_host_apply_env
 fi
 
