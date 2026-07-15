@@ -459,11 +459,15 @@ export default function Sidebar({
           <div className={`flex items-center ${collapsed ? 'justify-center' : 'justify-between'}`}>
             <span className={`flex items-center ${collapsed ? '' : 'space-x-1.5'} text-emerald-400`}>
               <span className="w-2 h-2 rounded-full bg-emerald-500 inline-block animate-ping"></span>
-              {!collapsed && <span className="font-semibold text-[10px] uppercase">Noc Core Live</span>}
+              {!collapsed && <span className="font-semibold text-[10px] uppercase">NugaCore</span>}
             </span>
-            {!collapsed && <span className="text-slate-400">v7.14 RouterOS</span>}
+            {!collapsed && <span className="text-slate-400">datos reales</span>}
           </div>
-          {!collapsed && <p className="text-[10px] text-slate-600 truncate">Sincronizado: Acapulco & CDMX</p>}
+          {!collapsed && (
+            <p className="text-[10px] text-slate-600 truncate">
+              Sin demos: inventario y NOC desde backend / routers dados de alta
+            </p>
+          )}
         </div>
       </aside>
     </>

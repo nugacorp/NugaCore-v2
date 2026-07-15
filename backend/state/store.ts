@@ -888,8 +888,13 @@ export const store: {
   },
 };
 
-/** En staging/producción pública no se sirven routers demo mkt-1/2/3 ni alertas ficticias. */
-const seedDemoData = (): boolean => {
+/**
+ * En staging/producción pública NO se sirven datos demo/mock del store.
+ * SEED_DEMO_DATA=false o PUBLIC_DEPLOYMENT=true → inventario/dashboard vacíos
+ * hasta que entren datos reales (DB, alta de routers, UISP, etc.).
+ * En tests/dev local (sin esos flags) se conservan seeds para desarrollo.
+ */
+export const seedDemoData = (): boolean => {
   const explicit = (process.env.SEED_DEMO_DATA || '').trim().toLowerCase();
   if (explicit === 'true') return true;
   if (explicit === 'false') return false;
@@ -897,8 +902,31 @@ const seedDemoData = (): boolean => {
 };
 
 if (!seedDemoData()) {
+  // Red / NOC / Mikrotik
+  store.TOWERS = [];
+  store.NETWORK_SECTORS = [];
   store.MIKROTIK_ROUTERS = [];
   store.NOC_ALERTS = [];
   store.MIKROTIK_LOGS = [];
   store.MIKROTIK_COMMAND_AUDIT = [];
+  store.MIKROTIK_ACTIONS = [];
+  store.MONITORING_SNAPSHOTS = [];
+  // FTTH inventado
+  store.OLTS = [];
+  store.ONUS = [];
+  store.NAP_BOXES = [];
+  // CRM / cobranza / ops demo (dominios con USE_DB_* leen Supabase; store vacío no afecta)
+  store.CLIENTS = [];
+  store.CLIENT_TIMELINE = [];
+  store.TICKETS = [];
+  store.WORK_ORDERS = [];
+  store.INVOICES = [];
+  store.INVENTORY = [];
+  store.INVENTORY_ITEM_STATES = [];
+  store.INVENTORY_MOVEMENTS = [];
+  store.INVENTORY_ASSIGNMENTS = [];
+  store.SUSPENSION_ACTION_LOGS = [];
+  store.PAYMENT_ALLOCATIONS = [];
+  store.PAYMENT_ORDERS = [];
+  store.PAYMENT_EVENTS = [];
 }

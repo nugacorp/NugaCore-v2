@@ -287,8 +287,12 @@ export default function Dashboard({ stats, alerts, onRefresh, getAuthHeaders, on
             Cargando estado de zonas…
           </div>
         ) : zoneReport.zones.length === 0 ? (
-          <div className="bg-slate-950 border border-slate-800 rounded-xl px-4 py-8 text-center text-sm text-slate-500">
-            Sin zonas registradas. Configura sitios en Red.
+          <div className="bg-slate-950 border border-slate-800 rounded-xl px-4 py-8 text-center text-sm text-slate-500 space-y-1">
+            <p>Sin zonas ni equipos reales todavía.</p>
+            <p className="text-xs text-slate-600">
+              No se muestran datos demo. Da de alta sitios en Red y routers en Sistema → Routers
+              (y más adelante UISP) para ver el estado aquí.
+            </p>
           </div>
         ) : (
           <div className="grid gap-3">
