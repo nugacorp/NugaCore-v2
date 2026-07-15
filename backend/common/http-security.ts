@@ -87,9 +87,20 @@ export function applyHttpSecurity(app: Express): void {
               'default-src': ["'self'"],
               'script-src': ["'self'"],
               'style-src': ["'self'", "'unsafe-inline'"],
-              'img-src': ["'self'", 'data:'],
+              // Tiles GIS (Leaflet/CARTO/OSM) — Co-Map fluido estilo UISP.
+              'img-src': [
+                "'self'",
+                'data:',
+                'blob:',
+                'https://*.basemaps.cartocdn.com',
+                'https://basemaps.cartocdn.com',
+                'https://*.tile.openstreetmap.org',
+                'https://tile.openstreetmap.org',
+              ],
               'font-src': ["'self'", 'data:'],
               'connect-src': ["'self'", ...extraConnect],
+              // Leaflet canvas / workers ocasionales
+              'worker-src': ["'self'", 'blob:'],
               'object-src': ["'none'"],
               'base-uri': ["'self'"],
               'frame-ancestors': ["'self'"],

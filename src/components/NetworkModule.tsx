@@ -5,9 +5,12 @@ import {
   CheckCircle, 
   Power,
   Copy,
-  Server
+  Server,
+  Map as MapIcon,
+  Cable,
 } from 'lucide-react';
 import { Tower, OltFTTH, OnuFTTH, Client, NapBox } from '../types';
+import WispSitesMap from './gis/WispSitesMap';
 
 interface NetworkModuleProps {
   towers: Tower[];
@@ -31,6 +34,10 @@ export default function NetworkModule({
   onCreateTower
 }: NetworkModuleProps) {
   const [activeSubTab, setActiveSubTab] = useState<'towers' | 'ftth'>('towers');
+  const [showCoverage, setShowCoverage] = useState(true);
+  const [showBackhaul, setShowBackhaul] = useState(true);
+  const [showCpes, setShowCpes] = useState(true);
+  const [selectedTowerId, setSelectedTowerId] = useState<string | null>(null);
 
   // Tower Form modal state
   const [showTowerModal, setShowTowerModal] = useState(false);
@@ -110,28 +117,34 @@ export default function NetworkModule({
       {/* Header Bento layout */}
       <div className="flex flex-col md:flex-row md:items-center justify-between gap-4 border-b border-slate-800 pb-5">
         <div>
-          <h2 className="text-2xl font-bold tracking-tight text-white">Topología de Red, WISP & FTTH</h2>
+          <h2 className="text-2xl font-bold tracking-tight text-white flex items-center gap-2">
+            <Radio className="w-6 h-6 text-sky-400" />
+            Torres y Sitios WISP
+          </h2>
           <p className="text-sm text-slate-400 font-mono mt-0.5">
-            Supervisión integral de radiofrecuencia (Ubiquiti/Cambium) y planta externa de fibra óptica (OLT Huawei - GPON).
+            Mapa de sitios estilo UISP · backhaul, cobertura y CPEs. La planta de fibra está en{' '}
+            <span className="text-emerald-300">Mapa FTTH</span>.
           </p>
         </div>
         <div className="flex bg-slate-950 p-1 border border-slate-800 rounded-xl space-x-1 self-start">
           <button
+            type="button"
             onClick={() => setActiveSubTab('towers')}
             className={`px-3 py-1.5 text-xs font-mono font-bold rounded-lg transition ${
-              activeSubTab === 'towers' ? 'bg-indigo-600 text-white shadow' : 'text-slate-400 hover:text-slate-200'
+              activeSubTab === 'towers' ? 'bg-sky-600 text-white shadow' : 'text-slate-400 hover:text-slate-200'
             }`}
           >
-            Infraestructura Torres WISP
+            Sitios WISP
           </button>
           <button
+            type="button"
             onClick={() => setActiveSubTab('ftth')}
             id="gpon-ftth-subtab"
             className={`px-3 py-1.5 text-xs font-mono font-bold rounded-lg transition ${
-              activeSubTab === 'ftth' ? 'bg-indigo-600 text-white shadow' : 'text-slate-400 hover:text-slate-200'
+              activeSubTab === 'ftth' ? 'bg-emerald-600 text-white shadow' : 'text-slate-400 hover:text-slate-200'
             }`}
           >
-            Red GPON / FTTH Fibra
+            Ops FTTH (listas)
           </button>
         </div>
       </div>
@@ -204,30 +217,48 @@ export default function NetworkModule({
             </div>
           </div>
 
-          {/* Bento boxes for Towers info */}
-          <div className="grid grid-cols-1 md:grid-cols-12 gap-5">
-            <div className="md:col-span-12 bg-slate-950 p-6 rounded-3xl border border-slate-800">
-              <span className="text-[10px] text-indigo-400 font-mono tracking-wider font-bold block uppercase mb-3">Topología de Enlaces Backhaul</span>
-              <div className="flex items-center space-x-4 overflow-x-auto py-2">
-                <div className="bg-slate-900 p-4 rounded-2xl border border-slate-850 text-center shrink-0 w-44">
-                  <span className="text-xs font-bold text-white uppercase font-mono">Core Router CDMX</span>
-                  <p className="text-[10px] text-slate-500 font-mono mt-1">CCR2116 core API</p>
-                  <span className="bg-emerald-500/10 text-emerald-400 text-[9px] border border-emerald-500/20 px-1.5 py-0.5 rounded mt-2 inline-block font-mono">10 Gbps SFP+ up</span>
-                </div>
-                <div className="text-slate-600 font-bold shrink-0">── (15km Fibra) ──</div>
-                <div className="bg-slate-900 p-4 rounded-2xl border border-slate-850 text-center shrink-0 w-44">
-                  <span className="text-xs font-bold text-white uppercase font-mono">Torre Ajusco</span>
-                  <p className="text-[10px] text-slate-500 font-mono mt-1">Uplink Principal 5Ghz</p>
-                  <span className="bg-amber-500/10 text-amber-400 text-[9px] border border-amber-500/20 px-1.5 py-0.5 rounded mt-2 inline-block font-mono">Ping: 24 ms</span>
-                </div>
-                <div className="text-slate-600 font-bold shrink-0">── (5.4km Radio) ──</div>
-                <div className="bg-slate-900 p-4 rounded-2xl border border-slate-850 text-center shrink-0 w-44">
-                  <span className="text-xs font-bold text-white uppercase font-mono">Torre del Valle</span>
-                  <p className="text-[10px] text-slate-500 font-mono mt-1">Repetidor Local</p>
-                  <span className="bg-emerald-500/10 text-emerald-400 text-[9px] border border-emerald-500/20 px-1.5 py-0.5 rounded mt-2 inline-block font-mono">Ping: 8 ms</span>
-                </div>
+          {/* Mapa de sitios WISP (estilo UISP) */}
+          <div className="bg-slate-950 p-5 rounded-3xl border border-slate-800 space-y-4">
+            <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3">
+              <div>
+                <span className="text-[10px] text-sky-400 font-mono tracking-wider font-bold uppercase flex items-center gap-1.5">
+                  <MapIcon className="w-3.5 h-3.5" />
+                  Mapa de sitios
+                </span>
+                <p className="text-[11px] text-slate-500 mt-1">
+                  Pan/zoom · cobertura RF · enlaces backhaul y CPE. Clic en un sitio para ver detalle.
+                </p>
+              </div>
+              <div className="flex flex-wrap gap-3 text-[11px] font-mono text-slate-300">
+                <label className="inline-flex items-center gap-1.5 cursor-pointer">
+                  <input type="checkbox" checked={showCoverage} onChange={(e) => setShowCoverage(e.target.checked)} className="rounded border-slate-700 bg-slate-900 text-sky-500 focus:ring-0" />
+                  Cobertura
+                </label>
+                <label className="inline-flex items-center gap-1.5 cursor-pointer">
+                  <input type="checkbox" checked={showBackhaul} onChange={(e) => setShowBackhaul(e.target.checked)} className="rounded border-slate-700 bg-slate-900 text-sky-500 focus:ring-0" />
+                  Backhaul
+                </label>
+                <label className="inline-flex items-center gap-1.5 cursor-pointer">
+                  <input type="checkbox" checked={showCpes} onChange={(e) => setShowCpes(e.target.checked)} className="rounded border-slate-700 bg-slate-900 text-sky-500 focus:ring-0" />
+                  CPEs
+                </label>
               </div>
             </div>
+            {towers.length === 0 ? (
+              <div className="rounded-2xl border border-dashed border-slate-800 py-12 text-center text-sm text-slate-500">
+                Sin torres georreferenciadas. Agrega un sitio WISP para verlo en el mapa.
+              </div>
+            ) : (
+              <WispSitesMap
+                towers={towers}
+                clients={clients}
+                showCoverage={showCoverage}
+                showBackhaul={showBackhaul}
+                showCpes={showCpes}
+                selectedTowerId={selectedTowerId}
+                onSelectTower={setSelectedTowerId}
+              />
+            )}
           </div>
 
           {/* List of Towers */}
@@ -325,6 +356,16 @@ export default function NetworkModule({
         </div>
       ) : (
         <div id="ftth-gpon-view" className="space-y-6">
+          <div className="rounded-2xl border border-emerald-800/40 bg-emerald-950/20 px-4 py-3 flex items-start gap-3 text-sm">
+            <Cable className="w-5 h-5 text-emerald-400 shrink-0 mt-0.5" />
+            <div>
+              <p className="text-emerald-100 font-semibold text-sm">Mapa de fibra</p>
+              <p className="text-[12px] text-emerald-100/70 mt-0.5 leading-relaxed">
+                El mapa geográfico ODN (OLT → NAP → drop) está en <strong className="text-emerald-200">Red → Mapa FTTH</strong>.
+                Aquí quedan las listas operativas: OLT, ONU y aprovisionamiento.
+              </p>
+            </div>
+          </div>
           {/* OLT details block */}
           {olts.map((olt) => (
             <div key={olt.id} className="bg-slate-950 border border-slate-800 rounded-3xl p-6">
