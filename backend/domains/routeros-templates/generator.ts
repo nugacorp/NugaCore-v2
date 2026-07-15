@@ -25,6 +25,7 @@ import {
   assertNoForbiddenPolicies,
   assertNoForbiddenKeywords,
 } from './validators';
+import { isWgKey } from '../wireguard/keys';
 
 const sha256Short = (v: string): string =>
   createHash('sha256').update(v).digest('hex').substring(0, 32);
@@ -378,9 +379,21 @@ const sectionWireguard = (p: TemplateLibraryParams): WgSectionResult => {
   const keepalive = p.wgKeepalive ?? 25;
   const complete = Boolean(pubKey && endpoint && routerIpRaw);
 
-  const ifaceLine = p.wgPrivateKey
-    ? `/interface wireguard add name="NugaCoreWG" listen-port=13231 private-key="${p.wgPrivateKey}" comment="NugaCore WireGuard"`
-    : `/interface wireguard add name="NugaCoreWG" listen-port=13231 comment="NugaCore WireGuard (RouterOS auto-genera private-key)"`;
+  // Importante RouterOS: NO poner private-key= dentro de :if do={...}.
+  // Al pegar en Terminal, la línea larga se corrompe y ROS responde
+  // "failure: invalid private key". Crear iface sin key y luego SET top-level.
+  const ifaceCreate =
+    `/interface wireguard add name="NugaCoreWG" listen-port=13231 comment="NugaCore WireGuard"`;
+  const privateKey = (p.wgPrivateKey || '').trim();
+  const hasValidPrivateKey = isWgKey(privateKey);
+  if (privateKey && !hasValidPrivateKey) {
+    warnings.push(
+      'wgPrivateKey con formato inválido (se omite private-key; RouterOS auto-generará una).',
+    );
+  }
+  const privateKeySet = hasValidPrivateKey
+    ? `/interface wireguard set [find name="NugaCoreWG"] private-key="${privateKey}"`
+    : '';
 
   const watchdog = `# --- Watchdog WireGuard ---
 :if ([:len [/system scheduler find name="NugaCore-WG-Watchdog"]] = 0) do={
@@ -402,8 +415,9 @@ const sectionWireguard = (p: TemplateLibraryParams): WgSectionResult => {
 # Faltan parámetros reales. NO se emiten comandos inválidos que aborten /import.
 # Completar: Alta de Router (enrollment) o Biblioteca con Public Key + Endpoint + IP peer.
 :if ([:len [/interface wireguard find name="NugaCoreWG"]] = 0) do={
-  ${ifaceLine}
+  ${ifaceCreate}
 }
+${privateKeySet}
 :log warning "NugaCore WG incompleto: regenerar script con datos WG reales (Alta de Router)"
 ${watchdog}`;
 
@@ -419,29 +433,25 @@ ${watchdog}`;
   }
   const routerIp = normalizeWgRouterIp(routerIpRaw);
 
-  const note = p.wgPrivateKey
-    ? `# Peer pre-registrado en WireGuard Manager. El túnel se levanta automáticamente.`
+  const note = hasValidPrivateKey
+    ? `# Peer pre-registrado en WireGuard Manager. El túnel se levanta automáticamente.
+# Preferir /import del .rsc (no pegar el script completo en Terminal).`
     : `# Tras importar: copiar la public-key generada y registrarla en NugaCore WG Manager.
-#   /interface wireguard print where name=NugaCoreWG`;
+#   /interface wireguard print where name=NugaCoreWG
+# Preferir /import del .rsc (no pegar el script completo en Terminal).`;
 
   const section = `
 # --- WireGuard tunnel NugaCore ---
 ${note}
 :if ([:len [/interface wireguard find name="NugaCoreWG"]] = 0) do={
-  ${ifaceLine}
+  ${ifaceCreate}
 }
+${privateKeySet}
 :if ([:len [/ip address find interface="NugaCoreWG" comment~"NugaCore"]] = 0) do={
   /ip address add address="${routerIp}" interface="NugaCoreWG" comment="NugaCore WG address"
 }
 :if ([:len [/interface wireguard peers find comment~"NugaCore WG server"]] = 0) do={
-  /interface wireguard peers add \\
-    interface="NugaCoreWG" \\
-    public-key="${pubKey}" \\
-    endpoint-address="${epHost}" \\
-    endpoint-port=${epPort} \\
-    allowed-address=${mgmtCidr} \\
-    persistent-keepalive=${keepalive}s \\
-    comment="NugaCore WG server peer"
+  /interface wireguard peers add interface="NugaCoreWG" public-key="${pubKey}" endpoint-address="${epHost}" endpoint-port=${epPort} allowed-address=${mgmtCidr} persistent-keepalive=${keepalive}s comment="NugaCore WG server peer"
 }
 :if ([:len [/ip route find dst-address="${mgmtCidr}" comment~"NugaCore"]] = 0) do={
   /ip route add dst-address="${mgmtCidr}" gateway=NugaCoreWG comment="NugaCore management route"
@@ -982,7 +992,9 @@ const genWireguardServer = (p: TemplateLibraryParams): GenResult => {
   const apiPort = p.apiPort ?? 8728;
   const cred = generateApiCredential(p.routerName);
 
-  const serverNote = p.wgPrivateKey
+  const serverPk = (p.wgPrivateKey || '').trim();
+  const serverPkValid = isWgKey(serverPk);
+  const serverNote = serverPkValid
     ? `# Servidor con clave privada pre-configurada (NugaCore WG Manager).`
     : `# RouterOS auto-genera la private-key. Exportar la public-key y registrarla.
 # /interface wireguard print where name=NugaCoreWG-Server`;
@@ -993,12 +1005,9 @@ ${sectionIdentity(p.routerName, mode)}
 # --- Servidor WireGuard NugaCore ---
 ${serverNote}
 :if ([:len [/interface wireguard find name="NugaCoreWG-Server"]] = 0) do={
-  ${
-    p.wgPrivateKey
-      ? `/interface wireguard add name="NugaCoreWG-Server" listen-port=13231 private-key="${p.wgPrivateKey}" comment="NugaCore WG Server"`
-      : `/interface wireguard add name="NugaCoreWG-Server" listen-port=13231 comment="NugaCore WG Server"`
-  }
+  /interface wireguard add name="NugaCoreWG-Server" listen-port=13231 comment="NugaCore WG Server"
 }
+${serverPkValid ? `/interface wireguard set [find name="NugaCoreWG-Server"] private-key="${serverPk}"` : ''}
 :if ([:len [/ip address find interface="NugaCoreWG-Server" comment~"NugaCore"]] = 0) do={
   /ip address add address="${serverIp}" interface="NugaCoreWG-Server" comment="NugaCore WG Server IP"
 }

@@ -199,27 +199,24 @@ const sectionWireguard = (p: ResourceGeneratorParams): { section: string; warnin
     warnings.push('WireGuard incompleto: solo se crea NugaCoreWG. Completa Public Key, Endpoint e IP peer y regenera.');
   }
 
-  const ifaceLine = p.wgPeerPrivateKey
-    ? `/interface wireguard add name="NugaCoreWG" listen-port=13231 private-key="${p.wgPeerPrivateKey}" comment="NugaCore WireGuard"`
-    : `/interface wireguard add name="NugaCoreWG" listen-port=13231 comment="NugaCore WireGuard"`;
+  // private-key en SET top-level (no dentro de :if do={}) — paste/import-safe en CHR.
+  const peerPk = (p.wgPeerPrivateKey || '').trim();
+  const ifaceCreate =
+    `/interface wireguard add name="NugaCoreWG" listen-port=13231 comment="NugaCore WireGuard"`;
+  const privateKeySet = peerPk
+    ? `/interface wireguard set [find name="NugaCoreWG"] private-key="${peerPk}"`
+    : '';
 
-  const wgNote = p.wgPeerPrivateKey
-    ? `# Peer pre-registrado en NugaCore WireGuard Manager.\n# El tunel se levantara automaticamente al importar el script.`
+  const wgNote = peerPk
+    ? `# Peer pre-registrado en NugaCore WireGuard Manager.\n# Preferir /import del .rsc (no pegar en Terminal).`
     : `# Paso 1: Este script crea la interfaz WireGuard. RouterOS generara la private-key automaticamente.\n# Paso 2: Tras ejecutar el script, copia la public-key del router:\n#   /interface wireguard print where name=NugaCoreWG\n# Paso 3: Registra esa public-key en NugaCore para completar el tunel.`;
 
   const tunnelBlock = complete
-    ? `/ip address
-:if ([:len [find interface="NugaCoreWG" comment~"NugaCore"]] = 0) do={
-  add address="${routerIp}" interface="NugaCoreWG" comment="NugaCore WG address"
+    ? `:if ([:len [/ip address find interface="NugaCoreWG" comment~"NugaCore"]] = 0) do={
+  /ip address add address="${routerIp}" interface="NugaCoreWG" comment="NugaCore WG address"
 }
 :if ([:len [/interface wireguard peers find comment~"NugaCore WG server"]] = 0) do={
-  /interface wireguard peers add interface="NugaCoreWG" \\
-      public-key="${serverPublicKey}" \\
-      endpoint-address="${endpointHost}" \\
-      endpoint-port=${endpointPort} \\
-      allowed-address=${managementCidr} \\
-      persistent-keepalive=${keepalive}s \\
-      comment="NugaCore WG server peer"
+  /interface wireguard peers add interface="NugaCoreWG" public-key="${serverPublicKey}" endpoint-address="${endpointHost}" endpoint-port=${endpointPort} allowed-address=${managementCidr} persistent-keepalive=${keepalive}s comment="NugaCore WG server peer"
 }
 :if ([:len [/ip route find dst-address="${managementCidr}" comment~"NugaCore"]] = 0) do={
   /ip route add dst-address="${managementCidr}" gateway=NugaCoreWG comment="NugaCore management route"
@@ -231,8 +228,9 @@ const sectionWireguard = (p: ResourceGeneratorParams): { section: string; warnin
 # --- 15. WireGuard (RouterOS v7) ---
 ${wgNote}
 :if ([:len [/interface wireguard find name="NugaCoreWG"]] = 0) do={
-  ${ifaceLine}
+  ${ifaceCreate}
 }
+${privateKeySet}
 ${tunnelBlock}
 
 # --- 16. Watchdog WireGuard ---

@@ -117,9 +117,11 @@ const buildWireguardScript = (input: ScriptGenerationInput, apiMode: ApiMode): {
   // Si el WireGuard Manager proveyó la private-key del router, la fijamos en la
   // interfaz (sin intercambio manual). Si no, RouterOS la autogenera.
   const managed = !!server.wgRouterPrivateKey;
-  const interfaceLine = managed
-    ? `/interface wireguard add name=NugaCoreWG listen-port=13231 private-key="${server.wgRouterPrivateKey}" comment="NugaCore WireGuard"`
-    : `/interface wireguard add name=NugaCoreWG listen-port=13231 comment="NugaCore WireGuard"`;
+  // private-key en SET top-level (evita "invalid private key" al pegar dentro de do={}).
+  const interfaceLine = `/interface wireguard add name=NugaCoreWG listen-port=13231 comment="NugaCore WireGuard"`;
+  const privateKeySet = managed
+    ? `/interface wireguard set [find name=NugaCoreWG] private-key="${server.wgRouterPrivateKey}"`
+    : '';
   const presharedPart = server.wgPresharedKey ? ` preshared-key="${server.wgPresharedKey}"` : '';
   const keyNote = managed
     ? `# Claves administradas por NugaCore (WireGuard Manager): private-key y
@@ -153,6 +155,7 @@ ${userAndGroup(apiUser, apiPassword, apiMode, 'WireGuard')}
 
 # --- 4. Interfaz WireGuard ---
 ${interfaceLine}
+${privateKeySet}
 
 ${wgTunnelBlock}
 

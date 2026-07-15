@@ -149,10 +149,18 @@ describe('Generator — Core templates', () => {
     const result = generateFromTemplate({
       templateId: 'router_base_wireguard',
       ...WG_PARAMS,
-      wgPrivateKey: 'TEST_PRIVATE_KEY_BASE64==',
+      // 44 chars base64 válidos (isWgKey) — private-key va en SET top-level
+      wgPrivateKey: 'AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA=',
     });
     expect(result.script).toContain('/interface wireguard add name="NugaCoreWG"');
     expect(result.script).not.toMatch(/do=\{\s*\n\s*add name="NugaCoreWG"/);
+    // private-key fuera del bloque :if do={...} (paste-safe en Terminal CHR)
+    expect(result.script).toContain(
+      '/interface wireguard set [find name="NugaCoreWG"] private-key="AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA="',
+    );
+    expect(result.script).not.toMatch(
+      /do=\{\s*\n\s*\/interface wireguard add[^\n]*private-key=/,
+    );
   });
 
   it('sin datos WG omite address/peer (nunca placeholders RouterOS-inválidos)', () => {

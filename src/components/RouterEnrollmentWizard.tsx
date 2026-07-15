@@ -758,6 +758,14 @@ export default function RouterEnrollmentWizard({ userRole, getAuthHeaders }: Pro
             <h3 className="font-semibold text-white">Importar en el MikroTik</h3>
           </div>
 
+          <div className="p-3 bg-rose-950/40 border border-rose-800/50 rounded-lg text-rose-200 text-xs">
+            <AlertTriangle size={14} className="inline mr-1" />
+            <strong>No pegues</strong> el script completo en Terminal. Pegar corrompe la
+            <code className="mx-1 font-mono">private-key</code>
+            WireGuard (<em>failure: invalid private key</em>). Usa siempre
+            <strong className="mx-1">Descargar .rsc</strong> + <code className="font-mono">/import</code>.
+          </div>
+
           <div className="space-y-3 text-sm text-gray-300">
             <div className="flex gap-3">
               <span className="shrink-0 w-6 h-6 bg-blue-700 text-white rounded-full flex items-center justify-center text-xs font-bold">1</span>
@@ -778,14 +786,14 @@ export default function RouterEnrollmentWizard({ userRole, getAuthHeaders }: Pro
             <div className="flex gap-3">
               <span className="shrink-0 w-6 h-6 bg-blue-700 text-white rounded-full flex items-center justify-center text-xs font-bold">3</span>
               <div>
-                <p className="font-medium">Sube el archivo al router (Files o drag &amp; drop en Winbox)</p>
+                <p className="font-medium">Descarga el .rsc y súbelo al router (Files / drag &amp; drop en Winbox)</p>
                 <p className="text-gray-500 text-xs">Archivo: <span className="font-mono text-blue-300">{startResult.scriptFilename}</span></p>
               </div>
             </div>
             <div className="flex gap-3">
               <span className="shrink-0 w-6 h-6 bg-blue-700 text-white rounded-full flex items-center justify-center text-xs font-bold">4</span>
               <div>
-                <p className="font-medium">Importa el script en Terminal</p>
+                <p className="font-medium">Importa el archivo (no pegar líneas)</p>
                 <pre className="mt-1 bg-gray-900 px-3 py-1.5 rounded text-xs font-mono text-green-300">
                   /import file-name={startResult.scriptFilename}
                 </pre>
