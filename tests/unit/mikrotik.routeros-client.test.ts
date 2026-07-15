@@ -8,6 +8,7 @@ import {
   encodeLength,
   resolveRouterApiEndpoint,
   routerOsRead,
+  routerOsReadMany,
 } from '../../backend/domains/mikrotik/worker/routeros-client';
 
 function encodeSentence(words: string[]): Buffer {
@@ -159,6 +160,46 @@ describe('RouterOsApiClient — login moderno y lectura', () => {
     });
 
     expect(rows).toEqual([{ name: 'ether1' }]);
+  });
+
+  it('routerOsReadMany hace un solo /login para varios prints', async () => {
+    let loginCount = 0;
+    const prints: string[] = [];
+    const mock = await startMockRouterOsApi((words) => {
+      if (words[0] === '/login') {
+        loginCount += 1;
+        return [encodeSentence(['!done'])];
+      }
+      prints.push(words[0]);
+      return [
+        encodeSentence(['!re', `=cmd=${words[0]}`]),
+        encodeSentence(['!done']),
+      ];
+    });
+    mockServers.push(mock.close);
+
+    const batches = await routerOsReadMany(
+      ['/system/resource/print', '/interface/print', '/ip/address/print'],
+      {
+        host: '127.0.0.1',
+        port: mock.port,
+        username: 'lab',
+        password: 'x',
+        timeoutMs: 2000,
+      },
+    );
+
+    expect(loginCount).toBe(1);
+    expect(prints).toEqual([
+      '/system/resource/print',
+      '/interface/print',
+      '/ip/address/print',
+    ]);
+    expect(batches).toEqual([
+      [{ cmd: '/system/resource/print' }],
+      [{ cmd: '/interface/print' }],
+      [{ cmd: '/ip/address/print' }],
+    ]);
   });
 });
 

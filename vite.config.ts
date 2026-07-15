@@ -20,6 +20,7 @@ export default defineConfig(() => {
             'vendor-react': ['react', 'react-dom'],
             'vendor-supabase': ['@supabase/supabase-js'],
             'vendor-ui': ['lucide-react', 'motion'],
+            'vendor-map': ['leaflet', 'react-leaflet'],
           },
         },
       },

@@ -541,11 +541,28 @@ export class RouterOsApiClient {
 /**
  * Abre conexión, autentica y ejecuta UNA sentencia de lectura (print).
  * Devuelve las filas !re como objetos. Cierra siempre la conexión.
+ *
+ * Preferir `routerOsReadMany` cuando haya varios prints: un login por lote
+ * evita spam de login/logout en el log del MikroTik.
  */
 export async function routerOsRead(
   command: string,
   opts: RouterOsReadOptions,
 ): Promise<Record<string, string>[]> {
+  const [rows] = await routerOsReadMany([command], opts);
+  return rows ?? [];
+}
+
+/**
+ * Un solo login → N lecturas → un logout.
+ * Patrón correcto para NOC/verify: no reautenticar por cada `print`.
+ */
+export async function routerOsReadMany(
+  commands: readonly string[],
+  opts: RouterOsReadOptions,
+): Promise<Record<string, string>[][]> {
+  if (commands.length === 0) return [];
+
   const timeoutMs = opts.timeoutMs ?? 4000;
   const client = new RouterOsApiClient({
     host: opts.host,
@@ -560,7 +577,11 @@ export async function routerOsRead(
 
   try {
     await client.connect();
-    return await client.execute(command);
+    const results: Record<string, string>[][] = [];
+    for (const command of commands) {
+      results.push(await client.execute(command));
+    }
+    return results;
   } finally {
     client.disconnect();
   }

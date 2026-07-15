@@ -25,6 +25,7 @@ import {
   Copy,
   Link2,
   Check,
+  Trash2,
 } from 'lucide-react';
 import { Client, Plan } from '../types';
 import type { UserRole } from '../lib/supabase';
@@ -112,9 +113,12 @@ interface CrmModuleProps {
   plans: Plan[];
   onAddClient: (newClientData: any) => Promise<void>;
   onUpdateClientStatus: (id: string, status: 'active' | 'suspended' | 'baja') => Promise<void>;
+  onDeleteClient?: (id: string) => Promise<void>;
   getAuthHeaders: () => Promise<Record<string, string>>;
   canCreateClient: boolean;
   canManageClientLifecycle: boolean;
+  /** DELETE permanente — alineado con API (super admin / administrador). */
+  canDeleteClient?: boolean;
   userRole: UserRole;
   onNavigate?: (tab: string) => void;
 }
@@ -124,9 +128,11 @@ export default function CrmModule({
   plans,
   onAddClient,
   onUpdateClientStatus,
+  onDeleteClient,
   getAuthHeaders,
   canCreateClient,
   canManageClientLifecycle,
+  canDeleteClient = false,
   userRole,
   onNavigate,
 }: CrmModuleProps) {
@@ -136,6 +142,8 @@ export default function CrmModule({
   
   // Form State
   const [showAddForm, setShowAddForm] = useState(false);
+  const [deletingClientId, setDeletingClientId] = useState<string | null>(null);
+  const [deleteError, setDeleteError] = useState('');
   const [formName, setFormName] = useState('');
   const [formType, setFormType] = useState<any>('residential');
   const [formEmail, setFormEmail] = useState('');
@@ -829,6 +837,24 @@ export default function CrmModule({
     setShowAddForm(false);
   };
 
+  const handleDeleteClient = async (client: Client) => {
+    if (!onDeleteClient || !canDeleteClient) return;
+    const ok = window.confirm(
+      `¿Eliminar permanentemente a «${client.name}»?\n\nEsto borra el cliente de la base (Supabase). El MRR y los KPIs del dashboard dejan de contarlo.\n«Baja» solo cambia el estatus; Eliminar sí lo quita.`,
+    );
+    if (!ok) return;
+    setDeleteError('');
+    setDeletingClientId(client.id);
+    try {
+      await onDeleteClient(client.id);
+      setSelectedClient(null);
+    } catch (err) {
+      setDeleteError(err instanceof Error ? err.message : 'No se pudo eliminar el cliente.');
+    } finally {
+      setDeletingClientId(null);
+    }
+  };
+
   const handleConvertLead = async (lead: Client) => {
     await onAddClient({
       name: lead.name,
@@ -1197,12 +1223,43 @@ export default function CrmModule({
                         </button>
                       )}
                       <button
+                        id="mark-client-baja"
                         onClick={() => onUpdateClientStatus(selectedClient.id, 'baja')}
                         className="py-1.5 px-3 bg-slate-800 hover:bg-slate-700 text-slate-400 rounded-xl transition text-[11px]"
+                        title="Cambia estatus a baja (sigue en el listado; deja de contar en MRR)"
                       >
                         Baja
                       </button>
                     </div>
+                    <p className="text-[10px] text-slate-600 font-mono leading-snug">
+                      Baja = estatus comercial. No borra la ficha ni limpia Supabase.
+                    </p>
+                  </div>
+                )}
+
+                {canDeleteClient && onDeleteClient && (
+                  <div className="border-t border-slate-900 pt-4 space-y-2">
+                    <span className="text-slate-500 block uppercase text-[9px] font-mono mb-1">Administración</span>
+                    {deleteError && (
+                      <p className="text-[11px] text-rose-400 font-mono" role="alert">{deleteError}</p>
+                    )}
+                    <button
+                      id="delete-client-permanent"
+                      type="button"
+                      disabled={deletingClientId === selectedClient.id}
+                      onClick={() => void handleDeleteClient(selectedClient)}
+                      className="w-full py-2 px-3 bg-rose-950/80 hover:bg-rose-900 border border-rose-800/60 text-rose-200 rounded-xl transition text-[11px] font-semibold flex items-center justify-center gap-1.5 disabled:opacity-50"
+                    >
+                      {deletingClientId === selectedClient.id ? (
+                        <Loader2 className="w-3.5 h-3.5 animate-spin" />
+                      ) : (
+                        <Trash2 className="w-3.5 h-3.5" />
+                      )}
+                      <span>Eliminar permanentemente</span>
+                    </button>
+                    <p className="text-[10px] text-slate-600 font-mono leading-snug">
+                      Borra el cliente de Supabase. El dashboard (activos / MRR) se actualiza al refrescar.
+                    </p>
                   </div>
                 )}
               </div>

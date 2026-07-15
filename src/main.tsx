@@ -14,6 +14,18 @@ try {
   /* Entornos sin DOM: no-op. */
 }
 
+// Quita el bust temporal `_nc` de la barra de direcciones tras un auto-reload
+// por chunk faltante (el flag de sessionStorage lo limpia el primer import OK).
+try {
+  const url = new URL(window.location.href);
+  if (url.searchParams.has('_nc')) {
+    url.searchParams.delete('_nc');
+    window.history.replaceState({}, '', url.pathname + url.search + url.hash);
+  }
+} catch {
+  /* ignore */
+}
+
 createRoot(document.getElementById('root')!).render(
   <StrictMode>
     <App />
@@ -21,6 +33,13 @@ createRoot(document.getElementById('root')!).render(
 );
 
 if ('serviceWorker' in navigator && import.meta.env.PROD) {
+  let refreshing = false;
+  navigator.serviceWorker.addEventListener('controllerchange', () => {
+    if (refreshing) return;
+    refreshing = true;
+    window.location.reload();
+  });
+
   void navigator.serviceWorker
     .register('/sw.js')
     .then((registration) => {

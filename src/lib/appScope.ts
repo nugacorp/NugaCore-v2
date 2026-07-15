@@ -66,7 +66,7 @@ let cachedScope: AppScope | null = null;
  */
 export function getAppScope(): AppScope {
   if (cachedScope) return cachedScope;
-  let scope: AppScope = 'admin';
+  let scope: AppScope;
   try {
     const params = new URLSearchParams(window.location.search);
     const fromQuery = params.get(APP_SCOPE_QUERY_KEY);

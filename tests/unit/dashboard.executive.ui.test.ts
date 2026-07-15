@@ -71,7 +71,7 @@ describe('Dashboard — navegación', () => {
   }
 
   it('App pasa onNavigate al Dashboard', () => {
-    expect(app).toContain('onNavigate={setActiveTab}');
+    expect(app).toContain('onNavigate={navigateToTab}');
   });
 });
 

@@ -1,49 +1,34 @@
 import { readFileSync } from 'node:fs';
 import { describe, expect, it } from 'vitest';
 
-const moduleSource = readFileSync('src/modules/notifications/NotificationCenterModule.tsx', 'utf8');
 const sidebarSource = readFileSync('src/components/Sidebar.tsx', 'utf8');
 const appSource = readFileSync('src/App.tsx', 'utf8');
 const rbacSource = readFileSync('src/lib/rbac.ts', 'utf8');
 const manualSource = readFileSync('src/modules/user-manual/UserManualModule.tsx', 'utf8');
+const bellSource = readFileSync('src/components/TopAlertsBell.tsx', 'utf8');
 
-describe('Notification Center UI', () => {
-  it('está en Sistema, debajo de Automatización', () => {
-    expect(sidebarSource).toContain("id: 'notifications'");
-    expect(sidebarSource.indexOf("name: 'Automatización'")).toBeLessThan(sidebarSource.indexOf("name: 'Notificaciones'"));
+describe('Notification Center — retirado; campana operativa en top bar', () => {
+  it('no aparece el módulo Notification Center en sidebar/App/manual', () => {
+    expect(sidebarSource).not.toContain("id: 'notifications'");
+    expect(sidebarSource).not.toContain('Notificaciones');
+    expect(appSource).not.toContain('NotificationCenterModule');
+    expect(appSource).not.toContain("activeTab === 'notifications'");
+    expect(manualSource).not.toContain("id: 'notifications'");
+    expect(manualSource).not.toContain('Notification Center');
   });
 
-  it('muestra badge gated y el banner obligatorio', () => {
-    expect(moduleSource).toContain('ProductionGateBadge');
-    expect(moduleSource).toContain('notificationsLive');
-    expect(moduleSource).toContain('Las notificaciones están en modo simulación. No se envían mensajes reales.');
-  });
-
-  it('incluye las 5 pantallas requeridas', () => {
-    for (const text of ['Resumen', 'Templates', 'Mensajes', 'Simulaciones', 'Canales']) {
-      expect(moduleSource).toContain(text);
-    }
-  });
-
-  it('tiene botones Vista previa / Simular / Cancelar y NO Enviar/Dispatch', () => {
-    expect(moduleSource).toContain('Vista previa');
-    expect(moduleSource).toContain('Simular');
-    expect(moduleSource).toContain('Cancelar');
-    expect(moduleSource).not.toContain('Enviar');
-    expect(moduleSource).not.toContain('Dispatch');
-  });
-
-  it('App renderiza el módulo y RBAC lo expone a todos los roles', () => {
-    expect(appSource).toContain("const NotificationCenterModule = lazyWithRetry(() => import('./modules/notifications/NotificationCenterModule'))");
-    expect(appSource).toContain("activeTab === 'notifications'");
+  it('ningún rol tiene acceso al tab notifications', () => {
     for (const role of ["'Super Admin'", "'Administrador'", "'Cobranza'", "'Técnico'", "'Soporte'", "'Solo lectura'"]) {
       const line = rbacSource.split('\n').find((item) => item.includes(role)) ?? '';
-      expect(line).toContain("'notifications'");
+      expect(line, `${role} no debería incluir notifications`).not.toContain("'notifications'");
     }
   });
 
-  it('el Manual de Usuario documenta Notification Center', () => {
-    expect(manualSource).toContain("id: 'notifications'");
-    expect(manualSource).toContain('Notification Center');
+  it('App monta la campana de alertas operativas (NOC)', () => {
+    expect(appSource).toContain('TopAlertsBell');
+    expect(appSource).toContain('id="desktop-top-bar"');
+    expect(bellSource).toContain('id="top-alerts-bell"');
+    expect(bellSource).toContain('Alertas operativas');
+    expect(bellSource).toContain('btn-top-alerts-ack-all');
   });
 });
