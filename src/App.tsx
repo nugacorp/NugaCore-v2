@@ -18,8 +18,6 @@ const NocOperationsPanel = lazyWithRetry(() => import('./components/NocOperation
 const ManualSafeModeModule = lazyWithRetry(() => import('./modules/manual-safe-mode/ManualSafeModeModule'));
 const SafeCommandQueueModule = lazyWithRetry(() => import('./modules/safe-command-queue/SafeCommandQueueModule'));
 const ProvisioningCenterModule = lazyWithRetry(() => import('./modules/provisioning/ProvisioningCenterModule'));
-const AutomationCenterModule = lazyWithRetry(() => import('./modules/automation/AutomationCenterModule'));
-const NotificationCenterModule = lazyWithRetry(() => import('./modules/notifications/NotificationCenterModule'));
 const RouterOSReadOnlyModule = lazyWithRetry(() => import('./modules/routeros-readonly/RouterOSReadOnlyModule'));
 const UserManualModule = lazyWithRetry(() => import('./modules/user-manual/UserManualModule'));
 const InventorySyncModule = lazyWithRetry(() => import('./modules/inventory-sync/InventorySyncModule'));
@@ -37,6 +35,7 @@ const TechPwaModule = lazyWithRetry(() => import('./modules/tech-pwa/TechPwaModu
 import LoginForm from './components/LoginForm';
 import LandingPage from './components/LandingPage';
 import UserMenu from './components/UserMenu';
+import TopAlertsBell from './components/TopAlertsBell';
 import { authSession, restoreSessionProfileFromSupabase } from './lib/authSession';
 import { UserSessionProfile, isSupabaseConfigured, supabase } from './lib/supabase';
 import { canAccessTab, getDefaultTabByRole } from './lib/rbac';
@@ -572,10 +571,38 @@ export default function App() {
     await fetchData();
   };
 
+  const refreshAlerts = useCallback(async () => {
+    if (!sessionBootstrapped || !userSession) return;
+    if (Date.now() < rateLimitUntilMs) return;
+    if (typeof document !== 'undefined' && document.visibilityState !== 'visible') return;
+    try {
+      const resAlerts = await fetchJson<NocAlert[]>('/api/alerts');
+      setAlerts(resAlerts);
+    } catch (err) {
+      if (isApiRateLimitError(err)) {
+        setRateLimitMessage(err.retryAfterMs);
+        return;
+      }
+      clientLog.error(err);
+    }
+  }, [sessionBootstrapped, userSession, rateLimitUntilMs, fetchJson, setRateLimitMessage]);
+
+  useEffect(() => {
+    if (!sessionBootstrapped || !userSession) return;
+    void refreshAlerts();
+    const id = window.setInterval(() => {
+      void refreshAlerts();
+    }, 60_000);
+    return () => window.clearInterval(id);
+  }, [sessionBootstrapped, userSession, refreshAlerts]);
+
   const handleAcknowledgeAlerts = async () => {
     try {
       await fetchJson('/api/alerts/acknowledge-all', { method: 'POST' });
-      await fetchData();
+      await refreshAlerts();
+      if (activeTab === 'dashboard' || activeTab === 'noc') {
+        await fetchData();
+      }
     } catch (err) {
       clientLog.error(err);
     }
@@ -617,6 +644,11 @@ export default function App() {
     } catch (err) {
       clientLog.error(err);
     }
+  };
+
+  const handleDeleteClient = async (id: string) => {
+    await fetchJson(`/api/clients/${id}`, { method: 'DELETE' });
+    await fetchData();
   };
 
   // BILLING TRANSAC CONTROLS
@@ -991,27 +1023,38 @@ export default function App() {
         isOpen={mobileMenuOpen}
         onClose={() => setMobileMenuOpen(false)}
         userProfile={userSession}
-        onLogout={handleLogout}
       />
 
       {/* Main Content Area */}
       <div className="flex-1 flex flex-col min-w-0">
-        {/* Desktop top bar: identidad / perfil / logout */}
+        {/* Desktop top bar: alertas (izq) + perfil (der) */}
         {!isSupportWorkspace && (
-          <div id="desktop-top-bar" className="hidden md:flex items-center justify-end gap-3 py-2.5 px-6 bg-slate-950 border-b border-slate-900 shrink-0 sticky top-0 z-20">
+          <div id="desktop-top-bar" className="hidden md:flex items-center justify-between gap-3 py-2.5 px-6 bg-slate-950 border-b border-slate-900 shrink-0 sticky top-0 z-20">
+            <TopAlertsBell
+              alerts={alerts}
+              onAcknowledgeAll={handleAcknowledgeAlerts}
+              onOpenNoc={canAccessTab(userSession.role, 'noc') ? () => navigateToTab('noc') : undefined}
+            />
             <UserMenu profile={userSession} onLogout={handleLogout} />
           </div>
         )}
 
         {/* Mobile Navigation Header */}
         <div id="mobile-navigation-bar" className="md:hidden flex items-center justify-between py-3 px-4 bg-slate-950 border-b border-slate-900 shrink-0 sticky top-0 z-20">
-          <button
-            onClick={() => setMobileMenuOpen(true)}
-            className="p-1.5 rounded-lg text-slate-400 hover:text-white hover:bg-slate-900 focus:outline-none transition"
-            title="Abrir menú"
-          >
-            <Menu className="w-5 h-5" />
-          </button>
+          <div className="flex items-center gap-1.5">
+            <button
+              onClick={() => setMobileMenuOpen(true)}
+              className="p-1.5 rounded-lg text-slate-400 hover:text-white hover:bg-slate-900 focus:outline-none transition"
+              title="Abrir menú"
+            >
+              <Menu className="w-5 h-5" />
+            </button>
+            <TopAlertsBell
+              alerts={alerts}
+              onAcknowledgeAll={handleAcknowledgeAlerts}
+              onOpenNoc={canAccessTab(userSession.role, 'noc') ? () => navigateToTab('noc') : undefined}
+            />
+          </div>
 
           <div className="flex items-center space-x-1.5">
             <span className="w-2 h-2 rounded-full bg-indigo-500 animate-pulse"></span>
@@ -1178,14 +1221,6 @@ export default function App() {
               <ProvisioningCenterModule userRole={userSession.role} getAuthHeaders={getAuthHeaders} />
             )}
 
-            {activeTab === 'automation' && (
-              <AutomationCenterModule userRole={userSession.role} getAuthHeaders={getAuthHeaders} />
-            )}
-
-            {activeTab === 'notifications' && (
-              <NotificationCenterModule userRole={userSession.role} getAuthHeaders={getAuthHeaders} />
-            )}
-
             {activeTab === 'routeros-readonly' && (
               <RouterOSReadOnlyModule getAuthHeaders={getAuthHeaders} />
             )}
@@ -1200,13 +1235,15 @@ export default function App() {
 
             {activeTab === 'crm' && (
               <CrmModule 
-                clients={clients} 
-                plans={plans} 
+                clients={clients}
+                plans={plans}
                 onAddClient={handleAddClient}
                 onUpdateClientStatus={handleUpdateClientStatus}
+                onDeleteClient={handleDeleteClient}
                 getAuthHeaders={getAuthHeaders}
                 canCreateClient={['Super Admin', 'Administrador', 'Técnico', 'Soporte'].includes(userSession.role)}
                 canManageClientLifecycle={['Super Admin', 'Administrador', 'Cobranza'].includes(userSession.role)}
+                canDeleteClient={['Super Admin', 'Administrador'].includes(userSession.role)}
                 userRole={userSession.role}
                 onNavigate={navigateToTab}
               />

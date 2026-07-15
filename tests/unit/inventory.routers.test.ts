@@ -30,9 +30,9 @@ const mockRouter = (over: Partial<MikrotikRouterRegistryItem> & { id: string }):
 });
 
 describe('inventoryRoutersService.getSummary', () => {
-  it('es estable con cero routers (todo en 0)', () => {
+  it('es estable con cero routers (todo en 0)', async () => {
     setRouters([]);
-    expect(inventoryRoutersService.getSummary()).toEqual({
+    expect(await inventoryRoutersService.getSummary()).toEqual({
       totalRouters: 0,
       onlineRouters: 0,
       offlineRouters: 0,
@@ -44,13 +44,13 @@ describe('inventoryRoutersService.getSummary', () => {
     });
   });
 
-  it('cuenta correctamente con routers mock', () => {
+  it('cuenta correctamente con routers mock', async () => {
     setRouters([
       mockRouter({ id: 'r1', isOnline: true, provisioningStatus: 'provisioned', vpnIp: '10.10.0.2', encryptedPassword: 'cipher', lastSeenAt: '2026-06-18 01:00' }),
       mockRouter({ id: 'r2', isOnline: false, provisioningStatus: 'pending' }),
       mockRouter({ id: 'r3', isOnline: true, provisioningStatus: 'connected', hasCredentials: true }),
     ]);
-    const s = inventoryRoutersService.getSummary();
+    const s = await inventoryRoutersService.getSummary();
     expect(s.totalRouters).toBe(3);
     expect(s.onlineRouters).toBe(2);
     expect(s.offlineRouters).toBe(1);
@@ -63,9 +63,9 @@ describe('inventoryRoutersService.getSummary', () => {
 });
 
 describe('inventoryRoutersService.getRouter / mapper', () => {
-  it('devuelve null para id inexistente', () => {
+  it('devuelve null para id inexistente', async () => {
     setRouters([]);
-    expect(inventoryRoutersService.getRouter('nope')).toBeNull();
+    expect(await inventoryRoutersService.getRouter('nope')).toBeNull();
   });
 
   it('la vista NO expone secretos (encryptedPassword/username)', () => {

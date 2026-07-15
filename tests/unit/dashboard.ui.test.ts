@@ -24,7 +24,7 @@ describe('Dashboard — estructura ejecutiva V3', () => {
 
   it('permite enlazar a módulos vía onNavigate (cada KPI/alerta/acción)', () => {
     expect(dashboardSource).toContain('onNavigate');
-    expect(appSource).toContain('onNavigate={setActiveTab}');
+    expect(appSource).toContain('onNavigate={navigateToTab}');
   });
 
   it('no introduce un tema nuevo: conserva la paleta slate/indigo existente', () => {
