@@ -1018,7 +1018,6 @@ export default function App() {
         isOpen={mobileMenuOpen}
         onClose={() => setMobileMenuOpen(false)}
         userProfile={userSession}
-        onLogout={handleLogout}
       />
 
       {/* Main Content Area */}

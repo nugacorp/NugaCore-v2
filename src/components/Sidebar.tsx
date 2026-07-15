@@ -13,7 +13,6 @@ import {
   Ban,
   BookOpen,
   X,
-  LogOut,
   ChevronLeft,
   ChevronRight,
   ChevronDown,
@@ -40,7 +39,6 @@ interface SidebarProps {
   isOpen?: boolean;
   onClose?: () => void;
   userProfile?: UserSessionProfile | null;
-  onLogout?: () => void;
 }
 
 type MenuItem = {
@@ -66,7 +64,6 @@ export default function Sidebar({
   isOpen = false,
   onClose,
   userProfile,
-  onLogout
 }: SidebarProps) {
   // Reorganización UX WISP LATAM (referencia WispHub): categorías desplegables
   // para no saturar al operador. routers MikroTik viven en Sistema → Routers.
@@ -400,55 +397,6 @@ export default function Sidebar({
             </nav>
           </div>
 
-          {userProfile && (
-            <div className={`${collapsed ? 'mt-6 pt-4' : 'mt-8 pt-5'} border-t border-slate-900/90 space-y-3.5`}>
-              <div className={`bg-slate-950/80 border border-slate-900 rounded-2xl ${collapsed ? 'p-2.5 flex justify-center' : 'p-3 flex items-center space-x-3'}`}>
-                {userProfile.avatar_url ? (
-                  <img
-                    src={userProfile.avatar_url}
-                    alt={userProfile.full_name}
-                    className="w-10 h-10 rounded-xl object-cover shrink-0 border border-slate-800"
-                    referrerPolicy="no-referrer"
-                  />
-                ) : (
-                  <div className="w-10 h-10 rounded-xl bg-indigo-950 border border-indigo-900 text-indigo-400 flex items-center justify-center font-bold text-xs shrink-0 uppercase">
-                    {userProfile.full_name.substring(0, 2)}
-                  </div>
-                )}
-                {!collapsed && (
-                  <div className="min-w-0 flex-1">
-                    <h4 className="text-xs font-bold text-slate-200 truncate leading-tight flex items-center space-x-1">
-                      <span>{userProfile.full_name}</span>
-                    </h4>
-                    <p className="text-[10px] text-slate-500 truncate font-mono mt-0.5">{userProfile.email}</p>
-
-                    <span className={`inline-flex items-center px-1.5 py-0.5 rounded text-[9px] font-mono font-bold mt-1.5 ${
-                      userProfile.role === 'Super Admin' ? 'bg-indigo-950 text-indigo-400 border border-indigo-900' :
-                      userProfile.role === 'Administrador' ? 'bg-sky-950 text-sky-400 border border-sky-900' :
-                      userProfile.role === 'Cobranza' ? 'bg-emerald-950 text-emerald-400 border border-emerald-900' :
-                      userProfile.role === 'Técnico' ? 'bg-amber-950 text-amber-400 border border-amber-900' :
-                      'bg-slate-900 text-slate-400 border border-slate-800'
-                    }`}>
-                      {userProfile.role}
-                    </span>
-                  </div>
-                )}
-              </div>
-
-              {onLogout && (
-                <button
-                  type="button"
-                  onClick={onLogout}
-                  className={`w-full py-2 ${collapsed ? 'px-2' : 'px-3'} border border-slate-900 hover:border-rose-950/40 hover:bg-rose-950/20 text-slate-400 hover:text-rose-400 text-xs font-semibold rounded-xl transition flex items-center justify-center ${collapsed ? '' : 'space-x-2'} font-mono group`}
-                  title="Cerrar sesión"
-                  aria-label="Cerrar sesión"
-                >
-                  <LogOut className="w-3.5 h-3.5 transition-transform group-hover:-translate-x-0.5" />
-                  {!collapsed && <span>Salir del Sistema</span>}
-                </button>
-              )}
-            </div>
-          )}
         </div>
 
         <div className={`border-t border-slate-900 bg-slate-950/60 font-mono text-[11px] text-slate-500 shrink-0 ${collapsed ? 'p-2.5' : 'p-4 space-y-1'}`}>
