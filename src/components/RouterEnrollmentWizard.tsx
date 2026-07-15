@@ -581,6 +581,11 @@ export default function RouterEnrollmentWizard({ userRole, getAuthHeaders }: Pro
             <Terminal size={18} className="text-orange-400" />
             <h3 className="font-semibold text-white">Configuración LAN <span className="text-gray-500 font-normal text-sm">(opcional)</span></h3>
           </div>
+          <p className="text-xs text-gray-400 bg-gray-900/60 border border-gray-700 rounded-lg px-3 py-2">
+            El script crea <span className="font-mono text-blue-300">bridge-lan</span> con la IP/DHCP de LAN.
+            No agrega puertos al bridge: tú decides qué ether queda dentro (LAN) y cuál fuera (WAN), p.ej.{' '}
+            <span className="font-mono text-green-300">/interface bridge port add interface=ether2 bridge=bridge-lan</span>.
+          </p>
           <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
             <div>
               <label className="block text-xs font-medium text-gray-400 mb-1">Versión RouterOS</label>

@@ -2,7 +2,7 @@
 // Tipos de la Biblioteca de Plantillas RouterOS (Fase 4.6.3).
 // ====================================================================
 
-export const TEMPLATE_LIBRARY_VERSION = 'nugacore-templates-1.0.6';
+export const TEMPLATE_LIBRARY_VERSION = 'nugacore-templates-1.0.7';
 
 export type TemplateLibraryId =
   | 'router_base_wireguard'
@@ -77,6 +77,10 @@ export interface TemplateLibraryParams {
   lanCidr?: string;
   lanGateway?: string;
   wanInterface?: string;
+  /**
+   * Puertos a meter en el bridge. Por defecto ninguno: el WISP los agrega
+   * manualmente para decidir qué queda dentro/fuera del bridge (LAN vs WAN).
+   */
   lanInterfaces?: string[];
   dhcpPoolStart?: string;
   dhcpPoolEnd?: string;
@@ -84,9 +88,8 @@ export interface TemplateLibraryParams {
   enableNat?: boolean;
   enableBasicFirewall?: boolean;
   /**
-   * Si es false, omite bridge/LAN/DHCP/NAT/firewall y solo deja identity (según modo) + API + VPN.
-   * Útil en Alta de Router / CHR cuando el paso LAN queda vacío (opcional).
-   * Default: true (comportamiento biblioteca / WISP completo).
+   * Si es false, omite bridge/LAN/DHCP/NAT/firewall (solo API + VPN).
+   * Default: true — siempre crea bridge + LAN en el bridge; sin puertos auto.
    */
   enableLanStack?: boolean;
   // WireGuard

@@ -137,17 +137,17 @@ describe('resolveTemplateParams — router_base_wireguard', () => {
     expect(r.params.routerosVersion).toBe('7');
   });
 
-  it('con LAN en el input habilita enableLanStack', () => {
+  it('siempre habilita enableLanStack (bridge + LAN por defecto)', () => {
     expect(r.params.enableLanStack).toBe(true);
   });
 
-  it('sin parámetros LAN desactiva enableLanStack y usa lanInterfaces=[]', () => {
+  it('sin lanInterfaces explícitas usa [] (WISP agrega puertos a mano)', () => {
     const lean = resolveTemplateParams(
       'router_base_wireguard',
       { routerName: 'CHR', routerosVersion: '7' },
       MOCK_PEER,
     );
-    expect(lean.params.enableLanStack).toBe(false);
+    expect(lean.params.enableLanStack).toBe(true);
     expect(lean.params.lanInterfaces).toEqual([]);
   });
 });

@@ -217,27 +217,40 @@ describe('Generator — Core templates', () => {
     expect(result.script).not.toContain('192.168.1.10-192.168.1.254');
   });
 
-  it('bridge ports comprueban que la interfaz existe antes de añadir', () => {
+  it('por defecto crea bridge + LAN sin agregar puertos (WISP los añade a mano)', () => {
     const result = generateFromTemplate({ templateId: 'router_base_wireguard', ...WG_PARAMS });
-    expect(result.script).toContain('/interface find where name="ether2"');
-    expect(result.script).toContain('/interface bridge port find where interface="ether2"');
+    expect(result.script).toContain('nugacore-templates-1.0.7');
+    expect(result.script).toContain('/interface bridge add name="bridge-lan"');
+    expect(result.script).toContain('address="192.168.1.1/24" interface="bridge-lan"');
+    expect(result.script).toContain('NugaCore-pool-LAN');
+    expect(result.script).toContain('Puertos: NO se agregan automáticamente');
+    expect(result.script).not.toContain('bridge port add interface="ether2"');
+    expect(result.script).not.toContain('/interface find where name="ether2"');
+    expect(result.warnings.some((w) => /Bridge sin puertos/i.test(w))).toBe(true);
   });
 
-  it('enableLanStack=false omite bridge/DHCP y no referencia ether2', () => {
+  it('si lanInterfaces se indica, valida existencia antes de añadir al bridge', () => {
+    const result = generateFromTemplate({
+      templateId: 'router_base_wireguard',
+      ...WG_PARAMS,
+      lanInterfaces: ['ether2', 'ether3'],
+    });
+    expect(result.script).toContain('/interface find where name="ether2"');
+    expect(result.script).toContain('/interface bridge port find where interface="ether2"');
+    expect(result.script).toContain('bridge port add interface="ether2"');
+  });
+
+  it('enableLanStack=false omite bridge/DHCP', () => {
     const result = generateFromTemplate({
       templateId: 'router_base_wireguard',
       ...WG_PARAMS,
       enableLanStack: false,
       lanInterfaces: [],
     });
-    expect(result.script).toContain('nugacore-templates-1.0.6');
     expect(result.script).toContain('LAN/DHCP/NAT/firewall: omitidos');
-    expect(result.script).not.toContain('ether2');
     expect(result.script).not.toContain('bridge-lan');
     expect(result.script).not.toContain('NugaCore-pool-LAN');
     expect(result.script).toContain('/ip service set [find where name="api" and dynamic=no]');
-    expect(result.script).toContain('address=10.10.0.0/24');
-    expect(result.script).not.toMatch(/\/ip service set api /);
     expect(result.warnings.some((w) => /LAN omitida/i.test(w))).toBe(true);
   });
 

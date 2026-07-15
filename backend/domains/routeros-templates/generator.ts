@@ -64,10 +64,11 @@ const getDefaults = (p: TemplateLibraryParams): Defaults => {
     ipv4Prefix3(poolStartRaw) === lanPrefix ? poolStartRaw : `${lanPrefix}.10`;
   const poolEnd = ipv4Prefix3(poolEndRaw) === lanPrefix ? poolEndRaw : `${lanPrefix}.254`;
   const wan = normalizeIfaceName(p.wanInterface || 'ether1');
-  // Array vacío (enrollment sin LAN) ≠ undefined (biblioteca → ether2/3/4 por defecto).
+  // Por defecto sin puertos: el WISP decide qué ether van al bridge (LAN)
+  // y cuáles quedan fuera (WAN). Evita romper CHR / routers con few NICs.
   const lanPorts = Array.isArray(p.lanInterfaces)
-    ? p.lanInterfaces.map(normalizeIfaceName)
-    : ['ether2', 'ether3', 'ether4'].map(normalizeIfaceName);
+    ? p.lanInterfaces.map(normalizeIfaceName).filter(Boolean)
+    : [];
   return {
     bridge: p.lanBridgeName || 'bridge-lan',
     lanCidr,
@@ -166,18 +167,25 @@ const sectionIdentity = (name: string, mode: TemplateApplyMode): string => {
 };
 
 const sectionBridge = (d: Defaults): string => {
-  const ports = d.lanPorts
-    .map(
-      (p) => `# Puerto LAN ${p} (omite si la interfaz no existe o ya está en un bridge)
+  const ports =
+    d.lanPorts.length > 0
+      ? d.lanPorts
+          .map(
+            (p) => `# Puerto LAN ${p} (omite si la interfaz no existe o ya está en un bridge)
 :if ([:len [/interface find where name="${p}"]] > 0) do={
   :if ([:len [/interface bridge port find where interface="${p}"]] = 0) do={
     /interface bridge port add interface="${p}" bridge="${d.bridge}" comment="NugaCore"
   }
 }`,
-    )
-    .join('\n');
+          )
+          .join('\n')
+      : `# Puertos: NO se agregan automáticamente.
+# El WISP decide qué queda DENTRO del bridge (LAN) y qué queda FUERA (WAN), p.ej.:
+#   /interface bridge port add interface=ether2 bridge=${d.bridge} comment="NugaCore"
+#   /interface bridge port add interface=ether3 bridge=${d.bridge} comment="NugaCore"
+# Deja ether1 (u otra WAN) fuera del bridge.`;
   return `
-# --- Bridge LAN ---
+# --- Bridge LAN (IP/DHCP viven aquí; puertos = decisión del WISP) ---
 :if ([:len [/interface bridge find where name="${d.bridge}"]] = 0) do={
   /interface bridge add name="${d.bridge}" fast-forward=no comment="NugaCore LAN bridge"
 }
@@ -544,7 +552,11 @@ const genRouterBaseWireguard = (p: TemplateLibraryParams): GenResult => {
   const warnings = [...modeWarnings(mode), ...wgWarnings];
   if (!enableLanStack) {
     warnings.push(
-      'LAN omitida (enableLanStack=false): solo identity (según modo) + API + WireGuard. Ideal para CHR/Alta sin parámetros LAN.',
+      'LAN omitida (enableLanStack=false): solo identity (según modo) + API + WireGuard.',
+    );
+  } else if (d.lanPorts.length === 0) {
+    warnings.push(
+      'Bridge sin puertos: LAN/DHCP viven en el bridge; agrega manualmente los ether LAN (deja WAN fuera).',
     );
   }
 
@@ -558,7 +570,7 @@ const genRouterBaseWireguard = (p: TemplateLibraryParams): GenResult => {
         sectionFirewall(mode),
       ]
     : [
-        `\n# --- LAN/DHCP/NAT/firewall: omitidos (enrollment sin parámetros LAN) ---`,
+        `\n# --- LAN/DHCP/NAT/firewall: omitidos (enableLanStack=false) ---`,
       ];
 
   const script = [
@@ -590,6 +602,10 @@ const genFactoryOnboarding = (p: TemplateLibraryParams): GenResult => {
     warnings.push(
       'LAN omitida (enableLanStack=false): factory aplica API + WG + SNMP + firewall de gestión, sin bridge/DHCP.',
     );
+  } else if (d.lanPorts.length === 0) {
+    warnings.push(
+      'Bridge sin puertos: agrega manualmente los ether LAN al bridge; deja WAN fuera.',
+    );
   }
 
   const script = [
@@ -598,7 +614,7 @@ const genFactoryOnboarding = (p: TemplateLibraryParams): GenResult => {
     sectionIdentity(p.routerName, mode),
     enableLanStack
       ? sectionMinimalLan(d, mode)
-      : `\n# --- LAN mínima: omitida (sin parámetros LAN) ---`,
+      : `\n# --- LAN mínima: omitida (enableLanStack=false) ---`,
     sectionApiUser(cred.username, cred.plainPassword, vpnCidr, d.apiPort),
     wgSection,
     sectionSnmp(snmpCommunity, snmpCidr, zoneName),
@@ -628,6 +644,10 @@ const genRouterBaseSstp = (p: TemplateLibraryParams): GenResult => {
   const warnings = [...modeWarnings(mode), ...sstpWarnings];
   if (!enableLanStack) {
     warnings.push('LAN omitida (enableLanStack=false): solo API + SSTP.');
+  } else if (d.lanPorts.length === 0) {
+    warnings.push(
+      'Bridge sin puertos: agrega manualmente los ether LAN al bridge; deja WAN fuera.',
+    );
   }
 
   const lanSections = enableLanStack
@@ -639,7 +659,7 @@ const genRouterBaseSstp = (p: TemplateLibraryParams): GenResult => {
         sectionNat(d),
         sectionFirewall(mode),
       ]
-    : [`\n# --- LAN/DHCP/NAT/firewall: omitidos (sin parámetros LAN) ---`];
+    : [`\n# --- LAN/DHCP/NAT/firewall: omitidos (enableLanStack=false) ---`];
 
   const script = [
     header(p, 'Router Base WISP + SSTP NugaCore', mode),
