@@ -62,6 +62,11 @@ foreach (\$rows as \$row) { \$row->delete(); }
   esac
 }
 
+# Forzar fuentes reales en staging
+upsert_env "USE_DB_FINANCE" "true"
+upsert_env "NOC_POLLER_ENABLED" "true"
+upsert_env "SNMP_POLLER_ENABLED" "true"
+
 # WireGuard host-apply: peers → wg0 sin sync manual en cada alta.
 ensure_wg_host_apply_env() {
   local token_file="${WG_HOST_APPLY_TOKEN_FILE:-/root/.wireguard/host-apply.token}"

@@ -91,6 +91,16 @@ export class FinanceOperationalService {
     return expense;
   }
 
+  async deleteExpense(id: string) {
+    const idx = memory.findIndex((e) => e.id === id);
+    if (idx >= 0) memory.splice(idx, 1);
+    if (this.useDb) {
+      const { error } = await this.admin.from('operational_expenses').delete().eq('id', id);
+      if (error) throw error;
+    }
+    return { deleted: true, id };
+  }
+
   async getOperationalPnl(periodFrom?: string, periodTo?: string) {
     const from = periodFrom ?? `${new Date().getFullYear()}-${String(new Date().getMonth() + 1).padStart(2, '0')}-01`;
     const to = periodTo ?? today();

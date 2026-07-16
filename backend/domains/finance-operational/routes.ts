@@ -19,6 +19,12 @@ router.post('/api/finance/operational/expenses', requireRoles([...WRITE]), async
   res.status(201).json(created);
 }));
 
+router.delete('/api/finance/operational/expenses/:id', requireRoles([...WRITE]), asyncHandler(async (req, res) => {
+  const { id } = req.params;
+  await getFinanceOperationalService().deleteExpense(String(id));
+  res.status(204).send();
+}));
+
 router.get('/api/finance/operational/pnl', requireRoles(READ_ROLES), asyncHandler(async (req, res) => {
   res.json(await getFinanceOperationalService().getOperationalPnl(
     req.query.from ? String(req.query.from) : undefined,

@@ -78,25 +78,45 @@ export default function FinanceOwnerModule({
   const [newEgresoCategory, setNewEgresoCategory] = useState('Arrendamientos');
   const [newEgresoAmount, setNewEgresoAmount] = useState('');
 
-  const handleAddEgreso = (e: React.FormEvent) => {
+  const handleAddEgreso = async (e: React.FormEvent) => {
     e.preventDefault();
     if (!newEgresoDesc || !newEgresoAmount) return;
-    setEgresos([
-      ...egresos,
-      {
-        id: `egr-${Date.now()}`,
-        desc: newEgresoDesc,
-        category: newEgresoCategory,
-        amount: Number(newEgresoAmount),
-        state: 'pagado'
+    try {
+      const headers = (await getAuthHeaders?.()) ?? {};
+      const res = await fetch('/api/finance/operational/expenses', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json', ...headers },
+        body: JSON.stringify({
+          description: newEgresoDesc,
+          category: newEgresoCategory.toLowerCase(),
+          amount: Number(newEgresoAmount),
+          currency: 'MXN',
+        }),
+      });
+      if (res.ok) {
+        const created = await res.json();
+        setEgresos([
+          { id: created.id, desc: created.description, category: created.category, amount: Math.round(created.amountCents / 100), state: 'pagado' },
+          ...egresos,
+        ]);
       }
-    ]);
+    } catch {
+      /* noop */
+    }
     setNewEgresoDesc('');
     setNewEgresoAmount('');
   };
 
-  const handleRemoveEgreso = (id: string) => {
-    setEgresos(egresos.filter(e => e.id !== id));
+  const handleRemoveEgreso = async (id: string) => {
+    try {
+      const headers = (await getAuthHeaders?.()) ?? {};
+      await fetch(`/api/finance/operational/expenses/${encodeURIComponent(id)}`, {
+        method: 'DELETE',
+        headers,
+      }).catch(() => {});
+    } finally {
+      setEgresos(egresos.filter(e => e.id !== id));
+    }
   };
 
   // --- Sub-Tab: HR State ---
