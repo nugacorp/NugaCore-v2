@@ -46,6 +46,7 @@ import routerConfigAuditRoutes from './domains/router-config-audit/routes';
 import radiusRoutes from './domains/radius/routes';
 import tenancyRoutes from './domains/tenancy/routes';
 import wispOnboardingRoutes from './domains/wisp-onboarding/routes';
+import integrationsRoutes from './domains/integrations/routes';
 import jobsRoutes from './domains/jobs/routes';
 
 export function registerRoutes(app: Express): void {
@@ -88,6 +89,7 @@ export function registerRoutes(app: Express): void {
   app.use(commercialRoutes);
   app.use(purchasesRoutes);
   app.use(financeOperationalRoutes);
+  app.use(integrationsRoutes);
   app.use(clientActionsRoutes);
   app.use(client360Routes);
   app.use(collectionsRoutes);

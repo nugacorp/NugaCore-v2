@@ -7,6 +7,7 @@ import { PaymentProvider } from '../types';
 import { ManualProvider } from './manual.provider';
 import { MercadoPagoProvider } from './mercadopago.provider';
 import { OpenPayProvider } from './openpay.provider';
+import { CodiProvider } from './codi.provider';
 
 // ── Interfaz desacoplada ──────────────────────────────────────────────
 
@@ -53,6 +54,7 @@ const providers: Record<PaymentProvider, IPaymentProvider> = {
   mercado_pago: new MercadoPagoProvider(),
   openpay: new OpenPayProvider(),
   spei: new ManualProvider(),
+  codi: new CodiProvider(),
 };
 
 export const getProvider = (name: PaymentProvider): IPaymentProvider => {

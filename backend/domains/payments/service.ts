@@ -51,7 +51,7 @@ import { nowIso } from '../../common/time';
 
 // ── Helpers ───────────────────────────────────────────────────────────
 
-const VALID_PROVIDERS: PaymentProvider[] = ['manual', 'mercado_pago', 'openpay', 'spei'];
+const VALID_PROVIDERS: PaymentProvider[] = ['manual', 'mercado_pago', 'openpay', 'spei', 'codi'];
 
 const assertValidProvider = (p: unknown): PaymentProvider => {
   if (!VALID_PROVIDERS.includes(p as PaymentProvider)) {
@@ -200,6 +200,60 @@ export class PaymentService {
       logger.info('PaymentEngine: pago confirmado', {
         orderId: order.id, invoiceId: order.invoiceId, customerId: order.customerId,
       });
+    } else if (provider === 'codi') {
+      const reference = String(payload.reference ?? payload.referencia ?? '').toUpperCase();
+      if (reference) {
+        const invoiceId = reference.split('-')[0];
+        const orders = await this.repo.listOrders({ invoiceId });
+        const order = orders.find((o) => o.provider === 'codi') ?? orders[0];
+        if (order) {
+          await this.repo.updateOrderStatus(order.id, 'completed');
+          const invoiceResult = await this.confirmPaymentOnInvoice(order);
+          invoiceUpdated = invoiceResult.updated;
+          const reactivation = await this.reactivateCustomerService(order.customerId, {
+            triggeredBy: `webhook:codi:${providerEventId}`,
+            invoiceId: order.invoiceId,
+          });
+          reactivationTriggered = !reactivation.alreadyActive;
+          mikrotikActionId = reactivation.mikrotikAction?.id;
+          await this.repo.markEventProcessed(eventId);
+          return {
+            eventId,
+            idempotent: false,
+            invoiceUpdated,
+            reactivationTriggered,
+            mikrotikActionId,
+            message: 'Pago CoDi confirmado y cliente reactivado.',
+          };
+        }
+        // Sin order previa: intentar factura directa por referencia
+        const billing = getBillingService();
+        const invoice = await billing.findInvoiceById(invoiceId);
+        if (invoice && invoice.status !== 'paid') {
+          const amount = Number(payload.amount ?? payload.monto ?? invoice.pendingAmount ?? invoice.amount);
+          await billing.recordPayment(invoice.id, {
+            amount,
+            method: 'Transferencia',
+            transactionId: providerEventId,
+          });
+          invoiceUpdated = true;
+          const reactivation = await this.reactivateCustomerService(invoice.clientId, {
+            triggeredBy: `webhook:codi:${providerEventId}`,
+            invoiceId: invoice.id,
+          });
+          reactivationTriggered = !reactivation.alreadyActive;
+          mikrotikActionId = reactivation.mikrotikAction?.id;
+        }
+      }
+      await this.repo.markEventProcessed(eventId);
+      return {
+        eventId,
+        idempotent: false,
+        invoiceUpdated,
+        reactivationTriggered,
+        mikrotikActionId,
+        message: invoiceUpdated ? 'Pago CoDi aplicado a factura.' : 'Evento CoDi sin factura asociada.',
+      };
     } else {
       // Webhook de proveedor sin order registrada — guardar y continuar
       await this.repo.markEventProcessed(eventId);
@@ -365,6 +419,9 @@ export class PaymentService {
     }
     if (provider === 'openpay') {
       return (payload.order_id as string) ?? (payload.transaction as { order_id?: string } | undefined)?.order_id ?? null;
+    }
+    if (provider === 'codi') {
+      return (payload.reference as string) ?? (payload.referencia as string) ?? null;
     }
     return (payload.order_id as string) ?? (payload.orderId as string) ?? null;
   }
