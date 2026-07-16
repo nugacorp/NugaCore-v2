@@ -31,3 +31,27 @@ ALTER TABLE public.clients
 
 CREATE INDEX IF NOT EXISTS idx_clients_notification_channel
   ON public.clients (notification_channel);
+
+-- RLS — wisp_integration_settings guarda credenciales en claro (Stripe/WhatsApp/
+-- Telegram/CoDi). Sin RLS, PostgREST la expone y los default privileges de public
+-- dan a anon todos los privilegios sobre ella. Deny-by-default como el resto del
+-- proyecto (ver 20260713180000 / 20260713190000): backend usa service_role.
+ALTER TABLE public.wisp_integration_settings ENABLE ROW LEVEL SECURITY;
+
+DO $$
+BEGIN
+  IF NOT EXISTS (
+    SELECT 1
+    FROM pg_policies
+    WHERE schemaname = 'public'
+      AND tablename = 'wisp_integration_settings'
+      AND policyname = 'wisp_integration_settings_service_role'
+  ) THEN
+    EXECUTE
+      'CREATE POLICY wisp_integration_settings_service_role '
+      || 'ON public.wisp_integration_settings '
+      || 'FOR ALL '
+      || 'USING (auth.role() = ''service_role'') '
+      || 'WITH CHECK (auth.role() = ''service_role'');';
+  END IF;
+END $$;
