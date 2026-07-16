@@ -5,9 +5,9 @@ Proyecto Supabase: `elshnzkceutvjzxvzqad` (nugacore-staging).
 
 ## Estado actual (2026-07-16)
 
-**Totalmente reconciliado.** Las **33 migraciones** de `supabase/migrations/` están
+**Totalmente reconciliado.** Las **34 migraciones** de `supabase/migrations/` están
 aplicadas y registradas en `supabase_migrations.schema_migrations`. El historial
-remoto tiene **34 registros**: las 33 + 1 huérfano (ver abajo).
+remoto tiene **35 registros**: las 34 + 1 huérfano (ver abajo).
 
 Verificación: `LOCAL sin aplicar = vacío` (comparando los prefijos de versión de
 los archivos locales contra la tabla de historial).
@@ -23,9 +23,52 @@ los archivos locales contra la tabla de historial).
 > - `20260716120000_ftth_fiber_infrastructure` → rama `cursor/ftth-import-nap-view-cb99` (commit `bd0183e`)
 > - `20260716140000_wisp_external_integrations` → rama `cursor/external-integrations-codi-cb99` (commit `676c495`)
 > - `20260716153000_tower_onboarding_profiles_rls` → rama `cursor/external-integrations-codi-cb99` (commit `57af6bf`)
+> - `20260716200000_multi_tenant_foundation` → rama `cursor/multi-tenant-foundation-cb99` (commit `e2528d4`)
 >
-> El conteo de 33 es el del repo integrado; se normaliza cuando esas ramas se
+> El conteo de 34 es el del repo integrado; se normaliza cuando esas ramas se
 > mergeen a `main`.
+
+### Reconciliación 2026-07-16 · noche (multi-tenant)
+
+| Versión | Migración | Acción |
+|---|---|---|
+| 20260716200000 | multi_tenant_foundation | **Nueva.** Crea `public.tenant_memberships` (user↔tenant, UNIQUE `(tenant_id, user_id)`, FK a `tenants` CASCADE) y el helper `public.is_tenant_member(TEXT)`; añade `tenant_id` (FK a `tenants` RESTRICT) a `clients`, `towers`, `tower_onboarding_profiles`, `plans`, `invoices` y `network_sectors`, con backfill a `tenant-default`, `SET DEFAULT`, `SET NOT NULL` e índices por `tenant_id` (+ `radius_accounting`). RLS `service_role` only en las 9 tablas. **Se corrigió antes de aplicar** (ver abajo): la versión original tenía una escalada de privilegios. Backfill real: **5 filas de `plans`** → `tenant-default` (el resto de tablas piloto estaban vacías). Aplicada y registrada. |
+
+### Drift resuelto: escalada de privilegios en `is_tenant_member`
+
+La versión original de `20260716200000` autorizaba por claim JWT con este
+`COALESCE`:
+
+```sql
+COALESCE(
+  auth.jwt() -> 'app_metadata'  ->> 'tenant_id',
+  auth.jwt() -> 'user_metadata' ->> 'tenant_id'   -- ← editable por el usuario
+) = p_tenant_id
+```
+
+`user_metadata` lo escribe **el propio usuario** desde el navegador con la anon key
+(`supabase.auth.updateUser({ data: { tenant_id: 'tenant-default' } })`). Combinado
+con las políticas `authenticated ... FOR ALL` que creaba la misma migración,
+cualquiera de los usuarios de `auth.users` podía auto-asignarse el tenant y
+leer/insertar/actualizar/**borrar** `clients`, `invoices`, `plans`, `towers` y
+`network_sectors`, saltándose por completo el RBAC del backend (p. ej. un rol
+"Solo lectura" borrando facturación).
+
+Verificado contra staging con un JWT simulado: la fórmula original devolvía
+`true`; la corregida devuelve `false` y el atacante lee 0 filas.
+
+Correcciones (commits `e2528d4` / `39b6d66` en `cursor/multi-tenant-foundation-cb99`):
+
+- `is_tenant_member()` autoriza **solo por membresía real** (`tenant_memberships`).
+  Ningún claim JWT sustituye a la tabla de membresías.
+- **No se crean políticas `authenticated`**: ningún consumidor las necesita (el
+  frontend usa Supabase solo para login, no consulta datos vía PostgREST; ver
+  `src/lib/supabase.ts`) y abrían acceso directo saltando el RBAC. El scoping por
+  tenant lo hace `backend/domains/tenancy/resolve-tenant.ts` con `service_role`.
+
+> **`MULTI_TENANT_ENABLED=false` no mitigaba nada**: es un flag de aplicación que
+> solo apaga el scoping en Express. Las políticas RLS viven en la DB y aplican
+> desde el momento en que se aplica la migración.
 
 ### Reconciliación 2026-07-16 · tarde (integraciones externas + RLS)
 
