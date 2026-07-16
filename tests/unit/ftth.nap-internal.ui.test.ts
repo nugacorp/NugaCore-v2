@@ -10,6 +10,15 @@ describe('FtthImportPanel — importador', () => {
     expect(panel).toContain('ftth-import-run');
     expect(panel).toContain('/api/ftth/import');
   });
+
+  it('permite al WISP descargar CSV/GeoJSON reales desde la UI', () => {
+    expect(panel).toContain('ftth-export-actions');
+    expect(panel).toContain('ftth-export-naps-csv');
+    expect(panel).toContain('ftth-export-segments-csv');
+    expect(panel).toContain('ftth-export-geojson');
+    expect(panel).toContain('Mis NAPs (CSV)');
+    expect(panel).toContain('No necesitas acceso al servidor');
+  });
 });
 
 describe('NapInternalView — vista interna NAP', () => {

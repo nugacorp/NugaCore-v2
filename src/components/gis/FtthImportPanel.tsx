@@ -1,18 +1,29 @@
 import React, { useState } from 'react';
-import { Upload, FileJson, FileSpreadsheet, AlertTriangle, CheckCircle2 } from 'lucide-react';
-import type { FtthImportPreview, FtthImportResult } from '../../types';
+import {
+  Upload,
+  FileJson,
+  FileSpreadsheet,
+  AlertTriangle,
+  CheckCircle2,
+  Download,
+} from 'lucide-react';
+import type { FiberSegment, FtthImportPreview, FtthImportResult, NapBox } from '../../types';
+import {
+  NAP_CSV_TEMPLATE,
+  SEGMENT_CSV_TEMPLATE,
+  downloadTextFile,
+  napsToCsv,
+  segmentsToCsv,
+  toFtthGeoJson,
+} from '../../lib/ftthExport';
 
 type ImportFormat = 'csv-naps' | 'csv-segments' | 'geojson' | 'mixed';
 
 interface FtthImportPanelProps {
+  naps?: NapBox[];
+  segments?: FiberSegment[];
   onImported?: () => void;
 }
-
-const NAP_TEMPLATE = `id,name,lat,lng,pon_port,split_ratio,fibers_total,coverage_m
-NAP-01,Caja Centro,19.4285,-99.1655,1/1,1:8,8,250`;
-
-const SEGMENT_TEMPLATE = `id,name,from_id,to_id,type,thread_count,coordinates
-SEG-01,Feeder Centro,OLT-1,NAP-01,feeder,12,"[[19.43,-99.17],[19.428,-99.165]]"`;
 
 async function postJson<T>(url: string, body: unknown): Promise<T> {
   const res = await fetch(url, {
@@ -31,8 +42,12 @@ async function postJson<T>(url: string, body: unknown): Promise<T> {
   return data as T;
 }
 
-/** Importador CSV / GeoJSON de NAPs y tramos de fibra. */
-export default function FtthImportPanel({ onImported }: FtthImportPanelProps) {
+/** Importador/exportador CSV·GeoJSON pensado para el WISP (todo desde la UI). */
+export default function FtthImportPanel({
+  naps = [],
+  segments = [],
+  onImported,
+}: FtthImportPanelProps) {
   const [format, setFormat] = useState<ImportFormat>('mixed');
   const [napsCsv, setNapsCsv] = useState('');
   const [segmentsCsv, setSegmentsCsv] = useState('');
@@ -41,6 +56,7 @@ export default function FtthImportPanel({ onImported }: FtthImportPanelProps) {
   const [result, setResult] = useState<FtthImportResult | null>(null);
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  const [exportNote, setExportNote] = useState<string | null>(null);
 
   const payload = () => ({
     format,
@@ -89,6 +105,47 @@ export default function FtthImportPanel({ onImported }: FtthImportPanelProps) {
     setError(null);
   };
 
+  const exportReal = (kind: 'naps-csv' | 'segments-csv' | 'geojson') => {
+    setExportNote(null);
+    setError(null);
+    if (kind === 'naps-csv') {
+      if (naps.length === 0) {
+        setError('No hay NAPs registradas para exportar. Importa o créalas primero.');
+        return;
+      }
+      downloadTextFile('naps.csv', napsToCsv(naps), 'text/csv;charset=utf-8');
+      setExportNote(`Descargado naps.csv (${naps.length} NAPs reales).`);
+      return;
+    }
+    if (kind === 'segments-csv') {
+      if (segments.length === 0) {
+        setError('No hay tramos registrados para exportar.');
+        return;
+      }
+      downloadTextFile('segments.csv', segmentsToCsv(segments), 'text/csv;charset=utf-8');
+      setExportNote(`Descargado segments.csv (${segments.length} tramos reales).`);
+      return;
+    }
+    if (naps.length === 0 && segments.length === 0) {
+      setError('Sin NAPs ni tramos para armar GeoJSON.');
+      return;
+    }
+    const geo = JSON.stringify(toFtthGeoJson(naps, segments), null, 2) + '\n';
+    downloadTextFile('ftth.geojson', geo, 'application/geo+json;charset=utf-8');
+    setExportNote(`Descargado ftth.geojson (${naps.length} NAPs · ${segments.length} tramos).`);
+  };
+
+  const loadTemplate = (kind: 'naps' | 'segments') => {
+    if (kind === 'naps') {
+      setNapsCsv(NAP_CSV_TEMPLATE.trim() + '\n');
+      setFormat((f) => (f === 'geojson' ? 'mixed' : f));
+    } else {
+      setSegmentsCsv(SEGMENT_CSV_TEMPLATE.trim() + '\n');
+      setFormat((f) => (f === 'geojson' ? 'mixed' : f));
+    }
+    setExportNote(kind === 'naps' ? 'Plantilla NAPs cargada en el editor.' : 'Plantilla tramos cargada en el editor.');
+  };
+
   return (
     <div
       id="ftth-import-panel"
@@ -97,12 +154,96 @@ export default function FtthImportPanel({ onImported }: FtthImportPanelProps) {
       <div className="border-b border-slate-900 pb-3">
         <h3 className="text-xs font-bold text-slate-300 font-mono uppercase flex items-center gap-2">
           <Upload className="w-4 h-4 text-violet-400" />
-          Importar NAPs y tramos
+          Importar / exportar NAPs y tramos
         </h3>
         <p className="text-[11px] text-slate-500 font-mono mt-1 leading-snug">
-          CSV de cajas NAP, CSV de tramos con coordenadas, o GeoJSON (Point + LineString).
-          Los datos se persisten en la API FTTH.
+          Todo desde esta pantalla: descarga plantillas, exporta tu planta real (CSV/GeoJSON) o importa
+          archivos. No necesitas acceso al servidor.
         </p>
+      </div>
+
+      {/* Exportación pensada para el WISP */}
+      <div
+        id="ftth-export-actions"
+        className="rounded-xl border border-slate-800 bg-slate-900/40 p-3 space-y-2"
+      >
+        <p className="text-[10px] uppercase tracking-wider text-slate-500 font-mono flex items-center gap-1.5">
+          <Download className="w-3.5 h-3.5 text-emerald-400" />
+          Descargar (sin VPS)
+        </p>
+        <div className="flex flex-wrap gap-2">
+          <button
+            type="button"
+            id="ftth-export-naps-csv"
+            onClick={() => exportReal('naps-csv')}
+            className="rounded-lg border border-emerald-800/60 bg-emerald-950/30 px-3 py-1.5 text-[11px] font-mono text-emerald-200 hover:bg-emerald-900/40"
+          >
+            Mis NAPs (CSV)
+          </button>
+          <button
+            type="button"
+            id="ftth-export-segments-csv"
+            onClick={() => exportReal('segments-csv')}
+            className="rounded-lg border border-emerald-800/60 bg-emerald-950/30 px-3 py-1.5 text-[11px] font-mono text-emerald-200 hover:bg-emerald-900/40"
+          >
+            Mis tramos (CSV)
+          </button>
+          <button
+            type="button"
+            id="ftth-export-geojson"
+            onClick={() => exportReal('geojson')}
+            className="rounded-lg border border-emerald-800/60 bg-emerald-950/30 px-3 py-1.5 text-[11px] font-mono text-emerald-200 hover:bg-emerald-900/40"
+          >
+            Planta GeoJSON
+          </button>
+          <button
+            type="button"
+            id="ftth-download-nap-template"
+            onClick={() => {
+              downloadTextFile('plantilla-naps.csv', NAP_CSV_TEMPLATE, 'text/csv;charset=utf-8');
+              setExportNote('Descargada plantilla-naps.csv');
+            }}
+            className="rounded-lg border border-slate-700 px-3 py-1.5 text-[11px] font-mono text-slate-300 hover:bg-slate-800"
+          >
+            Plantilla NAPs
+          </button>
+          <button
+            type="button"
+            id="ftth-download-segment-template"
+            onClick={() => {
+              downloadTextFile('plantilla-tramos.csv', SEGMENT_CSV_TEMPLATE, 'text/csv;charset=utf-8');
+              setExportNote('Descargada plantilla-tramos.csv');
+            }}
+            className="rounded-lg border border-slate-700 px-3 py-1.5 text-[11px] font-mono text-slate-300 hover:bg-slate-800"
+          >
+            Plantilla tramos
+          </button>
+          <button
+            type="button"
+            id="ftth-load-nap-template"
+            onClick={() => loadTemplate('naps')}
+            className="rounded-lg border border-violet-800/50 px-3 py-1.5 text-[11px] font-mono text-violet-300 hover:bg-violet-950/40"
+          >
+            Cargar plantilla NAPs al editor
+          </button>
+          <button
+            type="button"
+            id="ftth-load-segment-template"
+            onClick={() => loadTemplate('segments')}
+            className="rounded-lg border border-violet-800/50 px-3 py-1.5 text-[11px] font-mono text-violet-300 hover:bg-violet-950/40"
+          >
+            Cargar plantilla tramos al editor
+          </button>
+        </div>
+        <p className="text-[10px] text-slate-600 font-mono">
+          Inventario actual: {naps.length} NAPs · {segments.length} tramos
+        </p>
+        {exportNote && (
+          <p className="text-[11px] text-emerald-400 font-mono flex items-center gap-1.5">
+            <CheckCircle2 className="w-3.5 h-3.5" />
+            {exportNote}
+          </p>
+        )}
       </div>
 
       <div className="flex flex-wrap gap-2">
@@ -151,7 +292,7 @@ export default function FtthImportPanel({ onImported }: FtthImportPanelProps) {
           <textarea
             value={napsCsv}
             onChange={(e) => setNapsCsv(e.target.value)}
-            placeholder={NAP_TEMPLATE}
+            placeholder={NAP_CSV_TEMPLATE}
             rows={4}
             className="w-full rounded-xl border border-slate-800 bg-slate-900 px-3 py-2 text-[11px] font-mono text-slate-200"
           />
@@ -180,7 +321,7 @@ export default function FtthImportPanel({ onImported }: FtthImportPanelProps) {
           <textarea
             value={segmentsCsv}
             onChange={(e) => setSegmentsCsv(e.target.value)}
-            placeholder={SEGMENT_TEMPLATE}
+            placeholder={SEGMENT_CSV_TEMPLATE}
             rows={4}
             className="w-full rounded-xl border border-slate-800 bg-slate-900 px-3 py-2 text-[11px] font-mono text-slate-200"
           />

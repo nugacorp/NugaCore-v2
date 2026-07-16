@@ -316,7 +316,11 @@ export default function GisModule({
       </div>
 
       <div className="grid grid-cols-1 xl:grid-cols-2 gap-6">
-        <FtthImportPanel onImported={() => void refreshFtth()} />
+        <FtthImportPanel
+          naps={naps}
+          segments={segments}
+          onImported={() => void refreshFtth()}
+        />
         <FtthInfrastructurePanel
           naps={naps}
           olts={olts}
