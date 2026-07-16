@@ -5,10 +5,10 @@ Proyecto Supabase: `elshnzkceutvjzxvzqad` (nugacore-staging).
 
 ## Estado actual (2026-07-16, tras barrido de las 48 ramas)
 
-**Totalmente reconciliado. Cero migraciones pendientes.** Las **34 migraciones**
+**Totalmente reconciliado. Cero migraciones pendientes.** Las **35 migraciones**
 que existen en **cualquier rama del repo** (no solo en `main`) están aplicadas y
 registradas en `supabase_migrations.schema_migrations`. El historial remoto tiene
-**35 registros**: las 34 + 1 huérfano, cuyo origen ya está **confirmado** y es
+**36 registros**: las 35 + 1 huérfano, cuyo origen ya está **confirmado** y es
 inocuo (ver abajo).
 
 **Ninguna tabla de `public` queda sin RLS** (verificado contra `pg_class.relrowsecurity`).
@@ -33,18 +33,44 @@ psql -tA -c "select version from supabase_migrations.schema_migrations order by 
 
 Resultado 2026-07-16: **A) vacío**, **B) solo `20260619033952`**.
 
-> **Nota de ramas (drift temporal de repo):** cuatro de las 34 aún no están en
-> `main`, pero **las cuatro ya están aplicadas y registradas** en la DB de staging
-> (compartida). `main` tiene 29 archivos; el conteo de 34 es el del repo integrado:
+> **Nota de ramas (drift temporal de repo):** **seis** de las 35 aún no están en
+> `main`, pero **las seis ya están aplicadas y registradas** en la DB de staging
+> (compartida). `main` tiene 29 archivos; el conteo de 35 es el del repo integrado:
 >
 > - `20260715000000_client_documents_reconciliation` → rama `fix/db-schema-reconciliation`
 > - `20260716160000_rls_fiber_tables` → rama `fix/db-schema-reconciliation`
 > - `20260716120000_ftth_fiber_infrastructure` → rama `cursor/ftth-import-nap-view-cb99` (commit `bd0183e`)
 > - `20260716140000_wisp_external_integrations` → rama `cursor/external-integrations-codi-cb99` (commit `676c495`)
 > - `20260716153000_tower_onboarding_profiles_rls` → rama `cursor/external-integrations-codi-cb99` (commit `57af6bf`)
+> - `20260716220000_wisp_onboarding_and_wg_tenant` → rama `cursor/wisp-onboarding-login-cb99` (commit `bff2788`)
 >
 > Ya normalizadas en `main`: `20260716081000_tower_onboarding_profiles` (`838f541`)
 > y `20260716200000_multi_tenant_foundation` (merge `47fdb3c`).
+
+### Reconciliación 2026-07-16 · noche (WISP onboarding + WG multi-tenant)
+
+| Versión | Migración | Acción |
+|---|---|---|
+| 20260716220000 | wisp_onboarding_and_wg_tenant | **Nueva.** Añade `tenants.onboarding_status` (CHECK `completed`/`in_progress`, DEFAULT `completed`); crea `public.wisp_onboarding` (PK `tenant_id` → `tenants` CASCADE, wizard paso a paso, `completed_steps` JSONB) **con RLS + política `service_role` incluidas en la propia migración** (cumple la regla de abajo); añade `tenant_id` a `wireguard_servers` y `wireguard_peers` con backfill, `SET DEFAULT`, `SET NOT NULL` e índices. Sustituye el índice único global `uniq_wg_servers_default` por `uniq_wg_servers_default_per_tenant`: el server default activo pasa de ser único **global** a único **por tenant**. Backfill real: **1 server + 11 peers** → `tenant-default`. Aplicada y registrada. |
+
+**Verificaciones del cambio de índice** (contra staging, en transacción con
+`ROLLBACK`; sin residuos):
+
+- Precondición: había **1 solo** server `is_default AND status='active'`, así que
+  el `CREATE UNIQUE INDEX` no podía fallar por duplicados previos.
+- Un 2º default activo en el **mismo** tenant → rechazado por
+  `uniq_wg_servers_default_per_tenant` (comportamiento conservado).
+- Un default activo en **otro** tenant → permitido (el objetivo del cambio).
+
+> **Nota de diseño (no bloqueante): `onboarding_status` es fail-open.** El DEFAULT
+> es `'completed'`, y `WispOnboardingService.isOnboardingRequired()` devuelve
+> `false` cuando lo lee. El alta de un WISP nuevo inserta el tenant (que nace
+> `completed` por el DEFAULT, ya que `tenantToRow` no incluye la columna) y solo
+> **después** hace `UPDATE ... SET onboarding_status='in_progress'`. Si ese update
+> falla, el tenant queda `completed` y **se salta el wizard obligatorio**. Es un
+> problema de robustez, no de seguridad (el gate es UX, no autorización). Un diseño
+> fail-closed sería `DEFAULT 'in_progress'` + `UPDATE` de los tenants existentes a
+> `completed`. `tenant-default` está exento por código.
 
 ### Reconciliación 2026-07-16 · noche (multi-tenant)
 
@@ -160,6 +186,8 @@ columnas ni datos. (Tabla vacía al aplicar: 0 filas.)
   cubrieron las tablas existentes al aplicarse; ya reaparecieron cuatro tablas sin
   RLS por confiar en ellas (`tower_onboarding_profiles`, `fiber_segments`,
   `fiber_threads`, `wisp_integration_settings`).
+  **La regla ya se está siguiendo**: `20260716220000` (`wisp_onboarding`) trae su
+  RLS + política en la propia migración, sin necesitar parche posterior.
 - **Secretos en claro en `wisp_integration_settings`** (deuda, no bloqueante): RLS
   ya impide el acceso de `anon`/`authenticated`, pero `stripe_secret_key`,
   `whatsapp_access_token`, `telegram_bot_token` y `codi_webhook_secret` se guardan
