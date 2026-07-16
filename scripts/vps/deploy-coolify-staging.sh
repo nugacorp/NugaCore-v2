@@ -108,9 +108,9 @@ if [[ "$ADD_SNMP_ENV" == "true" ]]; then
   upsert_env "PUBLIC_DEPLOYMENT" "true"
   upsert_env "CSP_ENABLED" "true"
   upsert_env "CSP_CONNECT_SRC" "https://elshnzkceutvjzxvzqad.supabase.co"
-  upsert_env "SNMP_POLLER_ENABLED" "false"
+  upsert_env "SNMP_POLLER_ENABLED" "true"
   upsert_env "SNMP_POLLER_INTERVAL_MS" "120000"
-  upsert_env "NOC_POLLER_ENABLED" "false"
+  upsert_env "NOC_POLLER_ENABLED" "true"
   # Lectura live al CHR por VPN (check-online / inventario). Writes siguen gated.
   # FORCE_MIKROTIK_WORKER_LIVE=false para apagar en un deploy.
   if [[ "${FORCE_MIKROTIK_WORKER_LIVE:-true}" == "true" ]]; then
