@@ -1,18 +1,31 @@
 # Estado de sincronización de migraciones · GitHub ↔ Supabase
 
 Proyecto Supabase: `elshnzkceutvjzxvzqad` (nugacore-staging).
-Última reconciliación: **2026-07-15** (vía `psql` por el pooler).
+Última reconciliación: **2026-07-16** (vía `psql` por el pooler).
 
-## Estado actual (2026-07-15)
+## Estado actual (2026-07-16)
 
-**Totalmente reconciliado.** Las **28 migraciones** de `supabase/migrations/` están
+**Totalmente reconciliado.** Las **29 migraciones** de `supabase/migrations/` están
 aplicadas y registradas en `supabase_migrations.schema_migrations`. El historial
-remoto tiene **29 registros**: los 28 locales + 1 huérfano (ver abajo).
+remoto tiene **30 registros**: las 29 + 1 huérfano (ver abajo).
 
 Verificación: `LOCAL sin aplicar = vacío` (comparando los prefijos de versión de
 los archivos locales contra la tabla de historial).
 
-### Reconciliación 2026-07-15 (lo que se aplicó hoy)
+> **Nota de ramas (drift temporal de repo):** dos de las 29 aún no coexisten en la
+> misma rama de Git, pero **ambas ya están aplicadas y registradas** en la DB de
+> staging (compartida): `20260716081000_tower_onboarding_profiles` llega por `main`
+> (commit `838f541`) y `20260715000000_client_documents_reconciliation` por la rama
+> `fix/db-schema-reconciliation`. El conteo de 29 es el del repo integrado; se
+> normaliza al mergear esa rama a `main`.
+
+### Reconciliación 2026-07-16 (lo que se aplicó hoy)
+
+| Versión | Migración | Acción |
+|---|---|---|
+| 20260716081000 | tower_onboarding_profiles | **Nueva.** Crea `public.tower_onboarding_profiles`: PK `tower_id` con FK a `towers(id)` `ON DELETE CASCADE`, más `zone_name`, `billing_cycle_day` (CHECK 1–31), `billing_cycle_time`, `router_id`, `router_name` y timestamps; + índice `idx_tower_onboarding_zone (zone_name)`. Aditiva e idempotente (`CREATE TABLE/INDEX IF NOT EXISTS`); tabla nueva (0 filas). Aplicada y registrada. Cierra el drift que cubría el fallback de `4edca93` ("onboarding torre si tabla DB aún no existe"): el onboarding de torre ya persiste en la tabla real. |
+
+### Reconciliación 2026-07-15
 
 | Versión | Migración | Acción |
 |---|---|---|
