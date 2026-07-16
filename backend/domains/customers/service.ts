@@ -82,8 +82,8 @@ export class CustomersService {
     return this.repo.list(filters);
   }
 
-  getById(id: string): Promise<Client | null> {
-    return this.repo.findById(id);
+  getById(id: string, tenantId?: string): Promise<Client | null> {
+    return this.repo.findById(id, tenantId);
   }
 
   getHistory(id: string): Promise<ClientTimelineEvent[]> {
@@ -98,12 +98,12 @@ export class CustomersService {
     return this.repo.create(client);
   }
 
-  update(id: string, patch: Partial<Client>): Promise<Client | null> {
-    return this.repo.update(id, patch);
+  update(id: string, patch: Partial<Client>, tenantId?: string): Promise<Client | null> {
+    return this.repo.update(id, patch, tenantId);
   }
 
-  remove(id: string): Promise<boolean> {
-    return this.repo.remove(id);
+  remove(id: string, tenantId?: string): Promise<boolean> {
+    return this.repo.remove(id, tenantId);
   }
 
   addTimelineEvent(event: Omit<ClientTimelineEvent, 'id' | 'createdAt'>): Promise<void> {

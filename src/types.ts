@@ -20,6 +20,8 @@ export interface Client {
   lng: number;
   planId: string;
   ip: string;
+  /** Tenant WISP (multi-tenant). Ausente ⇒ tenant-default en persistencia. */
+  tenantId?: string;
   /** Asignación IPAM local; `ip` se conserva como alias legacy. */
   routerId?: string;
   poolId?: string;
@@ -54,6 +56,8 @@ export interface Tower {
   ports: { port: string; status: 'up' | 'down'; speed: string }[];
   equipment: { name: string; type: string; brand: string }[];
   photos?: string[];
+  /** Tenant WISP (multi-tenant). Ausente ⇒ tenant-default en persistencia. */
+  tenantId?: string;
 }
 
 export interface TowerOnboardingProfile {

@@ -97,3 +97,12 @@ export const useDbRouterEnrollment = (): boolean =>
 //   true            → SupabaseWireguardRepository
 export const useDbWireguard = (): boolean =>
   asBool(process.env.USE_DB_WIREGUARD);
+
+// ── Multi-tenant / Tenancy (Fase 11) ──────────────────────────────────
+// MULTI_TENANT_ENABLED=true → aislamiento por tenant_id + memberships.
+// USE_DB_TENANCY=true → tenants/memberships en Supabase (si no, store).
+export const isMultiTenantEnabledFlag = (): boolean =>
+  asBool(process.env.MULTI_TENANT_ENABLED);
+
+export const useDbTenancy = (): boolean =>
+  asBool(process.env.USE_DB_TENANCY);

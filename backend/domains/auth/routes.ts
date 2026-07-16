@@ -24,7 +24,7 @@ router.get('/api/auth/me', asyncHandler(async (req, res) => {
     return res.status(401).json({ error: 'No active auth context' });
   }
 
-  const { userId, role, source } = req.authContext;
+  const { userId, role, source, tenantId } = req.authContext;
 
   let email = '';
   let fullName = '';
@@ -53,6 +53,7 @@ router.get('/api/auth/me', asyncHandler(async (req, res) => {
     phone,
     avatarUrl,
     role,
+    tenantId,
     permissions: listRolePermissions(role),
     source,
   });
