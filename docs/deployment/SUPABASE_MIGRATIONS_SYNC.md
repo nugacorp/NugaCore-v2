@@ -1,66 +1,57 @@
 # Estado de sincronización de migraciones · GitHub ↔ Supabase
 
-Proyecto Supabase: `elshnzkceutvjzxvzqad` (nugacore-staging) · Sincronizado el
-2026-06-17 · Reconciliado de nuevo el 2026-06-18 (snapshots 4.9.2.1).
+Proyecto Supabase: `elshnzkceutvjzxvzqad` (nugacore-staging).
+Última reconciliación: **2026-07-15** (vía `psql` por el pooler).
 
-Resumen: el historial `supabase_migrations.schema_migrations` registraba solo las
-2 migraciones base, mientras que el schema remoto ya tenía aplicada (vía SQL
-editor, sin registrar) la mayoría de las tablas. Se reconcilió aplicando las
-migraciones pendientes que eran seguras e idempotentes y registrándolas en el
-historial. Conexión vía `psql` por el pooler (el REST HTTPS está bloqueado desde
-el entorno local; ver memoria del proyecto).
+## Estado actual (2026-07-15)
 
-## Estado por migración (14 archivos en `supabase/migrations/`)
+**Totalmente reconciliado.** Las **28 migraciones** de `supabase/migrations/` están
+aplicadas y registradas en `supabase_migrations.schema_migrations`. El historial
+remoto tiene **29 registros**: los 28 locales + 1 huérfano (ver abajo).
 
-| Versión | Migración | Estado | Nota |
-|---|---|---|---|
-| 20260531000000 | init_schema | ✅ aplicada | base (ya registrada) |
-| 20260531000001 | rls_and_seeds | ✅ aplicada | base (ya registrada) |
-| 20260604000000 | billing_schema | ✅ aplicada | idempotente; objetos ya existían (no-op) |
-| 20260604000001 | billing_data_migration | ⚠️ aplicada **parcial** | backfill real (Partes 1,2,4,5) aplicado (no-op: ya consistente). **Parte 3 (seed mock fac-101..105) OMITIDA** por decisión: faltan clientes c-2..c-5 y es entorno con datos reales |
-| 20260605000000 | mikrotik_provisioning_schema | ❌ **NO aplicada** | conflicto de schema (ver abajo). Pendiente |
-| 20260605120000 | suspension_engine | ✅ aplicada | creó suspension_policies, customer_service_state, suspension_events, suspension_orders, reactivation_orders |
-| 20260605140000 | mikrotik_worker | ✅ aplicada | |
-| 20260605160000 | wireguard_manager | ✅ aplicada | creó wireguard_servers/peers/ip_allocations/key_rotations |
-| 20260612000000 | router_enrollment | ✅ aplicada | Fase 4.9.2.1 |
-| 20260612120000 | payment_engine | ✅ aplicada | creó payment_orders, payment_events, mikrotik_actions |
-| 20260613000000 | router_enrollment_template_id | ✅ aplicada | Fase 4.9.1 |
-| 20260613120000 | router_enrollment_template_parameters | ✅ aplicada | Fase 4.9.2 |
-| 20260617000000 | router_enrollment_router_snapshot | ✅ aplicada | Fase 4.9.2.1; columna+índice GIN ya en schema, **registrada en historial el 2026-06-18** (SQL idempotente, no-op) |
-| 20260617120000 | router_enrollment_wireguard_snapshot | ✅ aplicada | Fase 4.9.2.1; ídem, **registrada el 2026-06-18** |
-| 20260618000000 | mikrotik_routers_reconciliation | ✅ aplicada | DB-1; `ADD COLUMN IF NOT EXISTS` evolutivo (ver ROADMAP DB-1) |
-| 20260622000000 | inventory_schema | 🔄 **pendiente (Hermes)** | Fase 5.1; aditiva/idempotente, RLS deny-by-default. Crea `warehouses`, `inventory_items`, `inventory_movements`, `inventory_transfers`, `inventory_assignments`. Aplicar antes de `USE_DB_INVENTORY=true` |
+Verificación: `LOCAL sin aplicar = vacío` (comparando los prefijos de versión de
+los archivos locales contra la tabla de historial).
 
-**Pendientes de aplicar/registrar:** `mikrotik_provisioning_schema` (conflicto, ver abajo) y `inventory_schema` (Fase 5.1, segura de aplicar).
+### Reconciliación 2026-07-15 (lo que se aplicó hoy)
 
-## Conflicto pendiente: `mikrotik_routers` (drift del repo)
+| Versión | Migración | Acción |
+|---|---|---|
+| 20260708070000 | inventory_config_snapshots | La tabla ya existía en el remoto pero la migración **no estaba registrada** (drift de tracking). Se corrió (idempotente, no-op sobre la tabla; aseguró índices/RLS/policy) y se **registró** en el historial. |
+| 20260715000000 | client_documents_reconciliation | **Nueva.** Cierra el drift de esquema de `client_documents` (ver abajo). Aplicada y registrada. |
 
-Hay **dos definiciones contradictorias** de `public.mikrotik_routers` en el repo:
+### Drift resuelto: `client_documents`
 
-- `20260531000000_init_schema.sql` la crea con esquema de **monitoreo**:
-  `id, name, ip_address, api_port, username, encrypted_password, is_online,
-  cpu_usage_pct, memory_usage_pct, routeros_version, linked_tower_id,
-  last_health_check_at, created_at`. **Esta es la tabla aplicada en la DB.**
-- `20260605000000_mikrotik_provisioning_schema.sql` (Fase 4.4) la redefine con
-  esquema de **provisioning**: `status, connection_type, management_ip, vpn_ip,
-  api_ssl_port, tower_id, last_seen_at, notes, updated_at…`.
+`client_documents` se creó en `init_schema` (20260531000000) con el modelo viejo
+(`name`, `file_url` **NOT NULL**, `file_type`, `doc_date`). El módulo CRM 360
+(`20260707100000_wisp_os_schema`) intentó recrearla con el modelo nuevo vía
+`CREATE TABLE IF NOT EXISTS`, pero fue **no-op** porque la tabla ya existía → drift.
 
-Como la tabla ya existe, el `CREATE TABLE IF NOT EXISTS` se salta y la migración
-falla en `CREATE INDEX … ON mikrotik_routers(status)` (la columna `status` no
-existe en la versión de monitoreo). Con `psql -1` la migración revierte completa,
-por lo que sus tablas auxiliares (`mikrotik_router_credentials`,
-`mikrotik_provisioning_tokens`, `mikrotik_provisioning_scripts`) **no se crearon**.
+El backend (`backend/domains/client-360/service.ts`) inserta/lee `doc_type,
+file_name, storage_path, mime_type, uploaded_by` y **no** llena `name`/`file_url`,
+por lo que sus inserts fallaban contra el NOT NULL legacy.
 
-La migración es **preparatoria** (`USE_DB_MIKROTIK=false`: el dominio corre sobre
-el store en memoria), así que omitirla **no afecta al backend actual**.
+La migración `20260715000000_client_documents_reconciliation.sql` (aditiva e
+idempotente) añade las columnas del modelo CRM 360 (`doc_type` con default `'other'`
++ CHECK, `file_name` NOT NULL, `storage_path`, `mime_type`, `uploaded_by`), hace
+backfill desde las legacy y libera el NOT NULL de `name`/`file_url`. No elimina
+columnas ni datos. (Tabla vacía al aplicar: 0 filas.)
 
-### Resolución futura (cuando se active `USE_DB_MIKROTIK`)
-Decidir una única forma canónica de `mikrotik_routers` y, en una migración nueva
-con timestamp posterior, `ALTER TABLE … ADD COLUMN IF NOT EXISTS` para añadir las
-columnas de provisioning (`status`, `connection_type`, `vpn_ip`, `management_ip`,
-`api_ssl_port`, `tower_id`, `last_seen_at`, `notes`, `updated_at`) y crear sus
-índices/tablas auxiliares — en vez de un `CREATE TABLE` que choca con init_schema.
-Reconciliar también el modelo del backend (hoy el store mezcla ambos modelos).
+## Pendientes / notas
+
+- **Registro huérfano `20260619033952`**: está en el historial remoto pero **no
+  tiene archivo local**. Casi seguro es el vestigio de la migración de
+  config_snapshots antes de renombrarla a `20260708070000` en el repo. Se deja
+  intacto (borrar historial de migraciones es riesgoso); reconciliar cuando se
+  confirme su origen (añadir archivo espejo o depurar el registro con autorización).
+- **`inventory_items` NO tiene drift**: por diseño usa `warehouse` (TEXT, el nombre
+  del almacén), no `warehouse_id` FK (ver `20260622000000_inventory_schema.sql`
+  y `backend/domains/inventory/`). El remoto ya coincide con el modelo del código.
+  (La sospecha de "falta warehouse_id" en auditorías previas fue un falso positivo.)
+- **Conflicto histórico `mikrotik_routers` (RESUELTO)**: existían dos definiciones
+  contradictorias (monitoreo en init vs provisioning en `20260605000000`). Se
+  resolvió con la migración evolutiva `20260618000000_mikrotik_routers_reconciliation`
+  (`ADD COLUMN IF NOT EXISTS`). Hoy `20260605000000` está aplicada y
+  `USE_DB_MIKROTIK=true` opera en staging.
 
 ## Reproducir / verificar (solo `psql`, no REST)
 
@@ -72,7 +63,8 @@ export PGHOST=aws-1-us-west-1.pooler.supabase.com PGPORT=5432 \
 psql -tA -c "select version, name from supabase_migrations.schema_migrations order by version;"
 ```
 
-> El CLI `supabase` está roto localmente por una clave `health_timeout` inválida
-> en `supabase/config.toml` para la versión instalada (2.67.1); por eso se usó
-> `psql` directo en lugar de `supabase db push`. `db push` además habría intentado
-> aplicar las 7 pendientes de golpe (incluida la conflictiva de provisioning).
+> El CLI `supabase` instalado (2.67.1) está roto localmente por la clave
+> `db.health_timeout` (inválida para esa versión) en `supabase/config.toml`; por eso
+> se usa `psql` directo por el pooler en lugar de `supabase db push`. Para volver a
+> usar el CLI: actualizarlo (≥2.109) o quitar esa clave del config. El REST HTTPS
+> (443) sigue bloqueado desde el entorno local; ver memoria del proyecto.
