@@ -14,6 +14,7 @@ import type { SupabaseClient } from '@supabase/supabase-js';
 import { Client } from '../../../src/types';
 import { ClientTimelineEvent, store } from '../../state/store';
 import { logger } from '../../common/logger';
+import { ConflictError } from '../../common/errors';
 import {
   ClientRow,
   TimelineRow,
@@ -166,12 +167,110 @@ export class SupabaseCustomersRepository implements CustomersRepository {
   }
 
   async remove(id: string): Promise<boolean> {
-    // client_timeline / invoices / onus en DB caen por FK ON DELETE CASCADE.
+    // Supabase JS no lanza en errores PostgREST: hay que leer `{ error }`.
+    // Varias tablas RESTRICT (payments, credit_notes, …) y otras usan
+    // `customer_id` (suspensión). payment_applications NO tiene client_id.
+    const warn = (table: string, error: { code?: string; message?: string } | null) => {
+      if (!error) return;
+      logger.warn('customers.remove dep cleanup', {
+        table,
+        code: error.code,
+        message: error.message,
+      });
+    };
+
+    const delEq = async (table: string, column: string, value: string) => {
+      const { error } = await this.client.from(table).delete().eq(column, value);
+      warn(table, error);
+    };
+
+    const delIn = async (table: string, column: string, values: string[]) => {
+      if (values.length === 0) return;
+      const { error } = await this.client.from(table).delete().in(column, values);
+      warn(table, error);
+    };
+
+    const { data: invoiceRows, error: invErr } = await this.client
+      .from('invoices')
+      .select('id')
+      .eq('client_id', id);
+    warn('invoices.select', invErr);
+    const invoiceIds = (invoiceRows ?? []).map((r) => String((r as { id: string }).id));
+
+    const { data: paymentRows, error: payErr } = await this.client
+      .from('payments')
+      .select('id')
+      .eq('client_id', id);
+    warn('payments.select', payErr);
+    const paymentIds = (paymentRows ?? []).map((r) => String((r as { id: string }).id));
+
+    const { data: creditRows, error: cnErr } = await this.client
+      .from('credit_notes')
+      .select('id')
+      .eq('client_id', id);
+    warn('credit_notes.select', cnErr);
+    const creditNoteIds = (creditRows ?? []).map((r) => String((r as { id: string }).id));
+
+    // Hijos M:N primero (sin client_id directo)
+    await delIn('payment_applications', 'payment_id', paymentIds);
+    await delIn('payment_applications', 'invoice_id', invoiceIds);
+    await delIn('payment_receipts', 'payment_id', paymentIds);
+    await delIn('credit_applications', 'credit_note_id', creditNoteIds);
+    await delIn('credit_applications', 'invoice_id', invoiceIds);
+    await delIn('adjustments', 'invoice_id', invoiceIds);
+    await delEq('adjustments', 'client_id', id);
+    await delIn('invoice_payments', 'invoice_id', invoiceIds);
+    await delIn('invoice_items', 'invoice_id', invoiceIds);
+
+    // Entidades con client_id RESTRICT
+    await delEq('payment_receipts', 'client_id', id);
+    await delEq('payments', 'client_id', id);
+    await delEq('credit_notes', 'client_id', id);
+    await delIn('invoices', 'id', invoiceIds);
+    await delEq('invoices', 'client_id', id);
+
+    // Suspensión / estado de servicio usan customer_id
+    await delEq('reactivation_orders', 'customer_id', id);
+    await delEq('suspension_orders', 'customer_id', id);
+    await delEq('suspension_events', 'customer_id', id);
+    await delEq('customer_service_state', 'customer_id', id);
+
+    // Relacionadas tipicas (CASCADE o SET NULL; limpiar por robustez)
+    const clientIdTables = [
+      'service_subscriptions',
+      'client_timeline',
+      'client_documents',
+      'client_tags',
+      'client_alternate_contacts',
+      'client_activity_log',
+      'payment_promises',
+      'portal_user_bindings',
+      'onus',
+      'tickets',
+      'work_orders',
+    ];
+    for (const table of clientIdTables) {
+      await delEq(table, 'client_id', id);
+    }
+
     const { error, count } = await this.client
       .from(CLIENTS_TABLE)
       .delete({ count: 'exact' })
       .eq('id', id);
-    if (error) return fail('remove', error);
+
+    if (error) {
+      if (
+        typeof error === 'object' &&
+        error !== null &&
+        'code' in error &&
+        (error as { code: string }).code === '23503'
+      ) {
+        throw new ConflictError(
+          'No se puede eliminar: el cliente tiene historial financiero o relaciones bloqueantes. Usa Baja comercial o limpia dependencias primero.',
+        );
+      }
+      return fail('remove', error);
+    }
     return (count ?? 0) > 0;
   }
 

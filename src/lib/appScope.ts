@@ -70,8 +70,15 @@ export function getAppScope(): AppScope {
   try {
     const params = new URLSearchParams(window.location.search);
     const fromQuery = params.get(APP_SCOPE_QUERY_KEY);
+    // Enlace de portal con `client=` sin `app=` → forzar scope portal
+    // (evita que sessionStorage de una sesión WISP deje al abonado en admin).
+    const hasPortalClient =
+      Boolean((params.get('client') || params.get('clientId') || '').trim());
     if (fromQuery) {
       scope = parseAppScope(fromQuery);
+      window.sessionStorage.setItem(APP_SCOPE_STORAGE_KEY, scope);
+    } else if (hasPortalClient) {
+      scope = 'portal';
       window.sessionStorage.setItem(APP_SCOPE_STORAGE_KEY, scope);
     } else {
       scope = parseAppScope(window.sessionStorage.getItem(APP_SCOPE_STORAGE_KEY));
@@ -86,4 +93,24 @@ export function getAppScope(): AppScope {
 /** Solo para tests: limpia el scope cacheado. */
 export function __resetAppScopeCache(): void {
   cachedScope = null;
+}
+
+/**
+ * Los scopes portal y tech son "aislados": se renderizan con shell propio
+ * (IsolatedAppShell) y no muestran el Sidebar ni los menús de WISP admin.
+ */
+export function isIsolatedScope(scope: AppScope): boolean {
+  return scope === 'portal' || scope === 'tech';
+}
+
+/**
+ * Devuelve el tab forzado para scopes aislados, o null para admin.
+ * El tab no debe cambiar mientras dure la sesión en ese scope.
+ */
+export function forcedTabForScope(scope: AppScope): 'portal' | 'tech-pwa' | null {
+  switch (scope) {
+    case 'portal': return 'portal';
+    case 'tech': return 'tech-pwa';
+    default: return null;
+  }
 }

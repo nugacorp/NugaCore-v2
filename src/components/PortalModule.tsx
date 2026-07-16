@@ -48,16 +48,30 @@ export default function PortalModule({ clients, getAuthHeaders }: PortalModulePr
   const scope = getAppScope();
   const isCustomerShell = scope === 'portal';
 
-  const initialClientId = useMemo(() => {
+  const urlClientId = useMemo(() => {
     try {
-      const fromUrl = readPortalClientIdFromSearch(window.location.search);
-      if (fromUrl && clients.some((c) => c.id === fromUrl)) return fromUrl;
+      return readPortalClientIdFromSearch(window.location.search);
     } catch {
-      /* no window */
+      return null;
     }
-    const active = clients.find((c) => c.status === 'active');
-    return active?.id ?? clients[0]?.id ?? '';
-  }, [clients]);
+  }, []);
+
+  // En shell cliente solo se opera el client de la URL (o el único accesible).
+  // En preview staff se listan todos.
+  const visibleClients = useMemo(() => {
+    if (!isCustomerShell) return clients;
+    if (urlClientId) return clients.filter((c) => c.id === urlClientId);
+    return clients.slice(0, 1);
+  }, [clients, isCustomerShell, urlClientId]);
+
+  const initialClientId = useMemo(() => {
+    if (urlClientId && (isCustomerShell || clients.some((c) => c.id === urlClientId))) {
+      return urlClientId;
+    }
+    const pool = isCustomerShell ? visibleClients : clients;
+    const active = pool.find((c) => c.status === 'active');
+    return active?.id ?? pool[0]?.id ?? '';
+  }, [clients, isCustomerShell, urlClientId, visibleClients]);
 
   const [clientId, setClientId] = useState(initialClientId);
   const [summary, setSummary] = useState<{
@@ -161,14 +175,18 @@ export default function PortalModule({ clients, getAuthHeaders }: PortalModulePr
     void loadAll();
   };
 
-  if (clients.length === 0) {
+  if ((isCustomerShell ? visibleClients : clients).length === 0) {
     return (
       <div className="min-h-[70vh] flex items-center justify-center p-6">
         <div className="max-w-md text-center space-y-3">
           <Globe className="w-10 h-10 text-sky-400 mx-auto" />
-          <h2 className="text-xl font-bold text-white tracking-tight">Portal del Cliente</h2>
+          <h2 className="text-xl font-bold text-white tracking-tight">
+            {isCustomerShell ? 'Mi cuenta' : 'Portal del Cliente'}
+          </h2>
           <p className="text-sm text-slate-400 leading-relaxed">
-            Aún no hay clientes en el sistema. Registra uno en CRM y aquí podrás copiar el enlace para compartírselo.
+            {isCustomerShell
+              ? 'No encontramos una cuenta vinculada a este enlace. Pide a tu proveedor el enlace correcto del portal.'
+              : 'Aún no hay clientes en el sistema. Registra uno en CRM y aquí podrás copiar el enlace para compartírselo.'}
           </p>
         </div>
       </div>
@@ -212,43 +230,45 @@ export default function PortalModule({ clients, getAuthHeaders }: PortalModulePr
           </button>
         </header>
 
-        {/* Acceso rápido: copiar enlace */}
-        <section className="rounded-2xl border border-sky-500/25 bg-gradient-to-br from-sky-950/50 to-slate-950/80 p-4 md:p-5 shadow-[0_0_0_1px_rgba(14,165,233,0.08)]">
-          <div className="flex items-start gap-3">
-            <div className="mt-0.5 rounded-xl bg-sky-500/15 p-2.5 border border-sky-500/20">
-              <Link2 className="w-5 h-5 text-sky-300" />
-            </div>
-            <div className="min-w-0 flex-1 space-y-2">
-              <div>
-                <h3 className="text-sm font-semibold text-white">Enlace del portal</h3>
-                <p className="text-[12px] text-slate-400 leading-snug mt-0.5">
-                  Cópialo y envíalo al cliente (WhatsApp, SMS o correo). Al abrirlo entra a{' '}
-                  <span className="text-sky-300/90 font-mono">/?app=portal</span> con su cuenta.
-                </p>
+        {/* Enlace compartible: solo staff WISP (nunca en shell del abonado) */}
+        {!isCustomerShell && (
+          <section className="rounded-2xl border border-sky-500/25 bg-gradient-to-br from-sky-950/50 to-slate-950/80 p-4 md:p-5 shadow-[0_0_0_1px_rgba(14,165,233,0.08)]">
+            <div className="flex items-start gap-3">
+              <div className="mt-0.5 rounded-xl bg-sky-500/15 p-2.5 border border-sky-500/20">
+                <Link2 className="w-5 h-5 text-sky-300" />
               </div>
-              <div className="flex flex-col sm:flex-row gap-2">
-                <input
-                  readOnly
-                  value={portalLink}
-                  className="flex-1 truncate rounded-xl border border-slate-800 bg-slate-950/90 px-3 py-2.5 text-[11px] font-mono text-slate-300"
-                  aria-label="URL del portal del cliente"
-                />
-                <button
-                  id="copy-portal-link"
-                  type="button"
-                  onClick={() => void copyPortalLink()}
-                  disabled={!portalLink}
-                  className="inline-flex items-center justify-center gap-2 rounded-xl bg-sky-600 hover:bg-sky-500 px-4 py-2.5 text-sm font-semibold text-white transition disabled:opacity-50 shrink-0"
-                >
-                  {copied ? <Check className="w-4 h-4" /> : <Copy className="w-4 h-4" />}
-                  {copied ? '¡Copiado!' : 'Copiar enlace'}
-                </button>
+              <div className="min-w-0 flex-1 space-y-2">
+                <div>
+                  <h3 className="text-sm font-semibold text-white">Enlace del portal</h3>
+                  <p className="text-[12px] text-slate-400 leading-snug mt-0.5">
+                    Cópialo y envíalo al cliente (WhatsApp, SMS o correo). Al abrirlo entra a{' '}
+                    <span className="text-sky-300/90 font-mono">/?app=portal</span> sin ver menús del WISP.
+                  </p>
+                </div>
+                <div className="flex flex-col sm:flex-row gap-2">
+                  <input
+                    readOnly
+                    value={portalLink}
+                    className="flex-1 truncate rounded-xl border border-slate-800 bg-slate-950/90 px-3 py-2.5 text-[11px] font-mono text-slate-300"
+                    aria-label="URL del portal del cliente"
+                  />
+                  <button
+                    id="copy-portal-link"
+                    type="button"
+                    onClick={() => void copyPortalLink()}
+                    disabled={!portalLink}
+                    className="inline-flex items-center justify-center gap-2 rounded-xl bg-sky-600 hover:bg-sky-500 px-4 py-2.5 text-sm font-semibold text-white transition disabled:opacity-50 shrink-0"
+                  >
+                    {copied ? <Check className="w-4 h-4" /> : <Copy className="w-4 h-4" />}
+                    {copied ? '¡Copiado!' : 'Copiar enlace'}
+                  </button>
+                </div>
               </div>
             </div>
-          </div>
-        </section>
+          </section>
+        )}
 
-        {/* Selector staff (oculto en shell puro cliente si hay un solo binding futuro; hoy útil para preview) */}
+        {/* Selector staff (oculto en shell puro cliente) */}
         {!isCustomerShell && (
           <div className="flex flex-col sm:flex-row gap-2 sm:items-center">
             <label className="text-[11px] uppercase tracking-wider font-mono text-slate-500 shrink-0">

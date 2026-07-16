@@ -4,6 +4,8 @@ import {
   parseAppScope,
   resolveEntryTab,
   manifestPathForScope,
+  isIsolatedScope,
+  forcedTabForScope,
   type AppScope,
 } from '../../src/lib/appScope';
 
@@ -65,5 +67,38 @@ describe('resolveEntryTab', () => {
   it('los scopes conocidos cubren el tipo AppScope', () => {
     const all: AppScope[] = ['admin', 'tech', 'portal'];
     expect(all).toHaveLength(3);
+  });
+});
+
+describe('isIsolatedScope', () => {
+  it('portal y tech son scopes aislados', () => {
+    expect(isIsolatedScope('portal')).toBe(true);
+    expect(isIsolatedScope('tech')).toBe(true);
+  });
+
+  it('admin NO es scope aislado', () => {
+    expect(isIsolatedScope('admin')).toBe(false);
+  });
+});
+
+describe('forcedTabForScope', () => {
+  it('portal fuerza tab portal', () => {
+    expect(forcedTabForScope('portal')).toBe('portal');
+  });
+
+  it('tech fuerza tab tech-pwa', () => {
+    expect(forcedTabForScope('tech')).toBe('tech-pwa');
+  });
+
+  it('admin devuelve null (sin tab forzado)', () => {
+    expect(forcedTabForScope('admin')).toBeNull();
+  });
+});
+
+describe('portal/tech no aparecen en el sidebar WISP', () => {
+  it('portal y tech-pwa están tabs ocultos del menú admin', async () => {
+    const { isSidebarHiddenTab } = await import('../../src/lib/rbac');
+    expect(isSidebarHiddenTab('portal')).toBe(true);
+    expect(isSidebarHiddenTab('tech-pwa')).toBe(true);
   });
 });

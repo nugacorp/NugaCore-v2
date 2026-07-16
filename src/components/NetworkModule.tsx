@@ -8,9 +8,11 @@ import {
   Server,
   Map as MapIcon,
   Cable,
+  AlertTriangle,
 } from 'lucide-react';
 import { Tower, OltFTTH, OnuFTTH, Client, NapBox } from '../types';
 import WispSitesMap from './gis/WispSitesMap';
+import LocationPinPicker from './gis/LocationPinPicker';
 
 interface NetworkModuleProps {
   towers: Tower[];
@@ -43,10 +45,12 @@ export default function NetworkModule({
   const [showTowerModal, setShowTowerModal] = useState(false);
   const [formTowerName, setFormTowerName] = useState('');
   const [formTowerIp, setFormTowerIp] = useState('10.150.10.1');
-  const [formTowerLat, setFormTowerLat] = useState('19.4326');
-  const [formTowerLng, setFormTowerLng] = useState('-99.1332');
+  const [formTowerLat, setFormTowerLat] = useState(19.4326);
+  const [formTowerLng, setFormTowerLng] = useState(-99.1332);
   const [formTowerSsid, setFormTowerSsid] = useState('NugaCore_Antenna_A1');
   const [formTowerFreq, setFormTowerFreq] = useState('5800 Mhz');
+  const [formTowerZone, setFormTowerZone] = useState('');
+  const [towerCreateError, setTowerCreateError] = useState<string | null>(null);
 
   // Script copy state
   const [scriptCopied, setScriptCopied] = useState(false);
@@ -94,16 +98,34 @@ export default function NetworkModule({
   const handleCreateTowerSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
     if (!formTowerName) return;
-    await onCreateTower({
-      name: formTowerName,
-      ip: formTowerIp,
-      lat: Number(formTowerLat),
-      lng: Number(formTowerLng),
-      ssid: formTowerSsid,
-      frequency: formTowerFreq
-    });
-    setFormTowerName('');
-    setShowTowerModal(false);
+    setTowerCreateError(null);
+    try {
+      const zoneName = formTowerZone.trim() || `Zona ${formTowerName}`;
+      const payload: Record<string, unknown> = {
+        name: formTowerName,
+        ip: formTowerIp,
+        lat: formTowerLat,
+        lng: formTowerLng,
+        ssid: formTowerSsid,
+        frequency: formTowerFreq,
+        zone: zoneName,
+      };
+      // Persist zone-to-tower mapping locally for UI linking
+      try {
+        const stored = JSON.parse(localStorage.getItem('nugacore.towerZones.v1') || '{}') as Record<string, string>;
+        stored[formTowerName] = zoneName;
+        localStorage.setItem('nugacore.towerZones.v1', JSON.stringify(stored));
+      } catch {
+        // Ignore storage failures
+      }
+      await onCreateTower(payload);
+      setFormTowerName('');
+      setFormTowerZone('');
+      setShowTowerModal(false);
+    } catch (err) {
+      const msg = err instanceof Error ? err.message : String(err);
+      setTowerCreateError(msg || 'Error al crear la torre');
+    }
   };
 
   const getSignalBadgeColor = (db: number) => {
@@ -753,13 +775,20 @@ export default function NetworkModule({
       {/* Add Base Station Tower Modal */}
       {showTowerModal && (
         <div className="fixed inset-0 bg-black/60 backdrop-blur-sm z-50 flex items-center justify-center p-4">
-          <div className="bg-slate-950 border border-slate-800 rounded-3xl max-w-sm w-full p-6 space-y-4">
+          <div className="bg-slate-950 border border-slate-800 rounded-3xl max-w-2xl w-full p-6 space-y-4 max-h-[90vh] overflow-y-auto">
             <div className="flex items-center justify-between border-b border-slate-900 pb-3">
               <h3 className="text-sm font-bold text-white font-mono flex items-center space-x-1.5">
                 <span>Registrar Nueva Torre Base</span>
               </h3>
-              <button onClick={() => setShowTowerModal(false)} className="text-slate-400 hover:text-white font-bold">✕</button>
+              <button onClick={() => { setShowTowerModal(false); setTowerCreateError(null); }} className="text-slate-400 hover:text-white font-bold">✕</button>
             </div>
+
+            {towerCreateError && (
+              <div className="flex items-start gap-2 bg-rose-950/40 border border-rose-900/50 rounded-xl px-3 py-2 text-xs text-rose-300 font-mono">
+                <AlertTriangle className="w-3.5 h-3.5 shrink-0 mt-0.5 text-rose-500" />
+                <span>{towerCreateError}</span>
+              </div>
+            )}
 
             <form onSubmit={handleCreateTowerSubmit} className="space-y-4 text-xs font-mono">
               <div className="space-y-1">
@@ -772,6 +801,52 @@ export default function NetworkModule({
                   onChange={(e) => setFormTowerName(e.target.value)}
                   className="w-full bg-slate-900 border border-slate-850 rounded-xl p-2.5 text-white"
                 />
+              </div>
+
+              <div className="space-y-1">
+                <label className="text-slate-400">Zona (dejar vacío = "Zona {'{'}nombre{'}'}")</label>
+                <input
+                  type="text"
+                  placeholder={`Zona ${formTowerName || 'Torres'}`}
+                  value={formTowerZone}
+                  onChange={(e) => setFormTowerZone(e.target.value)}
+                  className="w-full bg-slate-900 border border-slate-850 rounded-xl p-2.5 text-white"
+                />
+              </div>
+
+              <div className="space-y-1.5">
+                <label className="text-slate-400">Ubicación GPS — haz clic en el mapa para colocar el pin</label>
+                <LocationPinPicker
+                  lat={formTowerLat}
+                  lng={formTowerLng}
+                  onChange={(lat, lng) => { setFormTowerLat(lat); setFormTowerLng(lng); }}
+                  height="220px"
+                />
+              </div>
+
+              <div className="grid grid-cols-2 gap-3">
+                <div className="space-y-1">
+                  <label className="text-slate-400">Latitud GPS</label>
+                  <input
+                    type="number"
+                    step="any"
+                    required
+                    value={formTowerLat}
+                    onChange={(e) => setFormTowerLat(Number(e.target.value))}
+                    className="w-full bg-slate-900 border border-slate-850 rounded-xl p-2.5 text-white"
+                  />
+                </div>
+                <div className="space-y-1">
+                  <label className="text-slate-400">Longitud GPS</label>
+                  <input
+                    type="number"
+                    step="any"
+                    required
+                    value={formTowerLng}
+                    onChange={(e) => setFormTowerLng(Number(e.target.value))}
+                    className="w-full bg-slate-900 border border-slate-850 rounded-xl p-2.5 text-white"
+                  />
+                </div>
               </div>
 
               <div className="grid grid-cols-2 gap-3">
@@ -797,29 +872,6 @@ export default function NetworkModule({
                 </div>
               </div>
 
-              <div className="grid grid-cols-2 gap-3">
-                <div className="space-y-1">
-                  <label className="text-slate-400">Latitud GPS</label>
-                  <input
-                    type="text"
-                    required
-                    value={formTowerLat}
-                    onChange={(e) => setFormTowerLat(e.target.value)}
-                    className="w-full bg-slate-900 border border-slate-850 rounded-xl p-2.5 text-white"
-                  />
-                </div>
-                <div className="space-y-1">
-                  <label className="text-slate-400">Longitud GPS</label>
-                  <input
-                    type="text"
-                    required
-                    value={formTowerLng}
-                    onChange={(e) => setFormTowerLng(e.target.value)}
-                    className="w-full bg-slate-900 border border-slate-850 rounded-xl p-2.5 text-white"
-                  />
-                </div>
-              </div>
-
               <div className="space-y-1">
                 <label className="text-slate-400">Frecuencia de Operación (Mhz)</label>
                 <input
@@ -834,8 +886,8 @@ export default function NetworkModule({
               <div className="border-t border-slate-900 pt-3 flex justify-end space-x-2">
                 <button
                   type="button"
-                  onClick={() => setShowTowerModal(false)}
-                  className="border border-slate-880 border-slate-800 hover:bg-slate-900 text-slate-400 px-4 py-2 rounded-xl"
+                  onClick={() => { setShowTowerModal(false); setTowerCreateError(null); }}
+                  className="border border-slate-800 hover:bg-slate-900 text-slate-400 px-4 py-2 rounded-xl"
                 >
                   Cancelar
                 </button>

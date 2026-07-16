@@ -34,12 +34,13 @@ const PortalModule = lazyWithRetry(() => import('./components/PortalModule'));
 const TechPwaModule = lazyWithRetry(() => import('./modules/tech-pwa/TechPwaModule'));
 import LoginForm from './components/LoginForm';
 import LandingPage from './components/LandingPage';
+import IsolatedAppShell from './components/IsolatedAppShell';
 import UserMenu from './components/UserMenu';
 import TopAlertsBell from './components/TopAlertsBell';
 import { authSession, restoreSessionProfileFromSupabase } from './lib/authSession';
 import { UserSessionProfile, isSupabaseConfigured, supabase } from './lib/supabase';
 import { canAccessTab, getDefaultTabByRole } from './lib/rbac';
-import { getAppScope, resolveEntryTab } from './lib/appScope';
+import { getAppScope, resolveEntryTab, isIsolatedScope, forcedTabForScope } from './lib/appScope';
 import { fetchWithRateLimitBackoff, isApiRateLimitError } from './lib/apiBackoff';
 
 import { 
@@ -138,6 +139,10 @@ export default function App() {
   const [routersOpenEnrollment, setRoutersOpenEnrollment] = useState(false);
 
   const navigateToTab = useCallback((tab: string) => {
+    // Isolated scopes (portal / tech-pwa) may not navigate to other modules
+    const forcedTab = forcedTabForScope(getAppScope());
+    if (forcedTab !== null && tab !== forcedTab) return;
+
     if (tab === 'router-enrollment') {
       setRoutersOpenEnrollment(true);
       setActiveTab('inventory-routers');
@@ -335,7 +340,16 @@ export default function App() {
       throw new Error(errPayload.error || `HTTP ${response.status}`);
     }
 
-    return response.json();
+    // Handle empty body (204 No Content or Content-Length: 0)
+    if (
+      response.status === 204 ||
+      response.headers.get('content-length') === '0'
+    ) {
+      return undefined as unknown as T;
+    }
+    const text = await response.text();
+    if (!text) return undefined as unknown as T;
+    return JSON.parse(text) as T;
   }, [getAuthHeaders]);
 
   const setRateLimitMessage = useCallback((retryAfterMs: number) => {
@@ -370,7 +384,25 @@ export default function App() {
       // Carga solo el dataset que necesita la vista activa. Antes el shell
       // disparaba ~15 endpoints globales en cada navegación/poll; al abrir varios
       // módulos eso agotaba el rate-limit y producía spam de 429 en consola.
-      if (activeTab === 'dashboard') {
+      if (activeTab === 'portal' || getAppScope() === 'portal') {
+        attemptedFetch = true;
+        try {
+          const all = await fetchJson<Client[]>('/api/clients');
+          if (getAppScope() === 'portal') {
+            try {
+              const params = new URLSearchParams(window.location.search);
+              const bound = (params.get('client') || params.get('clientId') || '').trim();
+              setClients(bound ? all.filter((c) => c.id === bound) : all.slice(0, 1));
+            } catch {
+              setClients(all.slice(0, 1));
+            }
+          } else {
+            setClients(all);
+          }
+        } catch {
+          setClients([]);
+        }
+      } else if (activeTab === 'dashboard') {
         attemptedFetch = true;
         const [resStats, resAlerts] = await Promise.all([
           fetchJson<DashboardStats>('/api/dashboard-stats'),
@@ -647,8 +679,13 @@ export default function App() {
   };
 
   const handleDeleteClient = async (id: string) => {
-    await fetchJson(`/api/clients/${id}`, { method: 'DELETE' });
-    await fetchData();
+    try {
+      await fetchJson(`/api/clients/${id}`, { method: 'DELETE' });
+      await fetchData();
+    } catch (err) {
+      const msg = err instanceof Error ? err.message : String(err);
+      throw new Error(msg, { cause: err });
+    }
   };
 
   // BILLING TRANSAC CONTROLS
@@ -877,16 +914,12 @@ export default function App() {
   };
 
   const handleCreateTower = async (towerData: Record<string, unknown>) => {
-    try {
-      await fetchJson('/api/network-towers', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify(towerData)
-      });
-      await fetchData();
-    } catch (err) {
-      clientLog.error(err);
-    }
+    await fetchJson('/api/network-towers', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify(towerData)
+    });
+    await fetchData();
   };
 
   // MIKROTIK COMMAND & AI COPILOT
@@ -994,11 +1027,12 @@ export default function App() {
   }
 
   if (!userSession) {
-    if (showLogin) {
+    // Isolated scopes skip LandingPage — go directly to LoginForm
+    if (showLogin || isIsolatedScope(getAppScope())) {
       return (
         <LoginForm 
           onLoginSuccess={handleLoginSuccess} 
-          onBack={() => setShowLogin(false)} 
+          onBack={isIsolatedScope(getAppScope()) ? undefined : () => setShowLogin(false)} 
         />
       );
     } else {
@@ -1008,6 +1042,35 @@ export default function App() {
         />
       );
     }
+  }
+
+  // Isolated scopes (portal / tech-pwa): render with minimal shell, no Sidebar
+  if (isIsolatedScope(getAppScope())) {
+    const scope = getAppScope();
+    const shellTitle = scope === 'portal' ? 'Portal del Cliente' : 'NugaCore Técnico';
+    const shellSubtitle = scope === 'portal' ? 'Consulta tu cuenta y servicio' : 'Gestión de instalaciones y soporte';
+    return (
+      <IsolatedAppShell
+        title={shellTitle}
+        subtitle={shellSubtitle}
+        profile={userSession}
+        onLogout={handleLogout}
+      >
+        <Suspense fallback={<ModuleLoader />}>
+          {scope === 'portal' && (
+            <PortalModule
+              clients={clients}
+              getAuthHeaders={getAuthHeaders}
+            />
+          )}
+          {scope === 'tech' && (
+            <TechPwaModule
+              getAuthHeaders={getAuthHeaders}
+            />
+          )}
+        </Suspense>
+      </IsolatedAppShell>
+    );
   }
 
   return (
@@ -1027,9 +1090,9 @@ export default function App() {
 
       {/* Main Content Area */}
       <div className="flex-1 flex flex-col min-w-0">
-        {/* Desktop top bar: alertas (izq) + perfil (der) */}
+        {/* Desktop top bar: bell + perfil a la derecha */}
         {!isSupportWorkspace && (
-          <div id="desktop-top-bar" className="hidden md:flex items-center justify-between gap-3 py-2.5 px-6 bg-slate-950 border-b border-slate-900 shrink-0 sticky top-0 z-20">
+          <div id="desktop-top-bar" className="hidden md:flex items-center justify-end gap-3 py-2.5 px-6 bg-slate-950 border-b border-slate-900 shrink-0 sticky top-0 z-20">
             <TopAlertsBell
               alerts={alerts}
               onAcknowledgeAll={handleAcknowledgeAlerts}
@@ -1041,27 +1104,30 @@ export default function App() {
 
         {/* Mobile Navigation Header */}
         <div id="mobile-navigation-bar" className="md:hidden flex items-center justify-between py-3 px-4 bg-slate-950 border-b border-slate-900 shrink-0 sticky top-0 z-20">
-          <div className="flex items-center gap-1.5">
-            <button
-              onClick={() => setMobileMenuOpen(true)}
-              className="p-1.5 rounded-lg text-slate-400 hover:text-white hover:bg-slate-900 focus:outline-none transition"
-              title="Abrir menú"
-            >
-              <Menu className="w-5 h-5" />
-            </button>
-            <TopAlertsBell
-              alerts={alerts}
-              onAcknowledgeAll={handleAcknowledgeAlerts}
-              onOpenNoc={canAccessTab(userSession.role, 'noc') ? () => navigateToTab('noc') : undefined}
-            />
-          </div>
+          {/* Left: menu button */}
+          <button
+            onClick={() => setMobileMenuOpen(true)}
+            className="p-1.5 rounded-lg text-slate-400 hover:text-white hover:bg-slate-900 focus:outline-none transition"
+            title="Abrir menú"
+          >
+            <Menu className="w-5 h-5" />
+          </button>
 
+          {/* Center: brand */}
           <div className="flex items-center space-x-1.5">
             <span className="w-2 h-2 rounded-full bg-indigo-500 animate-pulse"></span>
             <span className="font-bold text-xs text-white tracking-wide font-sans">NugaCore ERP</span>
           </div>
 
-          <UserMenu profile={userSession} onLogout={handleLogout} />
+          {/* Right: bell + user menu */}
+          <div className="flex items-center gap-1.5">
+            <TopAlertsBell
+              alerts={alerts}
+              onAcknowledgeAll={handleAcknowledgeAlerts}
+              onOpenNoc={canAccessTab(userSession.role, 'noc') ? () => navigateToTab('noc') : undefined}
+            />
+            <UserMenu profile={userSession} onLogout={handleLogout} />
+          </div>
         </div>
 
         {shouldShowWelcomeBanner && (
