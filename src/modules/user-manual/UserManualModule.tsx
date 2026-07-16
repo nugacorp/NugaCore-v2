@@ -41,8 +41,32 @@ const SECTIONS: ManualSection[] = [
     summary: 'Vista general del estado operativo del WISP: clientes, cobranza, red y alertas.',
     steps: [
       'Abre "Inicio → Dashboard" para ver los indicadores clave (clientes activos, MRR, tickets, torres).',
-      'Revisa las alertas críticas que aparecen en la parte superior y siléncialas una vez atendidas.',
+      'La campana de notificaciones está en la BARRA SUPERIOR DERECHA. Ábrela para ver/confirmar alertas NOC.',
       'Usa "Actualizar" para refrescar los datos contra el servidor.',
+    ],
+  },
+  {
+    id: 'portal',
+    title: 'Portal del Cliente (App aislada)',
+    icon: Users,
+    summary:
+      'El Portal se abre como aplicación independiente, sin menús del WISP. Úsalo para que el abonado consulte saldo, facturas y reporte fallas.',
+    steps: [
+      'Comparte al abonado el enlace desde la ficha CRM: "Copiar enlace del portal".',
+      'El enlace recomendado es: /?app=portal&client=<id>. Si solo viene client=<id>, el sistema fuerza el modo portal.',
+      'En el portal el cliente solo ve su cuenta. No hay acceso a Red, Facturación interna ni Operaciones del WISP.',
+    ],
+  },
+  {
+    id: 'tech-pwa',
+    title: 'App de Técnicos (PWA aislada)',
+    icon: Wrench,
+    summary:
+      'Aplicación de campo para instalación y soporte. Se abre aislada del shell WISP y puede instalarse como PWA.',
+    steps: [
+      'Abre /?app=tech e inicia sesión con un usuario con rol de Técnico/Soporte.',
+      'Desde aquí gestionas tareas de instalación/atención sin menús administrativos.',
+      'Para compartirla, envía /?app=tech a tus técnicos; pueden “Instalar app” desde el navegador.',
     ],
   },
   {
@@ -135,10 +159,12 @@ const SECTIONS: ManualSection[] = [
     id: 'red-noc',
     title: 'Red / NOC',
     icon: Network,
-    summary: 'Monitoreo de red y mapa: NOC (alertas/telemetría read-only), cobertura, torres y sitios.',
+    summary:
+      'Monitoreo de red y planta FTTH. NOC es solo lectura; el mapa FTTH muestra NAPs/OLTs/ONUs y capacidad, y permite registrar tramos de fibra.',
     steps: [
       'Entra a "Red → NOC" para ver telemetría y alertas activas de la red (solo lectura, no opera cambios).',
-      'En "Red → Mapa / Infraestructura" revisa la cobertura en el mapa.',
+      'En "Red → Mapa FTTH" consulta NAPs, ONUs y OLTs. El panel “Capacidad NAP / PON” muestra puertos totales, usados y libres.',
+      'En el panel "Infraestructura de fibra" registra tramos (desde/hasta, hilos, NAP/PON). Es borrador local hasta activar la API/OLT.',
       'En "Red → Torres y Sitios" administra torres, OLT/ONU y NAPs.',
     ],
   },
@@ -177,6 +203,18 @@ const SECTIONS: ManualSection[] = [
     ],
   },
   {
+    id: 'torres',
+    title: 'Torres y Sitios',
+    icon: Network,
+    summary:
+      'Gestión de torres y sitios WISP. Alta rápida con PIN en mapa y zona automática; lat/lng siguen editables para precisión.',
+    steps: [
+      'Entra a "Red → Torres y Sitios" y usa "Agregar torre".',
+      'Coloca el PIN en el mapa para una ubicación rápida; puedes afinar con latitud/longitud.',
+      'Si la zona no existe, se crea automáticamente con la información de la torre; luego agrega routers a esa zona.',
+    ],
+  },
+  {
     id: 'templates-scripts',
     title: 'Plantillas y Scripts',
     icon: BookOpen,
@@ -204,11 +242,11 @@ const SECTIONS: ManualSection[] = [
     icon: HelpCircle,
     summary: 'Dudas comunes sobre módulos visibles, infraestructura interna y seguridad.',
     steps: [
-      '¿Dónde está WireGuard? Es infraestructura interna: el peer se crea solo al dar de alta un router, no se administra a mano.',
-      '¿Por qué no veo Modo Seguro Manual ni Cola Dry-Run? Son herramientas internas de seguridad para fases futuras; no son operación diaria.',
-      '¿Dónde están los Routers? Dentro de "Sistema → Routers".',
-      '¿Dónde veo alertas? Usa la campana de la barra superior: muestra alertas operativas NOC/red. El motor de mensajes WhatsApp/Telegram no es operación diaria todavía.',
-      '¿Qué rol veo? Tu menú se filtra por permisos (RBAC): solo aparecen los módulos que tu rol puede usar.',
+      '¿Portal y App Técnicos por qué no salen en el menú? Son apps aisladas: usa /?app=portal&client=<id> y /?app=tech.',
+      '¿Dónde veo alertas? En la campana de la barra superior derecha (NOC).',
+      '¿Dónde está WireGuard? Interno: se crea automáticamente al dar de alta un router.',
+      '¿Por qué no veo Modo Seguro ni Cola Dry-Run? Son herramientas internas; no son operación diaria.',
+      '¿Qué rol veo? El menú se filtra por permisos (RBAC).',
     ],
   },
 ];
