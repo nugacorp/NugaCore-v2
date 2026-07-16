@@ -4,8 +4,15 @@
 -- Evoluciona el schema OLA 6 (tenants + radius_accounting.tenant_id) a:
 --   - tenant_memberships (user ↔ tenant + rol de membresía)
 --   - tenant_id en tablas SSOT piloto (clients, towers, onboarding, plans, invoices, sectors)
---   - helper SQL para RLS por membership / JWT claim
---   - políticas authenticated restringidas por tenant + service_role backend
+--   - helper SQL is_tenant_member (SOLO memberships; sin JWT claims)
+--   - RLS service_role only (deny-by-default para anon/authenticated)
+--
+-- Seguridad:
+--   - NO leer user_metadata.tenant_id (el usuario lo edita con updateUser).
+--   - NO abrir políticas authenticated FOR ALL: el frontend no usa PostgREST;
+--     el acceso funcional es backend + service_role + RBAC Express.
+--   - MULTI_TENANT_ENABLED es flag de app; no apaga RLS. Por eso las
+--     políticas authenticated no se crean aquí (superficie de ataque).
 --
 -- Backfill: filas existentes → tenant-default (single-WISP compatible).
 -- ====================================================================
@@ -31,9 +38,11 @@ CREATE INDEX IF NOT EXISTS idx_tenant_memberships_tenant
   ON public.tenant_memberships (tenant_id);
 
 COMMENT ON TABLE public.tenant_memberships IS
-  'Membresía usuario↔tenant. Base para aislamiento multi-WISP y RLS authenticated.';
+  'Membresía usuario↔tenant. Fuente de verdad para aislamiento multi-WISP (backend + service_role).';
 
--- ── Helper: ¿el JWT actual es miembro activo del tenant? ──────────────
+-- ── Helper: ¿auth.uid() es miembro activo? (sin claims JWT) ──────────
+-- Solo memberships. Nunca user_metadata (editable por el cliente) ni
+-- app_metadata aquí: el claim JWT no sustituye la tabla de membresía.
 CREATE OR REPLACE FUNCTION public.is_tenant_member(p_tenant_id TEXT)
 RETURNS BOOLEAN
 LANGUAGE sql
@@ -47,13 +56,6 @@ AS $$
     WHERE m.tenant_id = p_tenant_id
       AND m.user_id = auth.uid()
       AND m.status = 'active'
-  )
-  OR (
-    -- Claim JWT opcional (app_metadata.tenant_id / user_metadata.tenant_id)
-    COALESCE(
-      auth.jwt() -> 'app_metadata' ->> 'tenant_id',
-      auth.jwt() -> 'user_metadata' ->> 'tenant_id'
-    ) = p_tenant_id
   );
 $$;
 
@@ -109,7 +111,7 @@ CREATE INDEX IF NOT EXISTS idx_invoices_tenant_id ON public.invoices (tenant_id)
 CREATE INDEX IF NOT EXISTS idx_network_sectors_tenant_id ON public.network_sectors (tenant_id);
 CREATE INDEX IF NOT EXISTS idx_radius_accounting_tenant_id ON public.radius_accounting (tenant_id);
 
--- ── RLS: tenants / memberships / tablas piloto ───────────────────────
+-- ── RLS: service_role only (deny-by-default para anon/authenticated) ─
 ALTER TABLE public.tenants ENABLE ROW LEVEL SECURITY;
 ALTER TABLE public.tenant_memberships ENABLE ROW LEVEL SECURITY;
 ALTER TABLE public.clients ENABLE ROW LEVEL SECURITY;
@@ -120,7 +122,8 @@ ALTER TABLE public.invoices ENABLE ROW LEVEL SECURITY;
 ALTER TABLE public.network_sectors ENABLE ROW LEVEL SECURITY;
 ALTER TABLE public.radius_accounting ENABLE ROW LEVEL SECURITY;
 
--- Drop políticas previas en tablas piloto (idempotente)
+-- Drop políticas previas en tablas piloto (idempotente), incl. authenticated
+-- residuales de borradores inseguros.
 DO $$
 DECLARE
   pol RECORD;
@@ -137,13 +140,16 @@ BEGIN
       AND (
         policyname LIKE '%tenant%'
         OR policyname LIKE '%service_role%'
+        OR policyname LIKE '%authenticated%'
       )
   LOOP
     EXECUTE format('DROP POLICY IF EXISTS %I ON public.%I', pol.policyname, pol.tablename);
   END LOOP;
 END $$;
 
--- Service-role: backend Express (bypass + política documentada)
+-- Service-role: backend Express (bypass + política documentada).
+-- Sin políticas authenticated: el cliente no lee SSOT vía PostgREST;
+-- el aislamiento y RBAC viven en Express + memberships.
 CREATE POLICY tenants_service_role ON public.tenants
   FOR ALL USING (auth.role() = 'service_role') WITH CHECK (auth.role() = 'service_role');
 
@@ -170,47 +176,3 @@ CREATE POLICY network_sectors_service_role ON public.network_sectors
 
 CREATE POLICY radius_accounting_service_role ON public.radius_accounting
   FOR ALL USING (auth.role() = 'service_role') WITH CHECK (auth.role() = 'service_role');
-
--- Authenticated: lectura/escritura solo del propio tenant (membership o JWT claim)
-CREATE POLICY tenants_authenticated_select ON public.tenants
-  FOR SELECT TO authenticated
-  USING (public.is_tenant_member(id));
-
-CREATE POLICY tenant_memberships_authenticated_select ON public.tenant_memberships
-  FOR SELECT TO authenticated
-  USING (user_id = auth.uid() OR public.is_tenant_member(tenant_id));
-
-CREATE POLICY clients_authenticated_tenant ON public.clients
-  FOR ALL TO authenticated
-  USING (public.is_tenant_member(tenant_id))
-  WITH CHECK (public.is_tenant_member(tenant_id));
-
-CREATE POLICY towers_authenticated_tenant ON public.towers
-  FOR ALL TO authenticated
-  USING (public.is_tenant_member(tenant_id))
-  WITH CHECK (public.is_tenant_member(tenant_id));
-
-CREATE POLICY tower_onboarding_profiles_authenticated_tenant ON public.tower_onboarding_profiles
-  FOR ALL TO authenticated
-  USING (public.is_tenant_member(tenant_id))
-  WITH CHECK (public.is_tenant_member(tenant_id));
-
-CREATE POLICY plans_authenticated_tenant ON public.plans
-  FOR ALL TO authenticated
-  USING (public.is_tenant_member(tenant_id))
-  WITH CHECK (public.is_tenant_member(tenant_id));
-
-CREATE POLICY invoices_authenticated_tenant ON public.invoices
-  FOR ALL TO authenticated
-  USING (public.is_tenant_member(tenant_id))
-  WITH CHECK (public.is_tenant_member(tenant_id));
-
-CREATE POLICY network_sectors_authenticated_tenant ON public.network_sectors
-  FOR ALL TO authenticated
-  USING (public.is_tenant_member(tenant_id))
-  WITH CHECK (public.is_tenant_member(tenant_id));
-
-CREATE POLICY radius_accounting_authenticated_tenant ON public.radius_accounting
-  FOR ALL TO authenticated
-  USING (tenant_id IS NOT NULL AND public.is_tenant_member(tenant_id))
-  WITH CHECK (tenant_id IS NOT NULL AND public.is_tenant_member(tenant_id));

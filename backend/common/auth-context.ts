@@ -89,18 +89,15 @@ export const attachAuthContext = async (req: Request, _res: Response, next: Next
       const { data, error } = await supabaseAdmin.auth.getUser(bearerToken);
       if (!error && data.user) {
         const role = await resolveRoleFromSupabase(data.user.id);
-        // Claim JWT opcional (app_metadata / user_metadata)
+        // Solo app_metadata.tenant_id (service_role). Nunca user_metadata:
+        // el cliente puede editarlo con supabase.auth.updateUser().
         const meta = data.user.app_metadata as Record<string, unknown> | undefined;
-        const userMeta = data.user.user_metadata as Record<string, unknown> | undefined;
-        const claimTenant = typeof meta?.tenant_id === 'string'
-          ? meta.tenant_id
-          : typeof userMeta?.tenant_id === 'string'
-            ? userMeta.tenant_id
-            : null;
+        const claimTenant = typeof meta?.tenant_id === 'string' ? meta.tenant_id : null;
         let tenantId = DEFAULT_TENANT_ID;
         try {
           tenantId = await resolveTenantIdForUser({
             userId: data.user.id,
+            // Header / claim solo se aceptan si hay membership (ver resolve-tenant).
             requestedTenantId: requestedTenantId || claimTenant,
             source: 'supabase-jwt',
           });
