@@ -1,32 +1,50 @@
 # Estado de sincronización de migraciones · GitHub ↔ Supabase
 
 Proyecto Supabase: `elshnzkceutvjzxvzqad` (nugacore-staging).
-Última reconciliación: **2026-07-16** (tarde; vía `psql` por el pooler).
+Última reconciliación: **2026-07-16** (vía `psql` por el pooler).
 
-## Estado actual (2026-07-16)
+## Estado actual (2026-07-16, tras barrido de las 48 ramas)
 
-**Totalmente reconciliado.** Las **34 migraciones** de `supabase/migrations/` están
-aplicadas y registradas en `supabase_migrations.schema_migrations`. El historial
-remoto tiene **35 registros**: las 34 + 1 huérfano (ver abajo).
-
-Verificación: `LOCAL sin aplicar = vacío` (comparando los prefijos de versión de
-los archivos locales contra la tabla de historial).
+**Totalmente reconciliado. Cero migraciones pendientes.** Las **34 migraciones**
+que existen en **cualquier rama del repo** (no solo en `main`) están aplicadas y
+registradas en `supabase_migrations.schema_migrations`. El historial remoto tiene
+**35 registros**: las 34 + 1 huérfano, cuyo origen ya está **confirmado** y es
+inocuo (ver abajo).
 
 **Ninguna tabla de `public` queda sin RLS** (verificado contra `pg_class.relrowsecurity`).
 
-> **Nota de ramas (drift temporal de repo):** cinco de las 33 aún no coexisten en la
-> misma rama de Git, pero **las cinco ya están aplicadas y registradas** en la DB de
-> staging (compartida):
+### Cómo se verificó (barrido completo, no solo la rama actual)
+
+Las migraciones aparecen en ramas de agentes antes de llegar a `main`, así que
+comparar solo el working tree da falsos "sin pendientes". El barrido correcto
+recorre **todas** las ramas remotas:
+
+```bash
+# Todas las migraciones que existen en cualquier rama
+for b in $(git branch -r --format='%(refname:short)' | grep -v 'origin$'); do
+  git ls-tree -r --name-only "$b" -- supabase/migrations/ | grep '\.sql$'
+done | sort -u > /tmp/all_migs.txt
+
+# Historial aplicado
+psql -tA -c "select version from supabase_migrations.schema_migrations order by version;" > /tmp/applied.txt
+
+# A) en el repo pero sin aplicar   B) aplicado sin archivo (huérfano)
+```
+
+Resultado 2026-07-16: **A) vacío**, **B) solo `20260619033952`**.
+
+> **Nota de ramas (drift temporal de repo):** cuatro de las 34 aún no están en
+> `main`, pero **las cuatro ya están aplicadas y registradas** en la DB de staging
+> (compartida). `main` tiene 29 archivos; el conteo de 34 es el del repo integrado:
 >
-> - `20260716081000_tower_onboarding_profiles` → `main` (commit `838f541`)
 > - `20260715000000_client_documents_reconciliation` → rama `fix/db-schema-reconciliation`
+> - `20260716160000_rls_fiber_tables` → rama `fix/db-schema-reconciliation`
 > - `20260716120000_ftth_fiber_infrastructure` → rama `cursor/ftth-import-nap-view-cb99` (commit `bd0183e`)
 > - `20260716140000_wisp_external_integrations` → rama `cursor/external-integrations-codi-cb99` (commit `676c495`)
 > - `20260716153000_tower_onboarding_profiles_rls` → rama `cursor/external-integrations-codi-cb99` (commit `57af6bf`)
-> - `20260716200000_multi_tenant_foundation` → rama `cursor/multi-tenant-foundation-cb99` (commit `e2528d4`)
 >
-> El conteo de 34 es el del repo integrado; se normaliza cuando esas ramas se
-> mergeen a `main`.
+> Ya normalizadas en `main`: `20260716081000_tower_onboarding_profiles` (`838f541`)
+> y `20260716200000_multi_tenant_foundation` (merge `47fdb3c`).
 
 ### Reconciliación 2026-07-16 · noche (multi-tenant)
 
@@ -148,11 +166,30 @@ columnas ni datos. (Tabla vacía al aplicar: 0 filas.)
   sin cifrar; quedan legibles para cualquiera con la service_role key o acceso a la
   DB, y en los backups. Evaluar Supabase Vault (`vault.create_secret`) o mover las
   credenciales a variables de entorno del backend. Ver `docs/runbooks/SECRET_ROTATION_RUNBOOK.md`.
-- **Registro huérfano `20260619033952`**: está en el historial remoto pero **no
-  tiene archivo local**. Casi seguro es el vestigio de la migración de
-  config_snapshots antes de renombrarla a `20260708070000` en el repo. Se deja
-  intacto (borrar historial de migraciones es riesgoso); reconciliar cuando se
-  confirme su origen (añadir archivo espejo o depurar el registro con autorización).
+- **Registro huérfano `20260619033952` — ORIGEN CONFIRMADO (2026-07-16), inocuo.**
+  Está en el historial remoto y no tiene archivo en ninguna rama. **La hipótesis
+  previa era errónea**: no era el vestigio de config_snapshots. Su nombre real es
+  `mikrotik_routers_reconciliation_strict_db1` y el registro **conserva sus
+  `statements`**, lo que permitió identificarlo con certeza:
+
+  ```sql
+  select name, statements from supabase_migrations.schema_migrations
+   where version = '20260619033952';
+  ```
+
+  Su SQL es **byte a byte idéntico** (normalizando comentarios y espacios) al de
+  `20260618000000_mikrotik_routers_reconciliation.sql`: las mismas 10 columnas
+  `ADD COLUMN IF NOT EXISTS` sobre `mikrotik_routers` y los mismos 4 índices. Es
+  una aplicación ad-hoc del mismo contrato "strict DB-1" hecha el 2026-06-19 vía
+  Studio/API (por eso guardó `statements`, cosa que `psql` no hace), en paralelo
+  al archivo del repo, que se registró con su propia versión `20260618000000`.
+
+  **Impacto: ninguno.** El SQL es aditivo e idempotente y ya está aplicado
+  (verificado: las 10/10 columnas existen). El duplicado solo ocupa una fila del
+  historial. **Se deja intacto a propósito**: borrar historial de migraciones es
+  riesgoso y aquí no aporta nada. Si algún día molesta el descuadre de conteo
+  (35 registros vs 34 archivos), la opción segura es añadir un archivo espejo
+  vacío/idempotente, no borrar la fila.
 - **`inventory_items` NO tiene drift**: por diseño usa `warehouse` (TEXT, el nombre
   del almacén), no `warehouse_id` FK (ver `20260622000000_inventory_schema.sql`
   y `backend/domains/inventory/`). El remoto ya coincide con el modelo del código.
@@ -161,7 +198,8 @@ columnas ni datos. (Tabla vacía al aplicar: 0 filas.)
   contradictorias (monitoreo en init vs provisioning en `20260605000000`). Se
   resolvió con la migración evolutiva `20260618000000_mikrotik_routers_reconciliation`
   (`ADD COLUMN IF NOT EXISTS`). Hoy `20260605000000` está aplicada y
-  `USE_DB_MIKROTIK=true` opera en staging.
+  `USE_DB_MIKROTIK=true` opera en staging. (El huérfano `20260619033952` es una
+  aplicación duplicada de esta misma reconciliación; ver arriba.)
 
 ## Reproducir / verificar (solo `psql`, no REST)
 
@@ -170,8 +208,23 @@ set -a; . ./.env; set +a
 export PGHOST=aws-1-us-west-1.pooler.supabase.com PGPORT=5432 \
   PGUSER="postgres.${SUPABASE_PROJECT_REF}" PGDATABASE=postgres \
   PGPASSWORD="$SUPABASE_DB_PASSWORD" PGSSLMODE=require
+
+# Historial aplicado
 psql -tA -c "select version, name from supabase_migrations.schema_migrations order by version;"
+
+# Ninguna tabla de public sin RLS (debe salir vacío)
+psql -tA -c "select relname from pg_class c
+  join pg_namespace n on n.oid = c.relnamespace
+ where n.nspname='public' and c.relkind='r' and not c.relrowsecurity;"
+
+# Ninguna política que abra acceso a anon/authenticated
+# (solo debe aparecer inventory_config_snapshots_deny_all, que es USING (false))
+psql -c "select tablename, policyname, qual from pg_policies
+ where schemaname='public' and ('anon' = any(roles) or 'authenticated' = any(roles));"
 ```
+
+Para el barrido de pendientes sobre **todas** las ramas, ver "Cómo se verificó"
+arriba: comparar solo el working tree da falsos negativos.
 
 > El CLI `supabase` instalado (2.67.1) está roto localmente por la clave
 > `db.health_timeout` (inválida para esa versión) en `supabase/config.toml`; por eso
