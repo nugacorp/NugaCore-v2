@@ -1,4 +1,4 @@
-import React, { useState } from 'react';
+import React, { useEffect, useMemo, useState } from 'react';
 import { 
   Radio, 
   Plus, 
@@ -9,8 +9,11 @@ import {
   Map as MapIcon,
   Cable,
   AlertTriangle,
+  Link2,
+  CalendarClock,
+  ListChecks,
 } from 'lucide-react';
-import { Tower, OltFTTH, OnuFTTH, Client, NapBox, MikrotikRouterView } from '../types';
+import { Tower, OltFTTH, OnuFTTH, Client, NapBox, MikrotikRouterView, TowerOnboardingProfile } from '../types';
 import WispSitesMap from './gis/WispSitesMap';
 import LocationPinPicker from './gis/LocationPinPicker';
 
@@ -27,6 +30,7 @@ interface NetworkModuleProps {
   onCreateMikrotikRouter: (routerData: Record<string, unknown>) => Promise<MikrotikRouterView>;
   onLinkRouterToTower: (routerId: string, towerId: string) => Promise<void>;
   onSaveTowerOnboarding: (towerId: string, onboarding: Record<string, unknown>) => Promise<void>;
+  getAuthHeaders?: () => Promise<Record<string, string>>;
 }
 
 export default function NetworkModule({ 
@@ -42,6 +46,7 @@ export default function NetworkModule({
   onCreateMikrotikRouter,
   onLinkRouterToTower,
   onSaveTowerOnboarding,
+  getAuthHeaders,
 }: NetworkModuleProps) {
   const [activeSubTab, setActiveSubTab] = useState<'towers' | 'ftth'>('towers');
   const [showCoverage, setShowCoverage] = useState(true);
@@ -69,6 +74,63 @@ export default function NetworkModule({
   const [newRouterConnectionType, setNewRouterConnectionType] = useState<'wireguard' | 'direct'>('wireguard');
   const [billingCycleDay, setBillingCycleDay] = useState<string>('');
   const [billingCycleTime, setBillingCycleTime] = useState<string>('');
+  const [onboardingByTower, setOnboardingByTower] = useState<Record<string, TowerOnboardingProfile>>({});
+
+  useEffect(() => {
+    let cancelled = false;
+    (async () => {
+      if (towers.length === 0) {
+        if (!cancelled) setOnboardingByTower({});
+        return;
+      }
+      const entries = await Promise.all(
+        towers.map(async (tower) => {
+          try {
+            const headers = (await getAuthHeaders?.()) ?? {};
+            const res = await fetch(`/api/network-towers/${encodeURIComponent(tower.id)}/onboarding`, { headers });
+            if (!res.ok) return [tower.id, null] as const;
+            return [tower.id, (await res.json()) as TowerOnboardingProfile] as const;
+          } catch {
+            return [tower.id, null] as const;
+          }
+        }),
+      );
+      if (cancelled) return;
+      const next: Record<string, TowerOnboardingProfile> = {};
+      for (const [towerId, profile] of entries) {
+        if (profile) next[towerId] = profile;
+      }
+      setOnboardingByTower(next);
+    })();
+    return () => {
+      cancelled = true;
+    };
+  }, [towers, getAuthHeaders]);
+
+  const onboardingSteps = useMemo(() => {
+    if (!enableTowerOnboarding) return [] as Array<{ label: string; done: boolean }>;
+    const hasRouterLinked =
+      (onboardRouterMode === 'existing' && Boolean(selectedRouterId)) ||
+      (onboardRouterMode === 'new' && Boolean(newRouterName.trim())) ||
+      onboardRouterMode === 'none';
+    return [
+      { label: 'Zona definida', done: Boolean(formTowerZone.trim() || formTowerName.trim()) },
+      { label: 'Router', done: hasRouterLinked },
+      { label: 'Facturación (día/hora)', done: Boolean(billingCycleDay && billingCycleTime) },
+      { label: 'GPS validado', done: Number.isFinite(formTowerLat) && Number.isFinite(formTowerLng) },
+    ];
+  }, [
+    enableTowerOnboarding,
+    onboardRouterMode,
+    selectedRouterId,
+    newRouterName,
+    billingCycleDay,
+    billingCycleTime,
+    formTowerZone,
+    formTowerName,
+    formTowerLat,
+    formTowerLng,
+  ]);
 
   // Script copy state
   const [scriptCopied, setScriptCopied] = useState(false);
@@ -177,13 +239,17 @@ export default function NetworkModule({
         }
 
         try {
-          await onSaveTowerOnboarding(createdTower.id, {
+          const savedProfile = {
+            towerId: createdTower.id,
             zoneName,
             billingCycleDay: billingCycleDay ? Number(billingCycleDay) : undefined,
             billingCycleTime: billingCycleTime || undefined,
             routerId: linkedRouterId,
             routerName: linkedRouterName,
-          });
+            updatedAt: new Date().toISOString(),
+          } satisfies TowerOnboardingProfile;
+          await onSaveTowerOnboarding(createdTower.id, savedProfile);
+          setOnboardingByTower((prev) => ({ ...prev, [createdTower.id]: savedProfile }));
           if (!billingCycleDay || !billingCycleTime) {
             warnings.push('Onboarding: no configuraste fecha/hora de facturación de zona (opcional).');
           }
@@ -401,6 +467,39 @@ export default function NetworkModule({
                           Offline
                         </span>
                       )}
+                    </div>
+                  </div>
+
+                  {/* Auditoría rápida onboarding */}
+                  <div className="mt-4 rounded-xl border border-indigo-900/40 bg-indigo-950/20 p-3 space-y-2" id={`tower-onboarding-audit-${tower.id}`}>
+                    <div className="flex items-center justify-between">
+                      <span className="text-[10px] text-indigo-300 font-mono uppercase tracking-wide flex items-center gap-1.5">
+                        <ListChecks className="w-3.5 h-3.5" />
+                        Onboarding / auditoría
+                      </span>
+                      <span className="text-[9px] text-slate-500 font-mono">
+                        {onboardingByTower[tower.id]?.updatedAt ? new Date(onboardingByTower[tower.id].updatedAt as string).toLocaleString() : 'Sin perfil'}
+                      </span>
+                    </div>
+                    <div className="grid grid-cols-1 gap-1 text-[10px] font-mono">
+                      <div className="flex justify-between">
+                        <span className="text-slate-400 flex items-center gap-1"><Link2 className="w-3 h-3" /> Router vinculado</span>
+                        <span className="text-slate-200">
+                          {onboardingByTower[tower.id]?.routerName || onboardingByTower[tower.id]?.routerId || 'No definido'}
+                        </span>
+                      </div>
+                      <div className="flex justify-between">
+                        <span className="text-slate-400 flex items-center gap-1"><CalendarClock className="w-3 h-3" /> Facturación zona</span>
+                        <span className="text-slate-200">
+                          {onboardingByTower[tower.id]?.billingCycleDay && onboardingByTower[tower.id]?.billingCycleTime
+                            ? `Día ${onboardingByTower[tower.id].billingCycleDay} · ${onboardingByTower[tower.id].billingCycleTime}`
+                            : 'No definida'}
+                        </span>
+                      </div>
+                      <div className="flex justify-between">
+                        <span className="text-slate-500">Zona</span>
+                        <span className="text-slate-300">{onboardingByTower[tower.id]?.zoneName || 'Sin zona'}</span>
+                      </div>
                     </div>
                   </div>
 
@@ -921,6 +1020,26 @@ export default function NetworkModule({
                 <p className="text-[10px] text-slate-500">
                   No bloquea la creación. Si algo falta, solo se mostrará advertencia.
                 </p>
+
+                {enableTowerOnboarding && onboardingSteps.length > 0 && (
+                  <div id="tower-onboarding-stepper" className="grid grid-cols-2 md:grid-cols-4 gap-2">
+                    {onboardingSteps.map((step) => (
+                      <div
+                        key={step.label}
+                        className={`rounded-lg border px-2 py-1.5 text-[10px] font-mono ${
+                          step.done
+                            ? 'border-emerald-600/50 bg-emerald-900/20 text-emerald-300'
+                            : 'border-slate-700 bg-slate-900 text-slate-500'
+                        }`}
+                      >
+                        <div className="flex items-center justify-between gap-2">
+                          <span>{step.label}</span>
+                          <span>{step.done ? '✓' : '•'}</span>
+                        </div>
+                      </div>
+                    ))}
+                  </div>
+                )}
 
                 {enableTowerOnboarding && (
                   <div className="space-y-3">
