@@ -314,6 +314,85 @@ router.get('/api/naps', requireRoles(READ_ROLES), asyncHandler(async (_req, res)
   res.json(await getFtthService().listNaps());
 }));
 
+router.get('/api/naps/:id', requireRoles(READ_ROLES), asyncHandler(async (req, res) => {
+  const nap = await getFtthService().getNap(req.params.id);
+  if (!nap) return res.status(404).json({ error: 'NAP not found' });
+  res.json(nap);
+}));
+
+router.put('/api/naps/:id/ports/:num', requireRoles(['super admin', 'administrador', 'tecnico']), asyncHandler(async (req, res) => {
+  const portNum = Number(req.params.num);
+  if (!Number.isFinite(portNum) || portNum < 1) {
+    return res.status(400).json({ error: 'Invalid port number' });
+  }
+  const nap = await getFtthService().updateNapPort(req.params.id, portNum, {
+    status: req.body.status,
+    client: req.body.client,
+    continuesToNapId: req.body.continuesToNapId,
+    continuesToThread: req.body.continuesToThread != null ? Number(req.body.continuesToThread) : undefined,
+  });
+  if (!nap) return res.status(404).json({ error: 'NAP or port not found' });
+  res.json(nap);
+}));
+
+router.get('/api/ftth/segments', requireRoles(READ_ROLES), asyncHandler(async (_req, res) => {
+  res.json(await getFtthService().listFiberSegments());
+}));
+
+router.post('/api/ftth/segments', requireRoles(['super admin', 'administrador', 'tecnico']), asyncHandler(async (req, res) => {
+  const body = req.body || {};
+  const id = String(body.id || `SEG-${Date.now()}`);
+  const segment = await getFtthService().createFiberSegment({
+    id,
+    name: String(body.name || id),
+    fromRef: body.fromRef ? String(body.fromRef) : body.from_id ? String(body.from_id) : undefined,
+    toRef: body.toRef ? String(body.toRef) : body.to_id ? String(body.to_id) : undefined,
+    fromLabel: String(body.fromLabel || body.from_label || ''),
+    toLabel: String(body.toLabel || body.to_label || ''),
+    segmentType: body.segmentType || body.segment_type || 'feeder',
+    threadCount: Math.max(1, Number(body.threadCount || body.thread_count || 12) || 12),
+    coordinates: Array.isArray(body.coordinates) ? body.coordinates : [],
+    napId: body.napId ? String(body.napId) : body.nap_id ? String(body.nap_id) : undefined,
+    ponPort: body.ponPort ? String(body.ponPort) : body.pon_port ? String(body.pon_port) : undefined,
+    notes: body.notes ? String(body.notes) : undefined,
+  });
+  res.status(201).json(segment);
+}));
+
+router.delete('/api/ftth/segments/:id', requireRoles(['super admin', 'administrador']), asyncHandler(async (req, res) => {
+  await getFtthService().deleteFiberSegment(req.params.id);
+  res.status(204).send();
+}));
+
+router.post('/api/ftth/import/preview', requireRoles(READ_ROLES), asyncHandler(async (req, res) => {
+  const body = req.body || {};
+  const format = body.format as 'csv-naps' | 'csv-segments' | 'geojson' | 'mixed';
+  res.json(
+    getFtthService().previewImport({
+      format,
+      napsCsv: body.napsCsv,
+      segmentsCsv: body.segmentsCsv,
+      geojson: body.geojson,
+    }),
+  );
+}));
+
+router.post('/api/ftth/import', requireRoles(['super admin', 'administrador', 'tecnico']), asyncHandler(async (req, res) => {
+  const body = req.body || {};
+  const format = body.format as 'csv-naps' | 'csv-segments' | 'geojson' | 'mixed';
+  const result = await getFtthService().importBatch({
+    format,
+    napsCsv: body.napsCsv,
+    segmentsCsv: body.segmentsCsv,
+    geojson: body.geojson,
+    dryRun: Boolean(body.dryRun),
+  });
+  if (result.errors.length > 0) {
+    return res.status(400).json(result);
+  }
+  res.status(201).json(result);
+}));
+
 router.post('/api/onu/provision', requireRoles(['super admin', 'administrador', 'tecnico']), asyncHandler(async (req, res) => {
   const { clientId, oltId, port, mac, brand, model, napId, napPort } = req.body;
   const client = clientId ? await getCustomersService().getById(String(clientId)) : null;

@@ -1,53 +1,29 @@
-import React, { useEffect, useMemo, useState } from 'react';
+import React, { useMemo, useState } from 'react';
 import { Cable, Plus, Route, Trash2 } from 'lucide-react';
-import type { NapBox, OltFTTH } from '../../types';
-
-const STORAGE_KEY = 'nugacore.ftth.fiberRoutes.v1';
-
-export interface FiberRouteDraft {
-  id: string;
-  name: string;
-  threadCount: number;
-  fromLabel: string;
-  toLabel: string;
-  napId?: string;
-  ponPort?: string;
-  notes?: string;
-}
+import type { FiberSegment, NapBox, OltFTTH } from '../../types';
 
 interface FtthInfrastructurePanelProps {
   naps: NapBox[];
   olts: OltFTTH[];
+  segments: FiberSegment[];
+  onSegmentsChange?: () => void;
 }
 
-function readRoutes(): FiberRouteDraft[] {
-  try {
-    const raw = localStorage.getItem(STORAGE_KEY);
-    if (!raw) return [];
-    const parsed = JSON.parse(raw) as FiberRouteDraft[];
-    return Array.isArray(parsed) ? parsed : [];
-  } catch {
-    return [];
-  }
-}
-
-/** Panel para dibujar / registrar tramos de fibra y hilos (borrador local hasta API OLT). */
-export default function FtthInfrastructurePanel({ naps, olts }: FtthInfrastructurePanelProps) {
-  const [routes, setRoutes] = useState<FiberRouteDraft[]>(() => readRoutes());
+/** Panel para registrar tramos de fibra vía API (sin localStorage). */
+export default function FtthInfrastructurePanel({
+  naps,
+  olts,
+  segments,
+  onSegmentsChange,
+}: FtthInfrastructurePanelProps) {
   const [name, setName] = useState('');
   const [threadCount, setThreadCount] = useState(12);
   const [fromLabel, setFromLabel] = useState('');
   const [toLabel, setToLabel] = useState('');
   const [napId, setNapId] = useState('');
   const [ponPort, setPonPort] = useState('');
-
-  useEffect(() => {
-    try {
-      localStorage.setItem(STORAGE_KEY, JSON.stringify(routes));
-    } catch {
-      /* ignore quota */
-    }
-  }, [routes]);
+  const [busy, setBusy] = useState(false);
+  const [error, setError] = useState<string | null>(null);
 
   const ponSummary = useMemo(() => {
     const byPon = new Map<string, { naps: number; total: number; free: number; used: number }>();
@@ -69,29 +45,60 @@ export default function FtthInfrastructurePanel({ naps, olts }: FtthInfrastructu
     return [...byPon.entries()].map(([pon, stats]) => ({ pon, ...stats }));
   }, [naps]);
 
-  const addRoute = () => {
+  const addRoute = async () => {
     const trimmed = name.trim();
     if (!trimmed || !fromLabel.trim() || !toLabel.trim()) return;
     const nap = naps.find((n) => n.id === napId);
-    setRoutes((prev) => [
-      {
-        id: `fr-${Date.now()}`,
-        name: trimmed,
-        threadCount: Math.max(1, Number(threadCount) || 1),
-        fromLabel: fromLabel.trim(),
-        toLabel: toLabel.trim(),
-        napId: napId || undefined,
-        ponPort: ponPort || nap?.ponPort || undefined,
-      },
-      ...prev,
-    ]);
-    setName('');
-    setFromLabel('');
-    setToLabel('');
+    setBusy(true);
+    setError(null);
+    try {
+      const coords: Array<[number, number]> = [];
+      if (nap && Number.isFinite(nap.lat) && Number.isFinite(nap.lng)) {
+        coords.push([nap.lat, nap.lng]);
+      }
+      const res = await fetch('/api/ftth/segments', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          name: trimmed,
+          threadCount: Math.max(1, Number(threadCount) || 1),
+          fromLabel: fromLabel.trim(),
+          toLabel: toLabel.trim(),
+          napId: napId || undefined,
+          ponPort: ponPort || nap?.ponPort || undefined,
+          coordinates: coords,
+          segmentType: 'feeder',
+        }),
+      });
+      if (!res.ok) {
+        const body = await res.json().catch(() => ({}));
+        throw new Error((body as { error?: string }).error || `HTTP ${res.status}`);
+      }
+      setName('');
+      setFromLabel('');
+      setToLabel('');
+      onSegmentsChange?.();
+    } catch (e) {
+      setError(e instanceof Error ? e.message : 'No se pudo registrar el tramo');
+    } finally {
+      setBusy(false);
+    }
   };
 
-  const removeRoute = (id: string) => {
-    setRoutes((prev) => prev.filter((r) => r.id !== id));
+  const removeRoute = async (id: string) => {
+    setBusy(true);
+    setError(null);
+    try {
+      const res = await fetch(`/api/ftth/segments/${encodeURIComponent(id)}`, { method: 'DELETE' });
+      if (!res.ok && res.status !== 204) {
+        throw new Error(`HTTP ${res.status}`);
+      }
+      onSegmentsChange?.();
+    } catch (e) {
+      setError(e instanceof Error ? e.message : 'No se pudo eliminar el tramo');
+    } finally {
+      setBusy(false);
+    }
   };
 
   return (
@@ -105,9 +112,8 @@ export default function FtthInfrastructurePanel({ naps, olts }: FtthInfrastructu
           Infraestructura de fibra
         </h3>
         <p className="text-[11px] text-slate-500 font-mono mt-1 leading-snug">
-          Registra por dónde corre el feeder, hilos totales y a qué NAP/PON llega.
-          Capacidad libre se calcula de las NAP reales; atenuación/potencia live llega cuando la OLT
-          esté conectada por SNMP/API ({olts.length} OLT en inventario).
+          Tramos persistidos en API. Capacidad libre desde NAPs reales; potencia live cuando la OLT
+          esté conectada ({olts.length} OLT en inventario).
         </p>
       </div>
 
@@ -197,21 +203,24 @@ export default function FtthInfrastructurePanel({ naps, olts }: FtthInfrastructu
       <button
         type="button"
         id="ftth-add-fiber-route"
-        onClick={addRoute}
-        className="inline-flex items-center gap-2 rounded-xl bg-emerald-700 hover:bg-emerald-600 px-4 py-2 text-xs font-semibold text-white transition"
+        disabled={busy}
+        onClick={() => void addRoute()}
+        className="inline-flex items-center gap-2 rounded-xl bg-emerald-700 hover:bg-emerald-600 px-4 py-2 text-xs font-semibold text-white transition disabled:opacity-50"
       >
         <Plus className="w-3.5 h-3.5" />
         Registrar tramo de fibra
       </button>
 
+      {error && <p className="text-[11px] text-rose-400 font-mono">{error}</p>}
+
       <div className="space-y-2 max-h-56 overflow-y-auto">
-        {routes.length === 0 ? (
+        {segments.length === 0 ? (
           <p className="text-[11px] text-slate-600 font-mono flex items-center gap-2">
             <Cable className="w-3.5 h-3.5" />
-            Sin tramos aún. Agrega el recorrido de tu planta óptica.
+            Sin tramos aún. Agrega el recorrido o importa CSV/GeoJSON.
           </p>
         ) : (
-          routes.map((r) => (
+          segments.map((r) => (
             <div
               key={r.id}
               className="flex items-start justify-between gap-2 rounded-xl border border-slate-800 bg-slate-900/50 px-3 py-2 font-mono text-[11px]"
@@ -221,12 +230,14 @@ export default function FtthInfrastructurePanel({ naps, olts }: FtthInfrastructu
                 <p className="text-slate-500 truncate">
                   {r.fromLabel} → {r.toLabel} · {r.threadCount} hilos
                   {r.ponPort ? ` · PON ${r.ponPort}` : ''}
+                  {r.coordinates.length > 0 ? ` · ${r.coordinates.length} pts` : ''}
                 </p>
               </div>
               <button
                 type="button"
-                onClick={() => removeRoute(r.id)}
-                className="p-1.5 rounded-lg text-slate-500 hover:text-rose-300 hover:bg-rose-950/40"
+                disabled={busy}
+                onClick={() => void removeRoute(r.id)}
+                className="p-1.5 rounded-lg text-slate-500 hover:text-rose-300 hover:bg-rose-950/40 disabled:opacity-40"
                 aria-label={`Eliminar tramo ${r.name}`}
               >
                 <Trash2 className="w-3.5 h-3.5" />

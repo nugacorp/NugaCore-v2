@@ -10,8 +10,9 @@ import {
   ZoomControl,
 } from 'react-leaflet';
 import L, { type LatLngExpression, type LatLngTuple } from 'leaflet';
-import { AlertTriangle, Cpu, Database, Users, X } from 'lucide-react';
-import type { Client, NapBox, OnuFTTH } from '../../types';
+import { AlertTriangle, Cpu, Users, X } from 'lucide-react';
+import type { Client, FiberSegment, NapBox, OnuFTTH } from '../../types';
+import NapInternalView from './NapInternalView';
 import 'leaflet/dist/leaflet.css';
 
 export type FtthSelection =
@@ -24,12 +25,23 @@ interface GisLeafletMapProps {
   clients: Client[];
   naps: NapBox[];
   onus: OnuFTTH[];
+  fiberSegments?: FiberSegment[];
   showNapCoverage: boolean;
   showDropLines: boolean;
   dynamicFiberCut: boolean;
   highAttenuationSim: boolean;
   centralOffice: { id: string; name: string; lat: number; lng: number; capacity: string };
   splices: Array<{ id: string; name: string; lat: number; lng: number }>;
+  onPortUpdate?: (
+    napId: string,
+    portNum: number,
+    patch: {
+      status?: 'free' | 'occupied';
+      client?: string;
+      continuesToNapId?: string;
+      continuesToThread?: number;
+    },
+  ) => Promise<void>;
 }
 
 const validPoint = (lat: number, lng: number): boolean =>
@@ -85,12 +97,14 @@ export default function GisLeafletMap({
   clients,
   naps,
   onus,
+  fiberSegments = [],
   showNapCoverage,
   showDropLines,
   dynamicFiberCut,
   highAttenuationSim,
   centralOffice,
   splices,
+  onPortUpdate,
 }: GisLeafletMapProps) {
   const [selection, setSelection] = useState<FtthSelection>(null);
 
@@ -112,9 +126,14 @@ export default function GisLeafletMap({
     for (const n of naps) if (validPoint(n.lat, n.lng)) pts.push([n.lat, n.lng]);
     for (const c of ftthClients) pts.push([c.lat, c.lng]);
     for (const s of splices) if (validPoint(s.lat, s.lng)) pts.push([s.lat, s.lng]);
+    for (const seg of fiberSegments) {
+      for (const [lat, lng] of seg.coordinates) {
+        if (validPoint(lat, lng)) pts.push([lat, lng]);
+      }
+    }
     if (pts.length === 0) pts.push([19.4326, -99.1332]);
     return pts;
-  }, [naps, ftthClients, splices, centralOffice]);
+  }, [naps, ftthClients, splices, centralOffice, fiberSegments]);
 
   const dropLines = useMemo(() => {
     if (!showDropLines) return [] as Array<{ key: string; positions: LatLngTuple[]; offline: boolean }>;
@@ -161,46 +180,70 @@ export default function GisLeafletMap({
         <FitDataBounds points={boundsPoints} />
         <InvalidateOnResize />
 
+        {fiberSegments.map((seg) => {
+          const positions = seg.coordinates
+            .filter(([lat, lng]) => validPoint(lat, lng))
+            .map(([lat, lng]) => [lat, lng] as LatLngTuple);
+          if (positions.length < 2) return null;
+          const isFeeder = seg.segmentType === 'feeder';
+          return (
+            <Polyline
+              key={`seg-${seg.id}`}
+              positions={positions}
+              pathOptions={{
+                color: isFeeder ? backboneColor : trunkColor,
+                weight: isFeeder ? 4 : 2.5,
+                opacity: 0.88,
+                dashArray: seg.segmentType === 'drop' ? '4 4' : undefined,
+              }}
+            />
+          );
+        })}
+
         {splices.map((sp) =>
           validPoint(sp.lat, sp.lng) ? (
             <React.Fragment key={`bb-${sp.id}`}>
-              <Polyline
-                positions={[
-                  [centralOffice.lat, centralOffice.lng],
-                  [sp.lat, sp.lng],
-                ]}
-                pathOptions={{
-                  color: backboneColor,
-                  weight: dynamicFiberCut ? 3 : 5,
-                  opacity: dynamicFiberCut ? 0.55 : 0.92,
-                  lineCap: 'round',
-                }}
-              />
+              {validPoint(centralOffice.lat, centralOffice.lng) && (
+                <Polyline
+                  positions={[
+                    [centralOffice.lat, centralOffice.lng],
+                    [sp.lat, sp.lng],
+                  ]}
+                  pathOptions={{
+                    color: backboneColor,
+                    weight: dynamicFiberCut ? 3 : 5,
+                    opacity: dynamicFiberCut ? 0.55 : 0.92,
+                    lineCap: 'round',
+                  }}
+                />
+              )}
               <Marker position={[sp.lat, sp.lng]} icon={spliceIcon()} />
             </React.Fragment>
           ) : null,
         )}
 
-        {naps.map((nap, index) => {
-          if (!validPoint(nap.lat, nap.lng)) return null;
-          const nearest = splices[index % Math.max(1, splices.length)];
-          if (!nearest || !validPoint(nearest.lat, nearest.lng)) return null;
-          return (
-            <Polyline
-              key={`trunk-${nap.id}`}
-              positions={[
-                [nearest.lat, nearest.lng],
-                [nap.lat, nap.lng],
-              ]}
-              pathOptions={{
-                color: trunkColor,
-                weight: 2.5,
-                opacity: 0.85,
-                dashArray: highAttenuationSim ? '6 4' : undefined,
-              }}
-            />
-          );
-        })}
+        {fiberSegments.length === 0 &&
+          splices.length > 0 &&
+          naps.map((nap, index) => {
+            if (!validPoint(nap.lat, nap.lng)) return null;
+            const nearest = splices[index % Math.max(1, splices.length)];
+            if (!nearest || !validPoint(nearest.lat, nearest.lng)) return null;
+            return (
+              <Polyline
+                key={`trunk-${nap.id}`}
+                positions={[
+                  [nearest.lat, nearest.lng],
+                  [nap.lat, nap.lng],
+                ]}
+                pathOptions={{
+                  color: trunkColor,
+                  weight: 2.5,
+                  opacity: 0.85,
+                  dashArray: highAttenuationSim ? '6 4' : undefined,
+                }}
+              />
+            );
+          })}
 
         {dropLines.map((line) => (
           <Polyline
@@ -283,52 +326,47 @@ export default function GisLeafletMap({
         </div>
       )}
 
-      {selection && (
-        <aside className="absolute bottom-3 right-3 z-[510] w-[260px] max-h-[55%] overflow-y-auto bg-white border border-slate-200 rounded-xl shadow-xl text-slate-700">
-          <div className="flex items-center justify-between px-3 py-2.5 border-b border-slate-100">
-            <div className="flex items-center gap-1.5 text-xs font-semibold">
-              {selection.type === 'olt' && <Cpu className="w-3.5 h-3.5 text-violet-600" />}
-              {selection.type === 'nap' && <Database className="w-3.5 h-3.5 text-emerald-600" />}
-              {selection.type === 'client' && <Users className="w-3.5 h-3.5 text-sky-600" />}
-              <span className="uppercase tracking-wide text-[10px] text-slate-500">{selection.type}</span>
+      {selection?.type === 'nap' ? (
+        <NapInternalView
+          nap={selection.data}
+          allNaps={naps}
+          onClose={() => setSelection(null)}
+          onPortUpdate={onPortUpdate}
+        />
+      ) : (
+        selection && (
+          <aside className="absolute bottom-3 right-3 z-[510] w-[260px] max-h-[55%] overflow-y-auto bg-white border border-slate-200 rounded-xl shadow-xl text-slate-700">
+            <div className="flex items-center justify-between px-3 py-2.5 border-b border-slate-100">
+              <div className="flex items-center gap-1.5 text-xs font-semibold">
+                {selection.type === 'olt' && <Cpu className="w-3.5 h-3.5 text-violet-600" />}
+                {selection.type === 'client' && <Users className="w-3.5 h-3.5 text-sky-600" />}
+                <span className="uppercase tracking-wide text-[10px] text-slate-500">{selection.type}</span>
+              </div>
+              <button type="button" onClick={() => setSelection(null)} className="text-slate-400 hover:text-slate-700">
+                <X className="w-3.5 h-3.5" />
+              </button>
             </div>
-            <button type="button" onClick={() => setSelection(null)} className="text-slate-400 hover:text-slate-700">
-              <X className="w-3.5 h-3.5" />
-            </button>
-          </div>
-          <div className="px-3 py-3 space-y-1.5 text-[11px] font-mono">
-            {selection.type === 'olt' && (
-              <>
-                <p className="font-sans font-semibold text-sm text-slate-900">{selection.data.name}</p>
-                <p>{selection.data.capacity}</p>
-                <p>
-                  {selection.data.lat.toFixed(5)}, {selection.data.lng.toFixed(5)}
-                </p>
-              </>
-            )}
-            {selection.type === 'nap' && (
-              <>
-                <p className="font-sans font-semibold text-sm text-slate-900">{selection.data.name}</p>
-                <p>PON {selection.data.ponPort || '—'} · Split {selection.data.splitRatio || '—'}</p>
-                <p>Cobertura {selection.data.coverageMeters}m</p>
-                <p>
-                  Fibras libres:{' '}
-                  <strong className={dynamicFiberCut ? 'text-rose-600' : 'text-emerald-600'}>
-                    {dynamicFiberCut ? '0 (corte)' : selection.data.fibersFree}
-                  </strong>
-                </p>
-              </>
-            )}
-            {selection.type === 'client' && (
-              <>
-                <p className="font-sans font-semibold text-sm text-slate-900">{selection.data.name}</p>
-                <p>FTTH · {selection.data.city}</p>
-                <p>IP {selection.data.ip || '—'}</p>
-                <p>Estatus {selection.data.status}</p>
-              </>
-            )}
-          </div>
-        </aside>
+            <div className="px-3 py-3 space-y-1.5 text-[11px] font-mono">
+              {selection.type === 'olt' && (
+                <>
+                  <p className="font-sans font-semibold text-sm text-slate-900">{selection.data.name}</p>
+                  <p>{selection.data.capacity}</p>
+                  <p>
+                    {selection.data.lat.toFixed(5)}, {selection.data.lng.toFixed(5)}
+                  </p>
+                </>
+              )}
+              {selection.type === 'client' && (
+                <>
+                  <p className="font-sans font-semibold text-sm text-slate-900">{selection.data.name}</p>
+                  <p>FTTH · {selection.data.city}</p>
+                  <p>IP {selection.data.ip || '—'}</p>
+                  <p>Estatus {selection.data.status}</p>
+                </>
+              )}
+            </div>
+          </aside>
+        )
       )}
 
       <style>{`
