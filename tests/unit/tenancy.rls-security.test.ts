@@ -10,16 +10,24 @@ const migrationPath = resolve(
 describe('Multi-tenant migration security invariants', () => {
   const sql = readFileSync(migrationPath, 'utf8');
 
-  it('is_tenant_member no lee user_metadata (escalada de privilegios)', () => {
-    expect(sql).not.toMatch(/user_metadata/);
-    expect(sql).toMatch(/tenant_memberships/);
-    expect(sql).toMatch(/CREATE OR REPLACE FUNCTION public\.is_tenant_member/);
+  /** Cuerpo de is_tenant_member (entre AS $$ y $$;) — sin comentarios de cabecera. */
+  const functionBody = (() => {
+    const match = sql.match(
+      /CREATE OR REPLACE FUNCTION public\.is_tenant_member[\s\S]*?AS \$\$([\s\S]*?)\$\$;/,
+    );
+    return match?.[1] ?? '';
+  })();
+
+  it('is_tenant_member solo usa memberships (sin claims JWT)', () => {
+    expect(functionBody).toMatch(/tenant_memberships/);
+    expect(functionBody).not.toMatch(/user_metadata/);
+    expect(functionBody).not.toMatch(/app_metadata/);
+    expect(functionBody).not.toMatch(/auth\.jwt\s*\(/);
   });
 
   it('no abre políticas authenticated FOR ALL sobre SSOT', () => {
     expect(sql).not.toMatch(/FOR ALL TO authenticated/i);
     expect(sql).not.toMatch(/_authenticated_tenant/i);
-    // service_role documentado sí
     expect(sql).toMatch(/clients_service_role/);
     expect(sql).toMatch(/invoices_service_role/);
   });
