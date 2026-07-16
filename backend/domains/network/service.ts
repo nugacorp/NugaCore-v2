@@ -4,6 +4,18 @@ import { store, type NetworkSector } from '../../state/store';
 import { isSupabaseAdminConfigured, supabaseAdmin } from '../../services/supabase-admin';
 import { logger } from '../../common/logger';
 
+export interface TowerOnboardingProfile {
+  towerId: string;
+  zoneName?: string;
+  billingCycleDay?: number;
+  billingCycleTime?: string;
+  routerId?: string;
+  routerName?: string;
+  updatedAt?: string;
+}
+
+const towerOnboardingMemory = new Map<string, TowerOnboardingProfile>();
+
 export class NetworkService {
   private useDb = isDomainOnDb('network') && isSupabaseAdminConfigured && Boolean(supabaseAdmin);
 
@@ -54,6 +66,71 @@ export class NetworkService {
       return (data ?? []).map(this.rowToSector);
     }
     return store.NETWORK_SECTORS.filter((s) => !filters?.towerId || s.towerId === filters.towerId);
+  }
+
+  async getTowerOnboarding(towerId: string): Promise<TowerOnboardingProfile | null> {
+    if (this.useDb) {
+      const { data, error } = await this.admin
+        .from('tower_onboarding_profiles')
+        .select('*')
+        .eq('tower_id', towerId)
+        .maybeSingle();
+      if (error) throw error;
+      if (!data) return null;
+      return {
+        towerId: String(data.tower_id),
+        zoneName: data.zone_name ? String(data.zone_name) : undefined,
+        billingCycleDay: data.billing_cycle_day != null ? Number(data.billing_cycle_day) : undefined,
+        billingCycleTime: data.billing_cycle_time ? String(data.billing_cycle_time) : undefined,
+        routerId: data.router_id ? String(data.router_id) : undefined,
+        routerName: data.router_name ? String(data.router_name) : undefined,
+        updatedAt: data.updated_at ? String(data.updated_at) : undefined,
+      };
+    }
+    return towerOnboardingMemory.get(towerId) ?? null;
+  }
+
+  async upsertTowerOnboarding(
+    towerId: string,
+    payload: Omit<TowerOnboardingProfile, 'towerId' | 'updatedAt'>,
+  ): Promise<TowerOnboardingProfile> {
+    if (this.useDb) {
+      const record = {
+        tower_id: towerId,
+        zone_name: payload.zoneName ?? null,
+        billing_cycle_day: payload.billingCycleDay ?? null,
+        billing_cycle_time: payload.billingCycleTime ?? null,
+        router_id: payload.routerId ?? null,
+        router_name: payload.routerName ?? null,
+        updated_at: new Date().toISOString(),
+      };
+      const { data, error } = await this.admin
+        .from('tower_onboarding_profiles')
+        .upsert(record, { onConflict: 'tower_id' })
+        .select('*')
+        .single();
+      if (error) throw error;
+      return {
+        towerId: String(data.tower_id),
+        zoneName: data.zone_name ? String(data.zone_name) : undefined,
+        billingCycleDay: data.billing_cycle_day != null ? Number(data.billing_cycle_day) : undefined,
+        billingCycleTime: data.billing_cycle_time ? String(data.billing_cycle_time) : undefined,
+        routerId: data.router_id ? String(data.router_id) : undefined,
+        routerName: data.router_name ? String(data.router_name) : undefined,
+        updatedAt: data.updated_at ? String(data.updated_at) : undefined,
+      };
+    }
+    const profile: TowerOnboardingProfile = {
+      towerId,
+      zoneName: payload.zoneName,
+      billingCycleDay: payload.billingCycleDay,
+      billingCycleTime: payload.billingCycleTime,
+      routerId: payload.routerId,
+      routerName: payload.routerName,
+      updatedAt: new Date().toISOString(),
+    };
+    towerOnboardingMemory.set(towerId, profile);
+    return profile;
   }
 
   private rowToSector(row: Record<string, unknown>): NetworkSector {

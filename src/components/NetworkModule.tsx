@@ -10,7 +10,7 @@ import {
   Cable,
   AlertTriangle,
 } from 'lucide-react';
-import { Tower, OltFTTH, OnuFTTH, Client, NapBox } from '../types';
+import { Tower, OltFTTH, OnuFTTH, Client, NapBox, MikrotikRouterView } from '../types';
 import WispSitesMap from './gis/WispSitesMap';
 import LocationPinPicker from './gis/LocationPinPicker';
 
@@ -20,9 +20,13 @@ interface NetworkModuleProps {
   onus: OnuFTTH[];
   clients: Client[];
   naps: NapBox[];
+  provisionedRouters: MikrotikRouterView[];
   onToggleTower: (id: string) => Promise<void>;
   onProvisionOnu: (onuData: any) => Promise<void>;
-  onCreateTower: (towerData: any) => Promise<void>;
+  onCreateTower: (towerData: any) => Promise<Tower>;
+  onCreateMikrotikRouter: (routerData: Record<string, unknown>) => Promise<MikrotikRouterView>;
+  onLinkRouterToTower: (routerId: string, towerId: string) => Promise<void>;
+  onSaveTowerOnboarding: (towerId: string, onboarding: Record<string, unknown>) => Promise<void>;
 }
 
 export default function NetworkModule({ 
@@ -31,9 +35,13 @@ export default function NetworkModule({
   onus, 
   clients, 
   naps = [],
+  provisionedRouters,
   onToggleTower, 
   onProvisionOnu,
-  onCreateTower
+  onCreateTower,
+  onCreateMikrotikRouter,
+  onLinkRouterToTower,
+  onSaveTowerOnboarding,
 }: NetworkModuleProps) {
   const [activeSubTab, setActiveSubTab] = useState<'towers' | 'ftth'>('towers');
   const [showCoverage, setShowCoverage] = useState(true);
@@ -51,6 +59,16 @@ export default function NetworkModule({
   const [formTowerFreq, setFormTowerFreq] = useState('5800 Mhz');
   const [formTowerZone, setFormTowerZone] = useState('');
   const [towerCreateError, setTowerCreateError] = useState<string | null>(null);
+  const [towerCreateWarnings, setTowerCreateWarnings] = useState<string[]>([]);
+  const [towerOnboardingNotice, setTowerOnboardingNotice] = useState<string | null>(null);
+  const [enableTowerOnboarding, setEnableTowerOnboarding] = useState(true);
+  const [onboardRouterMode, setOnboardRouterMode] = useState<'existing' | 'new' | 'none'>('existing');
+  const [selectedRouterId, setSelectedRouterId] = useState('');
+  const [newRouterName, setNewRouterName] = useState('');
+  const [newRouterManagementIp, setNewRouterManagementIp] = useState('');
+  const [newRouterConnectionType, setNewRouterConnectionType] = useState<'wireguard' | 'direct'>('wireguard');
+  const [billingCycleDay, setBillingCycleDay] = useState<string>('');
+  const [billingCycleTime, setBillingCycleTime] = useState<string>('');
 
   // Script copy state
   const [scriptCopied, setScriptCopied] = useState(false);
@@ -99,6 +117,7 @@ export default function NetworkModule({
     e.preventDefault();
     if (!formTowerName) return;
     setTowerCreateError(null);
+    setTowerCreateWarnings([]);
     try {
       const zoneName = formTowerZone.trim() || `Zona ${formTowerName}`;
       const payload: Record<string, unknown> = {
@@ -118,7 +137,67 @@ export default function NetworkModule({
       } catch {
         // Ignore storage failures
       }
-      await onCreateTower(payload);
+      const createdTower = await onCreateTower(payload);
+      const warnings: string[] = [];
+
+      if (enableTowerOnboarding) {
+        let linkedRouterId: string | undefined;
+        let linkedRouterName: string | undefined;
+
+        if (onboardRouterMode === 'existing') {
+          if (selectedRouterId) {
+            const existing = provisionedRouters.find((r) => r.id === selectedRouterId);
+            linkedRouterName = existing?.name;
+            try {
+              await onLinkRouterToTower(selectedRouterId, createdTower.id);
+              linkedRouterId = selectedRouterId;
+            } catch (err) {
+              warnings.push(`Torre creada, pero no se pudo vincular router existente: ${err instanceof Error ? err.message : String(err)}`);
+            }
+          } else {
+            warnings.push('Onboarding: no seleccionaste router existente (opcional).');
+          }
+        } else if (onboardRouterMode === 'new') {
+          if (!newRouterName.trim()) {
+            warnings.push('Onboarding: faltó nombre del router nuevo (opcional).');
+          } else {
+            try {
+              const createdRouter = await onCreateMikrotikRouter({
+                name: newRouterName.trim(),
+                linkedTowerId: createdTower.id,
+                connectionType: newRouterConnectionType,
+                managementIp: newRouterConnectionType === 'direct' ? newRouterManagementIp.trim() : undefined,
+              });
+              linkedRouterId = createdRouter.id;
+              linkedRouterName = createdRouter.name;
+            } catch (err) {
+              warnings.push(`Torre creada, pero falló alta de router opcional: ${err instanceof Error ? err.message : String(err)}`);
+            }
+          }
+        }
+
+        try {
+          await onSaveTowerOnboarding(createdTower.id, {
+            zoneName,
+            billingCycleDay: billingCycleDay ? Number(billingCycleDay) : undefined,
+            billingCycleTime: billingCycleTime || undefined,
+            routerId: linkedRouterId,
+            routerName: linkedRouterName,
+          });
+          if (!billingCycleDay || !billingCycleTime) {
+            warnings.push('Onboarding: no configuraste fecha/hora de facturación de zona (opcional).');
+          }
+        } catch (err) {
+          warnings.push(`Torre creada, pero no se guardó onboarding: ${err instanceof Error ? err.message : String(err)}`);
+        }
+      }
+
+      setTowerCreateWarnings(warnings);
+      setTowerOnboardingNotice(
+        warnings.length > 0
+          ? `Torre ${createdTower.name} creada con advertencias de onboarding opcional.`
+          : `Torre ${createdTower.name} creada y onboarding aplicado.`,
+      );
       setFormTowerName('');
       setFormTowerZone('');
       setShowTowerModal(false);
@@ -173,6 +252,11 @@ export default function NetworkModule({
 
       {activeSubTab === 'towers' ? (
         <div className="space-y-6">
+          {towerOnboardingNotice && (
+            <div className="rounded-xl border border-amber-900/40 bg-amber-950/30 text-amber-200 px-4 py-2 text-xs font-mono">
+              {towerOnboardingNotice}
+            </div>
+          )}
           {/* Action Row for WISP Towers */}
           <div className="grid grid-cols-1 md:grid-cols-2 gap-5">
             {/* Form Trigger Box */}
@@ -789,6 +873,16 @@ export default function NetworkModule({
                 <span>{towerCreateError}</span>
               </div>
             )}
+            {towerCreateWarnings.length > 0 && (
+              <div className="flex items-start gap-2 bg-amber-950/40 border border-amber-900/50 rounded-xl px-3 py-2 text-xs text-amber-300 font-mono">
+                <AlertTriangle className="w-3.5 h-3.5 shrink-0 mt-0.5 text-amber-500" />
+                <div className="space-y-1">
+                  {towerCreateWarnings.map((w, idx) => (
+                    <p key={idx}>{w}</p>
+                  ))}
+                </div>
+              </div>
+            )}
 
             <form onSubmit={handleCreateTowerSubmit} className="space-y-4 text-xs font-mono">
               <div className="space-y-1">
@@ -812,6 +906,65 @@ export default function NetworkModule({
                   onChange={(e) => setFormTowerZone(e.target.value)}
                   className="w-full bg-slate-900 border border-slate-850 rounded-xl p-2.5 text-white"
                 />
+              </div>
+
+              <div className="rounded-2xl border border-slate-800 bg-slate-900/50 p-4 space-y-3">
+                <label className="flex items-center justify-between text-slate-300">
+                  <span className="font-semibold">Onboarding opcional de torre</span>
+                  <input
+                    type="checkbox"
+                    checked={enableTowerOnboarding}
+                    onChange={(e) => setEnableTowerOnboarding(e.target.checked)}
+                    className="rounded border-slate-700 bg-slate-900 text-indigo-500 focus:ring-0"
+                  />
+                </label>
+                <p className="text-[10px] text-slate-500">
+                  No bloquea la creación. Si algo falta, solo se mostrará advertencia.
+                </p>
+
+                {enableTowerOnboarding && (
+                  <div className="space-y-3">
+                    <div className="grid grid-cols-3 gap-2">
+                      <button type="button" onClick={() => setOnboardRouterMode('existing')} className={`rounded-lg px-2 py-1.5 text-[11px] border ${onboardRouterMode === 'existing' ? 'border-indigo-500 bg-indigo-500/10 text-indigo-300' : 'border-slate-700 text-slate-400'}`}>Router existente</button>
+                      <button type="button" onClick={() => setOnboardRouterMode('new')} className={`rounded-lg px-2 py-1.5 text-[11px] border ${onboardRouterMode === 'new' ? 'border-indigo-500 bg-indigo-500/10 text-indigo-300' : 'border-slate-700 text-slate-400'}`}>Router nuevo</button>
+                      <button type="button" onClick={() => setOnboardRouterMode('none')} className={`rounded-lg px-2 py-1.5 text-[11px] border ${onboardRouterMode === 'none' ? 'border-indigo-500 bg-indigo-500/10 text-indigo-300' : 'border-slate-700 text-slate-400'}`}>Sin router</button>
+                    </div>
+
+                    {onboardRouterMode === 'existing' && (
+                      <div className="space-y-1">
+                        <label className="text-slate-400">Vincular router existente</label>
+                        <select value={selectedRouterId} onChange={(e) => setSelectedRouterId(e.target.value)} className="w-full bg-slate-900 border border-slate-850 rounded-xl p-2.5 text-white">
+                          <option value="">-- Opcional: seleccionar router --</option>
+                          {provisionedRouters.map((router) => (
+                            <option key={router.id} value={router.id}>{router.name} · {router.managementIp || router.vpnIp || 'sin-ip'}</option>
+                          ))}
+                        </select>
+                      </div>
+                    )}
+
+                    {onboardRouterMode === 'new' && (
+                      <div className="grid grid-cols-1 md:grid-cols-3 gap-2">
+                        <input value={newRouterName} onChange={(e) => setNewRouterName(e.target.value)} placeholder="Nombre router" className="bg-slate-900 border border-slate-850 rounded-xl p-2.5 text-white" />
+                        <select value={newRouterConnectionType} onChange={(e) => setNewRouterConnectionType(e.target.value as 'wireguard' | 'direct')} className="bg-slate-900 border border-slate-850 rounded-xl p-2.5 text-white">
+                          <option value="wireguard">WireGuard</option>
+                          <option value="direct">Directo API</option>
+                        </select>
+                        <input value={newRouterManagementIp} onChange={(e) => setNewRouterManagementIp(e.target.value)} placeholder="IP gestión (solo directo)" className="bg-slate-900 border border-slate-850 rounded-xl p-2.5 text-white" />
+                      </div>
+                    )}
+
+                    <div className="grid grid-cols-2 gap-2">
+                      <div className="space-y-1">
+                        <label className="text-slate-400">Día de facturación zona (1-31)</label>
+                        <input type="number" min={1} max={31} value={billingCycleDay} onChange={(e) => setBillingCycleDay(e.target.value)} className="w-full bg-slate-900 border border-slate-850 rounded-xl p-2.5 text-white" />
+                      </div>
+                      <div className="space-y-1">
+                        <label className="text-slate-400">Hora de corte / corrida</label>
+                        <input type="time" value={billingCycleTime} onChange={(e) => setBillingCycleTime(e.target.value)} className="w-full bg-slate-900 border border-slate-850 rounded-xl p-2.5 text-white" />
+                      </div>
+                    </div>
+                  </div>
+                )}
               </div>
 
               <div className="space-y-1.5">

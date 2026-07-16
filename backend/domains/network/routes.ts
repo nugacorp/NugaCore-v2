@@ -71,6 +71,24 @@ router.get('/api/network-towers/:id', requireRoles(READ_ROLES), asyncHandler(asy
   res.json(tower);
 }));
 
+router.get('/api/network-towers/:id/onboarding', requireRoles(READ_ROLES), asyncHandler(async (req, res) => {
+  const profile = await getNetworkService().getTowerOnboarding(req.params.id);
+  if (!profile) return res.status(404).json({ error: 'Onboarding profile not found' });
+  res.json(profile);
+}));
+
+router.put('/api/network-towers/:id/onboarding', requireRoles(['super admin', 'administrador', 'tecnico']), asyncHandler(async (req, res) => {
+  const payload = req.body || {};
+  const profile = await getNetworkService().upsertTowerOnboarding(req.params.id, {
+    zoneName: payload.zoneName ? String(payload.zoneName) : undefined,
+    billingCycleDay: payload.billingCycleDay != null ? Number(payload.billingCycleDay) : undefined,
+    billingCycleTime: payload.billingCycleTime ? String(payload.billingCycleTime) : undefined,
+    routerId: payload.routerId ? String(payload.routerId) : undefined,
+    routerName: payload.routerName ? String(payload.routerName) : undefined,
+  });
+  res.json(profile);
+}));
+
 router.post('/api/network-towers', requireRoles(['super admin', 'administrador', 'tecnico']), (req, res) => {
   const { name, lat, lng, height, coverageRadiusKm, ip, equipment } = req.body;
   if (!name) {

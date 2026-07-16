@@ -56,6 +56,16 @@ export interface Tower {
   photos?: string[];
 }
 
+export interface TowerOnboardingProfile {
+  towerId: string;
+  zoneName?: string;
+  billingCycleDay?: number;
+  billingCycleTime?: string;
+  routerId?: string;
+  routerName?: string;
+  updatedAt?: string;
+}
+
 export interface OltFTTH {
   id: string;
   name: string;

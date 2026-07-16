@@ -432,18 +432,20 @@ export default function App() {
         setRevenueReport(resRevenueReport);
       } else if (activeTab === 'network') {
         attemptedFetch = true;
-        const [resClients, resTowers, resOlts, resOnus, resNaps] = await Promise.all([
+        const [resClients, resTowers, resOlts, resOnus, resNaps, resRouters] = await Promise.all([
           fetchJson<Client[]>('/api/clients'),
           fetchJson<Tower[]>('/api/network-towers'),
           fetchJson<OltFTTH[]>('/api/olt'),
           fetchJson<OnuFTTH[]>('/api/onu'),
           fetchJson<NapBox[]>('/api/naps'),
+          fetchJson<MikrotikRouterView[]>('/api/mikrotik/routers').catch(() => []),
         ]);
         setClients(resClients);
         setTowers(resTowers);
         setOlts(resOlts);
         setOnus(resOnus);
         setNaps(resNaps);
+        setProvisionedRouters(resRouters);
       } else if (activeTab === 'support') {
         attemptedFetch = true;
         const [resClients, resTickets, resWorkOrders] = await Promise.all([
@@ -913,13 +915,41 @@ export default function App() {
     await fetchData();
   };
 
-  const handleCreateTower = async (towerData: Record<string, unknown>) => {
-    await fetchJson('/api/network-towers', {
+  const handleCreateTower = async (towerData: Record<string, unknown>): Promise<Tower> => {
+    const created = await fetchJson<Tower>('/api/network-towers', {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify(towerData)
     });
     await fetchData();
+    return created;
+  };
+
+  const handleCreateMikrotikRouter = async (routerData: Record<string, unknown>): Promise<MikrotikRouterView> => {
+    const created = await fetchJson<MikrotikRouterView>('/api/mikrotik/routers', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify(routerData),
+    });
+    await fetchData();
+    return created;
+  };
+
+  const handleLinkRouterToTower = async (routerId: string, towerId: string): Promise<void> => {
+    await fetchJson(`/api/mikrotik/routers/${encodeURIComponent(routerId)}`, {
+      method: 'PUT',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ linkedTowerId: towerId }),
+    });
+    await fetchData();
+  };
+
+  const handleSaveTowerOnboarding = async (towerId: string, onboarding: Record<string, unknown>): Promise<void> => {
+    await fetchJson(`/api/network-towers/${encodeURIComponent(towerId)}/onboarding`, {
+      method: 'PUT',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify(onboarding),
+    });
   };
 
   // MIKROTIK COMMAND & AI COPILOT
@@ -1337,9 +1367,13 @@ export default function App() {
                 onus={onus} 
                 clients={clients}
                 naps={naps}
+                provisionedRouters={provisionedRouters}
                 onToggleTower={handleToggleTower}
                 onProvisionOnu={handleProvisionOnu}
                 onCreateTower={handleCreateTower}
+                onCreateMikrotikRouter={handleCreateMikrotikRouter}
+                onLinkRouterToTower={handleLinkRouterToTower}
+                onSaveTowerOnboarding={handleSaveTowerOnboarding}
               />
             )}
 
