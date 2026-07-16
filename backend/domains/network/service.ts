@@ -70,22 +70,28 @@ export class NetworkService {
 
   async getTowerOnboarding(towerId: string): Promise<TowerOnboardingProfile | null> {
     if (this.useDb) {
-      const { data, error } = await this.admin
-        .from('tower_onboarding_profiles')
-        .select('*')
-        .eq('tower_id', towerId)
-        .maybeSingle();
-      if (error) throw error;
-      if (!data) return null;
-      return {
-        towerId: String(data.tower_id),
-        zoneName: data.zone_name ? String(data.zone_name) : undefined,
-        billingCycleDay: data.billing_cycle_day != null ? Number(data.billing_cycle_day) : undefined,
-        billingCycleTime: data.billing_cycle_time ? String(data.billing_cycle_time) : undefined,
-        routerId: data.router_id ? String(data.router_id) : undefined,
-        routerName: data.router_name ? String(data.router_name) : undefined,
-        updatedAt: data.updated_at ? String(data.updated_at) : undefined,
-      };
+      try {
+        const { data, error } = await this.admin
+          .from('tower_onboarding_profiles')
+          .select('*')
+          .eq('tower_id', towerId)
+          .maybeSingle();
+        if (error) throw error;
+        if (!data) return null;
+        return {
+          towerId: String(data.tower_id),
+          zoneName: data.zone_name ? String(data.zone_name) : undefined,
+          billingCycleDay: data.billing_cycle_day != null ? Number(data.billing_cycle_day) : undefined,
+          billingCycleTime: data.billing_cycle_time ? String(data.billing_cycle_time) : undefined,
+          routerId: data.router_id ? String(data.router_id) : undefined,
+          routerName: data.router_name ? String(data.router_name) : undefined,
+          updatedAt: data.updated_at ? String(data.updated_at) : undefined,
+        };
+      } catch (err) {
+        logger.warn('tower_onboarding_profiles not available yet, using memory fallback', {
+          message: err instanceof Error ? err.message : String(err),
+        });
+      }
     }
     return towerOnboardingMemory.get(towerId) ?? null;
   }
@@ -95,30 +101,36 @@ export class NetworkService {
     payload: Omit<TowerOnboardingProfile, 'towerId' | 'updatedAt'>,
   ): Promise<TowerOnboardingProfile> {
     if (this.useDb) {
-      const record = {
-        tower_id: towerId,
-        zone_name: payload.zoneName ?? null,
-        billing_cycle_day: payload.billingCycleDay ?? null,
-        billing_cycle_time: payload.billingCycleTime ?? null,
-        router_id: payload.routerId ?? null,
-        router_name: payload.routerName ?? null,
-        updated_at: new Date().toISOString(),
-      };
-      const { data, error } = await this.admin
-        .from('tower_onboarding_profiles')
-        .upsert(record, { onConflict: 'tower_id' })
-        .select('*')
-        .single();
-      if (error) throw error;
-      return {
-        towerId: String(data.tower_id),
-        zoneName: data.zone_name ? String(data.zone_name) : undefined,
-        billingCycleDay: data.billing_cycle_day != null ? Number(data.billing_cycle_day) : undefined,
-        billingCycleTime: data.billing_cycle_time ? String(data.billing_cycle_time) : undefined,
-        routerId: data.router_id ? String(data.router_id) : undefined,
-        routerName: data.router_name ? String(data.router_name) : undefined,
-        updatedAt: data.updated_at ? String(data.updated_at) : undefined,
-      };
+      try {
+        const record = {
+          tower_id: towerId,
+          zone_name: payload.zoneName ?? null,
+          billing_cycle_day: payload.billingCycleDay ?? null,
+          billing_cycle_time: payload.billingCycleTime ?? null,
+          router_id: payload.routerId ?? null,
+          router_name: payload.routerName ?? null,
+          updated_at: new Date().toISOString(),
+        };
+        const { data, error } = await this.admin
+          .from('tower_onboarding_profiles')
+          .upsert(record, { onConflict: 'tower_id' })
+          .select('*')
+          .single();
+        if (error) throw error;
+        return {
+          towerId: String(data.tower_id),
+          zoneName: data.zone_name ? String(data.zone_name) : undefined,
+          billingCycleDay: data.billing_cycle_day != null ? Number(data.billing_cycle_day) : undefined,
+          billingCycleTime: data.billing_cycle_time ? String(data.billing_cycle_time) : undefined,
+          routerId: data.router_id ? String(data.router_id) : undefined,
+          routerName: data.router_name ? String(data.router_name) : undefined,
+          updatedAt: data.updated_at ? String(data.updated_at) : undefined,
+        };
+      } catch (err) {
+        logger.warn('Could not persist tower onboarding in DB, falling back to memory', {
+          message: err instanceof Error ? err.message : String(err),
+        });
+      }
     }
     const profile: TowerOnboardingProfile = {
       towerId,
