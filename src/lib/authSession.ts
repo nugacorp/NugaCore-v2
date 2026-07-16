@@ -51,6 +51,9 @@ interface AuthMeResponse {
   phone?: string;
   avatarUrl?: string;
   role?: string;
+  tenantId?: string;
+  onboardingRequired?: boolean;
+  onboardingStep?: string;
   permissions?: string[];
   source?: 'supabase-jwt' | 'trusted-headers';
 }
@@ -69,6 +72,9 @@ export async function fetchProfileFromBackend(accessToken: string): Promise<User
       phone: me.phone || '',
       role: normalizeUserRole(me.role),
       avatar_url: me.avatarUrl || '',
+      tenantId: me.tenantId,
+      onboardingRequired: Boolean(me.onboardingRequired),
+      onboardingStep: me.onboardingStep,
       source: me.source,
       permissions: me.permissions || [],
     };

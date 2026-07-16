@@ -6,6 +6,7 @@
 import { Router } from 'express';
 import { requireRoles } from '../../common/rbac';
 import { asyncHandler } from '../../common/errors';
+import { tenantIdFromRequest } from '../tenancy/tenant-scope';
 import { getWireguardService } from './service';
 
 const router = Router();
@@ -14,13 +15,13 @@ const WG_ROLES = ['super admin', 'administrador'] as const;
 const WG_READ_ROLES = [...WG_ROLES, 'tecnico'] as const;
 
 // ── Servidores ───────────────────────────────────────────────────────
-router.get('/api/wireguard/servers', requireRoles([...WG_READ_ROLES]), asyncHandler(async (_req, res) => {
-  res.json(await getWireguardService().listServers());
+router.get('/api/wireguard/servers', requireRoles([...WG_READ_ROLES]), asyncHandler(async (req, res) => {
+  res.json(await getWireguardService().listServers(tenantIdFromRequest(req)));
 }));
 
 router.get('/api/wireguard/next-ip', requireRoles([...WG_READ_ROLES]), asyncHandler(async (req, res) => {
   const serverId = String(req.query.serverId || '').trim() || undefined;
-  res.json(await getWireguardService().previewNextIp(serverId));
+  res.json(await getWireguardService().previewNextIp(serverId, tenantIdFromRequest(req)));
 }));
 
 router.post('/api/wireguard/servers', requireRoles([...WG_ROLES]), asyncHandler(async (req, res) => {
@@ -36,6 +37,7 @@ router.post('/api/wireguard/servers', requireRoles([...WG_ROLES]), asyncHandler(
     vpnCidr: vpnCidr ? String(vpnCidr) : undefined,
     serverVpnIp: serverVpnIp ? String(serverVpnIp) : undefined,
     isDefault: isDefault === true || isDefault === 'true',
+    tenantId: tenantIdFromRequest(req),
   });
   res.status(201).json({
     ...created,
@@ -47,7 +49,11 @@ router.post('/api/wireguard/servers', requireRoles([...WG_ROLES]), asyncHandler(
 router.get('/api/wireguard/peers', requireRoles([...WG_READ_ROLES]), asyncHandler(async (req, res) => {
   const serverId = String(req.query.serverId || '').trim() || undefined;
   const status = String(req.query.status || '').trim() || undefined;
-  res.json(await getWireguardService().listPeers({ serverId, status }));
+  res.json(await getWireguardService().listPeers({
+    serverId,
+    status,
+    tenantId: tenantIdFromRequest(req),
+  }));
 }));
 
 router.post('/api/wireguard/peers', requireRoles([...WG_ROLES]), asyncHandler(async (req, res) => {
@@ -61,6 +67,7 @@ router.post('/api/wireguard/peers', requireRoles([...WG_ROLES]), asyncHandler(as
       serverId: String(serverId), name: String(name),
       routerId: routerId ? String(routerId) : undefined,
       allowedCidr: allowedCidr ? String(allowedCidr) : undefined,
+      tenantId: tenantIdFromRequest(req),
     }, req.authContext?.userId);
     res.status(201).json({
       ...created,

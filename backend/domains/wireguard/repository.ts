@@ -17,14 +17,14 @@ import {
 } from './mappers';
 
 export interface WireguardRepository {
-  listServers(): Promise<WireguardServerRecord[]>;
-  getServer(id: string): Promise<WireguardServerRecord | null>;
-  getDefaultServer(): Promise<WireguardServerRecord | null>;
+  listServers(tenantId?: string): Promise<WireguardServerRecord[]>;
+  getServer(id: string, tenantId?: string): Promise<WireguardServerRecord | null>;
+  getDefaultServer(tenantId?: string): Promise<WireguardServerRecord | null>;
   createServer(rec: WireguardServerRecord): Promise<WireguardServerRecord>;
   updateServer(id: string, patch: Partial<WireguardServerRecord>): Promise<WireguardServerRecord | null>;
 
-  listPeers(filter?: { serverId?: string; routerId?: string; status?: string }): Promise<WireguardPeerRecord[]>;
-  getPeer(id: string): Promise<WireguardPeerRecord | null>;
+  listPeers(filter?: { serverId?: string; routerId?: string; status?: string; tenantId?: string }): Promise<WireguardPeerRecord[]>;
+  getPeer(id: string, tenantId?: string): Promise<WireguardPeerRecord | null>;
   createPeer(rec: WireguardPeerRecord): Promise<WireguardPeerRecord>;
   updatePeer(id: string, patch: Partial<WireguardPeerRecord>): Promise<WireguardPeerRecord | null>;
 
@@ -54,9 +54,19 @@ export class StoreWireguardRepository implements WireguardRepository {
     return `${PREFIX[kind]}-${this.seq[kind]++}`;
   }
 
-  async listServers() { return this.SERVERS; }
-  async getServer(id: string) { return this.SERVERS.find((s) => s.id === id) ?? null; }
-  async getDefaultServer() { return this.SERVERS.find((s) => s.isDefault && s.status === 'active') ?? null; }
+  async listServers(tenantId?: string) {
+    return this.SERVERS.filter((s) => !tenantId || (s.tenantId || 'tenant-default') === tenantId);
+  }
+  async getServer(id: string, tenantId?: string) {
+    const s = this.SERVERS.find((x) => x.id === id) ?? null;
+    if (!s || !tenantId) return s;
+    return (s.tenantId || 'tenant-default') === tenantId ? s : null;
+  }
+  async getDefaultServer(tenantId?: string) {
+    return this.SERVERS.find((s) =>
+      s.isDefault && s.status === 'active'
+      && (!tenantId || (s.tenantId || 'tenant-default') === tenantId)) ?? null;
+  }
   async createServer(rec: WireguardServerRecord) { this.SERVERS.push(rec); return rec; }
   async updateServer(id: string, patch: Partial<WireguardServerRecord>) {
     const s = this.SERVERS.find((x) => x.id === id);
@@ -65,13 +75,18 @@ export class StoreWireguardRepository implements WireguardRepository {
     return s;
   }
 
-  async listPeers(filter?: { serverId?: string; routerId?: string; status?: string }) {
+  async listPeers(filter?: { serverId?: string; routerId?: string; status?: string; tenantId?: string }) {
     return this.PEERS.filter((p) =>
       (!filter?.serverId || p.serverId === filter.serverId) &&
       (!filter?.routerId || p.routerId === filter.routerId) &&
-      (!filter?.status || p.status === filter.status));
+      (!filter?.status || p.status === filter.status) &&
+      (!filter?.tenantId || (p.tenantId || 'tenant-default') === filter.tenantId));
   }
-  async getPeer(id: string) { return this.PEERS.find((p) => p.id === id) ?? null; }
+  async getPeer(id: string, tenantId?: string) {
+    const p = this.PEERS.find((x) => x.id === id) ?? null;
+    if (!p || !tenantId) return p;
+    return (p.tenantId || 'tenant-default') === tenantId ? p : null;
+  }
   async createPeer(rec: WireguardPeerRecord) { this.PEERS.push(rec); return rec; }
   async updatePeer(id: string, patch: Partial<WireguardPeerRecord>) {
     const p = this.PEERS.find((x) => x.id === id);
@@ -109,17 +124,23 @@ export class SupabaseWireguardRepository implements WireguardRepository {
     return `${PREFIX[kind]}-${this.seq++}`;
   }
 
-  async listServers() {
-    const { data, error } = await this.client.from('wireguard_servers').select('*').order('created_at', { ascending: false });
+  async listServers(tenantId?: string) {
+    let q = this.client.from('wireguard_servers').select('*').order('created_at', { ascending: false });
+    if (tenantId) q = q.eq('tenant_id', tenantId);
+    const { data, error } = await q;
     if (error) throw new Error(`listServers: ${error.message}`);
     return (data || []).map((r) => rowToServer(r as ServerRow));
   }
-  async getServer(id: string) {
-    const { data } = await this.client.from('wireguard_servers').select('*').eq('id', id).single();
+  async getServer(id: string, tenantId?: string) {
+    let q = this.client.from('wireguard_servers').select('*').eq('id', id);
+    if (tenantId) q = q.eq('tenant_id', tenantId);
+    const { data } = await q.maybeSingle();
     return data ? rowToServer(data as ServerRow) : null;
   }
-  async getDefaultServer() {
-    const { data } = await this.client.from('wireguard_servers').select('*').eq('is_default', true).eq('status', 'active').maybeSingle();
+  async getDefaultServer(tenantId?: string) {
+    let q = this.client.from('wireguard_servers').select('*').eq('is_default', true).eq('status', 'active');
+    if (tenantId) q = q.eq('tenant_id', tenantId);
+    const { data } = await q.maybeSingle();
     return data ? rowToServer(data as ServerRow) : null;
   }
   async createServer(rec: WireguardServerRecord) {
@@ -138,17 +159,20 @@ export class SupabaseWireguardRepository implements WireguardRepository {
     return this.getServer(id);
   }
 
-  async listPeers(filter?: { serverId?: string; routerId?: string; status?: string }) {
+  async listPeers(filter?: { serverId?: string; routerId?: string; status?: string; tenantId?: string }) {
     let q = this.client.from('wireguard_peers').select('*').order('created_at', { ascending: false });
     if (filter?.serverId) q = q.eq('server_id', filter.serverId);
     if (filter?.routerId) q = q.eq('router_id', filter.routerId);
     if (filter?.status) q = q.eq('status', filter.status);
+    if (filter?.tenantId) q = q.eq('tenant_id', filter.tenantId);
     const { data, error } = await q;
     if (error) throw new Error(`listPeers: ${error.message}`);
     return (data || []).map((r) => rowToPeer(r as PeerRow));
   }
-  async getPeer(id: string) {
-    const { data } = await this.client.from('wireguard_peers').select('*').eq('id', id).single();
+  async getPeer(id: string, tenantId?: string) {
+    let q = this.client.from('wireguard_peers').select('*').eq('id', id);
+    if (tenantId) q = q.eq('tenant_id', tenantId);
+    const { data } = await q.maybeSingle();
     return data ? rowToPeer(data as PeerRow) : null;
   }
   async createPeer(rec: WireguardPeerRecord) {

@@ -1,32 +1,31 @@
 import React, { useState } from 'react';
 import { getErrorMessage } from '../lib/errors';
 import { clientLog } from '../lib/clientLog';
-import { 
-  Lock, 
-  Mail, 
-  Cpu, 
-  Eye, 
-  EyeOff, 
-  AlertCircle, 
-  CheckCircle2, 
-  Sparkles, 
+import {
+  Lock,
+  Mail,
+  Cpu,
+  Eye,
+  EyeOff,
+  AlertCircle,
+  CheckCircle2,
   ArrowRight,
-  ChevronLeft
+  ChevronLeft,
 } from 'lucide-react';
-import { isSupabaseConfigured, supabase, STAGING_QUICK_LOGINS, isQuickLoginEnabled, UserSessionProfile } from '../lib/supabase';
+import { isSupabaseConfigured, supabase, UserSessionProfile } from '../lib/supabase';
 import { fetchProfileFromBackend } from '../lib/authSession';
 
 interface LoginFormProps {
   onLoginSuccess: (userProfile: UserSessionProfile, accessToken?: string) => void;
   onBack?: () => void;
+  onGoRegister?: () => void;
 }
 
-export default function LoginForm({ onLoginSuccess, onBack }: LoginFormProps) {
+export default function LoginForm({ onLoginSuccess, onBack, onGoRegister }: LoginFormProps) {
   const [email, setEmail] = useState('');
   const [password, setPassword] = useState('');
   const [showPassword, setShowPassword] = useState(false);
-  
-  // Recovery Mode state
+
   const [isRecoveryMode, setIsRecoveryMode] = useState(false);
   const [recoveryEmail, setRecoveryEmail] = useState('');
   const [recoveryStatus, setRecoveryStatus] = useState<{ type: 'success' | 'error'; message: string } | null>(null);
@@ -35,19 +34,11 @@ export default function LoginForm({ onLoginSuccess, onBack }: LoginFormProps) {
   const [errorMessage, setErrorMessage] = useState('');
   const [successMessage, setSuccessMessage] = useState('');
 
-  // Quick-login helper (staging): SOLO prerellena el email. Nunca rellena el
-  // password — el operador debe teclear la contraseña real (Supabase auth).
-  const handleAutoFill = (stagingEmail: string) => {
-    setEmail(stagingEmail);
-    setPassword('');
-    setErrorMessage('');
-  };
-
   const handleLoginSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
     setErrorMessage('');
     setSuccessMessage('');
-    
+
     if (!email || !password) {
       setErrorMessage('Por favor ingresa tu correo y contraseña.');
       return;
@@ -57,7 +48,6 @@ export default function LoginForm({ onLoginSuccess, onBack }: LoginFormProps) {
 
     try {
       if (isSupabaseConfigured && supabase) {
-        // --- REAL SUPABASE AUTHENTICATION ---
         const { data, error } = await supabase.auth.signInWithPassword({
           email: email.trim(),
           password: password,
@@ -68,8 +58,6 @@ export default function LoginForm({ onLoginSuccess, onBack }: LoginFormProps) {
         }
 
         if (data?.user) {
-          // El rol/perfil CANÓNICO viene del backend (/api/auth/me, service-role),
-          // NO de una consulta directa a users_profile (bloqueada por RLS deny-by-default).
           const accessToken = data.session?.access_token || '';
           const backendProfile = accessToken ? await fetchProfileFromBackend(accessToken) : null;
 
@@ -80,18 +68,15 @@ export default function LoginForm({ onLoginSuccess, onBack }: LoginFormProps) {
             role: 'Solo lectura',
           };
 
-          setSuccessMessage(`¡Bienvenido de vuelta, ${userSession.full_name}!`);
+          setSuccessMessage(`¡Bienvenido, ${userSession.full_name}!`);
           setTimeout(() => {
             onLoginSuccess(userSession, accessToken);
-          }, 800);
+          }, 600);
         }
       } else {
-        // --- BACKEND DE AUTENTICACIÓN NO CONFIGURADO ---
-        // Hardening 4.3.1: se eliminó el login-sin-password de modo preview.
-        // Sin Supabase configurado no hay forma segura de autenticar.
         setErrorMessage(
-          'El backend de autenticación no está configurado (VITE_SUPABASE_URL / VITE_SUPABASE_ANON_KEY). ' +
-          'No es posible iniciar sesión en este entorno.'
+          'El backend de autenticación no está configurado (VITE_SUPABASE_URL / VITE_SUPABASE_ANON_KEY). '
+          + 'No es posible iniciar sesión en este entorno.',
         );
       }
     } catch (err) {
@@ -105,7 +90,7 @@ export default function LoginForm({ onLoginSuccess, onBack }: LoginFormProps) {
   const handlePasswordResetSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
     setRecoveryStatus(null);
-    
+
     if (!recoveryEmail) {
       setRecoveryStatus({ type: 'error', message: 'Ingresa una dirección de correo válida.' });
       return;
@@ -115,7 +100,6 @@ export default function LoginForm({ onLoginSuccess, onBack }: LoginFormProps) {
 
     try {
       if (isSupabaseConfigured && supabase) {
-        // Real Supabase Password Reset Flow
         const { error } = await supabase.auth.resetPasswordForEmail(recoveryEmail.trim(), {
           redirectTo: `${window.location.origin}/reset-password`,
         });
@@ -123,13 +107,12 @@ export default function LoginForm({ onLoginSuccess, onBack }: LoginFormProps) {
         if (error) throw error;
         setRecoveryStatus({
           type: 'success',
-          message: 'Se ha enviado un enlace real de restablecimiento a tu dirección de correo.'
+          message: 'Se ha enviado un enlace de restablecimiento a tu correo.',
         });
       } else {
-        // Simulation Flow
         setRecoveryStatus({
           type: 'success',
-          message: `[Simulación] Correo enviado a ${recoveryEmail}. En un ambiente real con Supabase Auth configurado, este botón enviará las instrucciones de recuperación.`
+          message: `[Simulación] Correo enviado a ${recoveryEmail}.`,
         });
       }
     } catch (err) {
@@ -142,31 +125,20 @@ export default function LoginForm({ onLoginSuccess, onBack }: LoginFormProps) {
 
   return (
     <div id="nugacore-login" className="min-h-screen flex items-center justify-center bg-slate-950 p-4 font-sans text-slate-200 relative overflow-hidden">
-      
-      {/* Background Matrix Accents */}
-      <div className="absolute inset-0 opacity-[0.05]" style={{ backgroundImage: "radial-gradient(circle, #4f46e5 1px, transparent 1px)", backgroundSize: "32px 32px" }}></div>
-      <div className="absolute top-1/4 left-1/4 w-[350px] h-[350px] bg-indigo-600/10 rounded-full blur-[100px] pointer-events-none"></div>
-      <div className="absolute bottom-1/4 right-1/4 w-[400px] h-[400px] bg-cyan-600/10 rounded-full blur-[120px] pointer-events-none"></div>
+      <div className="absolute inset-0 opacity-[0.04]" style={{ backgroundImage: 'radial-gradient(circle, #38bdf8 1px, transparent 1px)', backgroundSize: '28px 28px' }} />
+      <div className="absolute -top-24 left-1/4 w-[420px] h-[420px] bg-sky-600/10 rounded-full blur-[120px] pointer-events-none" />
+      <div className="absolute bottom-0 right-1/5 w-[380px] h-[380px] bg-emerald-600/10 rounded-full blur-[120px] pointer-events-none" />
 
-      <div className="w-full max-w-lg bg-slate-900 border border-slate-800 rounded-3xl overflow-hidden shadow-2xl relative z-10">
-        
-        {/* Dynamic upper banner indicating mode */}
-        <div className={`px-5 py-2.5 text-[11px] font-mono flex items-center justify-between border-b ${
-          isSupabaseConfigured 
-            ? 'bg-indigo-950/40 border-indigo-900 text-indigo-400' 
-            : 'bg-emerald-950/40 border-emerald-900 text-emerald-400'
-        }`}>
+      <div className="w-full max-w-md bg-slate-900/95 border border-slate-800 rounded-3xl overflow-hidden shadow-2xl relative z-10 backdrop-blur-sm">
+        <div className="px-6 py-3 text-[11px] font-mono flex items-center justify-between border-b border-slate-800 bg-slate-950/80 text-slate-400">
           <div className="flex items-center space-x-2">
-            <span className={`w-2 h-2 rounded-full ${isSupabaseConfigured ? 'bg-indigo-500 animate-pulse' : 'bg-emerald-400'}`}></span>
-            <span>{isSupabaseConfigured ? 'Conexión Real Supabase Activa' : 'Modo Simulador de Pruebas'}</span>
+            <span className={`w-2 h-2 rounded-full ${isSupabaseConfigured ? 'bg-emerald-400' : 'bg-amber-400'}`} />
+            <span>{isSupabaseConfigured ? 'Acceso seguro' : 'Auth no configurada'}</span>
           </div>
-          <span className="text-slate-500 font-bold uppercase text-[9px]">v2.4 LTS</span>
+          <span className="text-slate-600 font-bold uppercase text-[9px]">NugaCore</span>
         </div>
 
-        {/* Content Box */}
-        <div className="p-8 sm:p-10 space-y-6">
-          
-          {/* Logo & Brand */}
+        <div className="p-8 sm:p-10 space-y-7">
           <div className="text-center space-y-2 relative">
             {onBack && (
               <button
@@ -178,37 +150,34 @@ export default function LoginForm({ onLoginSuccess, onBack }: LoginFormProps) {
                 <span>Volver</span>
               </button>
             )}
-            <div className="inline-flex items-center justify-center p-3 bg-indigo-950 text-indigo-400 rounded-2xl border border-indigo-900/50 mb-2">
+            <div className="inline-flex items-center justify-center p-3 bg-slate-950 text-sky-400 rounded-2xl border border-slate-800 mb-1">
               <Cpu className="w-8 h-8" />
             </div>
-            <h1 className="text-2xl font-black text-white tracking-tight">NugaCore ERP</h1>
-            <p className="text-xs text-slate-400 max-w-xs mx-auto">
-              Plataforma Centralizada de Telecomunicaciones y Control Financiero para <span className="text-slate-200 font-bold">NugaCorp</span>.
+            <h1 className="text-2xl font-black text-white tracking-tight">NugaCore</h1>
+            <p className="text-xs text-slate-400 max-w-xs mx-auto leading-relaxed">
+              Consola WISP / FTTH. Inicia sesión con las credenciales de tu operador.
             </p>
           </div>
 
           {!isRecoveryMode ? (
-            // --- LOGIN FORM ---
             <form onSubmit={handleLoginSubmit} className="space-y-4">
-              
               {errorMessage && (
-                <div className="p-3.5 bg-rose-950/80 border border-rose-850/60 rounded-2xl flex items-start space-x-2.5 text-xs text-rose-200">
+                <div className="p-3.5 bg-rose-950/80 border border-rose-900/60 rounded-2xl flex items-start space-x-2.5 text-xs text-rose-200">
                   <AlertCircle className="w-4 h-4 text-rose-500 shrink-0 mt-0.5" />
                   <span className="leading-snug">{errorMessage}</span>
                 </div>
               )}
 
               {successMessage && (
-                <div className="p-3.5 bg-emerald-950/80 border border-emerald-850/60 rounded-2xl flex items-start space-x-2.5 text-xs text-emerald-300">
+                <div className="p-3.5 bg-emerald-950/80 border border-emerald-900/60 rounded-2xl flex items-start space-x-2.5 text-xs text-emerald-300">
                   <CheckCircle2 className="w-4 h-4 text-emerald-400 shrink-0 mt-0.5" />
-                  <span className="leading-snug font-mono">{successMessage}</span>
+                  <span className="leading-snug">{successMessage}</span>
                 </div>
               )}
 
-              {/* Email Entry */}
               <div className="space-y-1.5">
-                <label className="text-[10px] uppercase font-bold text-slate-400 tracking-wider block font-mono">
-                  Correo del Operador
+                <label className="text-[10px] uppercase font-bold text-slate-400 tracking-wider block">
+                  Correo del operador
                 </label>
                 <div className="relative">
                   <span className="absolute left-3.5 top-1/2 -translate-y-1/2 text-slate-500">
@@ -218,23 +187,23 @@ export default function LoginForm({ onLoginSuccess, onBack }: LoginFormProps) {
                     type="email"
                     value={email}
                     onChange={(e) => setEmail(e.target.value)}
-                    placeholder="operador@example.com"
+                    placeholder="operador@tuwisp.com"
                     required
-                    className="w-full bg-slate-950 border border-slate-800 rounded-xl py-3 pl-11 pr-4 text-xs font-mono text-white placeholder-slate-600 focus:outline-none focus:border-indigo-500 transition-colors"
+                    autoComplete="username"
+                    className="w-full bg-slate-950 border border-slate-800 rounded-xl py-3 pl-11 pr-4 text-sm text-white placeholder-slate-600 focus:outline-none focus:border-sky-500 transition-colors"
                   />
                 </div>
               </div>
 
-              {/* Password Entry */}
               <div className="space-y-1.5">
                 <div className="flex items-center justify-between">
-                  <label className="text-[10px] uppercase font-bold text-slate-400 tracking-wider block font-mono">
-                    Contraseña de Acceso
+                  <label className="text-[10px] uppercase font-bold text-slate-400 tracking-wider block">
+                    Contraseña
                   </label>
                   <button
                     type="button"
                     onClick={() => setIsRecoveryMode(true)}
-                    className="text-[10px] text-indigo-400 hover:text-indigo-300 hover:underline transition font-mono"
+                    className="text-[10px] text-sky-400 hover:text-sky-300 hover:underline transition"
                   >
                     ¿Olvidaste tu contraseña?
                   </button>
@@ -247,76 +216,61 @@ export default function LoginForm({ onLoginSuccess, onBack }: LoginFormProps) {
                     type={showPassword ? 'text' : 'password'}
                     value={password}
                     onChange={(e) => setPassword(e.target.value)}
-                    placeholder="••••••••••••••"
+                    placeholder="••••••••••••"
                     required
-                    className="w-full bg-slate-950 border border-slate-800 rounded-xl py-3 pl-11 pr-11 text-xs font-mono text-white placeholder-slate-600 focus:outline-none focus:border-indigo-500 transition-colors"
+                    autoComplete="current-password"
+                    className="w-full bg-slate-950 border border-slate-800 rounded-xl py-3 pl-11 pr-11 text-sm text-white placeholder-slate-600 focus:outline-none focus:border-sky-500 transition-colors"
                   />
                   <button
                     type="button"
                     onClick={() => setShowPassword(!showPassword)}
                     className="absolute right-3.5 top-1/2 -translate-y-1/2 text-slate-500 hover:text-slate-300 transition"
+                    aria-label={showPassword ? 'Ocultar contraseña' : 'Mostrar contraseña'}
                   >
                     {showPassword ? <EyeOff className="w-4 h-4" /> : <Eye className="w-4 h-4" />}
                   </button>
                 </div>
               </div>
 
-              {/* Submit Action */}
               <button
                 type="submit"
                 disabled={loading}
-                className="w-full bg-indigo-600 hover:bg-indigo-500 active:bg-indigo-700 text-white py-3.5 rounded-xl font-bold text-xs transition duration-150 flex items-center justify-center space-x-2 shadow-lg shadow-indigo-600/20 disabled:opacity-50"
+                className="w-full bg-sky-600 hover:bg-sky-500 active:bg-sky-700 text-white py-3.5 rounded-xl font-bold text-sm transition duration-150 flex items-center justify-center space-x-2 shadow-lg shadow-sky-900/30 disabled:opacity-50"
               >
-                <span>{loading ? 'Validando Credenciales...' : 'Iniciar Sesión en NugaCore'}</span>
+                <span>{loading ? 'Validando…' : 'Iniciar sesión'}</span>
                 {!loading && <ArrowRight className="w-3.5 h-3.5" />}
               </button>
 
-              {/* QUICK LOGIN (solo staging, gateado). Prerellena el email del
-                  usuario de staging; el password se teclea manualmente. No se
-                  muestra en producción (VITE_ENABLE_QUICK_LOGIN apagado). */}
-              {isQuickLoginEnabled && (
-                <div className="mt-6 pt-5 border-t border-slate-800/80 space-y-3">
-                  <div className="flex items-center space-x-2 text-[10px] font-bold text-slate-400 uppercase font-mono tracking-wider">
-                    <Sparkles className="w-3.5 h-3.5 text-amber-400" />
-                    <span>Acceso Rápido Staging (solo email)</span>
-                  </div>
-                  <p className="text-[11px] text-slate-400">
-                    Prerellena el correo del usuario de staging. Escribe tu contraseña para iniciar sesión.
-                  </p>
-                  <div className="grid grid-cols-2 gap-2 text-[10px] font-mono">
-                    {STAGING_QUICK_LOGINS.map((entry) => (
-                      <button
-                        key={entry.email}
-                        type="button"
-                        onClick={() => handleAutoFill(entry.email)}
-                        className="bg-slate-950 hover:bg-slate-850 p-2 border border-slate-800 rounded-xl text-left hover:border-indigo-500 transition flex flex-col justify-between"
-                      >
-                        <span className="text-white font-bold block">{entry.label}</span>
-                        <span className="text-indigo-400 mt-1 truncate">{entry.email}</span>
-                      </button>
-                    ))}
-                  </div>
-                </div>
+              {onGoRegister && (
+                <p className="text-center text-xs text-slate-500 pt-2">
+                  ¿Nuevo WISP?{' '}
+                  <button
+                    type="button"
+                    onClick={onGoRegister}
+                    className="text-emerald-400 hover:text-emerald-300 font-semibold"
+                  >
+                    Crear cuenta
+                  </button>
+                </p>
               )}
-
             </form>
           ) : (
-            // --- RECOVERY PASSWORD WINDOW ---
             <form onSubmit={handlePasswordResetSubmit} className="space-y-4">
-              <h3 className="text-sm font-bold text-white font-mono text-center border-b border-slate-800 pb-2">
-                Restablecer Contraseña
+              <h3 className="text-sm font-bold text-white text-center border-b border-slate-800 pb-2">
+                Restablecer contraseña
               </h3>
-              
+
               <p className="text-xs text-slate-400 leading-relaxed">
-                Ingresa la dirección de correo electrónico registrada para enviarte un enlace de recuperación.
+                Te enviaremos un enlace de recuperación al correo registrado.
               </p>
 
               {recoveryStatus && (
-                <div className={`p-3.5 border rounded-2xl flex items-start space-x-2 text-xs font-mono ${
-                  recoveryStatus.type === 'success' 
-                    ? 'bg-emerald-950/80 border-emerald-850 text-emerald-300' 
-                    : 'bg-rose-950/80 border-rose-850 text-rose-200'
-                }`}>
+                <div className={`p-3.5 border rounded-2xl flex items-start space-x-2 text-xs ${
+                  recoveryStatus.type === 'success'
+                    ? 'bg-emerald-950/80 border-emerald-900 text-emerald-300'
+                    : 'bg-rose-950/80 border-rose-900 text-rose-200'
+                }`}
+                >
                   {recoveryStatus.type === 'success' ? (
                     <CheckCircle2 className="w-4 h-4 shrink-0 mt-0.5" />
                   ) : (
@@ -327,8 +281,8 @@ export default function LoginForm({ onLoginSuccess, onBack }: LoginFormProps) {
               )}
 
               <div className="space-y-1.5">
-                <label className="text-[10px] uppercase font-bold text-slate-400 tracking-wider block font-mono">
-                  Tu Correo Registrado
+                <label className="text-[10px] uppercase font-bold text-slate-400 tracking-wider block">
+                  Correo registrado
                 </label>
                 <div className="relative">
                   <span className="absolute left-3.5 top-1/2 -translate-y-1/2 text-slate-500">
@@ -338,14 +292,13 @@ export default function LoginForm({ onLoginSuccess, onBack }: LoginFormProps) {
                     type="email"
                     value={recoveryEmail}
                     onChange={(e) => setRecoveryEmail(e.target.value)}
-                    placeholder="usuario@example.com"
+                    placeholder="usuario@tuwisp.com"
                     required
-                    className="w-full bg-slate-950 border border-slate-800 rounded-xl py-3 pl-11 pr-4 text-xs font-mono text-white placeholder-slate-600 focus:outline-none focus:border-indigo-500 transition-colors"
+                    className="w-full bg-slate-950 border border-slate-800 rounded-xl py-3 pl-11 pr-4 text-sm text-white placeholder-slate-600 focus:outline-none focus:border-sky-500 transition-colors"
                   />
                 </div>
               </div>
 
-              {/* Recovery Actions */}
               <div className="flex gap-2">
                 <button
                   type="button"
@@ -360,23 +313,18 @@ export default function LoginForm({ onLoginSuccess, onBack }: LoginFormProps) {
                 <button
                   type="submit"
                   disabled={loading}
-                  className="w-2/3 bg-indigo-600 hover:bg-indigo-500 text-white text-xs font-bold py-3 rounded-xl transition"
+                  className="w-2/3 bg-sky-600 hover:bg-sky-500 text-white text-xs font-bold py-3 rounded-xl transition"
                 >
-                  {loading ? 'Enviando...' : 'Enviar Correo'}
+                  {loading ? 'Enviando…' : 'Enviar enlace'}
                 </button>
               </div>
-
             </form>
           )}
-
         </div>
 
-        {/* Footer brand info */}
-        <div className="px-8 py-4 bg-slate-950 border-t border-slate-800 text-center flex items-center justify-between text-[10px] font-mono text-slate-500">
-          <span>NugaCore ERP NOC System</span>
-          <span>Soporte: noc@example.com</span>
+        <div className="px-8 py-4 bg-slate-950 border-t border-slate-800 text-center text-[10px] text-slate-500">
+          Cada WISP opera con datos aislados en la misma plataforma.
         </div>
-
       </div>
     </div>
   );

@@ -49,6 +49,7 @@ export interface CreateServerInput {
   vpnCidr?: string;
   serverVpnIp?: string;
   isDefault?: boolean;
+  tenantId?: string;
 }
 
 export interface CreatePeerInput {
@@ -56,11 +57,14 @@ export interface CreatePeerInput {
   name: string;
   routerId?: string;
   allowedCidr?: string;
+  tenantId?: string;
 }
 
 export class WireguardService {
   constructor(private readonly repo: WireguardRepository) {
-    // El loader se reconfigura en cada instancia (incl. tests / reset).
+    // Host-apply es PLATFORM-GLOBAL: todos los peers activos de todos los
+    // tenants → un solo wg0. Nunca filtrar por tenant aquí (si no, un revoke
+    // de tenant A borraría peers de B en el reconcile full).
     configureHostApplyPeerLoader(async () => {
       const peers = await this.repo.listPeers({ status: 'active' });
       return peers.map((p) => ({
@@ -119,17 +123,17 @@ export class WireguardService {
   }
 
   // ── servidores ──────────────────────────────────────────────────────
-  async listServers(): Promise<WireguardServerView[]> {
-    const servers = await this.repo.listServers();
-    const peers = await this.repo.listPeers();
+  async listServers(tenantId?: string): Promise<WireguardServerView[]> {
+    const servers = await this.repo.listServers(tenantId);
+    const peers = await this.repo.listPeers(tenantId ? { tenantId } : undefined);
     return servers.map((s) => this.toServerView(s, peers.filter((p) => p.serverId === s.id && p.status === 'active').length));
   }
 
-  /** Servidor WireGuard por defecto (o null si no hay ninguno activo). */
-  async getDefaultServer(): Promise<WireguardServerView | null> {
-    const rec = await this.repo.getDefaultServer();
+  /** Servidor WireGuard por defecto del tenant (o null). */
+  async getDefaultServer(tenantId?: string): Promise<WireguardServerView | null> {
+    const rec = await this.repo.getDefaultServer(tenantId);
     if (!rec) return null;
-    const peers = await this.repo.listPeers({ serverId: rec.id, status: 'active' });
+    const peers = await this.repo.listPeers({ serverId: rec.id, status: 'active', tenantId });
     return this.toServerView(rec, peers.length);
   }
 
@@ -137,10 +141,10 @@ export class WireguardService {
    * Vista previa de la siguiente IP libre del pool (sin reservar).
    * Para mostrar al operador antes de registrar un router WireGuard.
    */
-  async previewNextIp(serverId?: string): Promise<{ ip: string; serverId: string; serverName: string; preview: true }> {
+  async previewNextIp(serverId?: string, tenantId?: string): Promise<{ ip: string; serverId: string; serverName: string; preview: true }> {
     const rec = serverId
-      ? await this.repo.getServer(serverId)
-      : await this.repo.getDefaultServer();
+      ? await this.repo.getServer(serverId, tenantId)
+      : await this.repo.getDefaultServer(tenantId);
     if (!rec) throw new NotFoundError('No hay servidor WireGuard configurado.');
     const allocations = await this.repo.listAllocations(rec.id);
     const ip = nextFreeIp(
@@ -153,9 +157,10 @@ export class WireguardService {
   }
 
   async createServer(input: CreateServerInput): Promise<ServerCreatedOnce> {
-    // Si este servidor es default, quitar el default anterior.
+    const tenantId = input.tenantId || 'tenant-default';
+    // Si este servidor es default, quitar el default anterior del mismo tenant.
     if (input.isDefault) {
-      const prev = await this.repo.getDefaultServer();
+      const prev = await this.repo.getDefaultServer(tenantId);
       if (prev) await this.repo.updateServer(prev.id, { isDefault: false });
     }
     const kp = generateWgKeyPair();
@@ -166,28 +171,30 @@ export class WireguardService {
       publicKey: kp.publicKey, encryptedPrivateKey: encryptSecret(kp.privateKey), encryptionVersion: ENCRYPTION_VERSION,
       vpnCidr: input.vpnCidr || DEFAULT_WG_POOL, serverVpnIp: input.serverVpnIp || DEFAULT_SERVER_IP,
       isDefault: input.isDefault ?? false,
+      tenantId,
       status: 'active', createdAt: nowIso(), updatedAt: nowIso(),
     };
     await this.repo.createServer(rec);
-    logger.info('WireGuard: servidor creado', { serverId: id, name: rec.name, isDefault: rec.isDefault });
+    logger.info('WireGuard: servidor creado', { serverId: id, name: rec.name, isDefault: rec.isDefault, tenantId });
     return { server: this.toServerView(rec, 0), serverPrivateKey: kp.privateKey };
   }
 
   /** Busca un servidor por ID y devuelve su vista, o null si no existe. */
-  async findServer(id: string): Promise<WireguardServerView | null> {
-    const rec = await this.repo.getServer(id);
+  async findServer(id: string, tenantId?: string): Promise<WireguardServerView | null> {
+    const rec = await this.repo.getServer(id, tenantId);
     if (!rec) return null;
-    const peers = await this.repo.listPeers({ serverId: rec.id, status: 'active' });
+    const peers = await this.repo.listPeers({ serverId: rec.id, status: 'active', tenantId });
     return this.toServerView(rec, peers.length);
   }
 
   // ── peers ─────────────────────────────────────────────────────────────
-  async listPeers(filter?: { serverId?: string; routerId?: string; status?: string }): Promise<WireguardPeerView[]> {
+  async listPeers(filter?: { serverId?: string; routerId?: string; status?: string; tenantId?: string }): Promise<WireguardPeerView[]> {
     return (await this.repo.listPeers(filter)).map((p) => this.toPeerView(p));
   }
 
   async createPeer(input: CreatePeerInput, actorId?: string): Promise<PeerCreatedOnce> {
-    const server = await this.repo.getServer(input.serverId);
+    const tenantId = input.tenantId || 'tenant-default';
+    const server = await this.repo.getServer(input.serverId, tenantId);
     if (!server) throw new NotFoundError(`Servidor WireGuard '${input.serverId}' no encontrado.`);
 
     const allocations = await this.repo.listAllocations(server.id);
@@ -206,6 +213,7 @@ export class WireguardService {
       id, serverId: server.id, routerId: input.routerId, name: input.name, publicKey: kp.publicKey,
       encryptedPrivateKey: encryptSecret(kp.privateKey), encryptedPresharedKey: encryptSecret(psk),
       encryptionVersion: ENCRYPTION_VERSION, allocatedIp: ip, allowedCidr: peerAllowedCidr(server, input.allowedCidr),
+      tenantId,
       status: 'active', createdBy: actorId, createdAt: nowIso(), updatedAt: nowIso(),
     };
     await this.repo.createPeer(rec);
