@@ -5,25 +5,30 @@ Proyecto Supabase: `elshnzkceutvjzxvzqad` (nugacore-staging).
 
 ## Estado actual (2026-07-16)
 
-**Totalmente reconciliado.** Las **29 migraciones** de `supabase/migrations/` están
+**Totalmente reconciliado.** Las **30 migraciones** de `supabase/migrations/` están
 aplicadas y registradas en `supabase_migrations.schema_migrations`. El historial
-remoto tiene **30 registros**: las 29 + 1 huérfano (ver abajo).
+remoto tiene **31 registros**: las 30 + 1 huérfano (ver abajo).
 
 Verificación: `LOCAL sin aplicar = vacío` (comparando los prefijos de versión de
 los archivos locales contra la tabla de historial).
 
-> **Nota de ramas (drift temporal de repo):** dos de las 29 aún no coexisten en la
-> misma rama de Git, pero **ambas ya están aplicadas y registradas** en la DB de
-> staging (compartida): `20260716081000_tower_onboarding_profiles` llega por `main`
-> (commit `838f541`) y `20260715000000_client_documents_reconciliation` por la rama
-> `fix/db-schema-reconciliation`. El conteo de 29 es el del repo integrado; se
-> normaliza al mergear esa rama a `main`.
+> **Nota de ramas (drift temporal de repo):** tres de las 30 aún no coexisten en la
+> misma rama de Git, pero **las tres ya están aplicadas y registradas** en la DB de
+> staging (compartida):
+>
+> - `20260716081000_tower_onboarding_profiles` → `main` (commit `838f541`)
+> - `20260715000000_client_documents_reconciliation` → rama `fix/db-schema-reconciliation`
+> - `20260716120000_ftth_fiber_infrastructure` → rama `cursor/ftth-import-nap-view-cb99` (commit `bd0183e`)
+>
+> El conteo de 30 es el del repo integrado; se normaliza cuando esas ramas se
+> mergeen a `main`.
 
 ### Reconciliación 2026-07-16 (lo que se aplicó hoy)
 
 | Versión | Migración | Acción |
 |---|---|---|
 | 20260716081000 | tower_onboarding_profiles | **Nueva.** Crea `public.tower_onboarding_profiles`: PK `tower_id` con FK a `towers(id)` `ON DELETE CASCADE`, más `zone_name`, `billing_cycle_day` (CHECK 1–31), `billing_cycle_time`, `router_id`, `router_name` y timestamps; + índice `idx_tower_onboarding_zone (zone_name)`. Aditiva e idempotente (`CREATE TABLE/INDEX IF NOT EXISTS`); tabla nueva (0 filas). Aplicada y registrada. Cierra el drift que cubría el fallback de `4edca93` ("onboarding torre si tabla DB aún no existe"): el onboarding de torre ya persiste en la tabla real. |
+| 20260716120000 | ftth_fiber_infrastructure | **Nueva.** Crea `public.fiber_segments` (tramos de fibra; FK `nap_id`→`nap_boxes` SET NULL, `coordinates` JSONB, `thread_count` CHECK ≥1) y `public.fiber_threads` (hilos; FK `segment_id`→`fiber_segments` CASCADE, `nap_id`/`continues_to_nap_id`→`nap_boxes`, UNIQUE `(segment_id, thread_num)`), + índices por `nap_id`/`segment_id`/`segment_type`. Añade a `nap_ports` las columnas `thread_id`→`fiber_threads`, `continues_to_nap_id`→`nap_boxes` y `continues_to_thread` (continuidad de hilo). Aditiva e idempotente (`CREATE TABLE`/`ADD COLUMN IF NOT EXISTS`); tablas nuevas (0 filas). Requiere `nap_boxes`/`nap_ports` preexistentes (verificado). Aplicada y registrada. Da soporte al importador CSV/GeoJSON y a la vista NAP de la rama FTTH. |
 
 ### Reconciliación 2026-07-15
 
