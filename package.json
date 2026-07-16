@@ -16,6 +16,7 @@
     "test:db": "node scripts/run-tests.mjs db",
     "test:db:billing": "node scripts/run-tests.mjs db:billing",
     "test:auth": "node scripts/run-tests.mjs auth",
+    "ftth:export-samples": "node scripts/ftth/export-import-samples.mjs",
     "lint:fix": "eslint . --fix"
   },
   "dependencies": {
