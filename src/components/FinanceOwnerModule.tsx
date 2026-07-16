@@ -47,13 +47,32 @@ export default function FinanceOwnerModule({
   }, [getAuthHeaders]);
 
   // --- Sub-Tab 1: Finance State ---
-  const [egresos, setEgresos] = useState([
-    { id: 'egr-1', desc: 'Arrendamiento de Torre Alfa (Espacio)', category: 'Arrendamientos', amount: 8500, state: 'pagado' },
-    { id: 'egr-2', desc: 'Enlace Dedicado Carrier WAN Giga (Backbone)', category: 'Telecomunicaciones', amount: 35000, state: 'pagado' },
-    { id: 'egr-3', desc: 'Costo Eléctrico Co-Location Torres & Nodos', category: 'Energía', amount: 4200, state: 'pagado' },
-    { id: 'egr-4', desc: 'Nómina Administrativa y Campo', category: 'Recursos Humanos', amount: 48000, state: 'pagado' },
-    { id: 'egr-5', desc: 'Licencias IPs Homologadas LACNIC', category: 'Otros', amount: 3000, state: 'pendiente' },
-  ]);
+  // Sin datos mock: la lista inicia vacía y se carga desde la API real.
+  const [egresos, setEgresos] = useState<Array<{ id: string; desc: string; category: string; amount: number; state: 'pagado' | 'pendiente' }>>([]);
+
+  React.useEffect(() => {
+    let cancelled = false;
+    (async () => {
+      try {
+        const headers = (await getAuthHeaders?.()) ?? {};
+        const res = await fetch('/api/finance/operational/expenses', { headers });
+        if (!res.ok) return;
+        const rows: Array<{ id: string; description: string; category: string; amountCents: number }> = await res.json();
+        if (!cancelled) {
+          setEgresos(rows.map(r => ({
+            id: r.id,
+            desc: r.description,
+            category: r.category || 'Otros',
+            amount: Math.round((r.amountCents ?? 0) / 100),
+            state: 'pagado',
+          })));
+        }
+      } catch {
+        /* tolerante: deja la lista vacía cuando no hay backend */
+      }
+    })();
+    return () => { cancelled = true; };
+  }, [getAuthHeaders]);
 
   const [newEgresoDesc, setNewEgresoDesc] = useState('');
   const [newEgresoCategory, setNewEgresoCategory] = useState('Arrendamientos');
@@ -81,12 +100,8 @@ export default function FinanceOwnerModule({
   };
 
   // --- Sub-Tab: HR State ---
-  const [employees, setEmployees] = useState([
-    { id: 'emp-1', name: 'Ing. Carlos Ortiz Torres', role: 'Técnico de Red / Planta Exterior', department: 'Planta Externa', status: 'Activo', commission: 2450 },
-    { id: 'emp-2', name: 'Lic. Miriam Valdez', role: 'Gestora Cobranza y Facturación', department: 'Cuentas por Cobrar', status: 'Activo', commission: 4100 },
-    { id: 'emp-3', name: 'Juan Manuel Rubio', role: 'Vendedor y Prospección en Campo', department: 'Ventas WISP', status: 'Activo', commission: 5600 },
-    { id: 'emp-4', name: 'Téc. Fernando Ruiz', role: 'Soporte y Mesa en Sitio CDMX', department: 'Soporte Técnico', status: 'Guardia', commission: 1200 },
-  ]);
+  // Recursos Humanos sin datos ficticios por defecto.
+  const [employees, setEmployees] = useState<Array<{ id: string; name: string; role: string; department: string; status: string; commission: number }>>([]);
 
   const [newEmpName, setNewEmpName] = useState('');
   const [newEmpRole, setNewEmpRole] = useState('');
