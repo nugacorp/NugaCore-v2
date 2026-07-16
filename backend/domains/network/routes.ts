@@ -3,9 +3,11 @@ import { OnuFTTH, Tower } from '../../../src/types';
 import { store } from '../../../backend/state/store';
 import { asyncHandler } from '../../common/errors';
 import { READ_ROLES, requireRoles } from '../../common/rbac';
-import { getNetworkService } from './service';
-import { getFtthService } from './ftth-service';
 import { getCustomersService } from '../customers/service';
+import { isMultiTenantEnabled } from '../tenancy/flags';
+import { tenantIdFromRequest } from '../tenancy/tenant-scope';
+import { getFtthService } from './ftth-service';
+import { getNetworkService } from './service';
 
 const router = Router();
 
@@ -56,15 +58,18 @@ const recalculateTowerStatusFromSectors = (towerId: string): void => {
 router.get('/api/network-towers', requireRoles(READ_ROLES), asyncHandler(async (req, res) => {
   const status = parseTowerStatus(req.query.status);
   const q = String(req.query.q || '').trim();
+  const tenantId = isMultiTenantEnabled() ? tenantIdFromRequest(req) : undefined;
   const rows = await getNetworkService().listTowers({
     status: status ?? undefined,
     q: q || undefined,
+    tenantId,
   });
   res.json(rows);
 }));
 
 router.get('/api/network-towers/:id', requireRoles(READ_ROLES), asyncHandler(async (req, res) => {
-  const tower = await getNetworkService().getTower(req.params.id);
+  const tenantId = isMultiTenantEnabled() ? tenantIdFromRequest(req) : undefined;
+  const tower = await getNetworkService().getTower(req.params.id, tenantId);
   if (!tower) {
     return res.status(404).json({ error: 'Tower not found' });
   }
@@ -72,7 +77,8 @@ router.get('/api/network-towers/:id', requireRoles(READ_ROLES), asyncHandler(asy
 }));
 
 router.get('/api/network-towers/:id/onboarding', requireRoles(READ_ROLES), asyncHandler(async (req, res) => {
-  const profile = await getNetworkService().getTowerOnboarding(req.params.id);
+  const tenantId = isMultiTenantEnabled() ? tenantIdFromRequest(req) : undefined;
+  const profile = await getNetworkService().getTowerOnboarding(req.params.id, tenantId);
   if (!profile) return res.status(404).json({ error: 'Onboarding profile not found' });
   res.json(profile);
 }));
@@ -85,7 +91,7 @@ router.put('/api/network-towers/:id/onboarding', requireRoles(['super admin', 'a
     billingCycleTime: payload.billingCycleTime ? String(payload.billingCycleTime) : undefined,
     routerId: payload.routerId ? String(payload.routerId) : undefined,
     routerName: payload.routerName ? String(payload.routerName) : undefined,
-  });
+  }, tenantIdFromRequest(req));
   res.json(profile);
 }));
 
@@ -124,6 +130,7 @@ router.post('/api/network-towers', requireRoles(['super admin', 'administrador',
       { name: 'RB5009UG+S+OUT', type: 'Router principal', brand: 'MikroTik' },
       { name: 'Rocket5 AC Gen2', type: 'AP Sectorial', brand: 'Ubiquiti' },
     ],
+    tenantId: tenantIdFromRequest(req),
   };
   store.TOWERS.push(newTower);
   store.NETWORK_SECTORS.push(

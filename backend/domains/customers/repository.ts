@@ -31,15 +31,17 @@ export interface CustomerFilters {
   city?: string;   // ya normalizado a minúsculas por la ruta
   planId?: string;
   q?: string;      // ya normalizado a minúsculas por la ruta
+  /** Aislamiento multi-tenant; si se omite no se filtra (compat single-WISP). */
+  tenantId?: string;
 }
 
 export interface CustomersRepository {
   list(filters: CustomerFilters): Promise<Client[]>;
-  findById(id: string): Promise<Client | null>;
+  findById(id: string, tenantId?: string): Promise<Client | null>;
   create(client: Client): Promise<Client>;
-  update(id: string, patch: Partial<Client>): Promise<Client | null>;
+  update(id: string, patch: Partial<Client>, tenantId?: string): Promise<Client | null>;
   /** Elimina el cliente (y su timeline). NO toca otros dominios (invoices/onus). */
-  remove(id: string): Promise<boolean>;
+  remove(id: string, tenantId?: string): Promise<boolean>;
   /** Genera el siguiente id con formato slug `c-N`. */
   generateId(): Promise<string>;
   listTimeline(clientId: string): Promise<ClientTimelineEvent[]>;
@@ -52,8 +54,11 @@ export interface CustomersRepository {
 // --------------------------------------------------------------------
 export class StoreCustomersRepository implements CustomersRepository {
   async list(filters: CustomerFilters): Promise<Client[]> {
-    const { status, type, city, planId, q } = filters;
+    const { status, type, city, planId, q, tenantId } = filters;
     return store.CLIENTS.filter((client) => {
+      const matchesTenant =
+        !tenantId
+        || (client.tenantId || 'tenant-default') === tenantId;
       const matchesStatus = !status || client.status === status;
       const matchesType = !type || client.type === type;
       const matchesCity = !city || client.city.toLowerCase().includes(city);
@@ -63,12 +68,14 @@ export class StoreCustomersRepository implements CustomersRepository {
         client.name.toLowerCase().includes(q) ||
         client.email.toLowerCase().includes(q) ||
         client.phone.includes(q);
-      return matchesStatus && matchesType && matchesCity && matchesPlan && matchesQuery;
+      return matchesTenant && matchesStatus && matchesType && matchesCity && matchesPlan && matchesQuery;
     });
   }
 
-  async findById(id: string): Promise<Client | null> {
-    return store.CLIENTS.find((c) => c.id === id) ?? null;
+  async findById(id: string, tenantId?: string): Promise<Client | null> {
+    const client = store.CLIENTS.find((c) => c.id === id) ?? null;
+    if (!client || !tenantId) return client;
+    return (client.tenantId || 'tenant-default') === tenantId ? client : null;
   }
 
   async create(client: Client): Promise<Client> {
@@ -76,17 +83,29 @@ export class StoreCustomersRepository implements CustomersRepository {
     return client;
   }
 
-  async update(id: string, patch: Partial<Client>): Promise<Client | null> {
-    const index = store.CLIENTS.findIndex((c) => c.id === id);
+  async update(id: string, patch: Partial<Client>, tenantId?: string): Promise<Client | null> {
+    const index = store.CLIENTS.findIndex((c) => {
+      if (c.id !== id) return false;
+      if (!tenantId) return true;
+      return (c.tenantId || 'tenant-default') === tenantId;
+    });
     if (index === -1) return null;
     store.CLIENTS[index] = { ...store.CLIENTS[index], ...patch };
     return store.CLIENTS[index];
   }
 
-  async remove(id: string): Promise<boolean> {
-    const existed = store.CLIENTS.some((c) => c.id === id);
+  async remove(id: string, tenantId?: string): Promise<boolean> {
+    const existed = store.CLIENTS.some((c) => {
+      if (c.id !== id) return false;
+      if (!tenantId) return true;
+      return (c.tenantId || 'tenant-default') === tenantId;
+    });
     if (!existed) return false;
-    store.CLIENTS = store.CLIENTS.filter((c) => c.id !== id);
+    store.CLIENTS = store.CLIENTS.filter((c) => {
+      if (c.id !== id) return true;
+      if (!tenantId) return false;
+      return (c.tenantId || 'tenant-default') !== tenantId;
+    });
     store.CLIENT_TIMELINE = store.CLIENT_TIMELINE.filter((e) => e.clientId !== id);
     return true;
   }
@@ -122,6 +141,7 @@ export class SupabaseCustomersRepository implements CustomersRepository {
 
   async list(filters: CustomerFilters): Promise<Client[]> {
     let query = this.client.from(CLIENTS_TABLE).select('*');
+    if (filters.tenantId) query = query.eq('tenant_id', filters.tenantId);
     if (filters.status) query = query.eq('status', filters.status);
     if (filters.type) query = query.eq('type', filters.type);
     if (filters.city) query = query.ilike('city', `%${filters.city}%`);
@@ -135,8 +155,10 @@ export class SupabaseCustomersRepository implements CustomersRepository {
     return (data as ClientRow[]).map(rowToClient);
   }
 
-  async findById(id: string): Promise<Client | null> {
-    const { data, error } = await this.client.from(CLIENTS_TABLE).select('*').eq('id', id).maybeSingle();
+  async findById(id: string, tenantId?: string): Promise<Client | null> {
+    let query = this.client.from(CLIENTS_TABLE).select('*').eq('id', id);
+    if (tenantId) query = query.eq('tenant_id', tenantId);
+    const { data, error } = await query.maybeSingle();
     if (error) return fail('findById', error);
     return data ? rowToClient(data as ClientRow) : null;
   }
@@ -151,25 +173,27 @@ export class SupabaseCustomersRepository implements CustomersRepository {
     return rowToClient(data as ClientRow);
   }
 
-  async update(id: string, patch: Partial<Client>): Promise<Client | null> {
+  async update(id: string, patch: Partial<Client>, tenantId?: string): Promise<Client | null> {
     const row = clientPatchToRow(patch);
     if (Object.keys(row).length === 0) {
-      return this.findById(id);
+      return this.findById(id, tenantId);
     }
-    const { data, error } = await this.client
-      .from(CLIENTS_TABLE)
-      .update(row)
-      .eq('id', id)
-      .select('*')
-      .maybeSingle();
+    let query = this.client.from(CLIENTS_TABLE).update(row).eq('id', id);
+    if (tenantId) query = query.eq('tenant_id', tenantId);
+    const { data, error } = await query.select('*').maybeSingle();
     if (error) return fail('update', error);
     return data ? rowToClient(data as ClientRow) : null;
   }
 
-  async remove(id: string): Promise<boolean> {
+  async remove(id: string, tenantId?: string): Promise<boolean> {
     // Supabase JS no lanza en errores PostgREST: hay que leer `{ error }`.
     // Varias tablas RESTRICT (payments, credit_notes, …) y otras usan
     // `customer_id` (suspensión). payment_applications NO tiene client_id.
+    if (tenantId) {
+      const owned = await this.findById(id, tenantId);
+      if (!owned) return false;
+    }
+
     const warn = (table: string, error: { code?: string; message?: string } | null) => {
       if (!error) return;
       logger.warn('customers.remove dep cleanup', {
@@ -253,10 +277,12 @@ export class SupabaseCustomersRepository implements CustomersRepository {
       await delEq(table, 'client_id', id);
     }
 
-    const { error, count } = await this.client
+    let deleteQuery = this.client
       .from(CLIENTS_TABLE)
       .delete({ count: 'exact' })
       .eq('id', id);
+    if (tenantId) deleteQuery = deleteQuery.eq('tenant_id', tenantId);
+    const { error, count } = await deleteQuery;
 
     if (error) {
       if (

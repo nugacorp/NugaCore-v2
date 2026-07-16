@@ -32,6 +32,7 @@ export interface ClientRow {
   installation_photos: string[] | null;
   installation_date: string | null;
   notes: string | null;
+  tenant_id?: string | null;
 }
 
 export interface TimelineRow {
@@ -59,6 +60,7 @@ export const rowToClient = (row: ClientRow): Client => ({
   planId: row.plan_id ?? '',
   ip: row.ip_assigned ?? '',
   assignedIp: row.ip_assigned ?? '',
+  ...(row.tenant_id ? { tenantId: row.tenant_id } : {}),
   ...(row.connection_type ? { connectionType: row.connection_type } : {}),
   ...(row.mac_address ? { mac: row.mac_address } : {}),
   ...(row.ppp_user ? { pppoeUser: row.ppp_user } : {}),
@@ -91,6 +93,7 @@ export const clientToRow = (client: Client): ClientRow => ({
   installation_photos: client.installationPhotos ?? [],
   installation_date: client.installationDate ?? null,
   notes: client.notes ?? null,
+  tenant_id: client.tenantId ?? 'tenant-default',
 });
 
 // --- App -> DB (edición: solo las claves presentes en el patch) -------
@@ -115,6 +118,7 @@ const CAMEL_TO_SNAKE: Partial<Record<keyof Client, keyof ClientRow>> = {
   installationPhotos: 'installation_photos',
   installationDate: 'installation_date',
   notes: 'notes',
+  tenantId: 'tenant_id',
 };
 
 export const clientPatchToRow = (patch: Partial<Client>): Partial<ClientRow> => {

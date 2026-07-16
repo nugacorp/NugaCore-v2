@@ -51,13 +51,15 @@ export class RadiusService {
     };
   }
 
-  async listSessions(limit = 50): Promise<RadiusSessionView[]> {
+  async listSessions(limit = 50, tenantId?: string): Promise<RadiusSessionView[]> {
     if (this.useDb) {
-      const { data, error } = await this.admin
+      let q = this.admin
         .from('radius_accounting')
         .select('*')
         .order('started_at', { ascending: false })
         .limit(limit);
+      if (tenantId) q = q.eq('tenant_id', tenantId);
+      const { data, error } = await q;
       if (error) throw error;
       return (data ?? []).map(this.rowToSession);
     }

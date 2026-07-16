@@ -10,6 +10,8 @@ import { getPlansService } from '../plans/service';
 import { getBillingService } from '../billing/service';
 import { requestReactivation, requestSuspension } from '../service-status/service';
 import { ipamService } from '../ipam/service';
+import { isMultiTenantEnabled } from '../tenancy/flags';
+import { tenantIdFromRequest } from '../tenancy/tenant-scope';
 
 const router = Router();
 
@@ -24,8 +26,9 @@ router.get('/api/clients', requireRoles(READ_ROLES), asyncHandler(async (req, re
   const city = String(req.query.city || '').trim().toLowerCase();
   const planId = String(req.query.planId || '').trim();
   const q = String(req.query.q || '').trim().toLowerCase();
+  const tenantId = isMultiTenantEnabled() ? tenantIdFromRequest(req) : undefined;
 
-  const rows = await getCustomersService().list({ status, type, city, planId, q });
+  const rows = await getCustomersService().list({ status, type, city, planId, q, tenantId });
   const pagination = parsePaginationOptional(req.query as Record<string, unknown>);
   if (pagination) {
     res.json(paginateArray(rows, pagination));
@@ -40,7 +43,8 @@ router.get('/api/clients/:id/history', requireRoles(READ_ROLES), asyncHandler(as
 }));
 
 router.get('/api/clients/:id', requireRoles(READ_ROLES), asyncHandler(async (req, res) => {
-  const client = await getCustomersService().getById(req.params.id);
+  const tenantId = isMultiTenantEnabled() ? tenantIdFromRequest(req) : undefined;
+  const client = await getCustomersService().getById(req.params.id, tenantId);
   if (!client) {
     return res.status(404).json({ error: 'Customer not found' });
   }
@@ -116,6 +120,7 @@ router.post('/api/clients', requireRoles(['super admin', 'administrador', 'tecni
     }
   }
 
+  const tenantId = tenantIdFromRequest(req);
   const newClient: Client = {
     id: await service.generateClientId(),
     name,
@@ -128,6 +133,7 @@ router.post('/api/clients', requireRoles(['super admin', 'administrador', 'tecni
     lat: Number(lat) || 19.4125,
     lng: Number(lng) || -99.1555,
     planId: planId || 'plan-basic',
+    tenantId,
     connectionType: connectionType || (clientType === 'corporate' || clientType === 'hotel' ? 'FTTH' : 'WISP'),
     ip: validatedAssignment?.ip || (isConvertLead ? `10.100.10.${randomSub}` : '0.0.0.0'),
     ...(validatedAssignment
@@ -212,8 +218,9 @@ router.post('/api/clients', requireRoles(['super admin', 'administrador', 'tecni
 router.put('/api/clients/:id', requireRoles(['super admin', 'administrador', 'cobranza']), asyncHandler(async (req, res) => {
   const service = getCustomersService();
   const { id } = req.params;
+  const tenantId = isMultiTenantEnabled() ? tenantIdFromRequest(req) : undefined;
 
-  const existing = await service.getById(id);
+  const existing = await service.getById(id, tenantId);
   if (!existing) {
     return res.status(404).json({ error: 'Customer not found' });
   }
@@ -231,7 +238,9 @@ router.put('/api/clients/:id', requireRoles(['super admin', 'administrador', 'co
     }
   }
 
-  const updated = await service.update(id, { ...req.body, status: nextStatus });
+  // No permitir mover tenant desde el payload del cliente.
+  const { tenantId: _ignoredTenant, ...bodyPatch } = req.body as Record<string, unknown>;
+  const updated = await service.update(id, { ...bodyPatch, status: nextStatus }, tenantId);
   if (!updated) {
     return res.status(404).json({ error: 'Customer not found' });
   }
@@ -263,7 +272,8 @@ router.put('/api/clients/:id', requireRoles(['super admin', 'administrador', 'co
 
 router.delete('/api/clients/:id', requireRoles(['super admin', 'administrador']), asyncHandler(async (req, res) => {
   const { id } = req.params;
-  const removed = await getCustomersService().remove(id);
+  const tenantId = isMultiTenantEnabled() ? tenantIdFromRequest(req) : undefined;
+  const removed = await getCustomersService().remove(id, tenantId);
   if (!removed) {
     return res.status(404).json({ error: 'Customer not found' });
   }

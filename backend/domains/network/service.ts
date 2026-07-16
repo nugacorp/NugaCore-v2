@@ -28,9 +28,10 @@ export class NetworkService {
     return supabaseAdmin;
   }
 
-  async listTowers(filters?: { status?: string; q?: string }) {
+  async listTowers(filters?: { status?: string; q?: string; tenantId?: string }) {
     if (this.useDb) {
       let q = this.admin.from('towers').select('*');
+      if (filters?.tenantId) q = q.eq('tenant_id', filters.tenantId);
       if (filters?.status) q = q.eq('status', filters.status);
       const { data, error } = await q.order('name');
       if (error) throw error;
@@ -42,24 +43,32 @@ export class NetworkService {
       return rows;
     }
     return store.TOWERS.filter((t) => {
+      const matchTenant =
+        !filters?.tenantId
+        || (t.tenantId || 'tenant-default') === filters.tenantId;
       const matchStatus = !filters?.status || t.status === filters.status;
       const matchQ = !filters?.q || t.name.toLowerCase().includes(filters.q.toLowerCase());
-      return matchStatus && matchQ;
+      return matchTenant && matchStatus && matchQ;
     });
   }
 
-  async getTower(id: string) {
+  async getTower(id: string, tenantId?: string) {
     if (this.useDb) {
-      const { data, error } = await this.admin.from('towers').select('*').eq('id', id).maybeSingle();
+      let q = this.admin.from('towers').select('*').eq('id', id);
+      if (tenantId) q = q.eq('tenant_id', tenantId);
+      const { data, error } = await q.maybeSingle();
       if (error) throw error;
       return data ? this.rowToTower(data) : null;
     }
-    return store.TOWERS.find((t) => t.id === id) ?? null;
+    const tower = store.TOWERS.find((t) => t.id === id) ?? null;
+    if (!tower || !tenantId) return tower;
+    return (tower.tenantId || 'tenant-default') === tenantId ? tower : null;
   }
 
-  async listSectors(filters?: { towerId?: string }) {
+  async listSectors(filters?: { towerId?: string; tenantId?: string }) {
     if (this.useDb) {
       let q = this.admin.from('network_sectors').select('*');
+      if (filters?.tenantId) q = q.eq('tenant_id', filters.tenantId);
       if (filters?.towerId) q = q.eq('tower_id', filters.towerId);
       const { data, error } = await q.order('name');
       if (error) throw error;
@@ -68,14 +77,15 @@ export class NetworkService {
     return store.NETWORK_SECTORS.filter((s) => !filters?.towerId || s.towerId === filters.towerId);
   }
 
-  async getTowerOnboarding(towerId: string): Promise<TowerOnboardingProfile | null> {
+  async getTowerOnboarding(towerId: string, tenantId?: string): Promise<TowerOnboardingProfile | null> {
     if (this.useDb) {
       try {
-        const { data, error } = await this.admin
+        let q = this.admin
           .from('tower_onboarding_profiles')
           .select('*')
-          .eq('tower_id', towerId)
-          .maybeSingle();
+          .eq('tower_id', towerId);
+        if (tenantId) q = q.eq('tenant_id', tenantId);
+        const { data, error } = await q.maybeSingle();
         if (error) throw error;
         if (!data) return null;
         return {
@@ -99,11 +109,13 @@ export class NetworkService {
   async upsertTowerOnboarding(
     towerId: string,
     payload: Omit<TowerOnboardingProfile, 'towerId' | 'updatedAt'>,
+    tenantId?: string,
   ): Promise<TowerOnboardingProfile> {
     if (this.useDb) {
       try {
         const record = {
           tower_id: towerId,
+          tenant_id: tenantId || 'tenant-default',
           zone_name: payload.zoneName ?? null,
           billing_cycle_day: payload.billingCycleDay ?? null,
           billing_cycle_time: payload.billingCycleTime ?? null,
@@ -175,6 +187,7 @@ export class NetworkService {
       ports: [],
       equipment: Array.isArray(row.equipment) ? (row.equipment as { name: string; type: string; brand: string }[]) : [],
       photos: Array.isArray(row.photos) ? row.photos as string[] : [],
+      ...(row.tenant_id ? { tenantId: String(row.tenant_id) } : {}),
     };
   }
 }
