@@ -37,6 +37,12 @@ export interface Client {
   installationPhotos?: string[];
   installationDate?: string;
   notes?: string;
+  /** Canal preferido para facturas y avisos de cobro. */
+  notificationChannel?: 'whatsapp' | 'telegram' | 'sms' | 'email';
+  /** Chat ID de Telegram (obligatorio si notificationChannel=telegram). */
+  telegramChatId?: string;
+  /** Zona de facturación (torre/zona) para fecha de corte. */
+  billingZoneId?: string;
 }
 
 export interface Tower {
@@ -498,4 +504,61 @@ export interface FtthImportResult {
   segmentsCreated: number;
   segmentsUpdated: number;
   errors: string[];
+}
+
+export type ClientNotificationChannel = 'whatsapp' | 'telegram' | 'sms' | 'email';
+
+export interface IntegrationServiceStatus {
+  enabled: boolean;
+  configured: boolean;
+  statusLabel: string;
+  detail?: string;
+}
+
+export interface WispIntegrationsSettings {
+  stripe: {
+    enabled: boolean;
+    publishableKey: string;
+    secretKeySet: boolean;
+    webhookSecretSet: boolean;
+  };
+  whatsapp: {
+    enabled: boolean;
+    phoneNumberId: string;
+    businessAccountId: string;
+    accessTokenSet: boolean;
+    webhookVerifyTokenSet: boolean;
+  };
+  telegram: {
+    enabled: boolean;
+    botUsername: string;
+    botTokenSet: boolean;
+  };
+  codi: {
+    enabled: boolean;
+    merchantId: string;
+    beneficiaryName: string;
+    clabe: string;
+    webhookSecretSet: boolean;
+    certificateRef: string;
+  };
+  mikrotik: {
+    note: string;
+  };
+  statuses: {
+    stripe: IntegrationServiceStatus;
+    whatsapp: IntegrationServiceStatus;
+    telegram: IntegrationServiceStatus;
+    codi: IntegrationServiceStatus;
+    mikrotik: IntegrationServiceStatus;
+  };
+}
+
+export interface BillingNotifyResult {
+  clientId: string;
+  channel: ClientNotificationChannel;
+  sent: boolean;
+  provider: string;
+  messagePreview: string;
+  error?: string;
 }

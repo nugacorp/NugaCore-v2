@@ -112,6 +112,7 @@ export default function BillingModule({
   const [payAmount, setPayAmount] = useState('');
   const [payAmountError, setPayAmountError] = useState('');
   const [paymentInProgress, setPaymentInProgress] = useState(false);
+  const [notifyInProgress, setNotifyInProgress] = useState(false);
 
   // Async UX state
   const [toast, setToast] = useState<Toast>(null);
@@ -277,6 +278,28 @@ export default function BillingModule({
       setToast({ kind: 'error', msg: getErrorMessage(err, 'No se pudo registrar el pago.') });
     } finally {
       setPaymentInProgress(false);
+      setBusyLabel('');
+    }
+  };
+
+  const notifyInvoice = async (inv: Invoice) => {
+    setNotifyInProgress(true);
+    setBusyLabel('Enviando factura...');
+    try {
+      const api = createAuthorizedApi(getAuthHeaders);
+      const result = await api.post<{ sent: boolean; channel: string; error?: string }>(
+        `/api/billing/invoices/${inv.id}/notify`,
+        {},
+      );
+      if (result.sent) {
+        setToast({ kind: 'success', msg: `Factura enviada por ${result.channel}.` });
+      } else {
+        setToast({ kind: 'error', msg: result.error || 'No se pudo enviar la notificación.' });
+      }
+    } catch (err) {
+      setToast({ kind: 'error', msg: getErrorMessage(err, 'Error al enviar factura.') });
+    } finally {
+      setNotifyInProgress(false);
       setBusyLabel('');
     }
   };
@@ -758,6 +781,18 @@ export default function BillingModule({
                     </div>
                   ))}
                 </div>
+
+                {canManage && pendingAmountOf(selectedInvoice) > 0 && (
+                  <button
+                    type="button"
+                    id="billing-notify-invoice"
+                    disabled={notifyInProgress || paymentInProgress}
+                    onClick={() => void notifyInvoice(selectedInvoice)}
+                    className="w-full py-2.5 bg-violet-700/30 hover:bg-violet-700/50 text-violet-100 rounded-xl font-bold transition text-[11px] border border-violet-800/60 disabled:opacity-50"
+                  >
+                    Enviar factura al cliente (WhatsApp / Telegram)
+                  </button>
+                )}
 
                 {/* Pagos aplicados (account-state) */}
                 <div>

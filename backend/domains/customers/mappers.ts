@@ -33,6 +33,9 @@ export interface ClientRow {
   installation_date: string | null;
   notes: string | null;
   tenant_id?: string | null;
+  notification_channel?: 'whatsapp' | 'telegram' | 'sms' | 'email' | null;
+  telegram_chat_id?: string | null;
+  billing_zone_id?: string | null;
 }
 
 export interface TimelineRow {
@@ -68,6 +71,9 @@ export const rowToClient = (row: ClientRow): Client => ({
   ...(row.contract_id ? { contractId: row.contract_id } : {}),
   ...(row.installation_date ? { installationDate: row.installation_date } : {}),
   ...(row.notes ? { notes: row.notes } : {}),
+  ...(row.notification_channel ? { notificationChannel: row.notification_channel } : {}),
+  ...(row.telegram_chat_id ? { telegramChatId: row.telegram_chat_id } : {}),
+  ...(row.billing_zone_id ? { billingZoneId: row.billing_zone_id } : {}),
   installationPhotos: Array.isArray(row.installation_photos) ? row.installation_photos : [],
 });
 
@@ -94,6 +100,9 @@ export const clientToRow = (client: Client): ClientRow => ({
   installation_date: client.installationDate ?? null,
   notes: client.notes ?? null,
   tenant_id: client.tenantId ?? 'tenant-default',
+  notification_channel: client.notificationChannel ?? 'whatsapp',
+  telegram_chat_id: client.telegramChatId ?? null,
+  billing_zone_id: client.billingZoneId ?? null,
 });
 
 // --- App -> DB (edición: solo las claves presentes en el patch) -------
@@ -119,6 +128,9 @@ const CAMEL_TO_SNAKE: Partial<Record<keyof Client, keyof ClientRow>> = {
   installationDate: 'installation_date',
   notes: 'notes',
   tenantId: 'tenant_id',
+  notificationChannel: 'notification_channel',
+  telegramChatId: 'telegram_chat_id',
+  billingZoneId: 'billing_zone_id',
 };
 
 export const clientPatchToRow = (patch: Partial<Client>): Partial<ClientRow> => {

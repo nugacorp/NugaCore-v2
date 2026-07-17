@@ -1,13 +1,13 @@
 import React, { useState } from 'react';
-import { 
-  DollarSign, 
-  Shield, 
-  Briefcase, 
-  Plus, 
-  Trash2, 
-  Clock, 
-  Key, 
+import {
+  DollarSign,
+  Shield,
+  Briefcase,
+  Plus,
+  Trash2,
+  Clock,
 } from 'lucide-react';
+import ExternalIntegrationsPanel from './owner/ExternalIntegrationsPanel';
 import { Client, Invoice, Ticket as SupportTicket } from '../types';
 
 interface FinanceOwnerModuleProps {
@@ -606,45 +606,8 @@ export default function FinanceOwnerModule({
                 </div>
               </div>
 
-              {/* API Integration Status — no fake data */}
-              <div className="bg-slate-950 border border-slate-800 p-5 rounded-2xl space-y-3.5">
-                <span className="text-xs font-mono font-bold text-indigo-400 block uppercase tracking-wider">Integraciones Externas</span>
-                <h3 className="text-sm font-bold text-white font-mono uppercase">Estado de Conexiones</h3>
-
-                <div className="space-y-2.5 text-xs font-mono font-semibold">
-                  <div className="flex justify-between items-center bg-slate-900/60 p-2 rounded-lg border border-slate-900">
-                    <div className="flex items-center space-x-1.5">
-                      <Key className="w-3.5 h-3.5 text-slate-500" />
-                      <span>Stripe Gateway</span>
-                    </div>
-                    <span className="text-[9px] text-amber-500 uppercase">No conectado — sin datos mock</span>
-                  </div>
-
-                  <div className="flex justify-between items-center bg-slate-900/60 p-2 rounded-lg border border-slate-900">
-                    <div className="flex items-center space-x-1.5">
-                      <Key className="w-3.5 h-3.5 text-slate-500" />
-                      <span>WhatsApp Cloud API</span>
-                    </div>
-                    <span className="text-[9px] text-amber-500 uppercase">No conectado — sin datos mock</span>
-                  </div>
-
-                  <div className="flex justify-between items-center bg-slate-900/60 p-2 rounded-lg border border-slate-900">
-                    <div className="flex items-center space-x-1.5">
-                      <Key className="w-3.5 h-3.5 text-amber-400" />
-                      <span>Mikrotik ROS API</span>
-                    </div>
-                    <span className="text-[9px] text-slate-500 uppercase">Port 8728 — ver módulo Red</span>
-                  </div>
-
-                  <div className="flex justify-between items-center bg-slate-900/60 p-2 rounded-lg border border-slate-900">
-                    <div className="flex items-center space-x-1.5">
-                      <Key className="w-3.5 h-3.5 text-slate-500" />
-                      <span>Telegram Bot</span>
-                    </div>
-                    <span className="text-[9px] text-amber-500 uppercase">No conectado — sin datos mock</span>
-                  </div>
-                </div>
-              </div>
+              {/* API Integration config — credenciales reales por WISP */}
+              <ExternalIntegrationsPanel getAuthHeaders={getAuthHeaders} />
 
             </div>
           </div>

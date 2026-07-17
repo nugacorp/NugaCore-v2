@@ -5,7 +5,7 @@
 // View   = forma saneada para API (sin secretos de proveedor).
 // ====================================================================
 
-export type PaymentProvider = 'manual' | 'mercado_pago' | 'openpay' | 'spei';
+export type PaymentProvider = 'manual' | 'mercado_pago' | 'openpay' | 'spei' | 'codi';
 
 export type PaymentOrderStatus =
   | 'pending'

@@ -1427,6 +1427,7 @@ export default function App() {
                 onCreateMikrotikRouter={handleCreateMikrotikRouter}
                 onLinkRouterToTower={handleLinkRouterToTower}
                 onSaveTowerOnboarding={handleSaveTowerOnboarding}
+                getAuthHeaders={getAuthHeaders}
               />
             )}
 

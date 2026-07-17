@@ -29,7 +29,7 @@ describe('Consola del propietario — sin simulador ni workflows IA', () => {
 
   it('no muestra Stripe Gateway como "Conectado (Live)" — sin datos mock', () => {
     expect(source).not.toContain('Conectado (Live)');
-    expect(source).toContain('No conectado');
+    expect(source).toContain('ExternalIntegrationsPanel');
   });
 
   it('MFA toggle etiqueta preferencia local pendiente de backend', () => {

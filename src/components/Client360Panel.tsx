@@ -3,7 +3,7 @@ import {
   X, MapPin, Phone, Mail, Wifi, Router as RouterIcon, CalendarClock,
   CreditCard, Ticket, UserMinus, CheckCircle, Pencil, Network, Navigation, History,
   Wallet, Receipt, FileText, AlertTriangle, ClipboardList, Brain, Bell,
-  Tag, Users, Paperclip, Loader2, Plus,
+  Tag, Users, Paperclip, Loader2, Plus, Send,
 } from 'lucide-react';
 import { Client } from '../types';
 import { ClientActionCaps } from '../lib/rbac';
@@ -183,6 +183,26 @@ export default function Client360Panel({
   const [newTag, setNewTag] = useState('');
   const [newDocName, setNewDocName] = useState('');
   const [busy, setBusy] = useState(false);
+  const [notifyChannel, setNotifyChannel] = useState(client.notificationChannel || 'whatsapp');
+  const [telegramChatId, setTelegramChatId] = useState(client.telegramChatId || '');
+
+  useEffect(() => {
+    setNotifyChannel(client.notificationChannel || 'whatsapp');
+    setTelegramChatId(client.telegramChatId || '');
+  }, [client.id, client.notificationChannel, client.telegramChatId]);
+
+  const saveNotificationPrefs = async () => {
+    setBusy(true);
+    try {
+      const api = createAuthorizedApi(getAuthHeaders);
+      await api.put(`/api/clients/${client.id}`, {
+        notificationChannel: notifyChannel,
+        telegramChatId: notifyChannel === 'telegram' ? telegramChatId : undefined,
+      });
+    } finally {
+      setBusy(false);
+    }
+  };
 
   const loadExpediente = useCallback(async () => {
     setExpedienteLoading(true);
@@ -284,6 +304,44 @@ export default function Client360Panel({
             {row('Dirección', client.address)}
             {row('Teléfono / WhatsApp', client.phone, <Phone className="w-3 h-3" />)}
             {row('Email', client.email, <Mail className="w-3 h-3" />)}
+            {row(
+              'Canal de facturación',
+              client.notificationChannel || 'whatsapp',
+              <Bell className="w-3 h-3" />,
+            )}
+            {client.notificationChannel === 'telegram' &&
+              row('Telegram chat ID', client.telegramChatId || 'Sin configurar', <Send className="w-3 h-3" />)}
+            {caps.editClient && (
+              <div className="pt-2 space-y-2 border-t border-slate-900/80 mt-2">
+                <p className="text-[10px] font-mono uppercase text-slate-500">Preferencia de avisos</p>
+                <select
+                  value={notifyChannel}
+                  onChange={(e) => setNotifyChannel(e.target.value as Client['notificationChannel'])}
+                  className="w-full bg-slate-950 border border-slate-800 rounded-lg px-2 py-1.5 text-[11px] text-white"
+                >
+                  <option value="whatsapp">WhatsApp</option>
+                  <option value="telegram">Telegram</option>
+                  <option value="sms">SMS (vía WhatsApp API)</option>
+                  <option value="email">Email (pendiente SMTP)</option>
+                </select>
+                {notifyChannel === 'telegram' && (
+                  <input
+                    value={telegramChatId}
+                    onChange={(e) => setTelegramChatId(e.target.value)}
+                    placeholder="Chat ID de Telegram"
+                    className="w-full bg-slate-950 border border-slate-800 rounded-lg px-2 py-1.5 text-[11px] text-white"
+                  />
+                )}
+                <button
+                  type="button"
+                  disabled={busy}
+                  onClick={() => void saveNotificationPrefs()}
+                  className="text-[10px] font-mono text-indigo-300 hover:text-indigo-200 disabled:opacity-50"
+                >
+                  Guardar canal de facturación
+                </button>
+              </div>
+            )}
             {row('Fecha instalación', client.installationDate, <CalendarClock className="w-3 h-3" />)}
             {row('GPS', hasGps ? <span className="font-mono">{client.lat}, {client.lng}</span> : 'Sin coordenadas')}
           </div>
