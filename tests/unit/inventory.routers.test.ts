@@ -32,7 +32,7 @@ const mockRouter = (over: Partial<MikrotikRouterRegistryItem> & { id: string }):
 describe('inventoryRoutersService.getSummary', () => {
   it('es estable con cero routers (todo en 0)', async () => {
     setRouters([]);
-    expect(await inventoryRoutersService.getSummary()).toEqual({
+    expect(await inventoryRoutersService.getSummary('tenant-default')).toEqual({
       totalRouters: 0,
       onlineRouters: 0,
       offlineRouters: 0,
@@ -50,7 +50,7 @@ describe('inventoryRoutersService.getSummary', () => {
       mockRouter({ id: 'r2', isOnline: false, provisioningStatus: 'pending' }),
       mockRouter({ id: 'r3', isOnline: true, provisioningStatus: 'connected', hasCredentials: true }),
     ]);
-    const s = await inventoryRoutersService.getSummary();
+    const s = await inventoryRoutersService.getSummary('tenant-default');
     expect(s.totalRouters).toBe(3);
     expect(s.onlineRouters).toBe(2);
     expect(s.offlineRouters).toBe(1);
@@ -60,12 +60,25 @@ describe('inventoryRoutersService.getSummary', () => {
     expect(s.routersWithCredentials).toBe(2);
     expect(s.lastSeenCount).toBe(1);
   });
+
+  it('no filtra routers de otro tenant', async () => {
+    setRouters([
+      mockRouter({ id: 'r-default', tenantId: 'tenant-default', isOnline: true }),
+      mockRouter({ id: 'r-other', tenantId: 'tenant-other', isOnline: true, vpnIp: '10.70.0.2' }),
+    ]);
+    const s = await inventoryRoutersService.getSummary('tenant-other');
+    expect(s.totalRouters).toBe(1);
+    expect(s.routersWithVpn).toBe(1);
+    const list = await inventoryRoutersService.listRouters('tenant-other');
+    expect(list.map((r) => r.id)).toEqual(['r-other']);
+    expect(await inventoryRoutersService.getRouter('r-default', 'tenant-other')).toBeNull();
+  });
 });
 
 describe('inventoryRoutersService.getRouter / mapper', () => {
   it('devuelve null para id inexistente', async () => {
     setRouters([]);
-    expect(await inventoryRoutersService.getRouter('nope')).toBeNull();
+    expect(await inventoryRoutersService.getRouter('nope', 'tenant-default')).toBeNull();
   });
 
   it('la vista NO expone secretos (encryptedPassword/username)', () => {

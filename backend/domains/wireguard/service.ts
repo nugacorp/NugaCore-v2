@@ -301,10 +301,22 @@ export class WireguardService {
    * un servidor. Si ya existe un peer activo, reusa su configuración
    * (descifra los secretos para incrustarlos en el script). Si no, lo crea.
    */
-  async getPeerConfigForRouter(routerId: string, serverId: string, actorId?: string): Promise<PeerCreatedOnce> {
-    const existing = (await this.repo.listPeers({ serverId, routerId, status: 'active' }))[0];
-    if (!existing) return this.createPeer({ serverId, name: `router-${routerId}`, routerId }, actorId);
-    const server = await this.repo.getServer(serverId);
+  async getPeerConfigForRouter(
+    routerId: string,
+    serverId: string,
+    actorId?: string,
+    tenantId?: string,
+  ): Promise<PeerCreatedOnce> {
+    const existing = (await this.repo.listPeers({
+      serverId, routerId, status: 'active', tenantId,
+    }))[0];
+    if (!existing) {
+      return this.createPeer(
+        { serverId, name: `router-${routerId}`, routerId, tenantId },
+        actorId,
+      );
+    }
+    const server = await this.repo.getServer(serverId, tenantId);
     if (!server) throw new NotFoundError(`Servidor WireGuard '${serverId}' no encontrado.`);
     const privateKey = existing.encryptedPrivateKey ? decryptSecret(existing.encryptedPrivateKey) : '';
     const presharedKey = existing.encryptedPresharedKey ? decryptSecret(existing.encryptedPresharedKey) : '';

@@ -83,7 +83,7 @@ export const enrollmentRepository = {
 export interface RouterEnrollmentRepository {
   create(record: RouterEnrollmentRecord): Promise<RouterEnrollmentRecord>;
   findById(id: string): Promise<RouterEnrollmentRecord | null>;
-  list(): Promise<RouterEnrollmentRecord[]>;
+  list(tenantId?: string): Promise<RouterEnrollmentRecord[]>;
   update(id: string, patch: Partial<RouterEnrollmentRecord>): Promise<RouterEnrollmentRecord | null>;
   delete(id: string): Promise<boolean>;
   findByRouterId(routerId: string): Promise<RouterEnrollmentRecord[]>;
@@ -102,8 +102,10 @@ export class StoreRouterEnrollmentRepository implements RouterEnrollmentReposito
   async findById(id: string) {
     return enrollmentRepository.getById(id) ?? null;
   }
-  async list() {
-    return enrollmentRepository.list();
+  async list(tenantId?: string) {
+    const rows = enrollmentRepository.list();
+    if (!tenantId) return rows;
+    return rows.filter((r) => (r.tenantId || 'tenant-default') === tenantId);
   }
   async update(id: string, patch: Partial<RouterEnrollmentRecord>) {
     return enrollmentRepository.update(id, patch) ?? null;
@@ -136,7 +138,13 @@ export class SupabaseRouterEnrollmentRepository implements RouterEnrollmentRepos
   }
 
   async create(record: RouterEnrollmentRecord): Promise<RouterEnrollmentRecord> {
-    const { error } = await this.client.from(TABLE).insert(enrollmentToRow(record));
+    const row = enrollmentToRow(record);
+    let { error } = await this.client.from(TABLE).insert(row);
+    // Compat: staging puede no tener aún la migración tenant_id.
+    if (error && /tenant_id/i.test(error.message || '')) {
+      const { tenant_id: _omit, ...withoutTenant } = row;
+      ({ error } = await this.client.from(TABLE).insert(withoutTenant));
+    }
     if (error) throw new Error(`router_enrollment.create: ${error.message}`);
     return record;
   }
@@ -147,8 +155,10 @@ export class SupabaseRouterEnrollmentRepository implements RouterEnrollmentRepos
     return data ? rowToEnrollment(data as RouterEnrollmentRow) : null;
   }
 
-  async list(): Promise<RouterEnrollmentRecord[]> {
-    const { data, error } = await this.client.from(TABLE).select('*').order('created_at', { ascending: false });
+  async list(tenantId?: string): Promise<RouterEnrollmentRecord[]> {
+    let q = this.client.from(TABLE).select('*').order('created_at', { ascending: false });
+    if (tenantId) q = q.eq('tenant_id', tenantId);
+    const { data, error } = await q;
     if (error) throw new Error(`router_enrollment.list: ${error.message}`);
     return (data || []).map((r) => rowToEnrollment(r as RouterEnrollmentRow));
   }

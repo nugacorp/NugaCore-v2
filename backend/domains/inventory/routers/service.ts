@@ -4,10 +4,12 @@
 // Expone listado, detalle y resumen agregado del inventario de routers,
 // derivados del modelo canónico `mikrotik_routers`. Todo calculado en local;
 // estable con cero routers. Sin escritura, sin RouterOS, sin comandos.
+// Filtrado obligatorio por tenantId (aislamiento multi-WISP).
 // ====================================================================
 
 import { MikrotikRouterRegistryItem } from '../../../state/store';
 import { hydrateMikrotikRoutersFromDb } from '../../mikrotik/repository';
+import { filterRoutersByTenant, findRouterForTenant } from '../../mikrotik/tenant-filter';
 import { inventoryRoutersRepository } from './repository';
 import { toInventoryRouterView } from './mappers';
 import { InventoryRouterView, InventorySummary } from './types';
@@ -23,24 +25,27 @@ const refreshInventoryCache = async (): Promise<void> => {
   await hydrateMikrotikRoutersFromDb();
 };
 
+const scoped = (tenantId: string): MikrotikRouterRegistryItem[] =>
+  filterRoutersByTenant(inventoryRoutersRepository.list(), tenantId);
+
 export const inventoryRoutersService = {
-  /** Lista saneada de todos los routers del inventario. */
-  async listRouters(): Promise<InventoryRouterView[]> {
+  /** Lista saneada de routers del tenant. */
+  async listRouters(tenantId: string): Promise<InventoryRouterView[]> {
     await refreshInventoryCache();
-    return inventoryRoutersRepository.list().map(toInventoryRouterView);
+    return scoped(tenantId).map(toInventoryRouterView);
   },
 
-  /** Detalle saneado de un router, o null si no existe. */
-  async getRouter(id: string): Promise<InventoryRouterView | null> {
+  /** Detalle saneado de un router del tenant, o null. */
+  async getRouter(id: string, tenantId: string): Promise<InventoryRouterView | null> {
     await refreshInventoryCache();
-    const item = inventoryRoutersRepository.getById(id);
+    const item = findRouterForTenant(inventoryRoutersRepository.list(), id, tenantId);
     return item ? toInventoryRouterView(item) : null;
   },
 
-  /** Resumen agregado. Estable aunque no haya routers (todo en 0). */
-  async getSummary(): Promise<InventorySummary> {
+  /** Resumen agregado del tenant. Estable aunque no haya routers (todo en 0). */
+  async getSummary(tenantId: string): Promise<InventorySummary> {
     await refreshInventoryCache();
-    const rows = inventoryRoutersRepository.list();
+    const rows = scoped(tenantId);
     return {
       totalRouters: rows.length,
       onlineRouters: rows.filter((r) => r.isOnline).length,

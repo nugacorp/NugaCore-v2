@@ -92,6 +92,7 @@ const toView = (rec: RouterEnrollmentRecord): RouterEnrollmentView => {
   const { templateName, generatorVersion } = getTemplateMetadata(rec.templateId);
   return {
     id: rec.id,
+    tenantId: rec.tenantId || 'tenant-default',
     routerId: rec.routerId,
     routerName: router?.name,
     wgServerId: rec.wgServerId,
@@ -306,6 +307,7 @@ const buildScript = async (
     mode: 'create' | 'download';
     wgSnapshot?: RouterEnrollmentWireGuardSnapshot;
     snmpSnapshot?: RouterEnrollmentSnmpSnapshot;
+    tenantId?: string;
   } = { mode: 'create' },
 ): Promise<BuildScriptResult> => {
   // Resuelve templateId con fallback a router_base_wireguard (backward compat).
@@ -315,7 +317,12 @@ const buildScript = async (
   let peerConfig: PeerCreatedOnce | null = null;
   if (opts.mode === 'create') {
     // start: siempre crea/reutiliza el peer WG de management (todas las plantillas).
-    peerConfig = await getWireguardService().getPeerConfigForRouter(routerId, wgServerId, actorId);
+    peerConfig = await getWireguardService().getPeerConfigForRouter(
+      routerId,
+      wgServerId,
+      actorId,
+      opts.tenantId,
+    );
   } else if (needsWg) {
     // download: solo resolver WG si el script lo incrusta (no-WG → sin lookup).
     peerConfig = await resolveWgForDownload(routerId, wgServerId, actorId, opts.wgSnapshot);
@@ -428,7 +435,11 @@ export const enrollmentService = {
    * El script se devuelve UNA vez y no se persiste.
    * Si wgServerId se omite, usa el servidor WireGuard default del VPS.
    */
-  async start(input: StartEnrollmentInput, actorId: string): Promise<StartEnrollmentResult> {
+  async start(
+    input: StartEnrollmentInput,
+    actorId: string,
+    tenantId = 'tenant-default',
+  ): Promise<StartEnrollmentResult> {
     // ── 1. Validar input básico ──────────────────────────────────────
     if (!input.routerName?.trim()) throw new BadRequestError('routerName es obligatorio.');
     if (!input.routerosVersion) throw new BadRequestError('routerosVersion es obligatorio.');
@@ -466,12 +477,12 @@ export const enrollmentService = {
     if (allowWgServerOverride && input.wgServerId?.trim()) {
       resolvedServerId = input.wgServerId.trim();
       // Validar que existe: 404 en lugar de 500
-      const server = await wgService.findServer(resolvedServerId);
+      const server = await wgService.findServer(resolvedServerId, tenantId);
       if (!server) {
         throw new NotFoundError(`Servidor WireGuard '${resolvedServerId}' no encontrado.`);
       }
     } else {
-      const defaultServer = await wgService.getDefaultServer();
+      const defaultServer = await wgService.getDefaultServer(tenantId);
       if (!defaultServer) {
         throw new BadRequestError(
           'No hay servidor WireGuard default configurado. ' +
@@ -489,11 +500,16 @@ export const enrollmentService = {
 
     let buildResult: Awaited<ReturnType<typeof buildScript>>;
     try {
-      buildResult = await buildScript(routerId, enrollInput, resolvedServerId, actorId);
+      buildResult = await buildScript(routerId, enrollInput, resolvedServerId, actorId, {
+        mode: 'create',
+        tenantId,
+      });
     } catch (err) {
       // Best-effort: revocar peer WG si fue creado antes del fallo
       try {
-        const orphans = await wgService.listPeers({ serverId: resolvedServerId, routerId, status: 'active' });
+        const orphans = await wgService.listPeers({
+          serverId: resolvedServerId, routerId, status: 'active', tenantId,
+        });
         if (orphans.length > 0) {
           await wgService.revokePeer(orphans[0].id);
           logger.warn('Enrollment: peer WG huérfano revocado en rollback', {
@@ -531,6 +547,7 @@ export const enrollmentService = {
     // y para regenerar el mismo password en /download.
     const enrolledRouter = {
       id: routerId,
+      tenantId,
       name: input.routerName.trim(),
       ipAddress: wgAssignedIp || input.ipAddress || '0.0.0.0',
       apiPort: input.apiPort || 8728,
@@ -584,6 +601,7 @@ export const enrollmentService = {
     const id = await repo.nextId();
     const rec: RouterEnrollmentRecord = {
       id,
+      tenantId,
       routerId,
       wgServerId: resolvedServerId,
       wgPeerId,
@@ -642,15 +660,17 @@ export const enrollmentService = {
     };
   },
 
-  async list(): Promise<RouterEnrollmentView[]> {
+  async list(tenantId: string): Promise<RouterEnrollmentView[]> {
     const repo = getEnrollmentRepository();
-    return (await repo.list()).map(toView);
+    return (await repo.list(tenantId)).map(toView);
   },
 
-  async getById(id: string): Promise<RouterEnrollmentView | null> {
+  async getById(id: string, tenantId: string): Promise<RouterEnrollmentView | null> {
     const repo = getEnrollmentRepository();
     const rec = await repo.findById(id);
-    return rec ? toView(rec) : null;
+    if (!rec) return null;
+    if ((rec.tenantId || 'tenant-default') !== tenantId) return null;
+    return toView(rec);
   },
 
   /**
@@ -661,10 +681,12 @@ export const enrollmentService = {
   async download(
     id: string,
     actorId: string,
+    tenantId = 'tenant-default',
   ): Promise<{ script: string; filename: string; enrollment: RouterEnrollmentView } | null> {
     const repo = getEnrollmentRepository();
     const rec = await repo.findById(id);
     if (!rec) return null;
+    if ((rec.tenantId || 'tenant-default') !== tenantId) return null;
 
     if (rec.status === 'revoked') throw new BadRequestError('El enrollment ha sido revocado.');
     if (rec.status === 'online') throw new BadRequestError('El router ya está online; no se requiere re-descarga.');
@@ -771,10 +793,12 @@ export const enrollmentService = {
    * SOLO source=live puede marcar el enrollment como online.
    * source=simulated deja el enrollment en waiting_for_router.
    */
-  async checkOnline(id: string): Promise<CheckOnlineResult> {
+  async checkOnline(id: string, tenantId = 'tenant-default'): Promise<CheckOnlineResult> {
     const repo = getEnrollmentRepository();
     const rec = await repo.findById(id);
-    if (!rec) throw new NotFoundError('Enrollment no encontrado.');
+    if (!rec || (rec.tenantId || 'tenant-default') !== tenantId) {
+      throw new NotFoundError('Enrollment no encontrado.');
+    }
 
     if (rec.status === 'online') {
       return {
@@ -905,10 +929,11 @@ export const enrollmentService = {
   async downloadApiRepair(
     id: string,
     actorId: string,
+    tenantId = 'tenant-default',
   ): Promise<{ script: string; filename: string } | null> {
     const repo = getEnrollmentRepository();
     const rec = await repo.findById(id);
-    if (!rec) return null;
+    if (!rec || (rec.tenantId || 'tenant-default') !== tenantId) return null;
     if (rec.status === 'revoked') {
       throw new BadRequestError('No se puede reparar un enrollment revocado.');
     }
@@ -957,10 +982,14 @@ export const enrollmentService = {
   },
 
   /** Revoca el peer WireGuard y marca el enrollment como revocado. */
-  async revoke(id: string, actorId: string): Promise<RouterEnrollmentView | null> {
+  async revoke(
+    id: string,
+    actorId: string,
+    tenantId = 'tenant-default',
+  ): Promise<RouterEnrollmentView | null> {
     const repo = getEnrollmentRepository();
     const rec = await repo.findById(id);
-    if (!rec) return null;
+    if (!rec || (rec.tenantId || 'tenant-default') !== tenantId) return null;
 
     if (rec.status === 'revoked') throw new BadRequestError('El enrollment ya está revocado.');
 
@@ -997,10 +1026,14 @@ export const enrollmentService = {
    * Elimina un enrollment de la lista. Solo permitido si ya está revocado
    * (el peer WG ya no está activo). Para registros activos, usar revoke primero.
    */
-  async remove(id: string, actorId: string): Promise<{ deleted: true; id: string } | null> {
+  async remove(
+    id: string,
+    actorId: string,
+    tenantId = 'tenant-default',
+  ): Promise<{ deleted: true; id: string } | null> {
     const repo = getEnrollmentRepository();
     const rec = await repo.findById(id);
-    if (!rec) return null;
+    if (!rec || (rec.tenantId || 'tenant-default') !== tenantId) return null;
 
     if (rec.status !== 'revoked') {
       throw new BadRequestError(
@@ -1038,25 +1071,28 @@ export const enrollmentService = {
   async purgeByRouterId(
     routerId: string,
     actorId: string,
+    tenantId = 'tenant-default',
   ): Promise<{ found: boolean; routerId: string; enrollmentsPurged: number }> {
     const repo = getEnrollmentRepository();
-    const enrollments = await repo.findByRouterId(routerId);
-    const inInventory = store.MIKROTIK_ROUTERS.some((r) => r.id === routerId);
+    const enrollments = (await repo.findByRouterId(routerId))
+      .filter((r) => (r.tenantId || 'tenant-default') === tenantId);
+    const inInventory = store.MIKROTIK_ROUTERS.some(
+      (r) => r.id === routerId && (r.tenantId || 'tenant-default') === tenantId,
+    );
 
     if (enrollments.length === 0 && !inInventory) {
-      const removed = await deleteMikrotikRouter(routerId);
-      return { found: removed, routerId, enrollmentsPurged: 0 };
+      return { found: false, routerId, enrollmentsPurged: 0 };
     }
 
     let enrollmentsPurged = 0;
     for (const rec of enrollments) {
       if (rec.status !== 'revoked') {
-        await this.revoke(rec.id, actorId);
+        await this.revoke(rec.id, actorId, tenantId);
       }
       // revoke ya quitó el inventario; remove limpia el registro de enrollment.
       const still = await repo.findById(rec.id);
       if (still?.status === 'revoked') {
-        await this.remove(rec.id, actorId);
+        await this.remove(rec.id, actorId, tenantId);
         enrollmentsPurged += 1;
       } else if (!still) {
         enrollmentsPurged += 1;

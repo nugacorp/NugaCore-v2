@@ -19,6 +19,8 @@ import { getWireguardService } from '../wireguard/service';
 import type { PeerCreatedOnce } from '../wireguard/types';
 import { persistMikrotikRouter } from './repository';
 import { enrollmentService } from '../router-enrollment/service';
+import { tenantIdFromRequest } from '../tenancy/tenant-scope';
+import { filterRoutersByTenant, findRouterForTenant } from './tenant-filter';
 
 const router = Router();
 
@@ -126,11 +128,12 @@ const isReadOnlyCommand = (command: string): boolean => {
   );
 };
 
-const resolveRouterFromPayload = (routerId?: string) => {
+const resolveRouterFromPayload = (routerId: string | undefined, tenantId: string) => {
+  const scoped = filterRoutersByTenant(store.MIKROTIK_ROUTERS, tenantId);
   if (routerId) {
-    return store.MIKROTIK_ROUTERS.find((routerItem) => routerItem.id === routerId) || null;
+    return scoped.find((routerItem) => routerItem.id === routerId) || null;
   }
-  return store.MIKROTIK_ROUTERS[0] || null;
+  return scoped[0] || null;
 };
 
 const logMikrotikAudit = (params: {
@@ -216,8 +219,9 @@ Output: [RouterOS simulated mode]
 Script trigger OK. Modified address-list counters.`;
 };
 
-router.get('/api/mikrotik/routers', requireRoles([...PROV_VIEW_ROLES]), (_req, res) => {
-  res.json(store.MIKROTIK_ROUTERS.map(fullRouterView));
+router.get('/api/mikrotik/routers', requireRoles([...PROV_VIEW_ROLES]), (req, res) => {
+  const tenantId = tenantIdFromRequest(req);
+  res.json(filterRoutersByTenant(store.MIKROTIK_ROUTERS, tenantId).map(fullRouterView));
 });
 
 router.get('/api/mikrotik/routers/vpn-ip-preview', requireRoles(['super admin', 'administrador', 'tecnico']), asyncHandler(async (req, res) => {
@@ -227,14 +231,14 @@ router.get('/api/mikrotik/routers/vpn-ip-preview', requireRoles(['super admin', 
     return;
   }
   try {
-    res.json(await getWireguardService().previewNextIp());
+    res.json(await getWireguardService().previewNextIp(undefined, tenantIdFromRequest(req)));
   } catch (err) {
     res.status(400).json({ error: err instanceof Error ? err.message : 'No se pudo obtener IP VPN' });
   }
 }));
 
 router.get('/api/mikrotik/routers/:id', requireRoles([...PROV_VIEW_ROLES]), (req, res) => {
-  const routerItem = store.MIKROTIK_ROUTERS.find((row) => row.id === req.params.id);
+  const routerItem = findRouterForTenant(store.MIKROTIK_ROUTERS, req.params.id, tenantIdFromRequest(req));
   if (!routerItem) {
     return res.status(404).json({ error: 'Router not found' });
   }
@@ -245,6 +249,7 @@ const VALID_CONNECTION_TYPES = ['wireguard', 'sstp', 'direct', 'zerotier', 'tail
 
 router.post('/api/mikrotik/routers', requireRoles(['super admin', 'administrador']), asyncHandler(async (req, res) => {
   const { name, ipAddress, managementIp, apiPort, apiSslPort, username, password, linkedTowerId, connectionType, vpnIp, notes, routerOsVersion } = req.body;
+  const tenantId = tenantIdFromRequest(req);
 
   const connType = connectionType ? String(connectionType) : 'sstp';
   if (!VALID_CONNECTION_TYPES.includes(connType as never)) {
@@ -270,13 +275,13 @@ router.post('/api/mikrotik/routers', requireRoles(['super admin', 'administrador
 
   if (isWireguard) {
     try {
-      const defaultServer = await getWireguardService().getDefaultServer();
+      const defaultServer = await getWireguardService().getDefaultServer(tenantId);
       if (!defaultServer) {
         res.status(400).json({ error: 'No hay servidor WireGuard default. Configura uno en WireGuard Manager.' });
         return;
       }
       const peer = await getWireguardService().createPeer(
-        { serverId: defaultServer.id, name: String(name), routerId: id },
+        { serverId: defaultServer.id, name: String(name), routerId: id, tenantId },
         req.authContext?.userId,
       );
       assignedVpnIp = peer.peer.allocatedIp;
@@ -293,7 +298,8 @@ router.post('/api/mikrotik/routers', requireRoles(['super admin', 'administrador
     }
   } else {
     mgmt = String(mgmt);
-    const duplicatedIp = store.MIKROTIK_ROUTERS.some((row) => row.ipAddress === mgmt);
+    const duplicatedIp = filterRoutersByTenant(store.MIKROTIK_ROUTERS, tenantId)
+      .some((row) => row.ipAddress === mgmt);
     if (duplicatedIp) {
       res.status(409).json({ error: 'Router IP already registered' });
       return;
@@ -305,6 +311,7 @@ router.post('/api/mikrotik/routers', requireRoles(['super admin', 'administrador
 
   const routerItem: MikrotikRouterRegistryItem = {
     id,
+    tenantId,
     name: String(name),
     ipAddress: String(mgmt),
     apiPort: Number(apiPort) || 8728,
@@ -350,7 +357,10 @@ router.post('/api/mikrotik/routers', requireRoles(['super admin', 'administrador
 }));
 
 router.put('/api/mikrotik/routers/:id', requireRoles(['super admin', 'administrador']), (req, res) => {
-  const index = store.MIKROTIK_ROUTERS.findIndex((row) => row.id === req.params.id);
+  const tenantId = tenantIdFromRequest(req);
+  const index = store.MIKROTIK_ROUTERS.findIndex(
+    (row) => row.id === req.params.id && (row.tenantId || 'tenant-default') === tenantId,
+  );
   if (index === -1) {
     return res.status(404).json({ error: 'Router not found' });
   }
@@ -388,7 +398,11 @@ router.delete(
   requireRoles(['super admin', 'administrador']),
   asyncHandler(async (req, res) => {
     const actorId = req.authContext?.userId ?? 'unknown';
-    const result = await enrollmentService.purgeByRouterId(req.params.id, actorId);
+    const tenantId = tenantIdFromRequest(req);
+    if (!findRouterForTenant(store.MIKROTIK_ROUTERS, req.params.id, tenantId)) {
+      return res.status(404).json({ error: 'Router not found' });
+    }
+    const result = await enrollmentService.purgeByRouterId(req.params.id, actorId, tenantId);
     if (!result.found) {
       return res.status(404).json({ error: 'Router not found' });
     }
@@ -397,7 +411,7 @@ router.delete(
 );
 
 router.get('/api/mikrotik/routers/:id/health', requireRoles(['super admin', 'administrador', 'tecnico', 'soporte']), (req, res) => {
-  const routerItem = store.MIKROTIK_ROUTERS.find((row) => row.id === req.params.id);
+  const routerItem = findRouterForTenant(store.MIKROTIK_ROUTERS, req.params.id, tenantIdFromRequest(req));
   if (!routerItem) {
     return res.status(404).json({ error: 'Router not found' });
   }
@@ -429,7 +443,7 @@ router.get('/api/mikrotik/routers/:id/health', requireRoles(['super admin', 'adm
 });
 
 router.get('/api/mikrotik/routers/:id/read/interfaces', requireRoles(['super admin', 'administrador', 'tecnico', 'soporte']), (req, res) => {
-  const routerItem = store.MIKROTIK_ROUTERS.find((row) => row.id === req.params.id);
+  const routerItem = findRouterForTenant(store.MIKROTIK_ROUTERS, req.params.id, tenantIdFromRequest(req));
   if (!routerItem) {
     return res.status(404).json({ error: 'Router not found' });
   }
@@ -440,7 +454,7 @@ router.get('/api/mikrotik/routers/:id/read/interfaces', requireRoles(['super adm
 });
 
 router.get('/api/mikrotik/routers/:id/read/queues', requireRoles(['super admin', 'administrador', 'tecnico', 'soporte']), (req, res) => {
-  const routerItem = store.MIKROTIK_ROUTERS.find((row) => row.id === req.params.id);
+  const routerItem = findRouterForTenant(store.MIKROTIK_ROUTERS, req.params.id, tenantIdFromRequest(req));
   if (!routerItem) {
     return res.status(404).json({ error: 'Router not found' });
   }
@@ -451,7 +465,7 @@ router.get('/api/mikrotik/routers/:id/read/queues', requireRoles(['super admin',
 });
 
 router.get('/api/mikrotik/routers/:id/read/ppp', requireRoles(['super admin', 'administrador', 'tecnico', 'soporte']), (req, res) => {
-  const routerItem = store.MIKROTIK_ROUTERS.find((row) => row.id === req.params.id);
+  const routerItem = findRouterForTenant(store.MIKROTIK_ROUTERS, req.params.id, tenantIdFromRequest(req));
   if (!routerItem) {
     return res.status(404).json({ error: 'Router not found' });
   }
@@ -477,7 +491,10 @@ router.post('/api/mikrotik/command', requireRoles(['super admin', 'administrador
   const { command, routerId, confirmWrite } = req.body;
   if (!command) return res.status(400).json({ error: 'No query command' });
 
-  const routerItem = resolveRouterFromPayload(routerId);
+  const routerItem = resolveRouterFromPayload(
+    routerId ? String(routerId) : undefined,
+    tenantIdFromRequest(req),
+  );
   if (!routerItem) {
     return res.status(404).json({ error: 'Router not found' });
   }
@@ -740,7 +757,7 @@ const emitProvisioning = async (
 };
 
 router.post('/api/mikrotik/routers/:id/provisioning-script', requireRoles([...PROV_SCRIPT_ROLES]), asyncHandler(async (req, res) => {
-  const routerItem = store.MIKROTIK_ROUTERS.find((row) => row.id === req.params.id);
+  const routerItem = findRouterForTenant(store.MIKROTIK_ROUTERS, req.params.id, tenantIdFromRequest(req));
   if (!routerItem) {
     res.status(404).json({ error: 'Router not found' });
     return;
@@ -771,7 +788,7 @@ router.post('/api/mikrotik/routers/:id/provisioning-script', requireRoles([...PR
 }));
 
 router.post('/api/mikrotik/routers/:id/rotate-credentials', requireRoles([...PROV_ROTATE_ROLES]), asyncHandler(async (req, res) => {
-  const routerItem = store.MIKROTIK_ROUTERS.find((row) => row.id === req.params.id);
+  const routerItem = findRouterForTenant(store.MIKROTIK_ROUTERS, req.params.id, tenantIdFromRequest(req));
   if (!routerItem) {
     res.status(404).json({ error: 'Router not found' });
     return;
@@ -786,7 +803,7 @@ router.post('/api/mikrotik/routers/:id/rotate-credentials', requireRoles([...PRO
 }));
 
 router.post('/api/mikrotik/routers/:id/test-connection', requireRoles([...PROV_SCRIPT_ROLES]), (req, res) => {
-  const routerItem = store.MIKROTIK_ROUTERS.find((row) => row.id === req.params.id);
+  const routerItem = findRouterForTenant(store.MIKROTIK_ROUTERS, req.params.id, tenantIdFromRequest(req));
   if (!routerItem) {
     return res.status(404).json({ error: 'Router not found' });
   }

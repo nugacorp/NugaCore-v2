@@ -95,6 +95,8 @@ export type RouterEnrollmentSnmpSnapshotView = Omit<
 /** Forma interna persistida en el repositorio. */
 export interface RouterEnrollmentRecord {
   id: string;
+  /** WISP dueño. Ausente en legacy → tenant-default. */
+  tenantId?: string;
   routerId: string;
   wgServerId: string;
   wgPeerId: string;
@@ -137,6 +139,7 @@ export interface RouterEnrollmentRecord {
 /** Vista saneada para la API / UI (sin secretos). */
 export interface RouterEnrollmentView {
   id: string;
+  tenantId?: string;
   routerId: string;
   routerName?: string;
   wgServerId: string;

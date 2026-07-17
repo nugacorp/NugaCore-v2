@@ -21,6 +21,7 @@ import type { TemplateParameterValues } from '../router-template-parameters/type
 
 export interface RouterEnrollmentRow {
   id: string;
+  tenant_id?: string | null;
   router_id: string;
   wg_server_id: string;
   wg_peer_id: string;
@@ -47,6 +48,7 @@ export interface RouterEnrollmentRow {
 /** Fila DB → record del dominio. */
 export const rowToEnrollment = (r: RouterEnrollmentRow): RouterEnrollmentRecord => ({
   id: r.id,
+  tenantId: r.tenant_id || 'tenant-default',
   routerId: r.router_id,
   wgServerId: r.wg_server_id,
   wgPeerId: r.wg_peer_id,
@@ -73,6 +75,7 @@ export const rowToEnrollment = (r: RouterEnrollmentRow): RouterEnrollmentRecord 
 /** Record del dominio → fila DB para INSERT (set completo). */
 export const enrollmentToRow = (rec: RouterEnrollmentRecord): Record<string, unknown> => ({
   id: rec.id,
+  tenant_id: rec.tenantId || 'tenant-default',
   router_id: rec.routerId,
   wg_server_id: rec.wgServerId,
   wg_peer_id: rec.wgPeerId,

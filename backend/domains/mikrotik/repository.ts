@@ -101,7 +101,12 @@ export class SupabaseMikrotikRoutersRepository implements MikrotikRoutersReposit
         || existing?.hasCredentials,
     };
     const row = routerToRow(merged);
-    const { data, error } = await this.db.from(TABLE).upsert(row, { onConflict: 'id' }).select('*').single();
+    let { data, error } = await this.db.from(TABLE).upsert(row, { onConflict: 'id' }).select('*').single();
+    // Compat: staging puede no tener aún la migración tenant_id.
+    if (error && /tenant_id/i.test(error.message || '')) {
+      const { tenant_id: _omit, ...withoutTenant } = row;
+      ({ data, error } = await this.db.from(TABLE).upsert(withoutTenant, { onConflict: 'id' }).select('*').single());
+    }
     if (error) this.fail('upsert', error);
     return rowToRouter(data as MikrotikRouterRow);
   }

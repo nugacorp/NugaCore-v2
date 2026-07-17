@@ -18,6 +18,7 @@
 import { Router } from 'express';
 import { asyncHandler } from '../../common/errors';
 import { requireRoles } from '../../common/rbac';
+import { tenantIdFromRequest } from '../tenancy/tenant-scope';
 import { enrollmentService } from './service';
 
 const router = Router();
@@ -32,7 +33,7 @@ router.post(
   requireRoles([...CAN_ENROLL]),
   asyncHandler(async (req, res) => {
     const actorId = req.authContext?.userId ?? 'unknown';
-    const result = await enrollmentService.start(req.body, actorId);
+    const result = await enrollmentService.start(req.body, actorId, tenantIdFromRequest(req));
     res.status(201).json(result);
   }),
 );
@@ -42,8 +43,8 @@ router.post(
 router.get(
   '/api/router-enrollment',
   requireRoles([...CAN_ENROLL]),
-  asyncHandler(async (_req, res) => {
-    res.json(await enrollmentService.list());
+  asyncHandler(async (req, res) => {
+    res.json(await enrollmentService.list(tenantIdFromRequest(req)));
   }),
 );
 
@@ -53,7 +54,7 @@ router.get(
   '/api/router-enrollment/:id',
   requireRoles([...CAN_ENROLL]),
   asyncHandler(async (req, res) => {
-    const enrollment = await enrollmentService.getById(req.params.id);
+    const enrollment = await enrollmentService.getById(req.params.id, tenantIdFromRequest(req));
     if (!enrollment) return res.status(404).json({ error: 'Enrollment no encontrado.' });
     res.json(enrollment);
   }),
@@ -66,7 +67,11 @@ router.get(
   requireRoles([...CAN_ENROLL]),
   asyncHandler(async (req, res) => {
     const actorId = req.authContext?.userId ?? 'unknown';
-    const result = await enrollmentService.download(req.params.id, actorId);
+    const result = await enrollmentService.download(
+      req.params.id,
+      actorId,
+      tenantIdFromRequest(req),
+    );
     if (!result) return res.status(404).json({ error: 'Enrollment no encontrado.' });
 
     res
@@ -84,7 +89,10 @@ router.post(
   '/api/router-enrollment/:id/check-online',
   requireRoles([...CAN_ENROLL]),
   asyncHandler(async (req, res) => {
-    const result = await enrollmentService.checkOnline(req.params.id);
+    const result = await enrollmentService.checkOnline(
+      req.params.id,
+      tenantIdFromRequest(req),
+    );
     res.json(result);
   }),
 );
@@ -96,7 +104,11 @@ router.get(
   requireRoles([...CAN_ENROLL]),
   asyncHandler(async (req, res) => {
     const actorId = req.authContext?.userId ?? 'unknown';
-    const result = await enrollmentService.downloadApiRepair(req.params.id, actorId);
+    const result = await enrollmentService.downloadApiRepair(
+      req.params.id,
+      actorId,
+      tenantIdFromRequest(req),
+    );
     if (!result) return res.status(404).json({ error: 'Enrollment no encontrado.' });
 
     res
@@ -115,7 +127,11 @@ router.post(
   requireRoles([...CAN_REVOKE]),
   asyncHandler(async (req, res) => {
     const actorId = req.authContext?.userId ?? 'unknown';
-    const enrollment = await enrollmentService.revoke(req.params.id, actorId);
+    const enrollment = await enrollmentService.revoke(
+      req.params.id,
+      actorId,
+      tenantIdFromRequest(req),
+    );
     if (!enrollment) return res.status(404).json({ error: 'Enrollment no encontrado.' });
     res.json(enrollment);
   }),
@@ -128,7 +144,11 @@ router.delete(
   requireRoles([...CAN_REVOKE]),
   asyncHandler(async (req, res) => {
     const actorId = req.authContext?.userId ?? 'unknown';
-    const result = await enrollmentService.remove(req.params.id, actorId);
+    const result = await enrollmentService.remove(
+      req.params.id,
+      actorId,
+      tenantIdFromRequest(req),
+    );
     if (!result) return res.status(404).json({ error: 'Enrollment no encontrado.' });
     res.json(result);
   }),
