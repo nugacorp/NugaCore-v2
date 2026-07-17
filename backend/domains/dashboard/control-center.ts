@@ -9,11 +9,13 @@ import { nocReadOnlyService } from '../noc/service';
 import { automationService } from '../automation/service';
 import { listSlaBreachesFromSupport } from '../tickets/sla';
 import { getNetworkService } from '../network/service';
+import { filterRoutersByTenant } from '../mikrotik/tenant-filter';
+import { DEFAULT_TENANT_ID } from '../tenancy/types';
 
 /**
  * Cabina de mando WISP OS — agrega las 8 áreas operativas en un solo payload.
  */
-export async function buildControlCenter() {
+export async function buildControlCenter(tenantId: string = DEFAULT_TENANT_ID) {
   const [snapshot, billingKpis, suspensionResults, commercialAppts, slaBreaches] = await Promise.all([
     getMetricsSnapshot(),
     buildBillingKpis(),
@@ -28,13 +30,13 @@ export async function buildControlCenter() {
   const pendingInstallations = workOrders.filter((o) => o.status === 'pending' || o.status === 'in_progress').length
     + commercialAppts.filter((a) => a.status === 'scheduled').length;
 
-  const routers = nocReadOnlyRepository.listRouters();
+  const routers = filterRoutersByTenant(nocReadOnlyRepository.listRouters(), tenantId);
   const routersOnline = routers.filter((r) => r.isOnline).length;
   const routersOffline = routers.length - routersOnline;
   const networkSvc = getNetworkService();
   const [towers, allSectors] = await Promise.all([
-    networkSvc.listTowers({}),
-    networkSvc.listSectors({}),
+    networkSvc.listTowers({ tenantId }),
+    networkSvc.listSectors({ tenantId }),
   ]);
   const towersByCapacity = towers.map((t) => {
     const sectors = allSectors.filter((s) => s.towerId === t.id);
@@ -42,7 +44,7 @@ export async function buildControlCenter() {
     return { towerId: t.id, towerName: t.name, clientsCount: clientsOnTower, sectorCount: sectors.length, status: t.status };
   });
 
-  const nocSummary = await nocReadOnlyService.getSummary();
+  const nocSummary = await nocReadOnlyService.getSummary(tenantId);
 
   const activePromises = await getCollectionsService().getActivePromisesCount();
 

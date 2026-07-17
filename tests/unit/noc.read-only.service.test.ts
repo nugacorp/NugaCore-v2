@@ -27,7 +27,7 @@ afterEach(() => {
 describe('nocReadOnlyService', () => {
   it('summary es estable con 0 routers', async () => {
     setRouters([]);
-    expect(await nocReadOnlyService.getSummary()).toEqual({
+    expect(await nocReadOnlyService.getSummary('tenant-default')).toEqual({
       totalRouters: 0,
       onlineRouters: 0,
       offlineRouters: 0,
@@ -54,7 +54,7 @@ describe('nocReadOnlyService', () => {
       }),
     ]);
 
-    const rows = await nocReadOnlyService.listRouters();
+    const rows = await nocReadOnlyService.listRouters('tenant-default');
     expect(rows.length).toBe(1);
     expect(rows[0]).toMatchObject({
       id: 'r1',
@@ -82,8 +82,8 @@ describe('nocReadOnlyService', () => {
       mockRouter({ id: 'r-hot', name: 'Hot', isOnline: true, cpuUsagePct: 95, memoryUsagePct: 85, lastHealthCheckAt: '2026-06-18 10:00' }),
     ]);
 
-    const first = await nocReadOnlyService.listAlerts();
-    const second = await nocReadOnlyService.listAlerts();
+    const first = await nocReadOnlyService.listAlerts('tenant-default');
+    const second = await nocReadOnlyService.listAlerts('tenant-default');
 
     expect(second).toEqual(first);
     expect(first.length).toBeGreaterThan(0);

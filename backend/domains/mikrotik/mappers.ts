@@ -7,6 +7,7 @@ import type { MikrotikRouterRegistryItem } from '../../state/store';
 export interface MikrotikRouterRow {
   id: string;
   name: string;
+  tenant_id?: string | null;
   ip_address: string;
   api_port: number;
   username: string;
@@ -33,6 +34,7 @@ export interface MikrotikRouterRow {
 export const rowToRouter = (row: MikrotikRouterRow): MikrotikRouterRegistryItem => ({
   id: row.id,
   name: row.name,
+  tenantId: row.tenant_id || 'tenant-default',
   ipAddress: row.ip_address,
   apiPort: Number(row.api_port) || 8728,
   username: row.username,
@@ -59,6 +61,7 @@ export const rowToRouter = (row: MikrotikRouterRow): MikrotikRouterRegistryItem 
 export const routerToRow = (r: MikrotikRouterRegistryItem): MikrotikRouterRow => ({
   id: r.id,
   name: r.name,
+  tenant_id: r.tenantId || 'tenant-default',
   ip_address: r.managementIp || r.ipAddress || r.vpnIp || '',
   api_port: r.apiPort || 8728,
   username: r.username || 'admin',

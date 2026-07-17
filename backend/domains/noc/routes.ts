@@ -1,6 +1,7 @@
 import { Router } from 'express';
 import { asyncHandler } from '../../common/errors';
 import { AppRole, requireRoles } from '../../common/rbac';
+import { tenantIdFromRequest } from '../tenancy/tenant-scope';
 import { nocReadOnlyService } from './service';
 
 // ====================================================================
@@ -8,6 +9,7 @@ import { nocReadOnlyService } from './service';
 //
 // Endpoints solo lectura para operación NOC. Cobranza queda excluido.
 // No existen endpoints de escritura en este dominio.
+// Filtrado por tenant (aislamiento multi-WISP).
 // ====================================================================
 
 const NOC_READ_ROLES: AppRole[] = ['super admin', 'administrador', 'tecnico', 'soporte', 'solo lectura'];
@@ -17,24 +19,24 @@ const router = Router();
 router.get(
   '/api/noc/summary',
   requireRoles(NOC_READ_ROLES),
-  asyncHandler(async (_req, res) => {
-    res.json(await nocReadOnlyService.getSummary());
+  asyncHandler(async (req, res) => {
+    res.json(await nocReadOnlyService.getSummary(tenantIdFromRequest(req)));
   }),
 );
 
 router.get(
   '/api/noc/routers',
   requireRoles(NOC_READ_ROLES),
-  asyncHandler(async (_req, res) => {
-    res.json(await nocReadOnlyService.listRouters());
+  asyncHandler(async (req, res) => {
+    res.json(await nocReadOnlyService.listRouters(tenantIdFromRequest(req)));
   }),
 );
 
 router.get(
   '/api/noc/alerts',
   requireRoles(NOC_READ_ROLES),
-  asyncHandler(async (_req, res) => {
-    res.json(await nocReadOnlyService.listAlerts());
+  asyncHandler(async (req, res) => {
+    res.json(await nocReadOnlyService.listAlerts(tenantIdFromRequest(req)));
   }),
 );
 

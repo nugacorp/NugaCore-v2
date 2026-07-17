@@ -10,6 +10,7 @@ import { notificationService } from '../notifications/service';
 import { getBillingService } from '../billing/service';
 import { getCustomersService } from '../customers/service';
 import { getBillingMetrics, getMetricsSnapshot, type MetricsSnapshot } from '../system/metrics';
+import { tenantIdFromRequest } from '../tenancy/tenant-scope';
 import { buildControlCenter } from './control-center';
 import { buildZoneStatusReport } from './zone-status';
 
@@ -480,8 +481,8 @@ router.post('/api/alerts/acknowledge-all', requireRoles(['super admin', 'adminis
   res.json(store.NOC_ALERTS);
 });
 
-router.get('/api/dashboard/control-center', requireRoles(READ_ROLES), asyncHandler(async (_req, res) => {
-  res.json(await buildControlCenter());
+router.get('/api/dashboard/control-center', requireRoles(READ_ROLES), asyncHandler(async (req, res) => {
+  res.json(await buildControlCenter(tenantIdFromRequest(req)));
 }));
 
 router.get('/api/dashboard/zones', requireRoles(READ_ROLES), asyncHandler(async (_req, res) => {

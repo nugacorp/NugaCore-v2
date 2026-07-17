@@ -52,6 +52,9 @@ Claim opcional: `app_metadata.tenant_id` (solo service_role); también requiere 
 - Network towers + onboarding
 - RADIUS sessions
 - WireGuard servers/peers (API scoped; **host-apply worker sigue global** → un `wg0` de plataforma)
+- MikroTik routers / inventario / enrollment / NOC read-only (`tenant_id` en
+  `mikrotik_routers` + `router_enrollment`; API filtra; hydrate/worker puede
+  seguir cargando el cache global)
 
 ## Onboarding WISP obligatorio
 

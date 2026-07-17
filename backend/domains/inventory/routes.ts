@@ -3,6 +3,7 @@ import { WarehouseItem } from '../../../src/types';
 import type { InventoryItemState } from '../../state/store';
 import { asyncHandler } from '../../common/errors';
 import { READ_ROLES, requireRoles } from '../../common/rbac';
+import { tenantIdFromRequest } from '../tenancy/tenant-scope';
 import { getInventoryService } from './service';
 import { inventoryRoutersService } from './routers/service';
 import {
@@ -59,16 +60,16 @@ const INVENTORY_ROUTERS_READ_ROLES = ['super admin', 'administrador', 'tecnico',
 router.get(
   '/api/inventory/routers',
   requireRoles([...INVENTORY_ROUTERS_READ_ROLES]),
-  asyncHandler(async (_req, res) => {
-    res.json(await inventoryRoutersService.listRouters());
+  asyncHandler(async (req, res) => {
+    res.json(await inventoryRoutersService.listRouters(tenantIdFromRequest(req)));
   }),
 );
 
 router.get(
   '/api/inventory/summary',
   requireRoles([...INVENTORY_ROUTERS_READ_ROLES]),
-  asyncHandler(async (_req, res) => {
-    res.json(await inventoryRoutersService.getSummary());
+  asyncHandler(async (req, res) => {
+    res.json(await inventoryRoutersService.getSummary(tenantIdFromRequest(req)));
   }),
 );
 
@@ -76,7 +77,7 @@ router.get(
   '/api/inventory/routers/:id',
   requireRoles([...INVENTORY_ROUTERS_READ_ROLES]),
   asyncHandler(async (req, res) => {
-    const view = await inventoryRoutersService.getRouter(req.params.id);
+    const view = await inventoryRoutersService.getRouter(req.params.id, tenantIdFromRequest(req));
     if (!view) {
       res.status(404).json({ error: 'Router not found in inventory' });
       return;

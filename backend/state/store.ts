@@ -31,6 +31,8 @@ export interface MikrotikLog {
 export interface MikrotikRouterRegistryItem {
   id: string;
   name: string;
+  /** WISP dueño. Ausente en datos legacy → se trata como tenant-default. */
+  tenantId?: string;
   ipAddress: string;
   apiPort: number;
   username: string;

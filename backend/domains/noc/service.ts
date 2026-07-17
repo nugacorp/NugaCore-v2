@@ -7,6 +7,7 @@
 
 import { MikrotikRouterRegistryItem, store } from '../../state/store';
 import { hydrateMikrotikRoutersFromDb } from '../mikrotik/repository';
+import { filterRoutersByTenant } from '../mikrotik/tenant-filter';
 import {
   HIGH_CPU_CRITICAL_PCT,
   HIGH_CPU_WARNING_PCT,
@@ -118,9 +119,9 @@ const refreshNocCache = async (): Promise<void> => {
 };
 
 export const nocReadOnlyService = {
-  async listRouters(): Promise<NocRouterView[]> {
+  async listRouters(tenantId: string): Promise<NocRouterView[]> {
     await refreshNocCache();
-    const routers = nocReadOnlyRepository.listRouters();
+    const routers = filterRoutersByTenant(nocReadOnlyRepository.listRouters(), tenantId);
     const referenceTimestampMs = resolveReferenceTimestampMs(routers);
     const towerNameById = new Map(store.TOWERS.map((tower) => [tower.id, tower.name]));
     return routers.map((router) => {
@@ -133,14 +134,14 @@ export const nocReadOnlyService = {
     });
   },
 
-  async listAlerts(): Promise<NocDerivedAlert[]> {
+  async listAlerts(tenantId: string): Promise<NocDerivedAlert[]> {
     await refreshNocCache();
-    return deriveAlerts(nocReadOnlyRepository.listRouters());
+    return deriveAlerts(filterRoutersByTenant(nocReadOnlyRepository.listRouters(), tenantId));
   },
 
-  async getSummary(): Promise<NocSummary> {
+  async getSummary(tenantId: string): Promise<NocSummary> {
     await refreshNocCache();
-    const routers = nocReadOnlyRepository.listRouters();
+    const routers = filterRoutersByTenant(nocReadOnlyRepository.listRouters(), tenantId);
     const referenceTimestampMs = resolveReferenceTimestampMs(routers);
     const alerts = deriveAlerts(routers);
 
