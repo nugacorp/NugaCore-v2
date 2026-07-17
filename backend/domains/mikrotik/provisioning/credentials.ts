@@ -31,14 +31,29 @@ export const generateApiUsername = (seed?: string): string => {
   return `nugacore_${suffix}`;
 };
 
+/** Substrings de branding que no deben aparecer ni en secretos embebidos. */
+const PASSWORD_BRAND_BLOCKLIST = ['livaur', 'wisphub', 'uisp', 'sgcm', 'whmcs'];
+
 /** Password aleatorio criptográfico, sin sesgo de módulo (randomInt). */
 export const generateStrongPassword = (length = DEFAULT_PASSWORD_LENGTH): string => {
   const len = Math.max(32, length);
-  let out = '';
-  for (let i = 0; i < len; i++) {
-    out += PASSWORD_ALPHABET[randomInt(0, PASSWORD_ALPHABET.length)];
+  for (let attempt = 0; attempt < 16; attempt++) {
+    let out = '';
+    for (let i = 0; i < len; i++) {
+      out += PASSWORD_ALPHABET[randomInt(0, PASSWORD_ALPHABET.length)];
+    }
+    const lower = out.toLowerCase();
+    if (!PASSWORD_BRAND_BLOCKLIST.some((b) => lower.includes(b))) {
+      return out;
+    }
   }
-  return out;
+  // Extremadamente improbable: devolver el último intento (el scan de branding
+  // del generador ya ignora valores password="...").
+  let fallback = '';
+  for (let i = 0; i < len; i++) {
+    fallback += PASSWORD_ALPHABET[randomInt(0, PASSWORD_ALPHABET.length)];
+  }
+  return fallback;
 };
 
 /** sha256 en hex (para token_hash / script_hash). */

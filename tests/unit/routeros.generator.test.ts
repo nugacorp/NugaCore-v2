@@ -197,6 +197,12 @@ describe('safe-rsc — assertNoBrandViolation', () => {
   it('no lanza para un script NugaCore limpio', () => {
     expect(() => assertNoBrandViolation('# NugaCore script\n/system identity')).not.toThrow();
   });
+
+  it('ignora substring de marca dentro de password opaco', () => {
+    expect(() =>
+      assertNoBrandViolation('/user add name="nugacore_x" password="abcsgcmdefghijklmnopqrstuvwxyz012345"'),
+    ).not.toThrow();
+  });
 });
 
 describe('safe-rsc — assertNoForbiddenPolicies', () => {

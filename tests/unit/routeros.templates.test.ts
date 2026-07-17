@@ -468,6 +468,15 @@ describe('Security — branding prohibido', () => {
   it('assertNoBrandViolation no lanza con script limpio NugaCore', () => {
     expect(() => assertNoBrandViolation('# NugaCore script /interface bridge add')).not.toThrow();
   });
+
+  it('assertNoBrandViolation ignora "sgcm" dentro de password/keys opacos', () => {
+    const script = [
+      '# NugaCore',
+      '/user add name="nugacore_ab12" password="xxsgcmYYnotabrandzzzzzzzzzzzzzzzzzz"',
+      '/interface wireguard peers add private-key="AAAAsgcmBBBB" public-key="pub"',
+    ].join('\n');
+    expect(() => assertNoBrandViolation(script)).not.toThrow();
+  });
 });
 
 describe('Security — políticas prohibidas', () => {
@@ -542,11 +551,9 @@ describe('Security — scripts generados no contienen branding externo', () => {
         params.wanGateways = Array.from({ length: n }, (_, i) => `10.0.${i}.1`);
       }
       const result = generateFromTemplate(params);
-      const lower = result.script.toLowerCase();
-      expect(lower).not.toContain('livaur');
-      expect(lower).not.toContain('wisphub');
-      expect(lower).not.toContain('uisp');
-      expect(lower).not.toContain('sgcm');
+      // Usa el validador (ignora secretos opacos) — no substring crudo sobre
+      // passwords/keys aleatorios (flake CI: "sgcm" dentro de password).
+      expect(() => assertNoBrandViolation(result.script)).not.toThrow();
     });
   }
 });

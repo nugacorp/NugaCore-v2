@@ -130,8 +130,23 @@ export function validateTemplateParams(params: Partial<TemplateLibraryParams>): 
 
 const BRAND_VIOLATIONS = ['livaur', 'wisphub', 'uisp', '@livaur', 'livaur.com', 'sgcm', 'whmcs'];
 
+/**
+ * Quita valores opacos (passwords / keys) antes del scan de branding.
+ * Evita falsos positivos cuando un password/base64 aleatorio contiene
+ * substrings cortos como "sgcm" o "uisp" (flake visto en CI enrollment).
+ */
+export function scrubSecretsForBrandScan(script: string): string {
+  return script
+    .replace(/\bpassword="[^"]*"/gi, 'password=""')
+    .replace(/\bprivate-key="[^"]*"/gi, 'private-key=""')
+    .replace(/\bpreshared-key="[^"]*"/gi, 'preshared-key=""')
+    .replace(/\bpsk="[^"]*"/gi, 'psk=""')
+    .replace(/\bsecret="[^"]*"/gi, 'secret=""')
+    .replace(/\bpassword=[^\s"\\]+/gi, 'password=REDACTED');
+}
+
 export function assertNoBrandViolation(script: string): void {
-  const lower = script.toLowerCase();
+  const lower = scrubSecretsForBrandScan(script).toLowerCase();
   for (const v of BRAND_VIOLATIONS) {
     if (lower.includes(v)) {
       throw new Error(`template-generator: branding externo prohibido detectado: "${v}"`);

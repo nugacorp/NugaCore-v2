@@ -27,9 +27,18 @@ export { buildTemplateFilename as buildFilename } from '../routeros-templates/rs
 
 /** Verifica que el script no contiene branding externo prohibido. */
 export const assertNoBrandViolation = (script: string): void => {
-  const violations = ['livaur', 'wisphub', '@livaur', 'livaur.com', 'SGCM'];
+  // Misma política que routeros-templates/validators: ignorar secretos opacos.
+  const scrubbed = script
+    .replace(/\bpassword="[^"]*"/gi, 'password=""')
+    .replace(/\bprivate-key="[^"]*"/gi, 'private-key=""')
+    .replace(/\bpreshared-key="[^"]*"/gi, 'preshared-key=""')
+    .replace(/\bpsk="[^"]*"/gi, 'psk=""')
+    .replace(/\bsecret="[^"]*"/gi, 'secret=""')
+    .replace(/\bpassword=[^\s"\\]+/gi, 'password=REDACTED');
+  const violations = ['livaur', 'wisphub', 'uisp', '@livaur', 'livaur.com', 'sgcm', 'whmcs'];
+  const lower = scrubbed.toLowerCase();
   for (const v of violations) {
-    if (script.toLowerCase().includes(v.toLowerCase())) {
+    if (lower.includes(v)) {
       throw new Error(`script-generator: branding externo detectado: "${v}"`);
     }
   }
