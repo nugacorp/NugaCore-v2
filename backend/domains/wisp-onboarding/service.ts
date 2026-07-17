@@ -47,8 +47,32 @@ const slugify = (value: string): string =>
 export class WispOnboardingService {
   constructor(private readonly repo: WispOnboardingRepository) {}
 
+  /**
+   * El registro ya captura companyName/city/phone: marca el paso `company` como hecho
+   * y avanza a `zone` (también repara filas antiguas que lo dejaron en `company`).
+   */
+  private async ensureCompanyCaptured(state: WispOnboardingState): Promise<WispOnboardingState> {
+    if (state.status === 'completed') return state;
+    if (!state.companyName?.trim()) return state;
+    if (state.completedSteps.includes('company') && state.currentStep !== 'company') {
+      return state;
+    }
+    const completedSteps = markStep(state, 'company');
+    const currentStep = state.currentStep === 'company'
+      ? nextStep(completedSteps)
+      : state.currentStep;
+    return this.repo.upsert({
+      ...state,
+      completedSteps,
+      currentStep,
+      updatedAt: new Date().toISOString(),
+    });
+  }
+
   async getStatus(tenantId: string): Promise<WispOnboardingState | null> {
-    return this.repo.get(tenantId);
+    const state = await this.repo.get(tenantId);
+    if (!state) return null;
+    return this.ensureCompanyCaptured(state);
   }
 
   async isOnboardingRequired(tenantId: string): Promise<boolean> {
@@ -188,15 +212,17 @@ export class WispOnboardingService {
         });
       }
 
+      // Nombre/ciudad/teléfono ya vienen del registro → no repetir paso "company".
+      const completedSteps: OnboardingStep[] = ['company'];
       const onboarding = await this.repo.upsert({
         tenantId: tenant.id,
         status: 'in_progress',
-        currentStep: 'company',
+        currentStep: 'zone',
         companyName,
         contactEmail: email,
         contactPhone: phone,
         city,
-        completedSteps: [],
+        completedSteps,
         updatedAt: new Date().toISOString(),
       });
 

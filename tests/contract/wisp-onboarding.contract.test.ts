@@ -31,6 +31,9 @@ describe('API — WISP onboarding', () => {
     expect(res.body.tenantId).toBeTruthy();
     expect(res.body.slug).toBe('wisp-beta');
     expect(res.body.onboarding.status).toBe('in_progress');
+    expect(res.body.onboarding.companyName).toBe('WISP Beta');
+    expect(res.body.onboarding.completedSteps).toContain('company');
+    expect(res.body.onboarding.currentStep).toBe('zone');
     // Sin Supabase Auth en tests: no exige confirmación por correo.
     expect(res.body.emailConfirmationRequired).toBe(false);
     expect(res.body.confirmationEmailSent).toBe(false);

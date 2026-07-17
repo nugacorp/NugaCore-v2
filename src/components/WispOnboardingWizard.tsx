@@ -30,8 +30,8 @@ interface WispOnboardingWizardProps {
   onCompleted: () => void;
 }
 
-const STEPS: { id: Step; title: string; blurb: string; icon: React.ReactNode }[] = [
-  { id: 'company', title: 'Tu WISP', blurb: 'Confirma los datos de la empresa.', icon: <Building2 className="w-4 h-4" /> },
+const ALL_STEPS: { id: Step; title: string; blurb: string; icon: React.ReactNode }[] = [
+  { id: 'company', title: 'Tu WISP', blurb: 'Datos de la empresa (del registro).', icon: <Building2 className="w-4 h-4" /> },
   { id: 'zone', title: 'Primera zona', blurb: 'Define tu primera zona de cobertura.', icon: <MapPin className="w-4 h-4" /> },
   { id: 'billing', title: 'Día de corte', blurb: 'Fecha y hora de corte de facturación.', icon: <CalendarClock className="w-4 h-4" /> },
   { id: 'router', title: 'Primer router', blurb: 'Registra el nombre de tu primer router.', icon: <Router className="w-4 h-4" /> },
@@ -43,7 +43,7 @@ export default function WispOnboardingWizard({
   companyHint,
   onCompleted,
 }: WispOnboardingWizardProps) {
-  const [step, setStep] = useState<Step>('company');
+  const [step, setStep] = useState<Step>('zone');
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState('');
   const [companyName, setCompanyName] = useState(companyHint || '');
@@ -53,6 +53,7 @@ export default function WispOnboardingWizard({
   const [billingDay, setBillingDay] = useState(1);
   const [billingTime, setBillingTime] = useState('08:00');
   const [routerName, setRouterName] = useState('');
+  const [companyAlreadySet, setCompanyAlreadySet] = useState(Boolean(companyHint?.trim()));
 
   useEffect(() => {
     let cancelled = false;
@@ -71,13 +72,24 @@ export default function WispOnboardingWizard({
         if (state.billingCycleDay) setBillingDay(state.billingCycleDay);
         if (state.billingCycleTime) setBillingTime(String(state.billingCycleTime).slice(0, 5));
         if (state.firstRouterName) setRouterName(state.firstRouterName);
-        if (state.currentStep && state.currentStep !== 'done') setStep(state.currentStep);
+        const hasCompany = Boolean(state.companyName?.trim())
+          || Boolean(state.completedSteps?.includes('company'));
+        setCompanyAlreadySet(hasCompany);
+        // Registro ya guardó empresa → no volver a pedir nombre/ciudad/teléfono.
+        const next = state.currentStep && state.currentStep !== 'done'
+          ? (state.currentStep === 'company' && hasCompany ? 'zone' : state.currentStep)
+          : (hasCompany ? 'zone' : 'company');
+        setStep(next);
       } catch {
         /* ignore */
       }
     })();
     return () => { cancelled = true; };
   }, [getAuthHeaders]);
+
+  const STEPS = companyAlreadySet
+    ? ALL_STEPS.filter((s) => s.id !== 'company')
+    : ALL_STEPS;
 
   const putStep = async (path: string, body: Record<string, unknown>) => {
     setLoading(true);
@@ -157,7 +169,7 @@ export default function WispOnboardingWizard({
           </p>
         </div>
 
-        <div className="grid grid-cols-4 gap-2">
+        <div className={`grid gap-2 ${STEPS.length === 3 ? 'grid-cols-3' : 'grid-cols-4'}`}>
           {STEPS.map((s, i) => (
             <div
               key={s.id}
@@ -180,7 +192,7 @@ export default function WispOnboardingWizard({
 
           {step === 'company' && (
             <div className="space-y-3">
-              <h2 className="font-bold text-white">1. Datos de tu empresa</h2>
+              <h2 className="font-bold text-white">Datos de tu empresa</h2>
               <p className="text-xs text-slate-400">Este nombre identifica tu WISP dentro de NugaCore.</p>
               <input className="w-full bg-slate-950 border border-slate-800 rounded-xl px-3 py-2.5 text-sm" placeholder="Nombre comercial" value={companyName} onChange={(e) => setCompanyName(e.target.value)} />
               <div className="grid grid-cols-2 gap-3">
@@ -192,7 +204,14 @@ export default function WispOnboardingWizard({
 
           {step === 'zone' && (
             <div className="space-y-3">
-              <h2 className="font-bold text-white">2. Primera zona de cobertura</h2>
+              <h2 className="font-bold text-white">Primera zona de cobertura</h2>
+              {companyAlreadySet && companyName ? (
+                <p className="text-xs text-slate-400">
+                  Empresa guardada: <span className="text-slate-200 font-medium">{companyName}</span>
+                  {city ? <> · {city}</> : null}
+                  {phone ? <> · {phone}</> : null}
+                </p>
+              ) : null}
               <p className="text-xs text-slate-400">
                 Crea tu primera zona (torre / sector). Más adelante puedes añadir más desde Red.
               </p>
@@ -202,7 +221,7 @@ export default function WispOnboardingWizard({
 
           {step === 'billing' && (
             <div className="space-y-3">
-              <h2 className="font-bold text-white">3. Día y hora de corte</h2>
+              <h2 className="font-bold text-white">Día y hora de corte</h2>
               <p className="text-xs text-slate-400">
                 Define cuándo se genera el ciclo de facturación / cortes por mora en esta zona.
               </p>
@@ -233,7 +252,7 @@ export default function WispOnboardingWizard({
 
           {step === 'router' && (
             <div className="space-y-3">
-              <h2 className="font-bold text-white">4. Primer router</h2>
+              <h2 className="font-bold text-white">Primer router</h2>
               <p className="text-xs text-slate-400">
                 Indica el nombre del router principal. Después podrás enrolarlo por WireGuard desde Inventario → Routers
                 (el host WG aplica peers de todos los WISP en un solo túnel de plataforma, con datos aislados por tenant).
