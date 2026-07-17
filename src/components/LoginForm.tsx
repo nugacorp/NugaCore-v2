@@ -14,7 +14,6 @@ import {
 } from 'lucide-react';
 import { isSupabaseConfigured, supabase, UserSessionProfile } from '../lib/supabase';
 import { fetchProfileFromBackend } from '../lib/authSession';
-import { messageForAuthEmailError } from '../lib/authEmailErrors';
 
 interface LoginFormProps {
   onLoginSuccess: (userProfile: UserSessionProfile, accessToken?: string) => void;
@@ -58,7 +57,7 @@ export default function LoginForm({ onLoginSuccess, onBack, onGoRegister }: Logi
           const msg = error.message || '';
           if (/email not confirmed/i.test(msg)) {
             throw new Error(
-              'Debes confirmar tu correo antes de entrar. Revisa tu bandeja o usa «Reenviar confirmación».',
+              'Debes confirmar tu correo antes de entrar. Revisa tu bandeja (y spam). Si acabas de crear el WISP, reenvía la confirmación desde la pantalla de registro.',
             );
           }
           if (/invalid login credentials/i.test(msg)) {
@@ -127,35 +126,6 @@ export default function LoginForm({ onLoginSuccess, onBack, onGoRegister }: Logi
     } catch (err) {
       clientLog.error(err);
       setRecoveryStatus({ type: 'error', message: getErrorMessage(err, 'Error al enviar correo de recuperación.') });
-    } finally {
-      setLoading(false);
-    }
-  };
-
-  const handleResendConfirmation = async () => {
-    setErrorMessage('');
-    setSuccessMessage('');
-    const target = (email || recoveryEmail).trim();
-    if (!target) {
-      setErrorMessage('Ingresa tu correo para reenviar la confirmación.');
-      return;
-    }
-    if (!isSupabaseConfigured || !supabase) {
-      setErrorMessage('Auth no está configurada en este entorno.');
-      return;
-    }
-    setLoading(true);
-    try {
-      const { error } = await supabase.auth.resend({
-        type: 'signup',
-        email: target,
-        options: { emailRedirectTo: `${window.location.origin}/auth/callback` },
-      });
-      if (error) throw error;
-      setSuccessMessage(`Si la cuenta existe y falta confirmar, enviamos un correo a ${target}.`);
-    } catch (err) {
-      clientLog.error(err);
-      setErrorMessage(messageForAuthEmailError(err, 'No se pudo reenviar la confirmación.'));
     } finally {
       setLoading(false);
     }
@@ -278,19 +248,6 @@ export default function LoginForm({ onLoginSuccess, onBack, onGoRegister }: Logi
                 <span>{loading ? 'Validando…' : 'Iniciar sesión'}</span>
                 {!loading && <ArrowRight className="w-3.5 h-3.5" />}
               </button>
-
-              <button
-                type="button"
-                id="login-resend-confirmation"
-                onClick={() => void handleResendConfirmation()}
-                disabled={loading}
-                className="w-full border border-slate-700 hover:border-sky-600/60 hover:bg-slate-950 text-sky-300 py-3 rounded-xl font-semibold text-sm transition disabled:opacity-50"
-              >
-                Reenviar confirmación
-              </button>
-              <p className="text-center text-[11px] text-slate-500">
-                Si no llegó el correo de alta, escribe tu correo arriba y pulsa reenviar.
-              </p>
 
               {onGoRegister && (
                 <p className="text-center text-xs text-slate-500 pt-2">

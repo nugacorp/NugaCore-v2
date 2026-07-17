@@ -235,8 +235,8 @@ export class WispOnboardingService {
         confirmationEmailErrorCode = sent.errorCode;
         if (!sent.sent) {
           note = sent.errorCode === 'EMAIL_RATE_LIMITED'
-            ? 'Cuenta creada, pero Supabase alcanzó el límite de correos. Espera unos minutos (a veces hasta 1 h) y usa «Reenviar confirmación», o inicia sesión si ya te confirmaron la cuenta.'
-            : 'Cuenta creada, pero no se pudo enviar el correo de confirmación. Usa «Reenviar confirmación» en el login.';
+            ? 'Cuenta creada, pero Supabase alcanzó el límite de correos. Espera unos minutos (a veces hasta 1 h) y usa «Reenviar confirmación» en esta pantalla, o inicia sesión si ya te confirmaron la cuenta.'
+            : 'Cuenta creada, pero no se pudo enviar el correo de confirmación. Usa «Reenviar confirmación» en esta pantalla.';
         }
       }
 
