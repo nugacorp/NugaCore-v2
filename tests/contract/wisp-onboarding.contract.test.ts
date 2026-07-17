@@ -40,4 +40,28 @@ describe('API — WISP onboarding', () => {
     expect(res.status).toBe(200);
     expect(res.body.required).toBe(false);
   });
+
+  it('bloquea APIs de negocio si onboarding está incompleto', async () => {
+    const reg = await request(app)
+      .post('/api/wisp-onboarding/register')
+      .send({
+        companyName: 'WISP Gamma',
+        slug: 'wisp-gamma',
+        email: 'admin@wispgamma.test',
+        password: 'password123',
+        fullName: 'Admin Gamma',
+      });
+    expect(reg.status).toBe(201);
+    const tenantId = reg.body.tenantId as string;
+
+    const blocked = await request(app)
+      .get('/api/clients')
+      .set({
+        'x-user-role': 'administrador',
+        'x-user-id': reg.body.userId,
+        'x-tenant-id': tenantId,
+      });
+    expect(blocked.status).toBe(403);
+    expect(blocked.body.code).toBe('ONBOARDING_REQUIRED');
+  });
 });

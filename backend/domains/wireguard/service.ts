@@ -251,10 +251,15 @@ export class WireguardService {
     return this.peerOnce(server, rec, kp.privateKey, psk);
   }
 
-  async rotatePeer(peerId: string, actorId?: string, reason?: string): Promise<PeerCreatedOnce | null> {
-    const peer = await this.repo.getPeer(peerId);
+  async rotatePeer(
+    peerId: string,
+    actorId?: string,
+    reason?: string,
+    tenantId?: string,
+  ): Promise<PeerCreatedOnce | null> {
+    const peer = await this.repo.getPeer(peerId, tenantId);
     if (!peer || peer.status !== 'active') return null;
-    const server = await this.repo.getServer(peer.serverId);
+    const server = await this.repo.getServer(peer.serverId, tenantId);
     if (!server) return null;
 
     const kp = generateWgKeyPair();
@@ -274,8 +279,8 @@ export class WireguardService {
     return this.peerOnce(server, updated!, kp.privateKey, psk);
   }
 
-  async revokePeer(peerId: string): Promise<boolean> {
-    const peer = await this.repo.getPeer(peerId);
+  async revokePeer(peerId: string, tenantId?: string): Promise<boolean> {
+    const peer = await this.repo.getPeer(peerId, tenantId);
     if (!peer) return false;
     await this.repo.updatePeer(peerId, { status: 'revoked', revokedAt: nowIso() });
     // Liberar la IP para reutilización.

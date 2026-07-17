@@ -161,5 +161,7 @@ export function applyHttpSecurity(app: Express): void {
 
   // El límite estricto de auth se registra primero para que /api/auth lo use.
   app.use('/api/auth', authLimiter);
+  // Registro público de WISP: mismo techo estricto que auth (anti-abuso).
+  app.use('/api/wisp-onboarding/register', authLimiter);
   app.use('/api', apiLimiter);
 }

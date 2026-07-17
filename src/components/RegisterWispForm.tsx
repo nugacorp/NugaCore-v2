@@ -58,7 +58,23 @@ export default function RegisterWispForm({ onRegistered, onBack, onGoLogin }: Re
       });
       const body = await res.json().catch(() => ({}));
       if (!res.ok) {
-        throw new Error(body.error || 'No se pudo registrar el WISP');
+        const code = typeof body.code === 'string' ? body.code : '';
+        if (code === 'EMAIL_EXISTS' || body.error === 'EMAIL_EXISTS') {
+          throw new Error('Ese correo ya está registrado. Inicia sesión o usa otro.');
+        }
+        if (code === 'REGISTRATION_DISABLED') {
+          throw new Error(
+            'El registro público de WISP no está habilitado en este entorno. Contacta al administrador.',
+          );
+        }
+        if (code === 'RATE_LIMITED' || res.status === 429) {
+          throw new Error('Demasiados intentos. Espera un minuto e intenta de nuevo.');
+        }
+        throw new Error(
+          typeof body.error === 'string' && body.error
+            ? body.error
+            : 'No se pudo registrar el WISP',
+        );
       }
 
       if (!isSupabaseConfigured || !supabase) {

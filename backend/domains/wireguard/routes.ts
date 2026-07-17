@@ -79,7 +79,12 @@ router.post('/api/wireguard/peers', requireRoles([...WG_ROLES]), asyncHandler(as
 }));
 
 router.post('/api/wireguard/peers/:id/rotate', requireRoles([...WG_ROLES]), asyncHandler(async (req, res) => {
-  const result = await getWireguardService().rotatePeer(req.params.id, req.authContext?.userId, req.body?.reason ? String(req.body.reason) : undefined);
+  const result = await getWireguardService().rotatePeer(
+    req.params.id,
+    req.authContext?.userId,
+    req.body?.reason ? String(req.body.reason) : undefined,
+    tenantIdFromRequest(req),
+  );
   if (!result) {
     res.status(404).json({ error: 'Active peer not found' });
     return;
@@ -91,7 +96,7 @@ router.post('/api/wireguard/peers/:id/rotate', requireRoles([...WG_ROLES]), asyn
 }));
 
 router.delete('/api/wireguard/peers/:id', requireRoles([...WG_ROLES]), asyncHandler(async (req, res) => {
-  const ok = await getWireguardService().revokePeer(req.params.id);
+  const ok = await getWireguardService().revokePeer(req.params.id, tenantIdFromRequest(req));
   if (!ok) {
     res.status(404).json({ error: 'Peer not found' });
     return;

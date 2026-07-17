@@ -52,20 +52,23 @@ export class WispOnboardingService {
     // tenant-default (legacy single-wisp) no fuerza wizard
     if (tenantId === 'tenant-default') return false;
 
+    // Fuente de verdad: fila wisp_onboarding (no depender solo de tenants.*).
+    const state = await this.repo.get(tenantId);
+    if (state) return state.status !== 'completed';
+
+    // Sin fila: mirar tenants.onboarding_status; si es in_progress o desconocido → required.
     if (isSupabaseAdminConfigured && supabaseAdmin) {
       const { data } = await supabaseAdmin
         .from('tenants')
         .select('onboarding_status')
         .eq('id', tenantId)
         .maybeSingle();
-      if (data && String((data as { onboarding_status?: string }).onboarding_status) === 'completed') {
-        return false;
-      }
+      const status = String((data as { onboarding_status?: string } | null)?.onboarding_status || '');
+      if (status === 'completed') return false;
+      if (status === 'in_progress') return true;
     }
-
-    const state = await this.repo.get(tenantId);
-    if (!state) return true;
-    return state.status !== 'completed';
+    // Tenant nuevo sin fila aún → exigir onboarding
+    return true;
   }
 
   async register(input: RegisterWispInput): Promise<RegisterWispResult> {
@@ -146,10 +149,16 @@ export class WispOnboardingService {
     });
 
     if (isSupabaseAdminConfigured && supabaseAdmin) {
-      await supabaseAdmin
+      const { error: statusErr } = await supabaseAdmin
         .from('tenants')
         .update({ onboarding_status: 'in_progress' })
         .eq('id', tenant.id);
+      if (statusErr) {
+        throw new BadRequestError(
+          `Tenant creado pero onboarding_status falló: ${statusErr.message}`,
+          'ONBOARDING_STATUS_FAILED',
+        );
+      }
 
       await supabaseAdmin.auth.admin.updateUserById(userId, {
         app_metadata: { tenant_id: tenant.id },

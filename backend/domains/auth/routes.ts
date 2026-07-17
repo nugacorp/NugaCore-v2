@@ -57,7 +57,9 @@ router.get('/api/auth/me', asyncHandler(async (req, res) => {
       onboardingStep = state?.currentStep ?? 'company';
     }
   } catch {
-    onboardingRequired = false;
+    // Fail-closed: si no podemos verificar, no saltar el wizard en tenants nuevos.
+    onboardingRequired = tenantId !== 'tenant-default';
+    onboardingStep = onboardingRequired ? 'company' : null;
   }
 
   res.json({

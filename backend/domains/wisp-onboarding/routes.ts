@@ -8,6 +8,18 @@ const router = Router();
 
 /** Registro público de un nuevo WISP (crea tenant aislado + owner). */
 router.post('/api/wisp-onboarding/register', asyncHandler(async (req, res) => {
+  const hardened = (process.env.PUBLIC_DEPLOYMENT || '').toLowerCase() === 'true'
+    || (process.env.NODE_ENV || '') === 'production';
+  const allowed = (process.env.WISP_PUBLIC_REGISTRATION || (hardened ? 'false' : 'true'))
+    .trim()
+    .toLowerCase() === 'true';
+  if (!allowed) {
+    return res.status(403).json({
+      error: 'Public WISP registration is disabled. Set WISP_PUBLIC_REGISTRATION=true to enable.',
+      code: 'REGISTRATION_DISABLED',
+    });
+  }
+
   const body = req.body || {};
   const result = await getWispOnboardingService().register({
     companyName: String(body.companyName || ''),
