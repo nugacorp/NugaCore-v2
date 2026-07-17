@@ -94,7 +94,12 @@ export const errorHandler = (
     return;
   }
 
-  const message = err instanceof Error ? err.message : 'Unexpected server error';
+  const message =
+    err instanceof Error
+      ? err.message
+      : err && typeof err === 'object' && 'message' in err
+        ? String((err as { message: unknown }).message || 'Unexpected server error')
+        : 'Unexpected server error';
   log.error('Unhandled exception', {
     message,
     path: req.path,

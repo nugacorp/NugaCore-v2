@@ -8,7 +8,14 @@ import { store } from '../../state/store';
 import { isDomainOnDb } from '../../config/feature-flags';
 import { isSupabaseAdminConfigured, supabaseAdmin } from '../../services/supabase-admin';
 import { logger } from '../../common/logger';
-import { belongsToTenant } from '../tenancy/tenant-scope';
+import {
+  belongsToTenant,
+  dbErrorMessage,
+  getTenantColumnReady,
+  isMissingTenantIdColumnError,
+  setTenantColumnReady,
+  stripTenantIdIfUnsupported,
+} from '../tenancy/tenant-scope';
 import {
   TicketAttachmentRow,
   TicketHistoryRow,
@@ -20,6 +27,13 @@ import {
   ticketToRow,
   workOrderToRow,
 } from './mappers';
+
+const TICKETS_TABLE = 'tickets';
+const WORK_ORDERS_TABLE = 'work_orders';
+
+const throwDb = (context: string, error: unknown): never => {
+  throw new Error(`Support DB error (${context}): ${dbErrorMessage(error)}`);
+};
 import type {
   SupportFilters,
   TicketCreateInput,
@@ -412,18 +426,37 @@ export class SupabaseSupportRepository implements SupportRepository {
     return new StoreSupportRepository().listTechnicians(tenantId);
   }
 
-  async listTickets(filters: SupportFilters) {
-    let query = this.db.from('tickets').select('*');
-    if (filters.tenantId) query = query.eq('tenant_id', filters.tenantId);
+  private shouldEqTenant(table: string, tenantId?: string): boolean {
+    return Boolean(tenantId) && getTenantColumnReady(table) !== false;
+  }
+
+  private async selectTicketsRows(filters: SupportFilters, useTenantEq: boolean) {
+    let query = this.db.from(TICKETS_TABLE).select('*');
+    if (useTenantEq && filters.tenantId) query = query.eq('tenant_id', filters.tenantId);
     if (filters.status) query = query.eq('status', filters.status);
     if (filters.severity) query = query.eq('severity', filters.severity);
     if (filters.priority) query = query.eq('priority', filters.priority);
     if (filters.technicianId) query = query.eq('technician_id', filters.technicianId);
     if (filters.clientId) query = query.eq('client_id', filters.clientId);
-    const { data, error } = await query.order('created_at', { ascending: false });
-    if (error) throw error;
-    const rows = (data ?? []) as TicketRow[];
-    const tickets = await Promise.all(rows.map((r) => this.hydrateTicket(r)));
+    return query.order('created_at', { ascending: false });
+  }
+
+  async listTickets(filters: SupportFilters) {
+    const useTenantEq = this.shouldEqTenant(TICKETS_TABLE, filters.tenantId);
+    let { data, error } = await this.selectTicketsRows(filters, useTenantEq);
+    if (error && useTenantEq && isMissingTenantIdColumnError(error)) {
+      setTenantColumnReady(TICKETS_TABLE, false);
+      logger.warn('tickets.tenant_id ausente — fallback in-memory (aplicar migración 20260717050000)');
+      ({ data, error } = await this.selectTicketsRows(filters, false));
+    } else if (!error && useTenantEq) {
+      setTenantColumnReady(TICKETS_TABLE, true);
+    }
+    if (error) throwDb('listTickets', error);
+
+    let tickets = await Promise.all(((data ?? []) as TicketRow[]).map((r) => this.hydrateTicket(r)));
+    if (filters.tenantId && getTenantColumnReady(TICKETS_TABLE) === false) {
+      tickets = tickets.filter((t) => belongsToTenant(t.tenantId, filters.tenantId!));
+    }
     if (!filters.q) return tickets;
     return tickets.filter((t) =>
       t.title.toLowerCase().includes(filters.q!)
@@ -433,12 +466,21 @@ export class SupabaseSupportRepository implements SupportRepository {
   }
 
   async getTicket(id: string, tenantId?: string) {
-    let query = this.db.from('tickets').select('*').eq('id', id);
-    if (tenantId) query = query.eq('tenant_id', tenantId);
-    const { data, error } = await query.maybeSingle();
-    if (error) throw error;
+    const useTenantEq = this.shouldEqTenant(TICKETS_TABLE, tenantId);
+    let query = this.db.from(TICKETS_TABLE).select('*').eq('id', id);
+    if (useTenantEq) query = query.eq('tenant_id', tenantId!);
+    let { data, error } = await query.maybeSingle();
+    if (error && useTenantEq && isMissingTenantIdColumnError(error)) {
+      setTenantColumnReady(TICKETS_TABLE, false);
+      ({ data, error } = await this.db.from(TICKETS_TABLE).select('*').eq('id', id).maybeSingle());
+    } else if (!error && useTenantEq) {
+      setTenantColumnReady(TICKETS_TABLE, true);
+    }
+    if (error) throwDb('getTicket', error);
     if (!data) return null;
-    return this.hydrateTicket(data as TicketRow);
+    const ticket = await this.hydrateTicket(data as TicketRow);
+    if (tenantId && !belongsToTenant(ticket.tenantId, tenantId)) return null;
+    return ticket;
   }
 
   async createTicket(input: TicketCreateInput) {
@@ -461,8 +503,16 @@ export class SupabaseSupportRepository implements SupportRepository {
       attachments: [],
       history: [],
     });
-    const { error } = await this.db.from('tickets').insert(row);
-    if (error) throw error;
+    let payload: Record<string, unknown> = stripTenantIdIfUnsupported(TICKETS_TABLE, { ...row });
+    let { error } = await this.db.from(TICKETS_TABLE).insert(payload);
+    if (error && isMissingTenantIdColumnError(error)) {
+      setTenantColumnReady(TICKETS_TABLE, false);
+      payload = stripTenantIdIfUnsupported(TICKETS_TABLE, { ...row });
+      ({ error } = await this.db.from(TICKETS_TABLE).insert(payload));
+    } else if (!error) {
+      setTenantColumnReady(TICKETS_TABLE, true);
+    }
+    if (error) throwDb('createTicket', error);
     await this.db.from('ticket_history').insert({
       id: 'th-' + Date.now(),
       ticket_id: id,
@@ -496,18 +546,23 @@ export class SupabaseSupportRepository implements SupportRepository {
     if (patch.status !== undefined) dbPatch.status = patch.status;
     if (patch.technicianId !== undefined) dbPatch.technician_id = patch.technicianId;
     if (patch.technicianName !== undefined) dbPatch.technician_name = patch.technicianName;
-    let query = this.db.from('tickets').update(dbPatch).eq('id', id);
-    if (tenantId) query = query.eq('tenant_id', tenantId);
-    const { error } = await query;
-    if (error) throw error;
+    const useTenantEq = this.shouldEqTenant(TICKETS_TABLE, tenantId);
+    let query = this.db.from(TICKETS_TABLE).update(dbPatch).eq('id', id);
+    if (useTenantEq) query = query.eq('tenant_id', tenantId!);
+    let { error } = await query;
+    if (error && useTenantEq && isMissingTenantIdColumnError(error)) {
+      setTenantColumnReady(TICKETS_TABLE, false);
+      ({ error } = await this.db.from(TICKETS_TABLE).update(dbPatch).eq('id', id));
+    }
+    if (error) throwDb('updateTicket', error);
     return this.getTicket(id, tenantId);
   }
 
   async deleteTicket(id: string, tenantId?: string) {
-    let query = this.db.from('tickets').delete({ count: 'exact' }).eq('id', id);
-    if (tenantId) query = query.eq('tenant_id', tenantId);
-    const { error, count } = await query;
-    if (error) throw error;
+    const existing = await this.getTicket(id, tenantId);
+    if (!existing) return false;
+    const { error, count } = await this.db.from(TICKETS_TABLE).delete({ count: 'exact' }).eq('id', id);
+    if (error) throwDb('deleteTicket', error);
     return (count ?? 0) > 0;
   }
 
@@ -558,15 +613,31 @@ export class SupabaseSupportRepository implements SupportRepository {
     return new StoreSupportRepository().generateWorkOrderId();
   }
 
-  async listWorkOrders(filters: SupportFilters) {
-    let query = this.db.from('work_orders').select('*');
-    if (filters.tenantId) query = query.eq('tenant_id', filters.tenantId);
+  private async selectWorkOrderRows(filters: SupportFilters, useTenantEq: boolean) {
+    let query = this.db.from(WORK_ORDERS_TABLE).select('*');
+    if (useTenantEq && filters.tenantId) query = query.eq('tenant_id', filters.tenantId);
     if (filters.status) query = query.eq('status', filters.status);
     if (filters.type) query = query.eq('type', filters.type);
     if (filters.technicianId) query = query.eq('assigned_technician_id', filters.technicianId);
-    const { data, error } = await query.order('date', { ascending: false });
-    if (error) throw error;
+    return query.order('date', { ascending: false });
+  }
+
+  async listWorkOrders(filters: SupportFilters) {
+    const useTenantEq = this.shouldEqTenant(WORK_ORDERS_TABLE, filters.tenantId);
+    let { data, error } = await this.selectWorkOrderRows(filters, useTenantEq);
+    if (error && useTenantEq && isMissingTenantIdColumnError(error)) {
+      setTenantColumnReady(WORK_ORDERS_TABLE, false);
+      logger.warn('work_orders.tenant_id ausente — fallback in-memory (aplicar migración 20260717050000)');
+      ({ data, error } = await this.selectWorkOrderRows(filters, false));
+    } else if (!error && useTenantEq) {
+      setTenantColumnReady(WORK_ORDERS_TABLE, true);
+    }
+    if (error) throwDb('listWorkOrders', error);
+
     let orders = ((data ?? []) as WorkOrderRow[]).map(rowToWorkOrder);
+    if (filters.tenantId && getTenantColumnReady(WORK_ORDERS_TABLE) === false) {
+      orders = orders.filter((o) => belongsToTenant(o.tenantId, filters.tenantId!));
+    }
     if (filters.dateFrom) orders = orders.filter((o) => o.date >= filters.dateFrom!);
     if (filters.dateTo) orders = orders.filter((o) => o.date <= filters.dateTo!);
     if (filters.q) {
@@ -598,11 +669,21 @@ export class SupabaseSupportRepository implements SupportRepository {
   }
 
   async getWorkOrder(id: string, tenantId?: string) {
-    let query = this.db.from('work_orders').select('*').eq('id', id);
-    if (tenantId) query = query.eq('tenant_id', tenantId);
-    const { data, error } = await query.maybeSingle();
-    if (error) throw error;
-    return data ? rowToWorkOrder(data as WorkOrderRow) : null;
+    const useTenantEq = this.shouldEqTenant(WORK_ORDERS_TABLE, tenantId);
+    let query = this.db.from(WORK_ORDERS_TABLE).select('*').eq('id', id);
+    if (useTenantEq) query = query.eq('tenant_id', tenantId!);
+    let { data, error } = await query.maybeSingle();
+    if (error && useTenantEq && isMissingTenantIdColumnError(error)) {
+      setTenantColumnReady(WORK_ORDERS_TABLE, false);
+      ({ data, error } = await this.db.from(WORK_ORDERS_TABLE).select('*').eq('id', id).maybeSingle());
+    } else if (!error && useTenantEq) {
+      setTenantColumnReady(WORK_ORDERS_TABLE, true);
+    }
+    if (error) throwDb('getWorkOrder', error);
+    if (!data) return null;
+    const order = rowToWorkOrder(data as WorkOrderRow);
+    if (tenantId && !belongsToTenant(order.tenantId, tenantId)) return null;
+    return order;
   }
 
   async createWorkOrder(input: WorkOrderCreateInput) {
@@ -628,8 +709,16 @@ export class SupabaseSupportRepository implements SupportRepository {
       evidences: [],
       history: [],
     });
-    const { error } = await this.db.from('work_orders').insert(row);
-    if (error) throw error;
+    let payload: Record<string, unknown> = stripTenantIdIfUnsupported(WORK_ORDERS_TABLE, { ...row });
+    let { error } = await this.db.from(WORK_ORDERS_TABLE).insert(payload);
+    if (error && isMissingTenantIdColumnError(error)) {
+      setTenantColumnReady(WORK_ORDERS_TABLE, false);
+      payload = stripTenantIdIfUnsupported(WORK_ORDERS_TABLE, { ...row });
+      ({ error } = await this.db.from(WORK_ORDERS_TABLE).insert(payload));
+    } else if (!error) {
+      setTenantColumnReady(WORK_ORDERS_TABLE, true);
+    }
+    if (error) throwDb('createWorkOrder', error);
     return (await this.getWorkOrder(id, input.tenantId))!;
   }
 
@@ -641,18 +730,23 @@ export class SupabaseSupportRepository implements SupportRepository {
     if (patch.type !== undefined) dbPatch.type = patch.type;
     if (patch.status !== undefined) dbPatch.status = patch.status;
     if (patch.checklist !== undefined) dbPatch.checklist = patch.checklist;
-    let query = this.db.from('work_orders').update(dbPatch).eq('id', id);
-    if (tenantId) query = query.eq('tenant_id', tenantId);
-    const { error } = await query;
-    if (error) throw error;
+    const useTenantEq = this.shouldEqTenant(WORK_ORDERS_TABLE, tenantId);
+    let query = this.db.from(WORK_ORDERS_TABLE).update(dbPatch).eq('id', id);
+    if (useTenantEq) query = query.eq('tenant_id', tenantId!);
+    let { error } = await query;
+    if (error && useTenantEq && isMissingTenantIdColumnError(error)) {
+      setTenantColumnReady(WORK_ORDERS_TABLE, false);
+      ({ error } = await this.db.from(WORK_ORDERS_TABLE).update(dbPatch).eq('id', id));
+    }
+    if (error) throwDb('updateWorkOrder', error);
     return this.getWorkOrder(id, tenantId);
   }
 
   async deleteWorkOrder(id: string, tenantId?: string) {
-    let query = this.db.from('work_orders').delete({ count: 'exact' }).eq('id', id);
-    if (tenantId) query = query.eq('tenant_id', tenantId);
-    const { error, count } = await query;
-    if (error) throw error;
+    const existing = await this.getWorkOrder(id, tenantId);
+    if (!existing) return false;
+    const { error, count } = await this.db.from(WORK_ORDERS_TABLE).delete({ count: 'exact' }).eq('id', id);
+    if (error) throwDb('deleteWorkOrder', error);
     return (count ?? 0) > 0;
   }
 
