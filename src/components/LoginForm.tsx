@@ -278,16 +278,17 @@ export default function LoginForm({ onLoginSuccess, onBack, onGoRegister }: Logi
                 {!loading && <ArrowRight className="w-3.5 h-3.5" />}
               </button>
 
-              <p className="text-center text-[11px] text-slate-500 pt-1">
-                ¿No llegó el correo de alta?{' '}
-                <button
-                  type="button"
-                  onClick={() => void handleResendConfirmation()}
-                  className="text-sky-400 hover:text-sky-300 font-semibold"
-                  disabled={loading}
-                >
-                  Reenviar confirmación
-                </button>
+              <button
+                type="button"
+                id="login-resend-confirmation"
+                onClick={() => void handleResendConfirmation()}
+                disabled={loading}
+                className="w-full border border-slate-700 hover:border-sky-600/60 hover:bg-slate-950 text-sky-300 py-3 rounded-xl font-semibold text-sm transition disabled:opacity-50"
+              >
+                Reenviar confirmación
+              </button>
+              <p className="text-center text-[11px] text-slate-500">
+                Si no llegó el correo de alta, escribe tu correo arriba y pulsa reenviar.
               </p>
 
               {onGoRegister && (
