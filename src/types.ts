@@ -439,6 +439,9 @@ export interface NapPort {
   num: number;
   status: 'occupied' | 'free';
   client: string;
+  threadId?: string;
+  continuesToNapId?: string;
+  continuesToThread?: number;
 }
 
 export interface NapBox {
@@ -452,4 +455,47 @@ export interface NapBox {
   splitRatio: string;
   coverageMeters: number;
   ports: NapPort[];
+}
+
+export interface FiberThread {
+  id: string;
+  segmentId: string;
+  threadNum: number;
+  napId?: string;
+  portNum?: number;
+  status: 'free' | 'occupied' | 'spliced' | 'cut';
+  continuesToNapId?: string;
+  continuesToThread?: number;
+  clientLabel: string;
+}
+
+export interface FiberSegment {
+  id: string;
+  name: string;
+  fromRef?: string;
+  toRef?: string;
+  fromLabel: string;
+  toLabel: string;
+  segmentType: 'feeder' | 'distribution' | 'drop' | 'splice';
+  threadCount: number;
+  coordinates: Array<[number, number]>;
+  napId?: string;
+  ponPort?: string;
+  notes?: string;
+  threads?: FiberThread[];
+}
+
+export interface FtthImportPreview {
+  naps: NapBox[];
+  segments: FiberSegment[];
+  errors: string[];
+  warnings: string[];
+}
+
+export interface FtthImportResult {
+  napsCreated: number;
+  napsUpdated: number;
+  segmentsCreated: number;
+  segmentsUpdated: number;
+  errors: string[];
 }

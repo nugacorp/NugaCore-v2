@@ -1,8 +1,9 @@
-import React, { useMemo, useState } from 'react';
+import React, { useCallback, useEffect, useMemo, useState } from 'react';
 import { Map as MapIcon, Sliders, Activity, Compass, Cable, Database, Info } from 'lucide-react';
-import { Client, NapBox, OnuFTTH, OltFTTH } from '../types';
+import { Client, FiberSegment, NapBox, OnuFTTH, OltFTTH } from '../types';
 import GisLeafletMap from './gis/GisLeafletMap';
 import FtthInfrastructurePanel from './gis/FtthInfrastructurePanel';
+import FtthImportPanel from './gis/FtthImportPanel';
 
 interface GisModuleProps {
   towers?: unknown[];
@@ -12,15 +13,46 @@ interface GisModuleProps {
   olts?: OltFTTH[];
 }
 
+async function fetchList<T>(url: string): Promise<T> {
+  const res = await fetch(url);
+  if (!res.ok) throw new Error(`HTTP ${res.status}`);
+  return res.json() as Promise<T>;
+}
+
 /** Mapa de Red = planta FTTH / GPON (fibra). WISP vive en Torres y Sitios. */
 export default function GisModule({
   clients = [],
-  naps = [],
+  naps: napsProp = [],
   onus = [],
   olts = [],
 }: GisModuleProps) {
   const [showNapCoverage, setShowNapCoverage] = useState(true);
   const [showDropLines, setShowDropLines] = useState(true);
+  const [localNaps, setLocalNaps] = useState<NapBox[]>(napsProp);
+  const [segments, setSegments] = useState<FiberSegment[]>([]);
+
+  useEffect(() => {
+    setLocalNaps(napsProp);
+  }, [napsProp]);
+
+  const refreshFtth = useCallback(async () => {
+    try {
+      const [naps, segs] = await Promise.all([
+        fetchList<NapBox[]>('/api/naps'),
+        fetchList<FiberSegment[]>('/api/ftth/segments'),
+      ]);
+      setLocalNaps(naps);
+      setSegments(segs);
+    } catch {
+      /* mantener estado previo si la API falla */
+    }
+  }, []);
+
+  useEffect(() => {
+    void refreshFtth();
+  }, [refreshFtth]);
+
+  const naps = localNaps;
 
   const ftthClients = useMemo(
     () =>
@@ -34,10 +66,12 @@ export default function GisModule({
     const lats = [
       ...ftthClients.map((c) => c.lat),
       ...naps.map((n) => n.lat),
+      ...segments.flatMap((s) => s.coordinates.map((c) => c[0])),
     ].filter((l) => Number.isFinite(l) && l !== 0);
     const lngs = [
       ...ftthClients.map((c) => c.lng),
       ...naps.map((n) => n.lng),
+      ...segments.flatMap((s) => s.coordinates.map((c) => c[1])),
     ].filter((g) => Number.isFinite(g) && g !== 0);
 
     const minLat = (lats.length ? Math.min(...lats) : 19.35) - 0.01;
@@ -56,27 +90,44 @@ export default function GisModule({
         : 'GPON / XGS-PON',
     };
 
-    const splices = [
-      {
-        id: 'SPLICE-01',
-        name: 'Empalme feeder A',
-        lat: centralOffice.lat + 0.008,
-        lng: centralOffice.lng + 0.006,
-      },
-      {
-        id: 'SPLICE-02',
-        name: 'Empalme feeder B',
-        lat: centralOffice.lat - 0.007,
-        lng: centralOffice.lng - 0.008,
-      },
-    ];
+    const splices = segments
+      .filter((s) => s.segmentType === 'splice' && s.coordinates.length >= 1)
+      .map((s) => ({
+        id: s.id,
+        name: s.name,
+        lat: s.coordinates[0][0],
+        lng: s.coordinates[0][1],
+      }));
 
     return {
       centralOffice,
       splices,
       bboxLabel: `Lat ${minLat.toFixed(3)}…${maxLat.toFixed(3)} · Lng ${minLng.toFixed(3)}…${maxLng.toFixed(3)}`,
     };
-  }, [ftthClients, naps, olts]);
+  }, [ftthClients, naps, olts, segments]);
+
+  const handlePortUpdate = useCallback(
+    async (
+      napId: string,
+      portNum: number,
+      patch: {
+        status?: 'free' | 'occupied';
+        client?: string;
+        continuesToNapId?: string;
+        continuesToThread?: number;
+      },
+    ) => {
+      const res = await fetch(`/api/naps/${encodeURIComponent(napId)}/ports/${portNum}`, {
+        method: 'PUT',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify(patch),
+      });
+      if (!res.ok) throw new Error(`HTTP ${res.status}`);
+      const updated = (await res.json()) as NapBox;
+      setLocalNaps((prev) => prev.map((n) => (n.id === updated.id ? updated : n)));
+    },
+    [],
+  );
 
   return (
     <div className="space-y-6 text-slate-200 p-6 bg-slate-900 min-h-screen font-sans">
@@ -105,10 +156,8 @@ export default function GisModule({
             <span className="text-sm font-black text-white">{ftthClients.length}</span>
           </div>
           <div className="bg-slate-950/80 border border-amber-900/40 px-3.5 py-1.5 rounded-xl">
-            <span className="text-[9px] text-amber-400 font-bold block uppercase mb-1">ONUs online</span>
-            <span className="text-sm font-black text-white">
-              {onus.filter((o) => o.status === 'online').length}
-            </span>
+            <span className="text-[9px] text-amber-400 font-bold block uppercase mb-1">Tramos</span>
+            <span className="text-sm font-black text-white">{segments.length}</span>
           </div>
         </div>
       </div>
@@ -174,29 +223,32 @@ export default function GisModule({
             clients={clients}
             naps={naps}
             onus={onus}
+            fiberSegments={segments}
             showNapCoverage={showNapCoverage}
             showDropLines={showDropLines}
             dynamicFiberCut={false}
             highAttenuationSim={false}
             centralOffice={centralOffice}
             splices={splices}
+            onPortUpdate={handlePortUpdate}
           />
         </div>
 
         <div className="xl:col-span-3 space-y-6">
-          {/* NAP / PON Capacity Panel */}
           <div className="bg-slate-950 border border-slate-800 rounded-3xl p-5 space-y-4">
             <h3 className="text-xs font-bold text-slate-300 font-mono uppercase flex items-center gap-2 border-b border-slate-900 pb-3">
               <Database className="w-4 h-4 text-emerald-400" />
               Capacidad NAP / PON
             </h3>
             {naps.length === 0 ? (
-              <p className="text-[11px] text-slate-600 font-mono">Sin NAPs registradas.</p>
+              <p className="text-[11px] text-slate-600 font-mono">Sin NAPs registradas. Usa el importador.</p>
             ) : (
               <div className="space-y-2.5 max-h-[340px] overflow-y-auto font-mono text-xs">
                 {naps.map((nap) => {
                   const totalPorts = nap.ports?.length ?? nap.fibersTotal ?? 0;
-                  const usedPorts = nap.ports?.filter((p) => p.status === 'occupied').length ?? (totalPorts - (nap.fibersFree ?? 0));
+                  const usedPorts =
+                    nap.ports?.filter((p) => p.status === 'occupied').length ??
+                    totalPorts - (nap.fibersFree ?? 0);
                   const freePorts = totalPorts - usedPorts;
                   const pct = totalPorts > 0 ? Math.round((usedPorts / totalPorts) * 100) : 0;
                   return (
@@ -223,7 +275,6 @@ export default function GisModule({
                           <span className="text-slate-300">{nap.ponPort}</span>
                         </div>
                       )}
-                      {/* Capacity bar */}
                       <div className="h-1.5 rounded-full bg-slate-800 overflow-hidden">
                         <div
                           className={`h-full rounded-full transition-all ${pct > 85 ? 'bg-rose-500' : pct > 60 ? 'bg-amber-500' : 'bg-emerald-500'}`}
@@ -237,11 +288,10 @@ export default function GisModule({
             )}
             <div className="flex items-start gap-2 bg-slate-900/40 border border-slate-800 rounded-xl px-3 py-2 text-[10px] text-slate-500 font-mono">
               <Info className="w-3.5 h-3.5 shrink-0 mt-0.5 text-slate-600" />
-              <span>Atenuación, potencia y distancias live requerirán conexión OLT/SNMP (aún no activa en staging).</span>
+              <span>Click en una NAP del mapa para ver puertos, hilos y continuidad.</span>
             </div>
           </div>
 
-          {/* ODN summary */}
           <div className="bg-slate-950 border border-slate-800 rounded-3xl p-5 space-y-3">
             <h3 className="text-xs font-bold text-slate-300 font-mono uppercase flex items-center gap-2 border-b border-slate-900 pb-3">
               <Activity className="w-4 h-4 text-emerald-400" />
@@ -253,8 +303,8 @@ export default function GisModule({
                 <span className="text-white font-bold">{naps.length}</span>
               </div>
               <div className="flex justify-between">
-                <span className="text-slate-400">ONUs conectadas</span>
-                <span className="text-white font-bold">{onus.filter((o) => o.status === 'online').length}</span>
+                <span className="text-slate-400">Tramos de fibra</span>
+                <span className="text-white font-bold">{segments.length}</span>
               </div>
               <div className="flex justify-between">
                 <span className="text-slate-400">Abonados FTTH</span>
@@ -265,7 +315,19 @@ export default function GisModule({
         </div>
       </div>
 
-      <FtthInfrastructurePanel naps={naps} olts={olts} />
+      <div className="grid grid-cols-1 xl:grid-cols-2 gap-6">
+        <FtthImportPanel
+          naps={naps}
+          segments={segments}
+          onImported={() => void refreshFtth()}
+        />
+        <FtthInfrastructurePanel
+          naps={naps}
+          olts={olts}
+          segments={segments}
+          onSegmentsChange={() => void refreshFtth()}
+        />
+      </div>
     </div>
   );
 }

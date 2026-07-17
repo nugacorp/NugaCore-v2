@@ -1,4 +1,4 @@
-import { Client, Invoice, NapBox, NocAlert, OltFTTH, OnuFTTH, Plan, TaskOrder, Ticket, Tower, WarehouseItem } from '../../src/types';
+import { Client, FiberSegment, Invoice, NapBox, NocAlert, OltFTTH, OnuFTTH, Plan, TaskOrder, Ticket, Tower, WarehouseItem } from '../../src/types';
 
 export type AlertSourceType = 'tower' | 'olt' | 'client' | 'system';
 export type AlertSeverity = 'critical' | 'warning' | 'info';
@@ -248,6 +248,7 @@ export const store: {
   OLTS: OltFTTH[];
   ONUS: OnuFTTH[];
   NAP_BOXES: NapBox[];
+  FIBER_SEGMENTS: FiberSegment[];
   TICKETS: Ticket[];
   WORK_ORDERS: TaskOrder[];
   INVENTORY: WarehouseItem[];
@@ -398,6 +399,7 @@ export const store: {
       ],
     },
   ],
+  FIBER_SEGMENTS: [],
   TICKETS: [
     { id: 'tk-1', clientName: 'Rodrigo Flores Ortiz', clientId: 'c-4', title: 'Servicio suspendido tras pago realizado', description: 'El cliente reporta que pago hace 3 horas por transferencia bancaria, pero sigue saliendo el portal de cobro en su navegador. Solicita reactivacion.', category: 'Facturacion', severity: 'medium', status: 'open', slaHours: 4, created: '2026-05-31 01:22', messages: [{ sender: 'Cliente', message: 'Ya pague mi recibo del mes de Mayo, por favor reactiven el servicio.', date: '2026-05-31 01:22' }] },
     { id: 'tk-2', clientName: 'Hotel Vista Hermosa', clientId: 'c-3', title: 'Paquetes perdidos en enlace dedicado', description: 'Departamento de TI del hotel reporta perdida de paquetes de un 8% detectada en su monitoreo. El ping a la IP publica fluctua entre 15ms y 240ms.', category: 'Internet', severity: 'high', status: 'assigned', slaHours: 2, technicianId: 'tech-1', created: '2026-05-30 18:45', messages: [{ sender: 'IT Hotel', message: 'Monitoreamos ping alto y paquetes caidos, de favor coordinen con soporte de segundo nivel.', date: '2026-05-30 18:45' }] },
@@ -915,6 +917,7 @@ if (!seedDemoData()) {
   store.OLTS = [];
   store.ONUS = [];
   store.NAP_BOXES = [];
+  store.FIBER_SEGMENTS = [];
   // CRM / cobranza / ops demo (dominios con USE_DB_* leen Supabase; store vacío no afecta)
   store.CLIENTS = [];
   store.CLIENT_TIMELINE = [];
