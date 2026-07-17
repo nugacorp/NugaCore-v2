@@ -24,7 +24,9 @@ import {
   Smartphone,
   DollarSign,
   LayoutDashboard,
+  LayoutGrid,
   Settings,
+  Settings2,
 } from 'lucide-react';
 import { UserSessionProfile } from '../lib/supabase';
 import { isVisibleInSidebar } from '../lib/rbac';
@@ -85,9 +87,17 @@ export default function Sidebar({
       items: [
         { id: 'crm', name: 'Clientes', icon: Users },
         { id: 'commercial', name: 'Prospectos', icon: TrendingUp },
-        { id: 'portal', name: 'Portal Cliente', icon: Globe },
         { id: 'support', name: 'Tickets', icon: Wrench },
-        { id: 'tech-pwa', name: 'App Técnicos', icon: Smartphone },
+      ],
+    },
+    {
+      id: 'apps',
+      title: 'Apps',
+      icon: LayoutGrid,
+      items: [
+        { id: 'portal-admin', name: 'Portal del Cliente', icon: Settings2 },
+        { id: 'portal', name: 'App del Cliente', icon: Globe },
+        { id: 'tech-pwa', name: 'App del Técnico', icon: Smartphone },
       ],
     },
     {

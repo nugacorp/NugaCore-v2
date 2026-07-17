@@ -16,7 +16,11 @@ const rbacSource = readFileSync('src/lib/rbac.ts', 'utf8');
 
 const EXPECTED_SECTIONS: Array<{ title: string; ids: string[] }> = [
   { title: 'Inicio', ids: ['dashboard', 'reports'] },
-  { title: 'Clientes', ids: ['crm', 'commercial', 'portal', 'support', 'tech-pwa'] },
+  { title: 'Clientes', ids: ['crm', 'commercial', 'support'] },
+  {
+    title: 'Apps',
+    ids: ['portal-admin', 'portal', 'tech-pwa'],
+  },
   { title: 'Facturación', ids: ['billing', 'payments', 'suspension', 'finance'] },
   { title: 'Red', ids: ['noc', 'gis', 'network'] },
   { title: 'Operaciones', ids: ['inventory'] },
@@ -58,7 +62,7 @@ function sectionBlock(title: string): string {
 }
 
 describe('Sidebar — secciones reorganizadas (WISP LATAM)', () => {
-  it('define las 6 secciones WISP en orden', () => {
+  it('define las 7 secciones WISP en orden', () => {
     let cursor = -1;
     for (const { title } of EXPECTED_SECTIONS) {
       const idx = sidebarSource.indexOf(`title: '${title}'`);
@@ -150,7 +154,7 @@ describe('Sidebar — módulos avanzados ocultos pero conservados', () => {
 
 describe('Sidebar — no se elimina ningún módulo', () => {
   it('los módulos visibles están presentes en el sidebar', () => {
-    expect(VISIBLE_TAB_IDS.length).toBe(19);
+    expect(VISIBLE_TAB_IDS.length).toBe(20);
     for (const id of VISIBLE_TAB_IDS) {
       expect(sidebarSource, `falta el módulo visible ${id}`).toContain(`id: '${id}'`);
     }

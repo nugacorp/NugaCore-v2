@@ -95,10 +95,14 @@ describe('forcedTabForScope', () => {
   });
 });
 
-describe('portal/tech no aparecen en el sidebar WISP', () => {
-  it('portal y tech-pwa están tabs ocultos del menú admin', async () => {
-    const { isSidebarHiddenTab } = await import('../../src/lib/rbac');
-    expect(isSidebarHiddenTab('portal')).toBe(true);
-    expect(isSidebarHiddenTab('tech-pwa')).toBe(true);
+describe('Apps — portal y tech visibles en el sidebar WISP', () => {
+  it('portal, portal-admin y tech-pwa ya no están ocultos del menú admin', async () => {
+    const { isSidebarHiddenTab, isVisibleInSidebar } = await import('../../src/lib/rbac');
+    expect(isSidebarHiddenTab('portal')).toBe(false);
+    expect(isSidebarHiddenTab('tech-pwa')).toBe(false);
+    expect(isSidebarHiddenTab('portal-admin')).toBe(false);
+    expect(isVisibleInSidebar('Super Admin', 'portal')).toBe(true);
+    expect(isVisibleInSidebar('Super Admin', 'tech-pwa')).toBe(true);
+    expect(isVisibleInSidebar('Super Admin', 'portal-admin')).toBe(true);
   });
 });

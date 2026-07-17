@@ -17,6 +17,7 @@ import {
 import { fetchWithRateLimitBackoff } from '../lib/apiBackoff';
 import { getAppScope } from '../lib/appScope';
 import { buildPortalShareUrl, readPortalClientIdFromSearch } from '../lib/portalLinks';
+import { DEFAULT_PORTAL_FEATURES, type PortalFeatures } from '../lib/portalConfig';
 import { Client } from '../types';
 
 interface PortalModuleProps {
@@ -79,6 +80,7 @@ export default function PortalModule({ clients, getAuthHeaders }: PortalModulePr
     balance?: number;
     nextDue?: string | null;
     serviceStatus?: string;
+    features?: PortalFeatures;
   } | null>(null);
   const [invoices, setInvoices] = useState<Array<{ id: string; amount: number; status: string; dueDateStr?: string }>>([]);
   const [tickets, setTickets] = useState<Array<{ id: string; title: string; status: string }>>([]);
@@ -107,24 +109,47 @@ export default function PortalModule({ clients, getAuthHeaders }: PortalModulePr
     }
   }, [clientId]);
 
+  const features = useMemo(
+    () => ({ ...DEFAULT_PORTAL_FEATURES, ...summary?.features }),
+    [summary?.features],
+  );
+
   const loadAll = useCallback(async () => {
     if (!clientId) return;
     setLoading(true);
     setError('');
     try {
       const headers = await getAuthHeaders();
-      const [sumRes, invRes, tktRes] = await Promise.all([
-        fetchWithRateLimitBackoff(`/api/portal/${clientId}/summary`, { headers }),
-        fetchWithRateLimitBackoff(`/api/portal/${clientId}/invoices`, { headers }),
-        fetchWithRateLimitBackoff(`/api/portal/${clientId}/tickets`, { headers }),
-      ]);
+      const sumRes = await fetchWithRateLimitBackoff(`/api/portal/${clientId}/summary`, { headers });
       if (!sumRes.ok) {
         const body = await sumRes.json().catch(() => ({}));
         throw new Error(body?.error || `No se pudo cargar la cuenta (${sumRes.status})`);
       }
-      setSummary(await sumRes.json());
-      if (invRes.ok) setInvoices(await invRes.json());
-      if (tktRes.ok) setTickets(await tktRes.json());
+      const sumData = await sumRes.json();
+      setSummary(sumData);
+      const enabled = { ...DEFAULT_PORTAL_FEATURES, ...sumData?.features };
+      const fetches: Promise<void>[] = [];
+      if (enabled.invoices) {
+        fetches.push(
+          fetchWithRateLimitBackoff(`/api/portal/${clientId}/invoices`, { headers })
+            .then(async (invRes) => {
+              if (invRes.ok) setInvoices(await invRes.json());
+            }),
+        );
+      } else {
+        setInvoices([]);
+      }
+      if (enabled.tickets) {
+        fetches.push(
+          fetchWithRateLimitBackoff(`/api/portal/${clientId}/tickets`, { headers })
+            .then(async (tktRes) => {
+              if (tktRes.ok) setTickets(await tktRes.json());
+            }),
+        );
+      } else {
+        setTickets([]);
+      }
+      await Promise.all(fetches);
     } catch (err) {
       setError(err instanceof Error ? err.message : 'Error al cargar el portal');
       setSummary(null);
@@ -321,122 +346,134 @@ export default function PortalModule({ clients, getAuthHeaders }: PortalModulePr
             </div>
           </div>
 
-          <div className="grid grid-cols-2 gap-px bg-slate-800/60">
-            <div className="bg-slate-950 px-4 py-4">
-              <div className="flex items-center gap-1.5 text-[11px] text-slate-500 font-mono uppercase tracking-wide">
-                <CreditCard className="w-3.5 h-3.5 text-emerald-400" />
-                Saldo pendiente
-              </div>
-              <p className="mt-1 text-2xl font-bold text-white tracking-tight">
-                {loading && !summary ? '…' : formatMXN(summary?.balance ?? 0)}
-              </p>
-            </div>
-            <div className="bg-slate-950 px-4 py-4">
-              <div className="flex items-center gap-1.5 text-[11px] text-slate-500 font-mono uppercase tracking-wide">
-                <Calendar className="w-3.5 h-3.5 text-amber-400" />
-                Próximo vencimiento
-              </div>
-              <p className="mt-1 text-lg font-semibold text-white">
-                {summary?.nextDue || '—'}
-              </p>
-            </div>
+          <div className={`grid gap-px bg-slate-800/60 ${features.balance ? 'grid-cols-2' : 'grid-cols-1'}`}>
+            {features.balance && (
+              <>
+                <div className="bg-slate-950 px-4 py-4">
+                  <div className="flex items-center gap-1.5 text-[11px] text-slate-500 font-mono uppercase tracking-wide">
+                    <CreditCard className="w-3.5 h-3.5 text-emerald-400" />
+                    Saldo pendiente
+                  </div>
+                  <p className="mt-1 text-2xl font-bold text-white tracking-tight">
+                    {loading && !summary ? '…' : formatMXN(summary?.balance ?? 0)}
+                  </p>
+                </div>
+                <div className="bg-slate-950 px-4 py-4">
+                  <div className="flex items-center gap-1.5 text-[11px] text-slate-500 font-mono uppercase tracking-wide">
+                    <Calendar className="w-3.5 h-3.5 text-amber-400" />
+                    Próximo vencimiento
+                  </div>
+                  <p className="mt-1 text-lg font-semibold text-white">
+                    {summary?.nextDue || '—'}
+                  </p>
+                </div>
+              </>
+            )}
           </div>
 
           <div className="p-4 md:p-5 space-y-5">
-            <button
-              id="portal-report-ticket"
-              type="button"
-              onClick={() => void reportTicket()}
-              className="w-full inline-flex items-center justify-center gap-2 rounded-xl border border-rose-700/40 bg-rose-950/35 hover:bg-rose-900/40 px-4 py-3 text-sm font-semibold text-rose-100 transition"
-            >
-              <Ticket className="w-4 h-4" />
-              Reportar falla
-            </button>
+            {features.reportFailure && (
+              <button
+                id="portal-report-ticket"
+                type="button"
+                onClick={() => void reportTicket()}
+                className="w-full inline-flex items-center justify-center gap-2 rounded-xl border border-rose-700/40 bg-rose-950/35 hover:bg-rose-900/40 px-4 py-3 text-sm font-semibold text-rose-100 transition"
+              >
+                <Ticket className="w-4 h-4" />
+                Reportar falla
+              </button>
+            )}
 
-            <div>
-              <h4 className="text-xs font-semibold text-white flex items-center gap-2 mb-2">
-                <Receipt className="w-3.5 h-3.5 text-slate-400" />
-                Mis facturas
-              </h4>
-              {invoices.length === 0 ? (
-                <p className="text-xs text-slate-500 font-mono py-2">Sin facturas registradas.</p>
-              ) : (
-                <ul className="space-y-1.5">
-                  {invoices.slice(0, 8).map((inv) => (
-                    <li
-                      key={inv.id}
-                      className="flex items-center justify-between gap-2 rounded-lg border border-slate-800/80 bg-slate-900/40 px-3 py-2.5 text-xs"
-                    >
-                      <span className="font-mono text-slate-400 truncate">{inv.id}</span>
-                      <span
-                        className={
-                          String(inv.status).toLowerCase() === 'paid'
-                            ? 'text-emerald-400 font-medium'
-                            : 'text-amber-300 font-medium'
-                        }
+            {features.invoices && (
+              <div>
+                <h4 className="text-xs font-semibold text-white flex items-center gap-2 mb-2">
+                  <Receipt className="w-3.5 h-3.5 text-slate-400" />
+                  Mis facturas
+                </h4>
+                {invoices.length === 0 ? (
+                  <p className="text-xs text-slate-500 font-mono py-2">Sin facturas registradas.</p>
+                ) : (
+                  <ul className="space-y-1.5">
+                    {invoices.slice(0, 8).map((inv) => (
+                      <li
+                        key={inv.id}
+                        className="flex items-center justify-between gap-2 rounded-lg border border-slate-800/80 bg-slate-900/40 px-3 py-2.5 text-xs"
                       >
-                        {formatMXN(inv.amount)} · {invoiceStatusLabel(inv.status)}
-                      </span>
-                    </li>
-                  ))}
-                </ul>
-              )}
-            </div>
-
-            <div>
-              <h4 className="text-xs font-semibold text-white flex items-center gap-2 mb-2">
-                <Ticket className="w-3.5 h-3.5 text-slate-400" />
-                Mis tickets
-              </h4>
-              {tickets.length === 0 ? (
-                <p className="text-xs text-slate-500 font-mono py-2">Sin tickets abiertos.</p>
-              ) : (
-                <ul className="space-y-1.5">
-                  {tickets.map((t) => (
-                    <li
-                      key={t.id}
-                      className="flex items-center justify-between gap-2 rounded-lg border border-slate-800/80 bg-slate-900/40 px-3 py-2.5 text-xs"
-                    >
-                      <span className="text-slate-200 truncate">{t.title}</span>
-                      <span className="uppercase font-mono text-slate-500 shrink-0">{t.status}</span>
-                    </li>
-                  ))}
-                </ul>
-              )}
-            </div>
-
-            <div className="border-t border-slate-800 pt-4">
-              <h4 className="text-xs font-semibold text-white flex items-center gap-2 mb-2">
-                <HandCoins className="w-3.5 h-3.5 text-amber-400/90" />
-                Promesa de pago
-              </h4>
-              <div className="flex flex-col sm:flex-row gap-2">
-                <input
-                  type="date"
-                  value={promiseDate}
-                  onChange={(e) => setPromiseDate(e.target.value)}
-                  className="rounded-xl border border-slate-800 bg-slate-950 px-3 py-2.5 text-sm text-white"
-                />
-                <input
-                  type="number"
-                  min="0"
-                  step="0.01"
-                  placeholder="Monto MXN"
-                  value={promiseAmount}
-                  onChange={(e) => setPromiseAmount(e.target.value)}
-                  className="sm:w-36 rounded-xl border border-slate-800 bg-slate-950 px-3 py-2.5 text-sm text-white"
-                />
-                <button
-                  id="portal-promise-submit"
-                  type="button"
-                  onClick={() => void submitPromise()}
-                  disabled={!promiseAmount}
-                  className="rounded-xl border border-amber-600/40 bg-amber-600/15 hover:bg-amber-600/25 px-4 py-2.5 text-sm font-semibold text-amber-100 transition disabled:opacity-40"
-                >
-                  Solicitar
-                </button>
+                        <span className="font-mono text-slate-400 truncate">{inv.id}</span>
+                        <span
+                          className={
+                            String(inv.status).toLowerCase() === 'paid'
+                              ? 'text-emerald-400 font-medium'
+                              : 'text-amber-300 font-medium'
+                          }
+                        >
+                          {formatMXN(inv.amount)} · {invoiceStatusLabel(inv.status)}
+                        </span>
+                      </li>
+                    ))}
+                  </ul>
+                )}
               </div>
-            </div>
+            )}
+
+            {features.tickets && (
+              <div>
+                <h4 className="text-xs font-semibold text-white flex items-center gap-2 mb-2">
+                  <Ticket className="w-3.5 h-3.5 text-slate-400" />
+                  Mis tickets
+                </h4>
+                {tickets.length === 0 ? (
+                  <p className="text-xs text-slate-500 font-mono py-2">Sin tickets abiertos.</p>
+                ) : (
+                  <ul className="space-y-1.5">
+                    {tickets.map((t) => (
+                      <li
+                        key={t.id}
+                        className="flex items-center justify-between gap-2 rounded-lg border border-slate-800/80 bg-slate-900/40 px-3 py-2.5 text-xs"
+                      >
+                        <span className="text-slate-200 truncate">{t.title}</span>
+                        <span className="uppercase font-mono text-slate-500 shrink-0">{t.status}</span>
+                      </li>
+                    ))}
+                  </ul>
+                )}
+              </div>
+            )}
+
+            {features.paymentPromise && (
+              <div className="border-t border-slate-800 pt-4">
+                <h4 className="text-xs font-semibold text-white flex items-center gap-2 mb-2">
+                  <HandCoins className="w-3.5 h-3.5 text-amber-400/90" />
+                  Promesa de pago
+                </h4>
+                <div className="flex flex-col sm:flex-row gap-2">
+                  <input
+                    type="date"
+                    value={promiseDate}
+                    onChange={(e) => setPromiseDate(e.target.value)}
+                    className="rounded-xl border border-slate-800 bg-slate-950 px-3 py-2.5 text-sm text-white"
+                  />
+                  <input
+                    type="number"
+                    min="0"
+                    step="0.01"
+                    placeholder="Monto MXN"
+                    value={promiseAmount}
+                    onChange={(e) => setPromiseAmount(e.target.value)}
+                    className="sm:w-36 rounded-xl border border-slate-800 bg-slate-950 px-3 py-2.5 text-sm text-white"
+                  />
+                  <button
+                    id="portal-promise-submit"
+                    type="button"
+                    onClick={() => void submitPromise()}
+                    disabled={!promiseAmount}
+                    className="rounded-xl border border-amber-600/40 bg-amber-600/15 hover:bg-amber-600/25 px-4 py-2.5 text-sm font-semibold text-amber-100 transition disabled:opacity-40"
+                  >
+                    Solicitar
+                  </button>
+                </div>
+              </div>
+            )}
           </div>
         </section>
       </div>

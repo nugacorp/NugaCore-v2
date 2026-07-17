@@ -6,10 +6,10 @@ import type { UserRole } from '../../src/lib/supabase';
 const ALL_ROLES: UserRole[] = ['Super Admin', 'Administrador', 'Cobranza', 'Técnico', 'Soporte', 'Solo lectura'];
 
 describe('RBAC visual por rol (frontend)', () => {
-  it('Super Admin ve todos los módulos operativos (28)', () => {
+  it('Super Admin ve todos los módulos operativos (29)', () => {
     const t = getAllowedTabsByRole('Super Admin');
-    expect(t.length).toBe(28);
-    expect(t).toEqual(expect.arrayContaining(['mikrotik', 'wireguard', 'commercial', 'reports', 'portal', 'tech-pwa', 'routeros-resources', 'routeros-templates', 'router-enrollment', 'payments', 'owner', 'finance', 'billing', 'inventory', 'inventory-routers', 'suspension', 'manual-safe-mode', 'safe-command-queue', 'routeros-readonly', 'inventory-sync', 'provisioning', 'user-manual']));
+    expect(t.length).toBe(29);
+    expect(t).toEqual(expect.arrayContaining(['mikrotik', 'wireguard', 'commercial', 'reports', 'portal', 'portal-admin', 'tech-pwa', 'routeros-resources', 'routeros-templates', 'router-enrollment', 'payments', 'owner', 'finance', 'billing', 'inventory', 'inventory-routers', 'suspension', 'manual-safe-mode', 'safe-command-queue', 'routeros-readonly', 'inventory-sync', 'provisioning', 'user-manual']));
     expect(t).not.toContain('automation');
     expect(t).not.toContain('notifications');
   });
@@ -23,7 +23,7 @@ describe('RBAC visual por rol (frontend)', () => {
   });
 
   it('Cobranza ve billing/finance/payments/commercial/reports; no mikrotik, red ni inventory-routers', () => {
-    expect(getAllowedTabsByRole('Cobranza')).toEqual(['dashboard', 'crm', 'commercial', 'billing', 'finance', 'suspension', 'payments', 'reports', 'portal', 'provisioning', 'user-manual']);
+    expect(getAllowedTabsByRole('Cobranza')).toEqual(['dashboard', 'crm', 'commercial', 'billing', 'finance', 'suspension', 'payments', 'reports', 'portal', 'portal-admin', 'provisioning', 'user-manual']);
     expect(canAccessTab('Cobranza', 'mikrotik')).toBe(false);
     expect(canAccessTab('Cobranza', 'network')).toBe(false);
     expect(canAccessTab('Cobranza', 'inventory-routers')).toBe(false);
@@ -195,7 +195,7 @@ describe('Visibilidad en sidebar ≠ acceso (módulos internos ocultos)', () => 
     for (const id of HIDDEN) {
       expect(isSidebarHiddenTab(id), `${id} debería estar oculto`).toBe(true);
     }
-    for (const id of ['dashboard', 'crm', 'inventory-routers', 'user-manual', 'owner']) {
+    for (const id of ['dashboard', 'crm', 'inventory-routers', 'user-manual', 'owner', 'portal', 'tech-pwa', 'portal-admin']) {
       expect(isSidebarHiddenTab(id), `${id} NO debería estar oculto`).toBe(false);
     }
   });
