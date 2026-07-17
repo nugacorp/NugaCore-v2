@@ -23,6 +23,7 @@ describe('WispOnboardingService', () => {
     });
     expect(reg.tenantId).toBeTruthy();
     expect(reg.onboarding.status).toBe('in_progress');
+    expect(reg.emailConfirmationRequired).toBe(false);
     expect(await svc.isOnboardingRequired(reg.tenantId)).toBe(true);
 
     await svc.saveCompany(reg.tenantId, { companyName: 'Red Alfa', city: 'CDMX' });

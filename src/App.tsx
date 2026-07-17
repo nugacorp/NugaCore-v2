@@ -35,6 +35,7 @@ const TechPwaModule = lazyWithRetry(() => import('./modules/tech-pwa/TechPwaModu
 import LoginForm from './components/LoginForm';
 import LandingPage from './components/LandingPage';
 import RegisterWispForm from './components/RegisterWispForm';
+import ResetPasswordForm from './components/ResetPasswordForm';
 import WispOnboardingWizard from './components/WispOnboardingWizard';
 import IsolatedAppShell from './components/IsolatedAppShell';
 import UserMenu from './components/UserMenu';
@@ -127,6 +128,11 @@ const isMikrotikWorkspaceTab = (tabId: string): boolean =>
 export default function App() {
   const [showLogin, setShowLogin] = useState<boolean>(false);
   const [showRegister, setShowRegister] = useState<boolean>(false);
+  const [passwordRecoveryMode, setPasswordRecoveryMode] = useState<boolean>(() => {
+    if (typeof window === 'undefined') return false;
+    const path = window.location.pathname;
+    return path === '/reset-password' || path === '/auth/reset-password';
+  });
   const [userSession, setUserSession] = useState<UserSessionProfile | null>(() => authSession.readProfile());
   const [sessionBootstrapped, setSessionBootstrapped] = useState<boolean>(!isSupabaseConfigured);
 
@@ -195,8 +201,38 @@ export default function App() {
 
   useEffect(() => {
     let mounted = true;
+    const client = supabase;
+    if (!isSupabaseConfigured || !client) {
+      setSessionBootstrapped(true);
+      return;
+    }
+
+    const { data: authSub } = client.auth.onAuthStateChange((event) => {
+      if (event === 'PASSWORD_RECOVERY') {
+        setPasswordRecoveryMode(true);
+        setShowLogin(false);
+        setShowRegister(false);
+        setUserSession(null);
+        setSessionBootstrapped(true);
+      }
+    });
+
     const bootstrap = async () => {
-      if (!isSupabaseConfigured) {
+      const hashParams = new URLSearchParams(window.location.hash.replace(/^#/, ''));
+      const queryParams = new URLSearchParams(window.location.search);
+      const authType = hashParams.get('type') || queryParams.get('type');
+      const isRecoveryPath =
+        window.location.pathname === '/reset-password'
+        || window.location.pathname === '/auth/reset-password'
+        || authType === 'recovery';
+
+      if (isRecoveryPath) {
+        setPasswordRecoveryMode(true);
+        // Deja que Supabase consuma el enlace (PKCE / hash) sin entrar al dashboard.
+        await client.auth.getSession();
+        if (!mounted) return;
+        setUserSession(null);
+        authSession.clear();
         setSessionBootstrapped(true);
         return;
       }
@@ -206,6 +242,9 @@ export default function App() {
       if (restored) {
         setUserSession(restored);
         setActiveTab(resolveEntryTab(restored.role, getAppScope()));
+        if (window.location.pathname.startsWith('/auth/')) {
+          window.history.replaceState({}, '', '/');
+        }
       } else {
         // Sin sesión válida en Supabase: limpiar cualquier perfil cacheado
         // (evita mostrar el dashboard con una sesión obsoleta) -> login.
@@ -215,9 +254,10 @@ export default function App() {
       setSessionBootstrapped(true);
     };
 
-    bootstrap();
+    void bootstrap();
     return () => {
       mounted = false;
+      authSub.subscription.unsubscribe();
     };
   }, []);
 
@@ -1062,12 +1102,33 @@ export default function App() {
     );
   }
 
+  if (passwordRecoveryMode) {
+    return (
+      <ResetPasswordForm
+        onDone={async () => {
+          setPasswordRecoveryMode(false);
+          window.history.replaceState({}, '', '/');
+          const restored = await restoreSessionProfileFromSupabase();
+          if (restored) {
+            handleLoginSuccess(restored);
+            return;
+          }
+          setShowLogin(true);
+        }}
+        onCancel={() => {
+          setPasswordRecoveryMode(false);
+          window.history.replaceState({}, '', '/');
+          setShowLogin(true);
+        }}
+      />
+    );
+  }
+
   if (!userSession) {
     // Isolated scopes skip LandingPage — go directly to LoginForm
     if (showRegister && !isIsolatedScope(getAppScope())) {
       return (
         <RegisterWispForm
-          onRegistered={handleLoginSuccess}
           onBack={() => setShowRegister(false)}
           onGoLogin={() => {
             setShowRegister(false);
