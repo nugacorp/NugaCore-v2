@@ -24,8 +24,9 @@ const useDbTenancy = (): boolean => {
   const explicit = (process.env.USE_DB_TENANCY || '').trim().toLowerCase();
   if (explicit === 'true') return isSupabaseAdminConfigured && Boolean(supabaseAdmin);
   if (explicit === 'false') return false;
-  // Auto: multi-tenant + Supabase admin → DB; si no, store en memoria.
-  return isMultiTenantEnabled() && isSupabaseAdminConfigured && Boolean(supabaseAdmin);
+  // Auto: con Supabase admin → DB. Necesario para registro WISP (wisp_onboarding
+  // tiene FK a tenants). MULTI_TENANT_ENABLED ya no condiciona la persistencia.
+  return isSupabaseAdminConfigured && Boolean(supabaseAdmin);
 };
 
 export class TenancyService {

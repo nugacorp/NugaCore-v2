@@ -108,6 +108,9 @@ if [[ "$ADD_SNMP_ENV" == "true" ]]; then
   upsert_env "PUBLIC_DEPLOYMENT" "true"
   # Con PUBLIC_DEPLOYMENT el registro público va OFF salvo flag explícito.
   upsert_env "WISP_PUBLIC_REGISTRATION" "${WISP_PUBLIC_REGISTRATION:-true}"
+  # Tenants/memberships en Supabase (requerido por FK de wisp_onboarding).
+  upsert_env "USE_DB_TENANCY" "true"
+  upsert_env "MULTI_TENANT_ENABLED" "true"
   upsert_env "APP_URL" "${APP_URL}"
   # Runtime anon key: el backend la usa para auth.resend (confirmación de email).
   # Si no viene en el entorno, intenta el secret file local del VPS (sin imprimir).
