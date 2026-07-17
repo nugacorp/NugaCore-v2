@@ -24,7 +24,12 @@ En el proyecto Auth (staging/prod):
      - `http://localhost:3000/reset-password` (dev)
 3. **Authentication → Emails**  
    - Plantillas Confirm signup y Reset password activas  
-   - SMTP propio o el de Supabase (límites del plan)
+   - **SMTP propio recomendado en staging/prod.** El mailer gratuito de Supabase
+     aplica un rate limit bajo (`over_email_send_rate_limit` / HTTP 429). Cuando
+     se agota, el alta crea el usuario pero **no** encola correo
+     (`confirmation_sent_at` queda vacío) y «Reenviar» también falla hasta que
+     pase la ventana. Con SMTP custom (Resend, SES, etc.) el límite deja de ser
+     el cuello de botella habitual.
 4. **Authentication → Attack Protection** (o Password security)  
    - **Leaked password protection: ON** (HaveIBeenPwned). Es un toggle de Auth,
      no una migración SQL; el advisor `auth_leaked_password_protection` se

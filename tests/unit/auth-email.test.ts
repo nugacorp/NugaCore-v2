@@ -1,5 +1,19 @@
 import { afterEach, describe, expect, it } from 'vitest';
-import { resolveAuthRedirectUrl } from '../../backend/domains/auth/auth-email';
+import {
+  classifySignupEmailError,
+  resolveAuthRedirectUrl,
+} from '../../backend/domains/auth/auth-email';
+
+describe('classifySignupEmailError', () => {
+  it('detecta over_email_send_rate_limit', () => {
+    expect(classifySignupEmailError('email rate limit exceeded')).toBe('EMAIL_RATE_LIMITED');
+    expect(classifySignupEmailError('over_email_send_rate_limit')).toBe('EMAIL_RATE_LIMITED');
+  });
+
+  it('marca otros errores como EMAIL_SEND_FAILED', () => {
+    expect(classifySignupEmailError('Unable to validate email address')).toBe('EMAIL_SEND_FAILED');
+  });
+});
 
 describe('resolveAuthRedirectUrl', () => {
   const prev = process.env.APP_URL;

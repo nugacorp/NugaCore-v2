@@ -42,7 +42,9 @@ export interface RegisterWispResult {
   emailConfirmationRequired: boolean;
   /** true si Supabase aceptó encolar el correo de confirmación. */
   confirmationEmailSent: boolean;
-  /** Solo en modos sin Supabase Auth real (dev/store). */
+  /** Código cuando el correo no se pudo encolar (p. ej. EMAIL_RATE_LIMITED). */
+  confirmationEmailErrorCode?: 'EMAIL_RATE_LIMITED' | 'EMAIL_SEND_FAILED' | 'ANON_KEY_MISSING';
+  /** Solo en modos sin Supabase Auth real (dev/store) o si falló el correo. */
   note?: string;
 }
 

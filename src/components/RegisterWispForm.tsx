@@ -81,11 +81,21 @@ export default function RegisterWispForm({ onBack, onGoLogin }: RegisterWispForm
 
       setAwaitingEmail(true);
       if (body.emailConfirmationRequired) {
-        setOk(
-          body.confirmationEmailSent
-            ? `Te enviamos un correo a ${email}. Confirma el enlace para activar tu cuenta e inicia sesión.`
-            : `Cuenta creada para ${email}. El correo no se pudo enviar automáticamente; usa «Reenviar confirmación» abajo.`,
-        );
+        if (body.confirmationEmailSent) {
+          setOk(
+            `Te enviamos un correo a ${email}. Confirma el enlace para activar tu cuenta e inicia sesión.`,
+          );
+        } else if (body.confirmationEmailErrorCode === 'EMAIL_RATE_LIMITED') {
+          setOk(
+            `Cuenta creada para ${email}, pero Supabase bloqueó el envío (límite de correos). Espera unos minutos y pulsa «Reenviar confirmación», o prueba «Ir a iniciar sesión» si un admin ya activó tu cuenta.`,
+          );
+        } else {
+          setOk(
+            typeof body.note === 'string' && body.note
+              ? body.note
+              : `Cuenta creada para ${email}. El correo no se pudo enviar automáticamente; usa «Reenviar confirmación» abajo.`,
+          );
+        }
       } else {
         setOk(body.note || 'WISP creado. Ya puedes iniciar sesión.');
       }
@@ -157,7 +167,8 @@ export default function RegisterWispForm({ onBack, onGoLogin }: RegisterWispForm
               </div>
             )}
             <p className="text-xs text-slate-400 leading-relaxed">
-              Sin confirmar el correo no podrás iniciar sesión. Revisa spam si no lo ves en unos minutos.
+              Sin confirmar el correo no podrás iniciar sesión. Revisa spam. El SMTP gratuito de Supabase
+              limita envíos: si no llega, suele ser ese límite, no un error de tu correo.
             </p>
             <div className="space-y-2.5 pt-1">
               <button
@@ -170,7 +181,8 @@ export default function RegisterWispForm({ onBack, onGoLogin }: RegisterWispForm
                 {resending ? 'Reenviando…' : 'Reenviar confirmación'}
               </button>
               <p className="text-[11px] text-slate-500">
-                Si ves «rate limit», espera unos minutos: Supabase limita cuántos correos se pueden enviar.
+                Si ves «límite de correos», espera (a veces hasta 1 h). Si un admin ya confirmó tu cuenta,
+                usa «Ir a iniciar sesión» aunque no hayas recibido el mail.
               </p>
               {onGoLogin && (
                 <button
