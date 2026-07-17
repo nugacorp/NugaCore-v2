@@ -47,7 +47,7 @@ router.get('/api/auth/me', asyncHandler(async (req, res) => {
     }
   }
 
-  let onboardingRequired = false;
+  let onboardingRequired: boolean;
   let onboardingStep: string | null = null;
   try {
     const onboarding = getWispOnboardingService();
