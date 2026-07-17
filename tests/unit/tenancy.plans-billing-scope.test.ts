@@ -6,10 +6,11 @@ import type { PlanRecord } from '../../backend/domains/plans/mappers';
 const basePlan = (overrides: Partial<PlanRecord>): PlanRecord => ({
   id: overrides.id || 'plan-test',
   name: overrides.name || 'Plan Test',
-  downloadSpeed: 50,
-  uploadSpeed: 20,
+  speedMbpsDown: 50,
+  speedMbpsUp: 20,
   price: 399,
-  businessType: 'residential',
+  type: 'PPPoE',
+  businessType: 'Residencial',
   isActive: true,
   ...overrides,
 });
