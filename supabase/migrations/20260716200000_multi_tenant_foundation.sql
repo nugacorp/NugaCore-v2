@@ -59,8 +59,13 @@ AS $$
   );
 $$;
 
+-- EXECUTE solo service_role. authenticated/anon no deben poder llamar
+-- /rest/v1/rpc/is_tenant_member (advisor 0028/0029). Ver migración
+-- 20260717013000_revoke_is_tenant_member_execute.sql en DBs ya aplicadas.
 REVOKE ALL ON FUNCTION public.is_tenant_member(TEXT) FROM PUBLIC;
-GRANT EXECUTE ON FUNCTION public.is_tenant_member(TEXT) TO authenticated, service_role;
+REVOKE ALL ON FUNCTION public.is_tenant_member(TEXT) FROM anon;
+REVOKE ALL ON FUNCTION public.is_tenant_member(TEXT) FROM authenticated;
+GRANT EXECUTE ON FUNCTION public.is_tenant_member(TEXT) TO service_role;
 
 -- ── tenant_id en tablas SSOT piloto ──────────────────────────────────
 ALTER TABLE public.clients

@@ -14,7 +14,9 @@
 ## Seguridad (no negociable)
 
 1. **No confiar en `user_metadata.tenant_id`**. El usuario lo edita con `supabase.auth.updateUser` y la anon key del frontend.
-2. **`is_tenant_member` solo mira `tenant_memberships`** (sin claims JWT).
+2. **`is_tenant_member` solo mira `tenant_memberships`** (sin claims JWT) y
+   **EXECUTE solo `service_role`** (revocado a `anon`/`authenticated` para que no
+   sea callable por `/rest/v1/rpc/is_tenant_member`).
 3. **Sin políticas `authenticated` FOR ALL** sobre SSOT: el frontend no usa PostgREST; abrirlas sería superficie de ataque (bypass de RBAC Express).
 4. **`MULTI_TENANT_ENABLED=false` no apaga RLS**. Solo desactiva el scoping en el backend. Por eso esta migración no crea políticas authenticated “por si acaso”.
 

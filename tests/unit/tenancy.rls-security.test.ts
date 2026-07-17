@@ -36,4 +36,34 @@ describe('Multi-tenant migration security invariants', () => {
     expect(sql).toMatch(/MULTI_TENANT_ENABLED/);
     expect(sql).toMatch(/superficie de ataque/i);
   });
+
+  it('is_tenant_member no concede EXECUTE a anon/authenticated', () => {
+    expect(sql).toMatch(/REVOKE ALL ON FUNCTION public\.is_tenant_member\(TEXT\) FROM anon/i);
+    expect(sql).toMatch(
+      /REVOKE ALL ON FUNCTION public\.is_tenant_member\(TEXT\) FROM authenticated/i,
+    );
+    expect(sql).toMatch(
+      /GRANT EXECUTE ON FUNCTION public\.is_tenant_member\(TEXT\) TO service_role/i,
+    );
+    expect(sql).not.toMatch(
+      /GRANT EXECUTE ON FUNCTION public\.is_tenant_member\(TEXT\) TO authenticated/i,
+    );
+  });
+});
+
+describe('Revoke is_tenant_member execute migration', () => {
+  const revokeSql = readFileSync(
+    resolve(process.cwd(), 'supabase/migrations/20260717013000_revoke_is_tenant_member_execute.sql'),
+    'utf8',
+  );
+
+  it('revoca anon/authenticated y deja solo service_role', () => {
+    expect(revokeSql).toMatch(/REVOKE ALL ON FUNCTION public\.is_tenant_member\(TEXT\) FROM anon/i);
+    expect(revokeSql).toMatch(
+      /REVOKE ALL ON FUNCTION public\.is_tenant_member\(TEXT\) FROM authenticated/i,
+    );
+    expect(revokeSql).toMatch(
+      /GRANT EXECUTE ON FUNCTION public\.is_tenant_member\(TEXT\) TO service_role/i,
+    );
+  });
 });

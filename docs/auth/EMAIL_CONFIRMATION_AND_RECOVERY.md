@@ -25,6 +25,10 @@ En el proyecto Auth (staging/prod):
 3. **Authentication → Emails**  
    - Plantillas Confirm signup y Reset password activas  
    - SMTP propio o el de Supabase (límites del plan)
+4. **Authentication → Attack Protection** (o Password security)  
+   - **Leaked password protection: ON** (HaveIBeenPwned). Es un toggle de Auth,
+     no una migración SQL; el advisor `auth_leaked_password_protection` se
+     apaga solo cuando lo activas en el Dashboard.
 
 ## Variables de entorno
 
