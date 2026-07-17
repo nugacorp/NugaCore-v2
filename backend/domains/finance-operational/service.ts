@@ -7,6 +7,7 @@ export type ExpenseCategory = 'payroll' | 'rent' | 'utilities' | 'equipment' | '
 
 export interface OperationalExpense {
   id: string;
+  tenantId?: string;
   category: ExpenseCategory;
   description: string;
   amountCents: number;
@@ -21,6 +22,9 @@ const memory: OperationalExpense[] = [];
 const uid = () => `exp-${Date.now()}`;
 const today = () => new Date().toISOString().substring(0, 10);
 
+const matchesTenant = (recordTenantId: string | undefined, tenantId: string): boolean =>
+  (recordTenantId || 'tenant-default') === tenantId;
+
 export class FinanceOperationalService {
   private useDb = isDomainOnDb('finance') && isSupabaseAdminConfigured && Boolean(supabaseAdmin);
 
@@ -29,12 +33,16 @@ export class FinanceOperationalService {
     return supabaseAdmin;
   }
 
-  listExpenses(filters?: { category?: string; from?: string; to?: string }) {
+  listExpenses(filters?: { category?: string; from?: string; to?: string; tenantId?: string }) {
+    const tenantId = filters?.tenantId;
     if (this.useDb) {
-      return this.admin.from('operational_expenses').select('*').then(({ data, error }) => {
+      let q = this.admin.from('operational_expenses').select('*');
+      if (tenantId) q = q.eq('tenant_id', tenantId);
+      return q.then(({ data, error }) => {
         if (error) throw error;
         let rows = (data ?? []).map((row) => ({
           id: String(row.id),
+          tenantId: row.tenant_id ? String(row.tenant_id) : 'tenant-default',
           category: row.category as ExpenseCategory,
           description: String(row.description),
           amountCents: Number(row.amount_cents),
@@ -51,21 +59,24 @@ export class FinanceOperationalService {
       });
     }
     return Promise.resolve(memory.filter((e) => {
+      const matchTenant = !tenantId || matchesTenant(e.tenantId, tenantId);
       const matchCat = !filters?.category || e.category === filters.category;
       const matchFrom = !filters?.from || e.expenseDate >= filters.from;
       const matchTo = !filters?.to || e.expenseDate <= filters.to;
-      return matchCat && matchFrom && matchTo;
+      return matchTenant && matchCat && matchFrom && matchTo;
     }));
   }
 
-  async createExpense(body: Record<string, unknown>, createdBy?: string) {
+  async createExpense(body: Record<string, unknown>, createdBy?: string, tenantId?: string) {
     const description = String(body.description || '').trim();
     const amountCents = Math.round(Number(body.amountCents ?? (Number(body.amount ?? 0) * 100)));
     if (!description || amountCents <= 0) {
       throw new BadRequestError('Invalid expense: description and positive amount required', 'MISSING_FIELD');
     }
+    const effectiveTenantId = tenantId || 'tenant-default';
     const expense: OperationalExpense = {
       id: uid(),
+      tenantId: effectiveTenantId,
       category: (String(body.category || 'other') as ExpenseCategory),
       description,
       amountCents,
@@ -79,6 +90,7 @@ export class FinanceOperationalService {
     if (this.useDb) {
       await this.admin.from('operational_expenses').insert({
         id: expense.id,
+        tenant_id: expense.tenantId,
         category: expense.category,
         description: expense.description,
         amount_cents: expense.amountCents,
@@ -91,25 +103,31 @@ export class FinanceOperationalService {
     return expense;
   }
 
-  async deleteExpense(id: string) {
-    const idx = memory.findIndex((e) => e.id === id);
+  async deleteExpense(id: string, tenantId?: string) {
+    const idx = memory.findIndex((e) => {
+      if (e.id !== id) return false;
+      if (tenantId && !matchesTenant(e.tenantId, tenantId)) return false;
+      return true;
+    });
     if (idx >= 0) memory.splice(idx, 1);
     if (this.useDb) {
-      const { error } = await this.admin.from('operational_expenses').delete().eq('id', id);
+      let q = this.admin.from('operational_expenses').delete().eq('id', id);
+      if (tenantId) q = q.eq('tenant_id', tenantId);
+      const { error } = await q;
       if (error) throw error;
     }
     return { deleted: true, id };
   }
 
-  async getOperationalPnl(periodFrom?: string, periodTo?: string) {
+  async getOperationalPnl(periodFrom?: string, periodTo?: string, tenantId?: string) {
     const from = periodFrom ?? `${new Date().getFullYear()}-${String(new Date().getMonth() + 1).padStart(2, '0')}-01`;
     const to = periodTo ?? today();
-    const expenses = await this.listExpenses({ from, to });
+    const expenses = await this.listExpenses({ from, to, tenantId });
     const totalExpensesCents = expenses.reduce((s, e) => s + e.amountCents, 0);
     let revenueCents: number;
     try {
       const billing = getBillingService();
-      const summary = await billing.getAccountSummary();
+      const summary = await billing.getAccountSummary(tenantId);
       revenueCents = Math.round(summary.totalCollected * 100);
     } catch {
       revenueCents = 0;

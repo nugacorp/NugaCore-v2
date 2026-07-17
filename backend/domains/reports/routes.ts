@@ -2,6 +2,7 @@ import { Router } from 'express';
 import * as XLSX from 'xlsx';
 import { asyncHandler } from '../../common/errors';
 import { requireAction } from '../../common/rbac';
+import { tenantIdFromRequest } from '../tenancy/tenant-scope';
 import { buildFinancialRows, buildOperationalRows, buildRowsByScope, buildSecurityRows } from './service';
 
 const router = Router();
@@ -98,10 +99,11 @@ router.get('/api/reports/catalog', requireAction('reports.view'), (_req, res) =>
   });
 });
 
-router.get('/api/reports/summary', requireAction('reports.view'), asyncHandler(async (_req, res) => {
+router.get('/api/reports/summary', requireAction('reports.view'), asyncHandler(async (req, res) => {
+  const tenantId = tenantIdFromRequest(req);
   const [financial, operational, security] = await Promise.all([
-    buildFinancialRows(),
-    buildOperationalRows(),
+    buildFinancialRows(tenantId),
+    buildOperationalRows(tenantId),
     Promise.resolve(buildSecurityRows()),
   ]);
 
@@ -131,7 +133,7 @@ router.get('/api/reports/export', requireAction('reports.export'), asyncHandler(
     return res.status(400).json({ error: 'Invalid format. Allowed: csv, xlsx, pdf.' });
   }
 
-  const rows = await buildRowsByScope(scope);
+  const rows = await buildRowsByScope(scope, tenantIdFromRequest(req));
   const fileBase = `nugacore-${scope}-${new Date().toISOString().substring(0, 10)}`;
 
   if (format === 'csv') {

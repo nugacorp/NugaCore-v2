@@ -1,27 +1,33 @@
 import { Router } from 'express';
 import { asyncHandler } from '../../common/errors';
 import { READ_ROLES, requireRoles } from '../../common/rbac';
+import { tenantIdFromRequest } from '../tenancy/tenant-scope';
 import { getFinanceOperationalService } from './service';
 
 const router = Router();
 const WRITE = ['super admin', 'administrador', 'cobranza'] as const;
 
 router.get('/api/finance/operational/expenses', requireRoles(READ_ROLES), asyncHandler(async (req, res) => {
-  res.json(getFinanceOperationalService().listExpenses({
+  res.json(await getFinanceOperationalService().listExpenses({
     category: req.query.category ? String(req.query.category) : undefined,
     from: req.query.from ? String(req.query.from) : undefined,
     to: req.query.to ? String(req.query.to) : undefined,
+    tenantId: tenantIdFromRequest(req),
   }));
 }));
 
 router.post('/api/finance/operational/expenses', requireRoles([...WRITE]), asyncHandler(async (req, res) => {
-  const created = await getFinanceOperationalService().createExpense(req.body || {}, req.authContext?.userId);
+  const created = await getFinanceOperationalService().createExpense(
+    req.body || {},
+    req.authContext?.userId,
+    tenantIdFromRequest(req),
+  );
   res.status(201).json(created);
 }));
 
 router.delete('/api/finance/operational/expenses/:id', requireRoles([...WRITE]), asyncHandler(async (req, res) => {
   const { id } = req.params;
-  await getFinanceOperationalService().deleteExpense(String(id));
+  await getFinanceOperationalService().deleteExpense(String(id), tenantIdFromRequest(req));
   res.status(204).send();
 }));
 
@@ -29,6 +35,7 @@ router.get('/api/finance/operational/pnl', requireRoles(READ_ROLES), asyncHandle
   res.json(await getFinanceOperationalService().getOperationalPnl(
     req.query.from ? String(req.query.from) : undefined,
     req.query.to ? String(req.query.to) : undefined,
+    tenantIdFromRequest(req),
   ));
 }));
 

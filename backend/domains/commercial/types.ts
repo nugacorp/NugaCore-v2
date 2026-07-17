@@ -5,6 +5,7 @@ export type AppointmentStatus = 'scheduled' | 'completed' | 'canceled' | 'no_sho
 
 export interface CommercialProspect {
   id: string;
+  tenantId?: string;
   name: string;
   phone?: string;
   email?: string;
@@ -24,6 +25,7 @@ export interface CommercialProspect {
 
 export interface CommercialQuote {
   id: string;
+  tenantId?: string;
   prospectId?: string;
   clientId?: string;
   planId?: string;
@@ -39,6 +41,7 @@ export interface CommercialQuote {
 
 export interface CommercialAppointment {
   id: string;
+  tenantId?: string;
   prospectId?: string;
   clientId?: string;
   workOrderId?: string;
