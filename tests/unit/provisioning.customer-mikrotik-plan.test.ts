@@ -26,6 +26,7 @@ describe('customer MikroTik plan from real zone/plan data', () => {
     });
     expect(cmds.some((c) => c.includes('/ppp secret add') && c.includes('juan_perez_12'))).toBe(true);
     expect(cmds.some((c) => c.includes('/queue simple add') && c.includes('20M/50M'))).toBe(true);
+    expect(cmds.some((c) => c.includes('list=nc-authorized') && c.includes('10.70.0.50'))).toBe(true);
   });
 
   it('incluye corte de zona en los pasos descriptivos', () => {

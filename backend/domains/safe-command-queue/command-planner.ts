@@ -5,6 +5,12 @@
 // Solo para análisis dry-run / lockout guard — NUNCA se envían al router.
 // ====================================================================
 
+import {
+  buildReactivateCommands,
+  buildSuspendCommands,
+  NC_ADDR,
+  normalizeAccessListName,
+} from '../mikrotik/access-control';
 import { SafeCommandType } from './types';
 
 export interface CommandPlanInput {
@@ -23,22 +29,20 @@ export const planRouterOsCommands = (input: CommandPlanInput): string[] => {
   const { commandType, targetId, payload } = input;
   const pppoeUser = str(payload, 'pppoeUser', targetId);
   const ip = str(payload, 'ip', '0.0.0.0');
-  const list = str(payload, 'addressList', 'NUGACORE_SUSPENDED');
+  const list = normalizeAccessListName(str(payload, 'addressList', NC_ADDR.suspended));
   const address = str(payload, 'address', ip);
 
   switch (commandType) {
     case 'SUSPEND_CUSTOMER':
-      return [
-        `/ppp secret disable [find name="${pppoeUser}"]`,
-        `/ip firewall address-list add list=${list} address=${ip} comment="suspend ${targetId}"`,
-        `/queue simple disable [find name~"${pppoeUser}"]`,
-      ];
+      return buildSuspendCommands(
+        { customerId: targetId, ip, pppoeUser },
+        { hardCutPpp: true },
+      );
     case 'RESTORE_CUSTOMER':
-      return [
-        `/ppp secret enable [find name="${pppoeUser}"]`,
-        `/ip firewall address-list remove [find list=${list} comment="suspend ${targetId}"]`,
-        `/queue simple enable [find name~"${pppoeUser}"]`,
-      ];
+      return buildReactivateCommands(
+        { customerId: targetId, ip, pppoeUser },
+        { hardCutPpp: true },
+      );
     case 'UPDATE_QUEUE':
       return [
         `/queue simple set [find name~"${pppoeUser}"] max-limit=${str(payload, 'maxLimit', '10M/10M')}`,

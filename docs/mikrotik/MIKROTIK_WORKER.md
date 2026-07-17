@@ -33,7 +33,7 @@ Módulo `backend/domains/mikrotik/worker/`:
 `processPendingOrders()`:
 1. Toma `suspension_orders` / `reactivation_orders` en estado **PENDING**.
 2. Para cada una calcula el **plan de comandos** RouterOS que se ejecutarían (sin enviarlos):
-   - Suspensión: `/ppp secret disable`, `address-list add NUGACORE_SUSPENDED`, `/queue simple disable`.
+   - Suspensión: `/ppp secret disable`, move IP a `nc-suspended` (sale de `nc-authorized`), `/queue simple disable`.
    - Reactivación: `/ppp secret enable`, `address-list remove`, `/queue simple enable`.
 3. Marca la orden `EXECUTED` con `dry_run=true`, `executed_at`, `worker_run_id` y una nota — **sin** tocar el router ni `client.status`.
 4. Registra una **corrida** (run) con los resultados.

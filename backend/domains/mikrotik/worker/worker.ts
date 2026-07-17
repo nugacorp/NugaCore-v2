@@ -16,6 +16,7 @@ import { workerStore } from './store';
 import { OrderProcessResult, RouterSnapshot, WorkerRun } from './types';
 
 import { nowIso } from '../../../common/time';
+import { buildReactivateCommands, buildSuspendCommands } from '../access-control';
 
 const planFor = (
   orderType: 'suspension' | 'reactivation',
@@ -23,18 +24,9 @@ const planFor = (
   ip: string,
   customerId: string,
 ): string[] => {
-  if (orderType === 'suspension') {
-    return [
-      `/ppp secret disable [find name="${pppoeUser}"]`,
-      `/ip firewall address-list add list=NUGACORE_SUSPENDED address=${ip} comment="suspend ${customerId}"`,
-      `/queue simple disable [find name~"${pppoeUser}"]`,
-    ];
-  }
-  return [
-    `/ppp secret enable [find name="${pppoeUser}"]`,
-    `/ip firewall address-list remove [find list=NUGACORE_SUSPENDED comment="suspend ${customerId}"]`,
-    `/queue simple enable [find name~"${pppoeUser}"]`,
-  ];
+  const ctx = { customerId, ip, pppoeUser };
+  if (orderType === 'suspension') return buildSuspendCommands(ctx, { hardCutPpp: true });
+  return buildReactivateCommands(ctx, { hardCutPpp: true });
 };
 
 const resolveRouterForCustomer = (routerId?: string) => {
