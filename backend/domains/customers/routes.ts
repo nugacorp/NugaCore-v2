@@ -224,8 +224,8 @@ router.post('/api/clients', requireRoles(['super admin', 'administrador', 'tecni
     });
   }
 
-  // Factura inicial con vencimiento = día de corte de la zona (si existe).
-  if (willBeActive) {
+  // Factura inicial: conversión de lead, o alta activa con zona (corte real).
+  if (isConvertLead || (willBeActive && zoneId)) {
     const plan = planExists;
     const cost = plan.price;
     const dueDateStr = dueDateFromZoneDay(zoneProfile?.billingCycleDay);

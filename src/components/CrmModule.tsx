@@ -1455,7 +1455,7 @@ export default function CrmModule({
                     </h4>
                     <p className="mt-1 text-[10px] text-slate-500">
                       Al guardar un cliente activo se encola la alta en MikroTik (PPPoE/Queue según el plan).
-                      La escritura live al router requiere PROVISIONING_EXECUTE + worker commit.
+                      La escritura live al router requiere PROVISIONING_EXECUTE y commit del motor de órdenes.
                     </p>
                   </div>
                   <span className="rounded border border-slate-700 bg-slate-950 px-2 py-1 font-mono text-[9px] text-slate-400">
