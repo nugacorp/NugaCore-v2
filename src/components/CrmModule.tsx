@@ -27,7 +27,16 @@ import {
   Check,
   Trash2,
 } from 'lucide-react';
-import { Client, Plan } from '../types';
+import { Client, Plan, Tower, TowerOnboardingProfile } from '../types';
+
+type ZoneOption = {
+  towerId: string;
+  label: string;
+  routerId?: string;
+  routerName?: string;
+  billingCycleDay?: number;
+  billingCycleTime?: string;
+};
 import type { UserRole } from '../lib/supabase';
 import { clientActionCaps } from '../lib/rbac';
 import { buildPortalShareUrl } from '../lib/portalLinks';
@@ -151,6 +160,8 @@ export default function CrmModule({
   const [formAddress, setFormAddress] = useState('');
   const [formCity, setFormCity] = useState('');
   const [formPlanId, setFormPlanId] = useState('');
+  const [formBillingZoneId, setFormBillingZoneId] = useState('');
+  const [zones, setZones] = useState<ZoneOption[]>([]);
   const [formLat, setFormLat] = useState('19.4125');
   const [formLng, setFormLng] = useState('-99.1555');
   const [formNotes, setFormNotes] = useState('');
@@ -517,6 +528,36 @@ export default function CrmModule({
     }
   }, [fetchIpamJson]);
 
+  const loadZones = useCallback(async () => {
+    try {
+      const towers = await fetchIpamJson<Tower[]>('/api/network-towers');
+      const profiles = await Promise.all(
+        towers.map(async (tower) => {
+          try {
+            const profile = await fetchIpamJson<TowerOnboardingProfile>(
+              `/api/network-towers/${encodeURIComponent(tower.id)}/onboarding`,
+            );
+            return { tower, profile };
+          } catch {
+            return { tower, profile: null as TowerOnboardingProfile | null };
+          }
+        }),
+      );
+      setZones(
+        profiles.map(({ tower, profile }) => ({
+          towerId: tower.id,
+          label: profile?.zoneName || tower.name,
+          routerId: profile?.routerId,
+          routerName: profile?.routerName,
+          billingCycleDay: profile?.billingCycleDay,
+          billingCycleTime: profile?.billingCycleTime,
+        })),
+      );
+    } catch {
+      setZones([]);
+    }
+  }, [fetchIpamJson]);
+
   const loadCustomerEquipment = useCallback(async () => {
     setEquipmentLoading(true);
     setEquipmentError('');
@@ -536,12 +577,15 @@ export default function CrmModule({
     if (!showAddForm) return;
     if (ipamRouters.length === 0) void loadIpamRouters();
     if (customerEquipment.length === 0) void loadCustomerEquipment();
+    if (zones.length === 0) void loadZones();
   }, [
     showAddForm,
     ipamRouters.length,
     customerEquipment.length,
+    zones.length,
     loadIpamRouters,
     loadCustomerEquipment,
+    loadZones,
   ]);
 
   const handleRouterSelection = async (routerId: string) => {
@@ -573,6 +617,14 @@ export default function CrmModule({
       setIpamError(error instanceof Error ? error.message : 'No se pudieron cargar pools IPAM.');
     } finally {
       setIpamLoading(false);
+    }
+  };
+
+  const handleZoneSelection = async (towerId: string) => {
+    setFormBillingZoneId(towerId);
+    const zone = zones.find((z) => z.towerId === towerId);
+    if (zone?.routerId) {
+      await handleRouterSelection(zone.routerId);
     }
   };
 
@@ -804,6 +856,7 @@ export default function CrmModule({
       address: formAddress,
       city: formCity,
       planId: formPlanId || plans[0]?.id || 'plan-basic',
+      billingZoneId: formBillingZoneId || undefined,
       connectionType: formConnectionType,
       lat: Number(formLat),
       lng: Number(formLng),
@@ -824,6 +877,7 @@ export default function CrmModule({
     setFormPhone('');
     setFormAddress('');
     setFormPlanId('');
+    setFormBillingZoneId('');
     setFormNotes('');
     setFormConnectionType('WISP');
     setGpsMessage('');
@@ -1335,14 +1389,45 @@ export default function CrmModule({
                   <select
                     value={formPlanId}
                     onChange={(e) => setFormPlanId(e.target.value)}
+                    required={!isLeadForm}
                     className="w-full bg-slate-900 border border-slate-800 rounded-xl p-2.5 focus:outline-none"
                   >
                     <option value="">Selecciona velocidad...</option>
-                    {plans.map(p => (
-                      <option key={p.id} value={p.id}>{p.name} - ${p.price}/mes</option>
+                    {plans.map((p) => (
+                      <option key={p.id} value={p.id}>
+                        {p.name} · {p.speedMbpsDown}/{p.speedMbpsUp} Mbps · ${p.price}/mes · {p.type}
+                      </option>
                     ))}
                   </select>
+                  <p className="text-[10px] text-slate-500">
+                    Los megas del plan se usan para el Simple Queue / PPPoE en el router de la zona.
+                    Administra el catálogo en Facturación → Planes.
+                  </p>
                 </div>
+              </div>
+
+              <div className="space-y-1">
+                <label className="text-slate-400 font-mono">Zona de servicio / corte</label>
+                <select
+                  id="customer-billing-zone"
+                  value={formBillingZoneId}
+                  required={!isLeadForm}
+                  onChange={(e) => void handleZoneSelection(e.target.value)}
+                  className="w-full bg-slate-900 border border-slate-800 rounded-xl p-2.5 focus:outline-none"
+                >
+                  <option value="">Selecciona zona (ej. Vicente Guerrero)...</option>
+                  {zones.map((z) => (
+                    <option key={z.towerId} value={z.towerId}>
+                      {z.label}
+                      {z.billingCycleDay != null ? ` · corte día ${z.billingCycleDay}` : ''}
+                      {z.routerName ? ` · ${z.routerName}` : z.routerId ? ` · router ${z.routerId}` : ' · sin router'}
+                    </option>
+                  ))}
+                </select>
+                <p className="text-[10px] text-slate-500">
+                  La zona define el router MikroTik y el día/hora de corte para suspensión si no paga.
+                  Configúrala en Red → Torres y Sitios (o en el onboarding del WISP).
+                </p>
               </div>
 
               <div className="space-y-1">
@@ -1369,7 +1454,8 @@ export default function CrmModule({
                       <span>Asignación de Red</span>
                     </h4>
                     <p className="mt-1 text-[10px] text-slate-500">
-                      IPAM local/mock. No consulta ni modifica RouterOS.
+                      Al guardar un cliente activo se encola la alta en MikroTik (PPPoE/Queue según el plan).
+                      La escritura live al router requiere PROVISIONING_EXECUTE y commit del motor de órdenes.
                     </p>
                   </div>
                   <span className="rounded border border-slate-700 bg-slate-950 px-2 py-1 font-mono text-[9px] text-slate-400">

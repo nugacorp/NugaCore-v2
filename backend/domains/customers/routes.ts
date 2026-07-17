@@ -11,6 +11,28 @@ import { getBillingService } from '../billing/service';
 import { requestReactivation, requestSuspension } from '../service-status/service';
 import { ipamService } from '../ipam/service';
 import { tenantIdFromRequest } from '../tenancy/tenant-scope';
+import { getNetworkService } from '../network/service';
+import { provisioningService } from '../provisioning/service';
+import { buildCustomerMikrotikPlanSteps } from '../provisioning/customer-mikrotik-plan';
+import { logger } from '../../common/logger';
+
+const slugUser = (value: string): string =>
+  value.toLowerCase().replace(/[^a-z0-9]+/g, '_').replace(/^_|_$/g, '').slice(0, 24) || 'cliente';
+
+const dueDateFromZoneDay = (billingCycleDay?: number): string => {
+  const now = new Date();
+  if (!billingCycleDay || billingCycleDay < 1 || billingCycleDay > 31) {
+    return new Date(now.getTime() + 10 * 24 * 60 * 60 * 1000).toISOString().substring(0, 10);
+  }
+  const year = now.getFullYear();
+  const month = now.getMonth();
+  // Próximo día de corte de la zona (si ya pasó este mes → mes siguiente).
+  let candidate = new Date(year, month, Math.min(billingCycleDay, 28));
+  if (candidate.getTime() <= now.getTime()) {
+    candidate = new Date(year, month + 1, Math.min(billingCycleDay, 28));
+  }
+  return candidate.toISOString().substring(0, 10);
+};
 
 const router = Router();
 
@@ -71,19 +93,28 @@ router.post('/api/clients', requireRoles(['super admin', 'administrador', 'tecni
     assignedIp,
     equipmentReservationId,
     mac,
+    billingZoneId,
   } = req.body;
 
   // Validación de entrada (lanza 400 si es inválida).
   const { type: clientType } = service.validateCreate({ name, type, address, city, email });
 
-  const planExists = await getPlansService().getById(planId || 'plan-basic');
+  const planExists = await getPlansService().getById(planId || 'plan-basic', tenantIdFromRequest(req));
   if (!planExists) {
     return res.status(400).json({ error: 'Plan not found' });
   }
 
+  const tenantId = tenantIdFromRequest(req);
   const requestedStatus = parseClientStatus(req.body.status);
   const randomSub = Math.floor(Math.random() * 253) + 2;
-  const normalizedRouterId = String(routerId || '').trim();
+  const zoneId = String(billingZoneId || '').trim();
+  let zoneProfile: Awaited<ReturnType<ReturnType<typeof getNetworkService>['getTowerOnboarding']>> = null;
+  if (zoneId) {
+    zoneProfile = await getNetworkService().getTowerOnboarding(zoneId, tenantId);
+  }
+
+  // Si eligen zona con router vinculado y no mandan routerId, usar el de la zona.
+  const normalizedRouterId = String(routerId || zoneProfile?.routerId || '').trim();
   const normalizedPoolId = String(poolId || '').trim();
   const normalizedAssignedIp = String(assignedIp || '').trim();
   const networkAssignmentProvided = Boolean(
@@ -119,7 +150,17 @@ router.post('/api/clients', requireRoles(['super admin', 'administrador', 'tecni
     }
   }
 
-  const tenantId = tenantIdFromRequest(req);
+  const willBeActive = isConvertLead || (requestedStatus || 'active') === 'active';
+  const needsAccessCreds = willBeActive && Boolean(validatedAssignment);
+  const pppoeUser = needsAccessCreds
+    ? `${slugUser(String(name))}_${randomSub}`
+    : isConvertLead
+      ? `${slugUser(String(name))}_nuga`
+      : undefined;
+  const pppoePassword = needsAccessCreds || isConvertLead
+    ? `Nc${randomSub}${Math.random().toString(36).slice(2, 8)}`
+    : undefined;
+
   const newClient: Client = {
     id: await service.generateClientId(),
     name,
@@ -133,6 +174,7 @@ router.post('/api/clients', requireRoles(['super admin', 'administrador', 'tecni
     lng: Number(lng) || -99.1555,
     planId: planId || 'plan-basic',
     tenantId,
+    billingZoneId: zoneId || undefined,
     connectionType: connectionType || (clientType === 'corporate' || clientType === 'hotel' ? 'FTTH' : 'WISP'),
     ip: validatedAssignment?.ip || (isConvertLead ? `10.100.10.${randomSub}` : '0.0.0.0'),
     ...(validatedAssignment
@@ -149,10 +191,12 @@ router.post('/api/clients', requireRoles(['super admin', 'administrador', 'tecni
       : isConvertLead
         ? `00:1A:79:A1:BA:${randomSub.toString(16).toUpperCase().padStart(2, '0')}`
         : undefined,
-    pppoeUser: isConvertLead ? `${name.toLowerCase().replace(/[^a-z0-9]/g, '_')}_nuga` : undefined,
-    pppoePassword: isConvertLead ? 'NugaSecretPass' : undefined,
+    pppoeUser,
+    pppoePassword,
     contractId: isConvertLead ? `CONT-2026-${120 + store.CLIENTS.length}` : undefined,
-    installationDate: isConvertLead ? new Date().toISOString().substring(0, 10) : undefined,
+    installationDate: isConvertLead || willBeActive
+      ? new Date().toISOString().substring(0, 10)
+      : undefined,
     notes: notes || '',
   };
 
@@ -161,13 +205,15 @@ router.post('/api/clients', requireRoles(['super admin', 'administrador', 'tecni
     clientId: newClient.id,
     eventType: 'created',
     summary: 'Cliente registrado en CRM',
-    details: `Alta de cliente con estatus ${newClient.status} y plan ${newClient.planId}.`,
+    details: `Alta de cliente con estatus ${newClient.status}, plan ${newClient.planId}`
+      + (zoneProfile?.zoneName ? ` y zona ${zoneProfile.zoneName}` : '')
+      + '.',
     createdBy: req.authContext?.userId,
   });
 
   if (isConvertLead && leadId) {
     // El lead original (cliente) se elimina vía service (DB cascada el timeline).
-    await service.remove(leadId);
+    await service.remove(leadId, tenantId);
     store.createAlert('client', 'info', name, 'Lead convertido exitosamente a Cliente.');
     await service.addTimelineEvent({
       clientId: newClient.id,
@@ -178,37 +224,75 @@ router.post('/api/clients', requireRoles(['super admin', 'administrador', 'tecni
     });
   }
 
-  if (isConvertLead) {
-    const plan = await getPlansService().getById(newClient.planId);
-    const cost = plan ? plan.price : 449;
+  // Factura inicial: conversión de lead, o alta activa con zona (corte real).
+  if (isConvertLead || (willBeActive && zoneId)) {
+    const plan = planExists;
+    const cost = plan.price;
+    const dueDateStr = dueDateFromZoneDay(zoneProfile?.billingCycleDay);
     await getBillingService().createInvoice({
       clientId: newClient.id,
       clientName: newClient.name,
       amount: cost,
-      dueDateStr: new Date(Date.now() + 10 * 24 * 60 * 60 * 1000).toISOString().substring(0, 10),
-      items: [{ description: `Cargo de instalacion y mensualidad anticipada - Plan ${plan?.name || 'Contrato'}`, price: cost, qty: 1 }],
+      dueDateStr,
+      items: [{
+        description: `Mensualidad ${plan.name}`
+          + (zoneProfile?.zoneName ? ` · zona ${zoneProfile.zoneName}` : ''),
+        price: cost,
+        qty: 1,
+      }],
+      tenantId,
     });
+  }
 
-    if (!isDomainOnDb('customers') && (newClient.type === 'residential' || newClient.type === 'school')) {
-      const newOnu: OnuFTTH = {
-        id: store.getUniqueOnuId(),
+  if (isConvertLead && !isDomainOnDb('customers') && (newClient.type === 'residential' || newClient.type === 'school')) {
+    const newOnu: OnuFTTH = {
+      id: store.getUniqueOnuId(),
+      clientId: newClient.id,
+      clientName: newClient.name,
+      oltId: 'olt-1',
+      port: 1,
+      mac: `HWTCA${randomSub}BBCC`,
+      signalDb: -20.5,
+      status: 'online',
+      brand: 'Huawei',
+      model: 'EG8145V5',
+    };
+    store.ONUS.push(newOnu);
+  }
+
+  // Encola provisión MikroTik (dry-run por defecto; live solo con PROVISIONING_EXECUTE).
+  if (willBeActive && validatedAssignment && newClient.routerId) {
+    try {
+      const steps = buildCustomerMikrotikPlanSteps({
+        client: newClient,
+        plan: planExists,
+        zoneName: zoneProfile?.zoneName,
+        billingCycleDay: zoneProfile?.billingCycleDay,
+        billingCycleTime: zoneProfile?.billingCycleTime,
+        routerName: zoneProfile?.routerName,
+      });
+      const action = provisioningService.createAction({
+        actionType: 'CREATE_CUSTOMER',
+        customerId: newClient.id,
+        customerName: newClient.name,
+        targetPlanId: planExists.id,
+        targetPlanName: planExists.name,
+        decisionSource: 'CRM',
+        notes: steps.join('\n'),
+      }, req.authContext?.userId || 'system');
+      // Autovalida + simula para dejar lista la acción (approve sigue siendo humano/gate).
+      provisioningService.validateAction(action.id, req.authContext?.userId || 'system');
+      provisioningService.simulateAction(action.id, req.authContext?.userId || 'system');
+      store.MIKROTIK_LOGS.push({
+        timestamp: new Date().toISOString().replace('T', ' ').substring(0, 19),
+        message: `provisioning,info CREATE_CUSTOMER queued for ${newClient.pppoeUser || newClient.id} on ${newClient.routerId} plan=${planExists.name}`,
+      });
+    } catch (err) {
+      logger.warn('No se pudo encolar provisioning CREATE_CUSTOMER', {
         clientId: newClient.id,
-        clientName: newClient.name,
-        oltId: 'olt-1',
-        port: 1,
-        mac: `HWTCA${randomSub}BBCC`,
-        signalDb: -20.5,
-        status: 'online',
-        brand: 'Huawei',
-        model: 'EG8145V5',
-      };
-      store.ONUS.push(newOnu);
+        message: err instanceof Error ? err.message : String(err),
+      });
     }
-
-    store.MIKROTIK_LOGS.push({
-      timestamp: new Date().toISOString().replace('T', ' ').substring(0, 19),
-      message: `pppoe,info AutoProvisioning done for PPP clientSecret ${newClient.pppoeUser}`,
-    });
   }
 
   res.status(201).json(newClient);

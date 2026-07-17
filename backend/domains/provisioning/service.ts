@@ -71,9 +71,10 @@ export const buildExecutionPlan = (
       ]);
     case 'CREATE_CUSTOMER':
       return plan([
-        'Validar IP disponible.',
-        'Validar equipo asignable.',
-        'Validar cobertura y zona de instalacion.',
+        'Validar IP disponible en el pool del router de la zona.',
+        'Crear identidad de acceso en MikroTik segun tipo de plan (PPPoE / Hotspot / Queue).',
+        'Aplicar Simple Queue con megas del plan seleccionado.',
+        'Registrar corte de zona para suspension automatica si no paga.',
       ]);
     case 'CANCEL_CUSTOMER':
       return plan([
