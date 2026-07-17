@@ -50,7 +50,8 @@ export class FtthService {
     if (this.useDb) {
       const { data, error } = await this.admin
         .from('nap_boxes')
-        .select('*, nap_ports(*)')
+        // Hint FK explícito: nap_ports tiene nap_id y continues_to_nap_id → ambigüedad PostgREST.
+        .select('*, nap_ports!nap_id(*)')
         .order('name');
       if (error) throw error;
       return (data ?? []).map((row) => this.rowToNap(row));
@@ -62,7 +63,7 @@ export class FtthService {
     if (this.useDb) {
       const { data, error } = await this.admin
         .from('nap_boxes')
-        .select('*, nap_ports(*)')
+        .select('*, nap_ports!nap_id(*)')
         .eq('id', id)
         .maybeSingle();
       if (error) throw error;
