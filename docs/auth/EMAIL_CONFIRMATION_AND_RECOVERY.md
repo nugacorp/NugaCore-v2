@@ -4,7 +4,7 @@
 
 | Flujo | Qué hace la app |
 |---|---|
-| Registro WISP | Crea el usuario con `email_confirm: false` y dispara el correo Signup de Supabase (`auth.resend`). El operador **no** entra hasta confirmar. |
+| Registro WISP | Crea el usuario con `email_confirm: false`, persiste tenant/onboarding y **después** dispara el correo Signup (`auth.resend`). Así no llega un enlace si el alta falló. El operador **no** entra hasta confirmar. |
 | Login sin confirmar | Mensaje claro + botón **Reenviar confirmación**. |
 | Olvidé mi contraseña | `resetPasswordForEmail` → enlace a `/reset-password` → `updateUser({ password })`. |
 

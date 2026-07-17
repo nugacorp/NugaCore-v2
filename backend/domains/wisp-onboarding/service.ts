@@ -147,12 +147,6 @@ export class WispOnboardingService {
             role_id: roleRow.id,
           }, { onConflict: 'user_id,role_id' });
         }
-
-        const sent = await sendSignupConfirmationEmail(email, emailRedirectTo);
-        confirmationEmailSent = sent.sent;
-        if (!sent.sent) {
-          note = 'Cuenta creada, pero no se pudo enviar el correo de confirmación. Usa «Reenviar confirmación» en el login.';
-        }
       } else {
         note = 'Usuario creado en modo store (sin Supabase Auth). Configura Supabase para login real.';
         logger.warn('WISP register sin Supabase Auth — solo store/tenancy');
@@ -205,6 +199,16 @@ export class WispOnboardingService {
         completedSteps: [],
         updatedAt: new Date().toISOString(),
       });
+
+      // Correo solo después de persistir tenant + onboarding (evita confirmación huérfana
+      // si el registro fallaba con 500 tras createUser, como en el bug de FK).
+      if (isSupabaseAdminConfigured && supabaseAdmin && emailConfirmationRequired) {
+        const sent = await sendSignupConfirmationEmail(email, emailRedirectTo);
+        confirmationEmailSent = sent.sent;
+        if (!sent.sent) {
+          note = 'Cuenta creada, pero no se pudo enviar el correo de confirmación. Usa «Reenviar confirmación» en el login.';
+        }
+      }
 
       return {
         tenantId: tenant.id,
