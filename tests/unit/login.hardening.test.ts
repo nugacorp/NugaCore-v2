@@ -80,11 +80,12 @@ describe('Hardening — sin bypass de autenticación', () => {
     expect(appTsx).toContain("fetchJson<NocAlert[]>('/api/alerts')");
   });
 
-  it('LoginForm expone recuperación y reenvío de confirmación', () => {
+  it('LoginForm expone recuperación de contraseña y no reenvío de confirmación', () => {
     expect(loginForm).toContain('resetPasswordForEmail');
     expect(loginForm).toContain('¿Olvidaste tu contraseña?');
-    expect(loginForm).toContain('Reenviar confirmación');
-    expect(loginForm).toContain("type: 'signup'");
+    // Reenviar confirmación solo en RegisterWispForm (post-alta), no en login.
+    expect(loginForm).not.toContain('Reenviar confirmación');
+    expect(loginForm).not.toContain('login-resend-confirmation');
   });
 
   it('LoginForm no entra con perfil fake si /api/auth/me falla', () => {

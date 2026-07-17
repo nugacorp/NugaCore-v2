@@ -253,8 +253,8 @@ export default function App() {
         setShowRegister(false);
         setNotice(
           authErrorCode === 'otp_expired'
-            ? 'El enlace de confirmación expiró. Inicia sesión y usa «Reenviar confirmación», o registra de nuevo.'
-            : 'No se pudo confirmar el correo. Solicita un enlace nuevo desde el login.',
+            ? 'El enlace de confirmación expiró. Registra de nuevo o reenvía la confirmación desde la pantalla de alta del WISP.'
+            : 'No se pudo confirmar el correo. Solicita un enlace nuevo desde la pantalla de registro del WISP.',
         );
         window.history.replaceState({}, '', '/');
         setSessionBootstrapped(true);
