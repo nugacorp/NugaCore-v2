@@ -27,7 +27,7 @@ import {
   Check,
   Trash2,
 } from 'lucide-react';
-import { Client, Plan, Tower, TowerOnboardingProfile } from '../types';
+import { Client, Plan, Tower, TowerOnboardingProfile, NapBox } from '../types';
 
 type ZoneOption = {
   towerId: string;
@@ -98,7 +98,7 @@ interface CoverageView {
 
 interface CustomerEquipmentView {
   id: string;
-  kind: 'CPE' | 'POE' | 'POWER_SUPPLY';
+  kind: 'CPE' | 'POE' | 'POWER_SUPPLY' | 'ONU' | 'OTHER';
   name: string;
   brand: string;
   model: string;
@@ -190,6 +190,14 @@ export default function CrmModule({
   const [equipmentReservation, setEquipmentReservation] = useState<EquipmentReservationView | null>(null);
   const [equipmentLoading, setEquipmentLoading] = useState(false);
   const [equipmentError, setEquipmentError] = useState('');
+  const [equipmentMode, setEquipmentMode] = useState<'inventory' | 'manual'>('inventory');
+  const [formManualEquipmentName, setFormManualEquipmentName] = useState('');
+  const [formManualEquipmentKind, setFormManualEquipmentKind] = useState<'CPE' | 'ONU' | 'POE' | 'POWER_SUPPLY' | 'OTHER'>('CPE');
+  const [ftthNaps, setFtthNaps] = useState<NapBox[]>([]);
+  const [formNapId, setFormNapId] = useState('');
+  const [formNapPort, setFormNapPort] = useState('');
+  const [ftthLoading, setFtthLoading] = useState(false);
+  const [ftthError, setFtthError] = useState('');
   const [isLeadForm, setIsLeadForm] = useState(false);
   const [selectedClient, setSelectedClient] = useState<Client | null>(null);
   const [portalLinkCopied, setPortalLinkCopied] = useState(false);
@@ -612,6 +620,10 @@ export default function CrmModule({
       setIpamPools(pools);
       setFormPoolId(pools[0]?.id || '');
       setRouterCapacity(capacity);
+      // Pool manual (/0) o sin IPs escaneables → modo escritura manual.
+      if (!pools[0] || pools[0].cidr === '0.0.0.0/0') {
+        setIpEntryMode('manual');
+      }
     } catch (error) {
       setIpamPools([]);
       setIpamError(error instanceof Error ? error.message : 'No se pudieron cargar pools IPAM.');
@@ -693,33 +705,80 @@ export default function CrmModule({
       setEquipmentError('Captura el nombre del cliente antes de reservar equipo.');
       return;
     }
-    if (!formEquipmentId || !formEquipmentSerial || !formEquipmentMac.trim()) {
-      setEquipmentError('Selecciona equipo, serie y captura la MAC.');
+    if (!formEquipmentMac.trim()) {
+      setEquipmentError('Captura la MAC del equipo.');
       return;
     }
 
     setEquipmentLoading(true);
     try {
-      setEquipmentReservation(
-        await fetchIpamJson<EquipmentReservationView>(
-          '/api/inventory/customer-equipment/reservations',
-          {
-            method: 'POST',
-            body: JSON.stringify({
-              equipmentId: formEquipmentId,
-              serial: formEquipmentSerial,
-              mac: formEquipmentMac,
-              customerLabel: formName,
-            }),
-          },
-        ),
-      );
+      if (equipmentMode === 'manual') {
+        if (!formManualEquipmentName.trim() || !formEquipmentSerial.trim()) {
+          setEquipmentError('En modo manual captura nombre del equipo y serie.');
+          setEquipmentLoading(false);
+          return;
+        }
+        setEquipmentReservation(
+          await fetchIpamJson<EquipmentReservationView>(
+            '/api/inventory/customer-equipment/manual-reservations',
+            {
+              method: 'POST',
+              body: JSON.stringify({
+                name: formManualEquipmentName,
+                kind: formManualEquipmentKind,
+                serial: formEquipmentSerial,
+                mac: formEquipmentMac,
+                customerLabel: formName,
+              }),
+            },
+          ),
+        );
+      } else {
+        if (!formEquipmentId || !formEquipmentSerial) {
+          setEquipmentError('Selecciona equipo y serie del inventario.');
+          setEquipmentLoading(false);
+          return;
+        }
+        setEquipmentReservation(
+          await fetchIpamJson<EquipmentReservationView>(
+            '/api/inventory/customer-equipment/reservations',
+            {
+              method: 'POST',
+              body: JSON.stringify({
+                equipmentId: formEquipmentId,
+                serial: formEquipmentSerial,
+                mac: formEquipmentMac,
+                customerLabel: formName,
+              }),
+            },
+          ),
+        );
+      }
     } catch (error) {
       setEquipmentError(error instanceof Error ? error.message : 'No se pudo reservar el equipo.');
     } finally {
       setEquipmentLoading(false);
     }
   };
+
+  const loadFtthNaps = useCallback(async () => {
+    setFtthLoading(true);
+    setFtthError('');
+    try {
+      const naps = await fetchIpamJson<NapBox[]>('/api/naps');
+      setFtthNaps(Array.isArray(naps) ? naps : []);
+    } catch (error) {
+      setFtthNaps([]);
+      setFtthError(error instanceof Error ? error.message : 'No se pudieron cargar NAPs.');
+    } finally {
+      setFtthLoading(false);
+    }
+  }, [fetchIpamJson]);
+
+  useEffect(() => {
+    if (!showAddForm || formConnectionType !== 'FTTH') return;
+    if (ftthNaps.length === 0) void loadFtthNaps();
+  }, [showAddForm, formConnectionType, ftthNaps.length, loadFtthNaps]);
 
   const validateAssignedIp = useCallback(async (ip: string): Promise<IpAssignmentValidation | null> => {
     const normalizedIp = ip.trim();
@@ -858,6 +917,8 @@ export default function CrmModule({
       planId: formPlanId || plans[0]?.id || 'plan-basic',
       billingZoneId: formBillingZoneId || undefined,
       connectionType: formConnectionType,
+      napId: formConnectionType === 'FTTH' ? formNapId || undefined : undefined,
+      napPort: formConnectionType === 'FTTH' && formNapPort ? Number(formNapPort) : undefined,
       lat: Number(formLat),
       lng: Number(formLng),
       notes: formNotes,
@@ -880,11 +941,15 @@ export default function CrmModule({
     setFormBillingZoneId('');
     setFormNotes('');
     setFormConnectionType('WISP');
+    setFormNapId('');
+    setFormNapPort('');
     setGpsMessage('');
     setGpsError('');
     setFormEquipmentId('');
     setFormEquipmentSerial('');
     setFormEquipmentMac('');
+    setFormManualEquipmentName('');
+    setEquipmentMode('inventory');
     setEquipmentReservation(null);
     setEquipmentError('');
     resetNetworkAssignment();
@@ -1434,13 +1499,113 @@ export default function CrmModule({
                 <label className="text-indigo-400 font-mono font-semibold">Tecnología de Suscriptor</label>
                 <select
                   value={formConnectionType}
-                  onChange={(e) => setFormConnectionType(e.target.value as 'WISP' | 'FTTH')}
+                  onChange={(e) => {
+                    const next = e.target.value as 'WISP' | 'FTTH';
+                    setFormConnectionType(next);
+                    if (next === 'FTTH') {
+                      setFormManualEquipmentKind('ONU');
+                      void loadFtthNaps();
+                    }
+                  }}
                   className="w-full bg-slate-900 border border-indigo-900/50 rounded-xl p-2.5 focus:outline-none focus:border-indigo-500 font-semibold"
                 >
                   <option value="WISP">WISP - Antena Inalámbrica CPE (Ubiquiti/Cambium)</option>
                   <option value="FTTH">FTTH - Fibra Óptica (Puerto Gpon / Caja NAP)</option>
                 </select>
               </div>
+
+              {formConnectionType === 'FTTH' && (
+                <section
+                  id="customer-ftth-assignment"
+                  className="space-y-3 rounded-2xl border border-cyan-900/40 bg-slate-900/40 p-4"
+                  aria-label="Asignación FTTH"
+                >
+                  <div>
+                    <h4 className="flex items-center gap-2 font-semibold text-white">
+                      <Network className="h-4 w-4 text-cyan-400" />
+                      <span>Asignación FTTH (NAP / PON)</span>
+                    </h4>
+                    <p className="mt-1 text-[10px] text-slate-500">
+                      NAPs cercanos a la coordenada del cliente. Elige puerto libre y revisa el PON de la caja.
+                    </p>
+                  </div>
+                  {ftthLoading && (
+                    <p className="text-[11px] text-slate-400 flex items-center gap-2">
+                      <Loader2 className="h-3.5 w-3.5 animate-spin" /> Cargando NAPs…
+                    </p>
+                  )}
+                  {ftthError && (
+                    <p className="rounded-xl border border-rose-500/30 bg-rose-500/10 p-2.5 text-rose-300 text-[11px]">
+                      {ftthError}
+                    </p>
+                  )}
+                  {!ftthLoading && !ftthError && ftthNaps.length === 0 && (
+                    <p className="rounded-xl border border-amber-500/30 bg-amber-500/10 p-2.5 text-amber-200 text-[11px]">
+                      No hay NAPs registrados. Crea cajas NAP en Red → Mapa FTTH / Torres y sitios.
+                    </p>
+                  )}
+                  {ftthNaps.length > 0 && (
+                    <div className="grid grid-cols-1 gap-3 sm:grid-cols-2">
+                      <div className="space-y-1">
+                        <label htmlFor="customer-nap-id" className="font-mono text-slate-400">NAP cercana</label>
+                        <select
+                          id="customer-nap-id"
+                          value={formNapId}
+                          onChange={(e) => {
+                            setFormNapId(e.target.value);
+                            setFormNapPort('');
+                          }}
+                          className="w-full rounded-xl border border-slate-800 bg-slate-900 p-2.5"
+                        >
+                          <option value="">Selecciona NAP…</option>
+                          {[...ftthNaps]
+                            .map((nap) => {
+                              const dLat = (Number(formLat) - nap.lat) * (Math.PI / 180);
+                              const dLng = (Number(formLng) - nap.lng) * (Math.PI / 180);
+                              const a = Math.sin(dLat / 2) ** 2
+                                + Math.cos(Number(formLat) * (Math.PI / 180))
+                                  * Math.cos(nap.lat * (Math.PI / 180))
+                                  * Math.sin(dLng / 2) ** 2;
+                              const km = 6371 * 2 * Math.atan2(Math.sqrt(a), Math.sqrt(1 - a));
+                              return { nap, km };
+                            })
+                            .sort((a, b) => a.km - b.km)
+                            .map(({ nap, km }) => (
+                              <option key={nap.id} value={nap.id}>
+                                {nap.name} · {Number.isFinite(km) ? `${km.toFixed(2)} km` : '—'} · PON {nap.ponPort || 'N/D'} · {nap.fibersFree}/{nap.fibersTotal} libres
+                              </option>
+                            ))}
+                        </select>
+                      </div>
+                      <div className="space-y-1">
+                        <label htmlFor="customer-nap-port" className="font-mono text-slate-400">Puerto NAP</label>
+                        <select
+                          id="customer-nap-port"
+                          value={formNapPort}
+                          disabled={!formNapId}
+                          onChange={(e) => setFormNapPort(e.target.value)}
+                          className="w-full rounded-xl border border-slate-800 bg-slate-900 p-2.5 disabled:opacity-50"
+                        >
+                          <option value="">Selecciona puerto libre…</option>
+                          {(ftthNaps.find((n) => n.id === formNapId)?.ports || [])
+                            .filter((p) => p.status === 'free')
+                            .map((p) => (
+                              <option key={p.num} value={String(p.num)}>Puerto {p.num}</option>
+                            ))}
+                        </select>
+                      </div>
+                    </div>
+                  )}
+                  {formNapId && (
+                    <div className="rounded-xl border border-slate-800 bg-slate-950/70 p-2.5 font-mono text-[10px] text-slate-400 grid grid-cols-2 gap-2">
+                      <span>PON: <strong className="text-cyan-300">{ftthNaps.find((n) => n.id === formNapId)?.ponPort || 'N/D'}</strong></span>
+                      <span>Split: <strong className="text-slate-200">{ftthNaps.find((n) => n.id === formNapId)?.splitRatio || 'N/D'}</strong></span>
+                      <span>Libres: <strong className="text-emerald-300">{ftthNaps.find((n) => n.id === formNapId)?.fibersFree ?? 0}</strong></span>
+                      <span>Total: <strong className="text-slate-200">{ftthNaps.find((n) => n.id === formNapId)?.fibersTotal ?? 0}</strong></span>
+                    </div>
+                  )}
+                </section>
+              )}
 
               <section
                 id="customer-network-assignment"
@@ -1838,78 +2003,163 @@ export default function CrmModule({
                     Reserva de equipo para instalación
                   </h4>
                   <p className="mt-1 text-[10px] text-slate-500">
-                    Reserva interna/mock. No descuenta ni modifica stock.
+                    Equipos del inventario real. Si no está cargado, usa entrada manual (se agrega al inventario al reservar).
                   </p>
                 </div>
 
-                <div className="grid grid-cols-1 gap-3 sm:grid-cols-3">
-                  <div className="space-y-1">
-                    <label htmlFor="customer-equipment-id" className="font-mono text-slate-400">
-                      Equipo
-                    </label>
-                    <select
-                      id="customer-equipment-id"
-                      value={formEquipmentId}
-                      disabled={equipmentLoading}
-                      onChange={(event) => {
-                        setFormEquipmentId(event.target.value);
-                        setFormEquipmentSerial('');
-                        setEquipmentReservation(null);
-                        setEquipmentError('');
-                      }}
-                      className="w-full rounded-xl border border-slate-800 bg-slate-900 p-2.5"
-                    >
-                      <option value="">Selecciona CPE, PoE o fuente...</option>
-                      {customerEquipment.map((item) => (
-                        <option key={item.id} value={item.id}>
-                          {item.kind} · {item.name} · {item.availableQty} disponibles
-                        </option>
-                      ))}
-                    </select>
-                  </div>
-                  <div className="space-y-1">
-                    <label htmlFor="customer-equipment-serial" className="font-mono text-slate-400">
-                      Serie
-                    </label>
-                    <select
-                      id="customer-equipment-serial"
-                      value={formEquipmentSerial}
-                      disabled={!selectedEquipment}
-                      onChange={(event) => {
-                        setFormEquipmentSerial(event.target.value);
-                        setEquipmentReservation(null);
-                      }}
-                      className="w-full rounded-xl border border-slate-800 bg-slate-900 p-2.5 font-mono disabled:opacity-50"
-                    >
-                      <option value="">Selecciona serie...</option>
-                      {selectedEquipment?.serials.map((serial) => (
-                        <option key={serial} value={serial}>{serial}</option>
-                      ))}
-                    </select>
-                  </div>
-                  <div className="space-y-1">
-                    <label htmlFor="customer-equipment-mac" className="font-mono text-slate-400">
-                      MAC
-                    </label>
-                    <input
-                      id="customer-equipment-mac"
-                      type="text"
-                      placeholder="AA:BB:CC:DD:EE:FF"
-                      value={formEquipmentMac}
-                      onChange={(event) => {
-                        setFormEquipmentMac(event.target.value.toUpperCase());
-                        setEquipmentReservation(null);
-                      }}
-                      className="w-full rounded-xl border border-slate-800 bg-slate-900 p-2.5 font-mono uppercase"
-                    />
-                  </div>
+                <div className="flex flex-wrap gap-2">
+                  <button
+                    type="button"
+                    onClick={() => setEquipmentMode('inventory')}
+                    className={`rounded-xl border px-3 py-2 font-mono text-[10px] ${
+                      equipmentMode === 'inventory'
+                        ? 'border-indigo-500/40 bg-indigo-600/15 text-indigo-300'
+                        : 'border-slate-800 bg-slate-950 text-slate-400'
+                    }`}
+                  >
+                    Desde inventario
+                  </button>
+                  <button
+                    type="button"
+                    onClick={() => setEquipmentMode('manual')}
+                    className={`rounded-xl border px-3 py-2 font-mono text-[10px] ${
+                      equipmentMode === 'manual'
+                        ? 'border-indigo-500/40 bg-indigo-600/15 text-indigo-300'
+                        : 'border-slate-800 bg-slate-950 text-slate-400'
+                    }`}
+                  >
+                    Entrada manual
+                  </button>
                 </div>
+
+                {equipmentMode === 'inventory' ? (
+                  <div className="grid grid-cols-1 gap-3 sm:grid-cols-3">
+                    <div className="space-y-1">
+                      <label htmlFor="customer-equipment-id" className="font-mono text-slate-400">Equipo</label>
+                      <select
+                        id="customer-equipment-id"
+                        value={formEquipmentId}
+                        disabled={equipmentLoading}
+                        onChange={(event) => {
+                          setFormEquipmentId(event.target.value);
+                          setFormEquipmentSerial('');
+                          setEquipmentReservation(null);
+                          setEquipmentError('');
+                        }}
+                        className="w-full rounded-xl border border-slate-800 bg-slate-900 p-2.5"
+                      >
+                        <option value="">
+                          {customerEquipment.length > 0
+                            ? 'Selecciona equipo del inventario…'
+                            : 'Sin stock — usa entrada manual'}
+                        </option>
+                        {customerEquipment.map((item) => (
+                          <option key={item.id} value={item.id}>
+                            {item.kind} · {item.name} · {item.availableQty} disponibles
+                          </option>
+                        ))}
+                      </select>
+                    </div>
+                    <div className="space-y-1">
+                      <label htmlFor="customer-equipment-serial" className="font-mono text-slate-400">Serie</label>
+                      {selectedEquipment && selectedEquipment.serials.length > 0 ? (
+                        <select
+                          id="customer-equipment-serial"
+                          value={formEquipmentSerial}
+                          disabled={!selectedEquipment}
+                          onChange={(event) => {
+                            setFormEquipmentSerial(event.target.value);
+                            setEquipmentReservation(null);
+                          }}
+                          className="w-full rounded-xl border border-slate-800 bg-slate-900 p-2.5 font-mono disabled:opacity-50"
+                        >
+                          <option value="">Selecciona serie...</option>
+                          {selectedEquipment.serials.map((serial) => (
+                            <option key={serial} value={serial}>{serial}</option>
+                          ))}
+                        </select>
+                      ) : (
+                        <input
+                          id="customer-equipment-serial"
+                          type="text"
+                          placeholder="Serie / S/N"
+                          value={formEquipmentSerial}
+                          onChange={(event) => {
+                            setFormEquipmentSerial(event.target.value);
+                            setEquipmentReservation(null);
+                          }}
+                          className="w-full rounded-xl border border-slate-800 bg-slate-900 p-2.5 font-mono"
+                        />
+                      )}
+                    </div>
+                    <div className="space-y-1">
+                      <label htmlFor="customer-equipment-mac" className="font-mono text-slate-400">MAC</label>
+                      <input
+                        id="customer-equipment-mac"
+                        type="text"
+                        placeholder="AA:BB:CC:DD:EE:FF"
+                        value={formEquipmentMac}
+                        onChange={(event) => {
+                          setFormEquipmentMac(event.target.value.toUpperCase());
+                          setEquipmentReservation(null);
+                        }}
+                        className="w-full rounded-xl border border-slate-800 bg-slate-900 p-2.5 font-mono uppercase"
+                      />
+                    </div>
+                  </div>
+                ) : (
+                  <div className="grid grid-cols-1 gap-3 sm:grid-cols-2">
+                    <div className="space-y-1">
+                      <label className="font-mono text-slate-400">Nombre del equipo</label>
+                      <input
+                        type="text"
+                        placeholder="ONU Huawei / CPE Ubiquiti…"
+                        value={formManualEquipmentName}
+                        onChange={(e) => setFormManualEquipmentName(e.target.value)}
+                        className="w-full rounded-xl border border-slate-800 bg-slate-900 p-2.5"
+                      />
+                    </div>
+                    <div className="space-y-1">
+                      <label className="font-mono text-slate-400">Tipo</label>
+                      <select
+                        value={formManualEquipmentKind}
+                        onChange={(e) => setFormManualEquipmentKind(e.target.value as typeof formManualEquipmentKind)}
+                        className="w-full rounded-xl border border-slate-800 bg-slate-900 p-2.5"
+                      >
+                        <option value="CPE">CPE</option>
+                        <option value="ONU">ONU / ONT</option>
+                        <option value="POE">PoE</option>
+                        <option value="POWER_SUPPLY">Fuente</option>
+                        <option value="OTHER">Otro</option>
+                      </select>
+                    </div>
+                    <div className="space-y-1">
+                      <label className="font-mono text-slate-400">Serie</label>
+                      <input
+                        type="text"
+                        value={formEquipmentSerial}
+                        onChange={(e) => setFormEquipmentSerial(e.target.value)}
+                        className="w-full rounded-xl border border-slate-800 bg-slate-900 p-2.5 font-mono"
+                      />
+                    </div>
+                    <div className="space-y-1">
+                      <label className="font-mono text-slate-400">MAC</label>
+                      <input
+                        type="text"
+                        placeholder="AA:BB:CC:DD:EE:FF"
+                        value={formEquipmentMac}
+                        onChange={(e) => setFormEquipmentMac(e.target.value.toUpperCase())}
+                        className="w-full rounded-xl border border-slate-800 bg-slate-900 p-2.5 font-mono uppercase"
+                      />
+                    </div>
+                  </div>
+                )}
 
                 <button
                   type="button"
                   id="reserve-customer-equipment-btn"
                   onClick={() => void handleReserveEquipment()}
-                  disabled={equipmentLoading || !formEquipmentId || !formEquipmentSerial || !formEquipmentMac}
+                  disabled={equipmentLoading || !formEquipmentMac || !formEquipmentSerial}
                   className="inline-flex items-center gap-2 rounded-xl border border-indigo-500/30 bg-indigo-600/10 px-3 py-2 font-semibold text-indigo-300 hover:bg-indigo-600/20 disabled:opacity-50"
                 >
                   {equipmentLoading

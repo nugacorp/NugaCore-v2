@@ -151,6 +151,10 @@ export const hydrateMikrotikRoutersFromDb = async (): Promise<number> => {
   return rows.length;
 };
 
+/** Lista routers (DB o store) para consumidores cross-domain (IPAM, etc.). */
+export const listMikrotikRouters = async (): Promise<MikrotikRouterRegistryItem[]> =>
+  getMikrotikRoutersRepository().list();
+
 /** Persistencia write-through tras mutaciones en memoria. */
 export const persistMikrotikRouter = async (
   router: MikrotikRouterRegistryItem,

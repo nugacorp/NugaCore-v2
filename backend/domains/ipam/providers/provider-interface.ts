@@ -5,7 +5,7 @@ import type {
   IpamRouter,
 } from '../types';
 
-export type IpamProviderSource = 'mock' | 'routeros';
+export type IpamProviderSource = 'mock' | 'routeros' | 'registry';
 
 /**
  * Contrato IPAM estrictamente de lectura. No expone operaciones para crear,
