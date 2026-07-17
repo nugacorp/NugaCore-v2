@@ -79,6 +79,11 @@ describe('Hardening — sin bypass de autenticación', () => {
     expect(loginForm).toContain("type: 'signup'");
   });
 
+  it('LoginForm no entra con perfil fake si /api/auth/me falla', () => {
+    expect(loginForm).toContain('No se pudo validar la sesión con el servidor');
+    expect(loginForm).not.toContain("role: 'Solo lectura'");
+  });
+
   it('App maneja reset de contraseña vía enlace Supabase', () => {
     expect(appTsx).toContain('ResetPasswordForm');
     expect(appTsx).toContain('PASSWORD_RECOVERY');

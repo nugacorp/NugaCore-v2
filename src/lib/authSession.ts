@@ -15,6 +15,17 @@ const safeParse = <T>(raw: string | null): T | null => {
   }
 };
 
+const clearLocalAndRemoteSession = async (): Promise<void> => {
+  authSession.clear();
+  if (supabase) {
+    try {
+      await supabase.auth.signOut({ scope: 'local' });
+    } catch {
+      /* ignore */
+    }
+  }
+};
+
 export const authSession = {
   readProfile(): UserSessionProfile | null {
     return safeParse<UserSessionProfile>(localStorage.getItem(SESSION_PROFILE_STORAGE_KEY));
@@ -86,18 +97,31 @@ export async function fetchProfileFromBackend(accessToken: string): Promise<User
 /**
  * Recupera la sesión de Supabase y reconstruye el perfil desde /api/auth/me.
  * Devuelve null si no hay sesión válida o el backend no responde el perfil.
+ *
+ * Usa getUser() (valida con Auth) en lugar de confiar solo en getSession()
+ * (storage local), para no llamar /api/auth/me con JWT zombie → 401 en consola.
  */
 export async function restoreSessionProfileFromSupabase(): Promise<UserSessionProfile | null> {
   if (!supabase) return null;
 
-  const { data, error } = await supabase.auth.getSession();
-  const accessToken = data.session?.access_token;
-  if (error || !accessToken) {
+  const { data: userData, error: userError } = await supabase.auth.getUser();
+  if (userError || !userData.user) {
+    await clearLocalAndRemoteSession();
+    return null;
+  }
+
+  const { data: sessionData } = await supabase.auth.getSession();
+  const accessToken = sessionData.session?.access_token;
+  if (!accessToken) {
+    await clearLocalAndRemoteSession();
     return null;
   }
 
   const profile = await fetchProfileFromBackend(accessToken);
-  if (!profile) return null;
+  if (!profile) {
+    await clearLocalAndRemoteSession();
+    return null;
+  }
 
   authSession.save(profile, accessToken);
   return profile;

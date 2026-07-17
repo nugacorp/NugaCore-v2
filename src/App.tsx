@@ -133,13 +133,18 @@ export default function App() {
     const path = window.location.pathname;
     return path === '/reset-password' || path === '/auth/reset-password';
   });
-  const [userSession, setUserSession] = useState<UserSessionProfile | null>(() => authSession.readProfile());
+  // Con Supabase: no hidratar perfil cacheado hasta validar JWT (evita 401
+  // por sesión zombie y flash de dashboard/onboarding con token inválido).
+  const [userSession, setUserSession] = useState<UserSessionProfile | null>(() =>
+    (isSupabaseConfigured ? null : authSession.readProfile()),
+  );
   const [sessionBootstrapped, setSessionBootstrapped] = useState<boolean>(!isSupabaseConfigured);
 
   // Tab inicial: 'dashboard' por defecto (permitido para todos los roles). Si
   // hay sesión cacheada, se abre en la pantalla de entrada del scope de la PWA
   // (`?app=tech|portal`). El efecto de RBAC corrige si el rol no lo autoriza.
   const [activeTab, setActiveTab] = useState<string>(() => {
+    if (isSupabaseConfigured) return 'dashboard';
     const cached = authSession.readProfile();
     return cached ? resolveEntryTab(cached.role, getAppScope()) : 'dashboard';
   });

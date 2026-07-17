@@ -69,17 +69,16 @@ export default function LoginForm({ onLoginSuccess, onBack, onGoRegister }: Logi
         if (data?.user) {
           const accessToken = data.session?.access_token || '';
           const backendProfile = accessToken ? await fetchProfileFromBackend(accessToken) : null;
+          if (!backendProfile || !accessToken) {
+            await supabase.auth.signOut({ scope: 'local' }).catch(() => undefined);
+            throw new Error(
+              'No se pudo validar la sesión con el servidor. Cierra la pestaña, vuelve a entrar e intenta de nuevo.',
+            );
+          }
 
-          const userSession: UserSessionProfile = backendProfile || {
-            id: data.user.id,
-            email: data.user.email || email,
-            full_name: 'Usuario Autenticado',
-            role: 'Solo lectura',
-          };
-
-          setSuccessMessage(`¡Bienvenido, ${userSession.full_name}!`);
+          setSuccessMessage(`¡Bienvenido, ${backendProfile.full_name}!`);
           setTimeout(() => {
-            onLoginSuccess(userSession, accessToken);
+            onLoginSuccess(backendProfile, accessToken);
           }, 600);
         }
       } else {
