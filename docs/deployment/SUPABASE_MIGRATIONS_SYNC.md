@@ -33,19 +33,10 @@ psql -tA -c "select version from supabase_migrations.schema_migrations order by 
 
 Resultado 2026-07-16: **A) vacío**, **B) solo `20260619033952`**.
 
-> **Nota de ramas (drift temporal de repo):** **cuatro** de las 35 aún no están en
-> `main`, pero **las cuatro ya están aplicadas y registradas** en la DB de staging
-> (compartida). El conteo de 35 es el del repo integrado:
->
-> - `20260716120000_ftth_fiber_infrastructure` → rama `cursor/ftth-import-nap-view-cb99` (commit `bd0183e`)
-> - `20260716140000_wisp_external_integrations` → rama `cursor/external-integrations-codi-cb99` (commit `676c495`)
-> - `20260716153000_tower_onboarding_profiles_rls` → rama `cursor/external-integrations-codi-cb99` (commit `57af6bf`)
-> - `20260716220000_wisp_onboarding_and_wg_tenant` → rama `cursor/wisp-onboarding-login-cb99` (commit `bff2788`+)
->
-> Ya normalizadas en `main`: `20260716081000_tower_onboarding_profiles` (`838f541`),
-> `20260716200000_multi_tenant_foundation` (merge `47fdb3c`),
-> `20260715000000_client_documents_reconciliation` + `20260716160000_rls_fiber_tables`
-> (merge de `fix/db-schema-reconciliation`).
+> **Nota de ramas:** las **35 migraciones** del repo integrado están en `main`
+> (merges #34 FTTH, #35 integrations, #37 onboarding/WG, #38 reconciliación).
+> Staging ya las tenía aplicadas/registradas; no hay drift archivo↔historial
+> pendiente por ramas de agente.
 
 ### Reconciliación 2026-07-16 · noche (WISP onboarding + WG multi-tenant)
 
