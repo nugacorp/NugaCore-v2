@@ -3,6 +3,7 @@ import type { Request } from 'express';
 
 const mockGetUser = vi.fn();
 const mockFrom = vi.fn();
+const mockGetById = vi.fn();
 
 vi.mock('../../backend/services/supabase-admin', () => ({
   isSupabaseAdminConfigured: true,
@@ -12,6 +13,12 @@ vi.mock('../../backend/services/supabase-admin', () => ({
   },
 }));
 
+vi.mock('../../backend/domains/customers/service', () => ({
+  getCustomersService: () => ({
+    getById: (...args: unknown[]) => mockGetById(...args),
+  }),
+}));
+
 import { ForbiddenError } from '../../backend/common/errors';
 import { resolvePortalAuth } from '../../backend/domains/portal/auth';
 
@@ -19,16 +26,19 @@ describe('portal auth', () => {
   beforeEach(() => {
     mockGetUser.mockReset();
     mockFrom.mockReset();
+    mockGetById.mockReset();
     delete process.env.PORTAL_STAGING_TOKEN;
+    mockGetById.mockResolvedValue({ id: 'c-1', tenantId: 'tenant-a' });
   });
 
   const req = (overrides: Partial<Request> = {}): Request => ({
     params: { clientId: 'c-1' },
     headers: {},
+    authContext: { userId: 'u', role: 'super admin', tenantId: 'tenant-staff', source: 'supabase-jwt' },
     ...overrides,
   } as Request);
 
-  const mockRoleLookup = (roleName: string | null) => {
+  const mockRoleLookup = (roleName: string | null, binding?: { client_id: string; tenant_id?: string } | null) => {
     mockFrom.mockImplementation((table: string) => {
       if (table === 'user_roles') {
         return {
@@ -49,7 +59,10 @@ describe('portal auth', () => {
           select: () => ({
             eq: () => ({
               limit: () => ({
-                maybeSingle: async () => ({ data: null, error: null }),
+                maybeSingle: async () => ({
+                  data: binding === undefined ? null : binding,
+                  error: null,
+                }),
               }),
             }),
           }),
@@ -67,7 +80,7 @@ describe('portal auth', () => {
     });
   };
 
-  it('permite JWT staff con clientId en ruta', async () => {
+  it('permite JWT staff con clientId en ruta y tenant del staff', async () => {
     mockGetUser.mockResolvedValue({
       data: { user: { id: 'u-staff', user_metadata: {}, app_metadata: {} } },
       error: null,
@@ -77,6 +90,7 @@ describe('portal auth', () => {
     const auth = await resolvePortalAuth(req({ headers: { authorization: 'Bearer staff-jwt' } }));
     expect(auth.mode).toBe('jwt-staff');
     expect(auth.clientId).toBe('c-1');
+    expect(auth.tenantId).toBe('tenant-staff');
   });
 
   it('rechaza JWT cliente si clientId no coincide', async () => {
@@ -91,7 +105,7 @@ describe('portal auth', () => {
     ).rejects.toBeInstanceOf(ForbiddenError);
   });
 
-  it('acepta JWT cliente vinculado por metadata', async () => {
+  it('acepta JWT cliente vinculado por metadata y resuelve tenant del client', async () => {
     mockGetUser.mockResolvedValue({
       data: { user: { id: 'u-client', user_metadata: { client_id: 'c-1' }, app_metadata: {} } },
       error: null,
@@ -101,6 +115,22 @@ describe('portal auth', () => {
     const auth = await resolvePortalAuth(req({ headers: { authorization: 'Bearer client-jwt' } }));
     expect(auth.mode).toBe('jwt-client');
     expect(auth.clientId).toBe('c-1');
+    expect(auth.tenantId).toBe('tenant-a');
+    expect(mockGetById).toHaveBeenCalledWith('c-1');
+  });
+
+  it('acepta JWT cliente con tenant desde portal_user_bindings', async () => {
+    mockGetUser.mockResolvedValue({
+      data: { user: { id: 'u-client', user_metadata: {}, app_metadata: {} } },
+      error: null,
+    });
+    mockRoleLookup(null, { client_id: 'c-1', tenant_id: 'tenant-bound' });
+
+    const auth = await resolvePortalAuth(req({ headers: { authorization: 'Bearer client-jwt' } }));
+    expect(auth.mode).toBe('jwt-client');
+    expect(auth.clientId).toBe('c-1');
+    expect(auth.tenantId).toBe('tenant-bound');
+    expect(mockGetById).not.toHaveBeenCalled();
   });
 
   it('requiere staging token cuando PORTAL_STAGING_TOKEN está configurado sin JWT', async () => {

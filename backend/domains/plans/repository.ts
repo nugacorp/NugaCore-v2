@@ -27,18 +27,19 @@ export interface PlanFilters {
   q?: string;            // ya normalizado a minúsculas por la ruta
   status?: string;       // '' | 'active' | 'inactive' (cualquier valor != 'active' filtra inactivos)
   businessType?: string; // ya normalizado a minúsculas por la ruta
+  tenantId?: string;
 }
 
 export interface PlansRepository {
   list(filters: PlanFilters): Promise<PlanRecord[]>;
-  findById(id: string): Promise<PlanRecord | null>;
+  findById(id: string, tenantId?: string): Promise<PlanRecord | null>;
   /** Busca por nombre (case-insensitive) para detectar duplicados en el alta. */
-  findByName(name: string): Promise<PlanRecord | null>;
+  findByName(name: string, tenantId?: string): Promise<PlanRecord | null>;
   create(plan: PlanRecord): Promise<PlanRecord>;
-  update(id: string, patch: Partial<PlanRecord>): Promise<PlanRecord | null>;
-  remove(id: string): Promise<boolean>;
+  update(id: string, patch: Partial<PlanRecord>, tenantId?: string): Promise<PlanRecord | null>;
+  remove(id: string, tenantId?: string): Promise<boolean>;
   /** ¿Algún cliente referencia este plan? (bloquea el borrado con 409). */
-  isInUse(id: string): Promise<boolean>;
+  isInUse(id: string, tenantId?: string): Promise<boolean>;
   /** Genera el siguiente id con formato slug `plan-N`. */
   generateId(): Promise<string>;
 }
@@ -54,37 +55,49 @@ export class StorePlansRepository implements PlansRepository {
   }
 
   async list(filters: PlanFilters): Promise<PlanRecord[]> {
-    const { q, status, businessType } = filters;
+    const { q, status, businessType, tenantId } = filters;
     return store.PLANS.map((plan) => this.toRecord(plan)).filter((plan) => {
+      const matchesTenant = !tenantId || (plan.tenantId || 'tenant-default') === tenantId;
       const matchesQ =
         !q || plan.name.toLowerCase().includes(q) || plan.id.toLowerCase().includes(q);
       const matchesStatus = !status || (status === 'active' ? plan.isActive : !plan.isActive);
       const matchesBusinessType =
         !businessType || plan.businessType.toLowerCase() === businessType;
-      return matchesQ && matchesStatus && matchesBusinessType;
+      return matchesTenant && matchesQ && matchesStatus && matchesBusinessType;
     });
   }
 
-  async findById(id: string): Promise<PlanRecord | null> {
+  async findById(id: string, tenantId?: string): Promise<PlanRecord | null> {
     const plan = store.PLANS.find((p) => p.id === id);
-    return plan ? this.toRecord(plan) : null;
+    if (!plan) return null;
+    const record = this.toRecord(plan);
+    if (tenantId && (record.tenantId || 'tenant-default') !== tenantId) return null;
+    return record;
   }
 
-  async findByName(name: string): Promise<PlanRecord | null> {
+  async findByName(name: string, tenantId?: string): Promise<PlanRecord | null> {
     const lower = name.trim().toLowerCase();
-    const plan = store.PLANS.find((p) => p.name.toLowerCase() === lower);
+    const plan = store.PLANS.find((p) => {
+      if (p.name.toLowerCase() !== lower) return false;
+      if (tenantId && (p.tenantId || 'tenant-default') !== tenantId) return false;
+      return true;
+    });
     return plan ? this.toRecord(plan) : null;
   }
 
   async create(record: PlanRecord): Promise<PlanRecord> {
     const { businessType, isActive, ...plan } = record;
-    store.PLANS.push(plan);
+    store.PLANS.push({ ...plan, tenantId: record.tenantId || 'tenant-default' });
     store.PLAN_METADATA.push({ planId: record.id, businessType, isActive });
-    return record;
+    return { ...record, tenantId: record.tenantId || 'tenant-default' };
   }
 
-  async update(id: string, patch: Partial<PlanRecord>): Promise<PlanRecord | null> {
-    const index = store.PLANS.findIndex((p) => p.id === id);
+  async update(id: string, patch: Partial<PlanRecord>, tenantId?: string): Promise<PlanRecord | null> {
+    const index = store.PLANS.findIndex((p) => {
+      if (p.id !== id) return false;
+      if (tenantId && (p.tenantId || 'tenant-default') !== tenantId) return false;
+      return true;
+    });
     if (index === -1) return null;
 
     const target = store.PLANS[index];
@@ -104,16 +117,24 @@ export class StorePlansRepository implements PlansRepository {
     return this.toRecord(store.PLANS[index]);
   }
 
-  async remove(id: string): Promise<boolean> {
+  async remove(id: string, tenantId?: string): Promise<boolean> {
     const before = store.PLANS.length;
-    store.PLANS = store.PLANS.filter((p) => p.id !== id);
+    store.PLANS = store.PLANS.filter((p) => {
+      if (p.id !== id) return true;
+      if (tenantId && (p.tenantId || 'tenant-default') !== tenantId) return true;
+      return false;
+    });
     if (store.PLANS.length === before) return false;
     store.PLAN_METADATA = store.PLAN_METADATA.filter((m) => m.planId !== id);
     return true;
   }
 
-  async isInUse(id: string): Promise<boolean> {
-    return store.CLIENTS.some((client) => client.planId === id);
+  async isInUse(id: string, tenantId?: string): Promise<boolean> {
+    return store.CLIENTS.some((client) => {
+      if (client.planId !== id) return false;
+      if (tenantId && (client.tenantId || 'tenant-default') !== tenantId) return false;
+      return true;
+    });
   }
 
   async generateId(): Promise<string> {
@@ -139,6 +160,7 @@ export class SupabasePlansRepository implements PlansRepository {
 
   async list(filters: PlanFilters): Promise<PlanRecord[]> {
     let query = this.client.from(PLANS_TABLE).select('*');
+    if (filters.tenantId) query = query.eq('tenant_id', filters.tenantId);
     if (filters.q) query = query.or(`name.ilike.%${filters.q}%,id.ilike.%${filters.q}%`);
     if (filters.status) query = query.eq('is_active', filters.status === 'active');
     // businessType llega en minúsculas; ilike compara case-insensitive contra 'Residencial', …
@@ -149,65 +171,60 @@ export class SupabasePlansRepository implements PlansRepository {
     return (data as PlanRow[]).map(rowToPlan);
   }
 
-  async findById(id: string): Promise<PlanRecord | null> {
-    const { data, error } = await this.client
-      .from(PLANS_TABLE)
-      .select('*')
-      .eq('id', id)
-      .maybeSingle();
+  async findById(id: string, tenantId?: string): Promise<PlanRecord | null> {
+    let query = this.client.from(PLANS_TABLE).select('*').eq('id', id);
+    if (tenantId) query = query.eq('tenant_id', tenantId);
+    const { data, error } = await query.maybeSingle();
     if (error) return fail('findById', error);
     return data ? rowToPlan(data as PlanRow) : null;
   }
 
-  async findByName(name: string): Promise<PlanRecord | null> {
-    const { data, error } = await this.client
-      .from(PLANS_TABLE)
-      .select('*')
-      .ilike('name', name.trim())
-      .maybeSingle();
+  async findByName(name: string, tenantId?: string): Promise<PlanRecord | null> {
+    let query = this.client.from(PLANS_TABLE).select('*').ilike('name', name.trim());
+    if (tenantId) query = query.eq('tenant_id', tenantId);
+    const { data, error } = await query.maybeSingle();
     if (error) return fail('findByName', error);
     return data ? rowToPlan(data as PlanRow) : null;
   }
 
   async create(record: PlanRecord): Promise<PlanRecord> {
-    const { data, error } = await this.client
-      .from(PLANS_TABLE)
-      .insert(planToRow(record))
-      .select('*')
-      .single();
+    const row = planToRow(record);
+    let { data, error } = await this.client.from(PLANS_TABLE).insert(row).select('*').single();
+    if (error && /tenant_id/i.test(error.message || '')) {
+      const { tenant_id: _omit, ...without } = row;
+      ({ data, error } = await this.client.from(PLANS_TABLE).insert(without).select('*').single());
+    }
     if (error) return fail('create', error);
     return rowToPlan(data as PlanRow);
   }
 
-  async update(id: string, patch: Partial<PlanRecord>): Promise<PlanRecord | null> {
+  async update(id: string, patch: Partial<PlanRecord>, tenantId?: string): Promise<PlanRecord | null> {
     const row = planPatchToRow(patch);
     if (Object.keys(row).length === 0) {
-      return this.findById(id);
+      return this.findById(id, tenantId);
     }
-    const { data, error } = await this.client
-      .from(PLANS_TABLE)
-      .update(row)
-      .eq('id', id)
-      .select('*')
-      .maybeSingle();
+    let query = this.client.from(PLANS_TABLE).update(row).eq('id', id);
+    if (tenantId) query = query.eq('tenant_id', tenantId);
+    const { data, error } = await query.select('*').maybeSingle();
     if (error) return fail('update', error);
     return data ? rowToPlan(data as PlanRow) : null;
   }
 
-  async remove(id: string): Promise<boolean> {
-    const { error, count } = await this.client
-      .from(PLANS_TABLE)
-      .delete({ count: 'exact' })
-      .eq('id', id);
+  async remove(id: string, tenantId?: string): Promise<boolean> {
+    let query = this.client.from(PLANS_TABLE).delete({ count: 'exact' }).eq('id', id);
+    if (tenantId) query = query.eq('tenant_id', tenantId);
+    const { error, count } = await query;
     if (error) return fail('remove', error);
     return (count ?? 0) > 0;
   }
 
-  async isInUse(id: string): Promise<boolean> {
-    const { count, error } = await this.client
+  async isInUse(id: string, tenantId?: string): Promise<boolean> {
+    let query = this.client
       .from(CLIENTS_TABLE)
       .select('id', { count: 'exact', head: true })
       .eq('plan_id', id);
+    if (tenantId) query = query.eq('tenant_id', tenantId);
+    const { count, error } = await query;
     if (error) return fail('isInUse', error);
     return (count ?? 0) > 0;
   }

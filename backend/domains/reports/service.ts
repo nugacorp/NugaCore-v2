@@ -5,8 +5,8 @@ import { listSecurityAuditLogs } from '../security/audit-log';
 
 const nowStamp = () => new Date().toISOString().replace('T', ' ').substring(0, 19);
 
-export async function buildFinancialRows() {
-  const invoices = await getBillingService().listInvoices();
+export async function buildFinancialRows(tenantId?: string) {
+  const invoices = await getBillingService().listInvoices(tenantId);
   return invoices.map((invoice) => {
     const paidAmount = invoice.payments?.reduce((acc, payment) => acc + Number(payment.amount || 0), 0)
       ?? invoice.paidAmount
@@ -26,11 +26,11 @@ export async function buildFinancialRows() {
   });
 }
 
-export async function buildOperationalRows() {
+export async function buildOperationalRows(tenantId?: string) {
   const [towers, tickets, sectors] = await Promise.all([
-    getNetworkService().listTowers({}),
-    getSupportService().listTickets({}),
-    getNetworkService().listSectors({}),
+    getNetworkService().listTowers({ tenantId }),
+    getSupportService().listTickets({}, tenantId),
+    getNetworkService().listSectors({ tenantId }),
   ]);
   const openTickets = tickets.filter((t) => t.status !== 'resolved' && t.status !== 'closed').length;
   return towers.map((tower) => ({
@@ -61,8 +61,11 @@ export function buildSecurityRows() {
   }));
 }
 
-export async function buildRowsByScope(scope: 'financial' | 'operational' | 'security') {
-  if (scope === 'financial') return buildFinancialRows();
-  if (scope === 'operational') return buildOperationalRows();
+export async function buildRowsByScope(
+  scope: 'financial' | 'operational' | 'security',
+  tenantId?: string,
+) {
+  if (scope === 'financial') return buildFinancialRows(tenantId);
+  if (scope === 'operational') return buildOperationalRows(tenantId);
   return buildSecurityRows();
 }

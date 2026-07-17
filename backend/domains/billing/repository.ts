@@ -62,6 +62,7 @@ export interface InvoiceCreateInput {
   amount: number;
   dueDateStr: string;
   items: InvoiceItem[];
+  tenantId?: string;
 }
 
 export interface InvoiceUpdateInput {
@@ -80,15 +81,15 @@ export interface PaymentRecordInput {
 // ── Contrato ──────────────────────────────────────────────────────────
 
 export interface BillingRepository {
-  listInvoices(): Promise<EnrichedInvoice[]>;
-  findInvoiceById(id: string): Promise<EnrichedInvoice | null>;
-  getAccountState(invoiceId: string): Promise<AccountStateResult | null>;
-  getAccountSummary(): Promise<AccountSummaryResult>;
-  getRevenueReport(): Promise<RevenueReportResult>;
+  listInvoices(tenantId?: string): Promise<EnrichedInvoice[]>;
+  findInvoiceById(id: string, tenantId?: string): Promise<EnrichedInvoice | null>;
+  getAccountState(invoiceId: string, tenantId?: string): Promise<AccountStateResult | null>;
+  getAccountSummary(tenantId?: string): Promise<AccountSummaryResult>;
+  getRevenueReport(tenantId?: string): Promise<RevenueReportResult>;
   createInvoice(input: InvoiceCreateInput): Promise<EnrichedInvoice>;
-  updateInvoice(id: string, input: InvoiceUpdateInput): Promise<EnrichedInvoice | null>;
-  cancelInvoice(id: string, reason?: string): Promise<EnrichedInvoice | null>;
-  recordPayment(invoiceId: string, input: PaymentRecordInput): Promise<EnrichedInvoice>;
+  updateInvoice(id: string, input: InvoiceUpdateInput, tenantId?: string): Promise<EnrichedInvoice | null>;
+  cancelInvoice(id: string, reason?: string, tenantId?: string): Promise<EnrichedInvoice | null>;
+  recordPayment(invoiceId: string, input: PaymentRecordInput, tenantId?: string): Promise<EnrichedInvoice>;
   generateInvoiceId(): Promise<string>;
 }
 
@@ -136,20 +137,30 @@ const enrich = (inv: Invoice): EnrichedInvoice => ({
 // IMPLEMENTACIÓN 1 — Store en memoria (idéntico al comportamiento actual)
 // ────────────────────────────────────────────────────────────────────
 export class StoreBillingRepository implements BillingRepository {
-  async listInvoices(): Promise<EnrichedInvoice[]> {
+  async listInvoices(tenantId?: string): Promise<EnrichedInvoice[]> {
     store.INVOICES.forEach(syncStatus);
-    return store.INVOICES.map(enrich);
+    return store.INVOICES
+      .filter((i) => !tenantId || (i.tenantId || 'tenant-default') === tenantId)
+      .map(enrich);
   }
 
-  async findInvoiceById(id: string): Promise<EnrichedInvoice | null> {
-    const inv = store.INVOICES.find((i) => i.id === id);
+  async findInvoiceById(id: string, tenantId?: string): Promise<EnrichedInvoice | null> {
+    const inv = store.INVOICES.find((i) => {
+      if (i.id !== id) return false;
+      if (tenantId && (i.tenantId || 'tenant-default') !== tenantId) return false;
+      return true;
+    });
     if (!inv) return null;
     syncStatus(inv);
     return enrich(inv);
   }
 
-  async getAccountState(invoiceId: string): Promise<AccountStateResult | null> {
-    const inv = store.INVOICES.find((i) => i.id === invoiceId);
+  async getAccountState(invoiceId: string, tenantId?: string): Promise<AccountStateResult | null> {
+    const inv = store.INVOICES.find((i) => {
+      if (i.id !== invoiceId) return false;
+      if (tenantId && (i.tenantId || 'tenant-default') !== tenantId) return false;
+      return true;
+    });
     if (!inv) return null;
     syncStatus(inv);
     const allocations = store.PAYMENT_ALLOCATIONS
@@ -166,9 +177,12 @@ export class StoreBillingRepository implements BillingRepository {
     return { invoice: enrich(inv), allocations };
   }
 
-  async getAccountSummary(): Promise<AccountSummaryResult> {
+  async getAccountSummary(tenantId?: string): Promise<AccountSummaryResult> {
     store.INVOICES.forEach(syncStatus);
-    return store.INVOICES.reduce(
+    const scoped = store.INVOICES.filter(
+      (i) => !tenantId || (i.tenantId || 'tenant-default') === tenantId,
+    );
+    return scoped.reduce(
       (acc, inv) => {
         if (inv.status === 'canceled') return acc; // canceladas no cuentan en cobranza
         const paid = invoicePaidAmount(inv);
@@ -184,21 +198,24 @@ export class StoreBillingRepository implements BillingRepository {
       {
         totalInvoiced: 0, totalCollected: 0, totalPending: 0,
         overdueCount: 0, paidCount: 0, unpaidCount: 0,
-        invoicesCount: store.INVOICES.length,
+        invoicesCount: scoped.length,
       },
     );
   }
 
-  async getRevenueReport(): Promise<RevenueReportResult> {
+  async getRevenueReport(tenantId?: string): Promise<RevenueReportResult> {
     store.INVOICES.forEach(syncStatus);
+    const scoped = store.INVOICES.filter(
+      (i) => !tenantId || (i.tenantId || 'tenant-default') === tenantId,
+    );
     const byMethod = new Map<string, number>();
-    for (const inv of store.INVOICES) {
+    for (const inv of scoped) {
       for (const p of inv.payments) {
         const m = p.method || 'Otro';
         byMethod.set(m, roundMoney((byMethod.get(m) || 0) + Number(p.amount || 0)));
       }
     }
-    const topPending = store.INVOICES
+    const topPending = scoped
       .map(enrich)
       .filter((i) => i.pendingAmount > 0)
       .sort((a, b) => b.pendingAmount - a.pendingAmount)
@@ -224,13 +241,18 @@ export class StoreBillingRepository implements BillingRepository {
       cfdiStatus: 'pending',
       items: input.items,
       payments: [],
+      tenantId: input.tenantId || 'tenant-default',
     };
     store.INVOICES.unshift(inv);
     return enrich(inv);
   }
 
-  async updateInvoice(id: string, input: InvoiceUpdateInput): Promise<EnrichedInvoice | null> {
-    const inv = store.INVOICES.find((i) => i.id === id);
+  async updateInvoice(id: string, input: InvoiceUpdateInput, tenantId?: string): Promise<EnrichedInvoice | null> {
+    const inv = store.INVOICES.find((i) => {
+      if (i.id !== id) return false;
+      if (tenantId && (i.tenantId || 'tenant-default') !== tenantId) return false;
+      return true;
+    });
     if (!inv) return null;
     if (input.amount !== undefined) inv.amount = input.amount;
     if (input.dueDateStr !== undefined) inv.dueDateStr = input.dueDateStr;
@@ -240,16 +262,29 @@ export class StoreBillingRepository implements BillingRepository {
     return enrich(inv);
   }
 
-  async cancelInvoice(id: string, _reason?: string): Promise<EnrichedInvoice | null> {
-    const inv = store.INVOICES.find((i) => i.id === id);
+  async cancelInvoice(id: string, _reason?: string, tenantId?: string): Promise<EnrichedInvoice | null> {
+    const inv = store.INVOICES.find((i) => {
+      if (i.id !== id) return false;
+      if (tenantId && (i.tenantId || 'tenant-default') !== tenantId) return false;
+      return true;
+    });
     if (!inv) return null;
     inv.status = 'canceled';
     inv.cfdiStatus = 'canceled';
     return enrich(inv);
   }
 
-  async recordPayment(invoiceId: string, input: PaymentRecordInput): Promise<EnrichedInvoice> {
-    const inv = store.INVOICES.find((i) => i.id === invoiceId)!;
+  async recordPayment(
+    invoiceId: string,
+    input: PaymentRecordInput,
+    tenantId?: string,
+  ): Promise<EnrichedInvoice> {
+    const inv = store.INVOICES.find((i) => {
+      if (i.id !== invoiceId) return false;
+      if (tenantId && (i.tenantId || 'tenant-default') !== tenantId) return false;
+      return true;
+    });
+    if (!inv) throw new Error('Invoice not found');
     inv.payments.push({
       date: new Date().toISOString().replace('T', ' ').substring(0, 16),
       amount: input.amount,
@@ -330,11 +365,10 @@ export class SupabaseBillingRepository implements BillingRepository {
 
   // ── Métodos públicos ───────────────────────────────────────────────
 
-  async listInvoices(): Promise<EnrichedInvoice[]> {
-    const { data, error } = await this.client
-      .from('invoices')
-      .select('*')
-      .order('created_at', { ascending: false });
+  async listInvoices(tenantId?: string): Promise<EnrichedInvoice[]> {
+    let query = this.client.from('invoices').select('*').order('created_at', { ascending: false });
+    if (tenantId) query = query.eq('tenant_id', tenantId);
+    const { data, error } = await query;
     if (error) throw new Error(`invoices list: ${error.message}`);
     const rows = (data || []) as InvoiceRow[];
     const ids = rows.map((r) => r.id);
@@ -345,12 +379,10 @@ export class SupabaseBillingRepository implements BillingRepository {
     return this.buildEnriched(rows, itemMap, appMap);
   }
 
-  async findInvoiceById(id: string): Promise<EnrichedInvoice | null> {
-    const { data, error } = await this.client
-      .from('invoices')
-      .select('*')
-      .eq('id', id)
-      .single();
+  async findInvoiceById(id: string, tenantId?: string): Promise<EnrichedInvoice | null> {
+    let query = this.client.from('invoices').select('*').eq('id', id);
+    if (tenantId) query = query.eq('tenant_id', tenantId);
+    const { data, error } = await query.maybeSingle();
     if (error || !data) return null;
     const row = data as InvoiceRow;
     const [itemMap, appMap] = await Promise.all([
@@ -360,8 +392,8 @@ export class SupabaseBillingRepository implements BillingRepository {
     return rowsToEnrichedInvoice(row, itemMap.get(id) ?? [], appMap.get(id) ?? []);
   }
 
-  async getAccountState(invoiceId: string): Promise<AccountStateResult | null> {
-    const invoice = await this.findInvoiceById(invoiceId);
+  async getAccountState(invoiceId: string, tenantId?: string): Promise<AccountStateResult | null> {
+    const invoice = await this.findInvoiceById(invoiceId, tenantId);
     if (!invoice) return null;
     const appMap = await this.loadPaymentApps([invoiceId]);
     const apps = appMap.get(invoiceId) ?? [];
@@ -369,8 +401,8 @@ export class SupabaseBillingRepository implements BillingRepository {
     return { invoice, allocations };
   }
 
-  async getAccountSummary(): Promise<AccountSummaryResult> {
-    const invoices = await this.listInvoices();
+  async getAccountSummary(tenantId?: string): Promise<AccountSummaryResult> {
+    const invoices = await this.listInvoices(tenantId);
     return invoices.reduce(
       (acc, inv) => {
         if (inv.status === 'canceled') return acc; // canceladas no cuentan en cobranza
@@ -390,8 +422,8 @@ export class SupabaseBillingRepository implements BillingRepository {
     );
   }
 
-  async getRevenueReport(): Promise<RevenueReportResult> {
-    const invoices = await this.listInvoices();
+  async getRevenueReport(tenantId?: string): Promise<RevenueReportResult> {
+    const invoices = await this.listInvoices(tenantId);
     const byMethod = new Map<string, number>();
     for (const inv of invoices) {
       for (const p of inv.payments) {
@@ -413,9 +445,14 @@ export class SupabaseBillingRepository implements BillingRepository {
     const id = await this.generateInvoiceId();
     const invoiceRow = buildInvoiceInsertRow(
       id, input.clientId, input.clientName, input.amount, input.dueDateStr,
+      input.tenantId || 'tenant-default',
     );
 
-    const { error: invErr } = await this.client.from('invoices').insert(invoiceRow);
+    let { error: invErr } = await this.client.from('invoices').insert(invoiceRow);
+    if (invErr && /tenant_id/i.test(invErr.message || '')) {
+      const { tenant_id: _omit, ...without } = invoiceRow;
+      ({ error: invErr } = await this.client.from('invoices').insert(without));
+    }
     if (invErr) throw new Error(`create invoice: ${invErr.message}`);
 
     if (input.items.length > 0) {
@@ -426,12 +463,16 @@ export class SupabaseBillingRepository implements BillingRepository {
       if (itemErr) throw new Error(`create invoice_items: ${itemErr.message}`);
     }
 
-    const created = await this.findInvoiceById(id);
+    const created = await this.findInvoiceById(id, input.tenantId);
     return created!;
   }
 
-  async updateInvoice(id: string, input: InvoiceUpdateInput): Promise<EnrichedInvoice | null> {
-    const existing = await this.findInvoiceById(id);
+  async updateInvoice(
+    id: string,
+    input: InvoiceUpdateInput,
+    tenantId?: string,
+  ): Promise<EnrichedInvoice | null> {
+    const existing = await this.findInvoiceById(id, tenantId);
     if (!existing) return null;
 
     const patch: Record<string, unknown> = {};
@@ -444,7 +485,9 @@ export class SupabaseBillingRepository implements BillingRepository {
     if (input.status !== undefined) patch.status = input.status;
 
     if (Object.keys(patch).length > 0) {
-      const { error } = await this.client.from('invoices').update(patch).eq('id', id);
+      let q = this.client.from('invoices').update(patch).eq('id', id);
+      if (tenantId) q = q.eq('tenant_id', tenantId);
+      const { error } = await q;
       if (error) throw new Error(`update invoice: ${error.message}`);
     }
 
@@ -460,13 +503,17 @@ export class SupabaseBillingRepository implements BillingRepository {
       }
     }
 
-    return this.findInvoiceById(id);
+    return this.findInvoiceById(id, tenantId);
   }
 
-  async cancelInvoice(id: string, reason?: string): Promise<EnrichedInvoice | null> {
-    const existing = await this.findInvoiceById(id);
+  async cancelInvoice(
+    id: string,
+    reason?: string,
+    tenantId?: string,
+  ): Promise<EnrichedInvoice | null> {
+    const existing = await this.findInvoiceById(id, tenantId);
     if (!existing) return null;
-    const { error } = await this.client
+    let q = this.client
       .from('invoices')
       .update({
         status: 'canceled',
@@ -475,20 +522,27 @@ export class SupabaseBillingRepository implements BillingRepository {
         cancel_reason: reason ?? null,
       })
       .eq('id', id);
+    if (tenantId) q = q.eq('tenant_id', tenantId);
+    const { error } = await q;
     if (error) throw new Error(`cancel invoice: ${error.message}`);
-    return this.findInvoiceById(id);
+    return this.findInvoiceById(id, tenantId);
   }
 
-  async recordPayment(invoiceId: string, input: PaymentRecordInput): Promise<EnrichedInvoice> {
-    const existing = await this.findInvoiceById(invoiceId);
+  async recordPayment(
+    invoiceId: string,
+    input: PaymentRecordInput,
+    tenantId?: string,
+  ): Promise<EnrichedInvoice> {
+    const existing = await this.findInvoiceById(invoiceId, tenantId);
     if (!existing) throw new Error(`Invoice not found: ${invoiceId}`);
 
     const paymentCents = Math.round(input.amount * 100);
     const paymentId = `pay-${invoiceId}-${Date.now()}`;
     const paId      = `pa-${invoiceId}-${Date.now()}`;
+    const tenant = tenantId || existing.tenantId || 'tenant-default';
 
     // INSERT payment
-    const { error: payErr } = await this.client.from('payments').insert({
+    const payRow: Record<string, unknown> = {
       id: paymentId,
       client_id: existing.clientId,
       client_name: existing.clientName,
@@ -497,26 +551,40 @@ export class SupabaseBillingRepository implements BillingRepository {
       transaction_id: input.transactionId || null,
       payment_date: new Date().toISOString(),
       status: 'confirmed',
-    });
+      tenant_id: tenant,
+    };
+    let { error: payErr } = await this.client.from('payments').insert(payRow);
+    if (payErr && /tenant_id/i.test(payErr.message || '')) {
+      const { tenant_id: _omit, ...without } = payRow;
+      ({ error: payErr } = await this.client.from('payments').insert(without));
+    }
     if (payErr) throw new Error(`insert payment: ${payErr.message}`);
 
     // INSERT payment_application
-    const { error: paErr } = await this.client.from('payment_applications').insert({
+    const paRow: Record<string, unknown> = {
       id: paId,
       payment_id: paymentId,
       invoice_id: invoiceId,
       applied_cents: paymentCents,
       applied_at: new Date().toISOString(),
-    });
+      tenant_id: tenant,
+    };
+    let { error: paErr } = await this.client.from('payment_applications').insert(paRow);
+    if (paErr && /tenant_id/i.test(paErr.message || '')) {
+      const { tenant_id: _omit, ...without } = paRow;
+      ({ error: paErr } = await this.client.from('payment_applications').insert(without));
+    }
     if (paErr) throw new Error(`insert payment_application: ${paErr.message}`);
 
     // UPDATE invoices: incrementar applied_cents + amount_paid
     const newAppliedCents = (existing.paidAmount * 100) + paymentCents;
     const newAmountPaid = roundMoney(newAppliedCents / 100);
-    const { error: updErr } = await this.client
+    let upd = this.client
       .from('invoices')
       .update({ applied_cents: newAppliedCents, amount_paid: newAmountPaid })
       .eq('id', invoiceId);
+    if (tenantId) upd = upd.eq('tenant_id', tenantId);
+    const { error: updErr } = await upd;
     if (updErr) throw new Error(`update applied_cents: ${updErr.message}`);
 
     // Calcular nuevo status y actualizar en DB

@@ -23,41 +23,52 @@ export interface CustomerLite {
 }
 
 export interface SuspensionDataProvider {
-  loadCustomers(): Promise<CustomerLite[]>;
-  getCustomer(id: string): Promise<CustomerLite | null>;
-  loadInvoices(): Promise<Invoice[]>;
+  loadCustomers(tenantId?: string): Promise<CustomerLite[]>;
+  getCustomer(id: string, tenantId?: string): Promise<CustomerLite | null>;
+  loadInvoices(tenantId?: string): Promise<Invoice[]>;
 }
 
 const toLite = (c: Client): CustomerLite => ({ id: c.id, name: c.name, status: c.status });
 
+const matchesTenant = (recordTenantId: string | undefined, tenantId: string): boolean =>
+  (recordTenantId || 'tenant-default') === tenantId;
+
 // ── Mock directo: lee el store en memoria (rápido y determinista) ──────
 export class StoreSuspensionDataProvider implements SuspensionDataProvider {
-  async loadCustomers(): Promise<CustomerLite[]> {
-    return store.CLIENTS.map(toLite);
+  async loadCustomers(tenantId?: string): Promise<CustomerLite[]> {
+    const rows = tenantId
+      ? store.CLIENTS.filter((c) => matchesTenant(c.tenantId, tenantId))
+      : store.CLIENTS;
+    return rows.map(toLite);
   }
-  async getCustomer(id: string): Promise<CustomerLite | null> {
-    const c = store.CLIENTS.find((x) => x.id === id);
+  async getCustomer(id: string, tenantId?: string): Promise<CustomerLite | null> {
+    const c = store.CLIENTS.find((x) => {
+      if (x.id !== id) return false;
+      if (!tenantId) return true;
+      return matchesTenant(x.tenantId, tenantId);
+    });
     return c ? toLite(c) : null;
   }
-  async loadInvoices(): Promise<Invoice[]> {
-    return store.INVOICES;
+  async loadInvoices(tenantId?: string): Promise<Invoice[]> {
+    if (!tenantId) return store.INVOICES;
+    return store.INVOICES.filter((inv) => matchesTenant(inv.tenantId, tenantId));
   }
 }
 
 // ── Vía services: correcto en CUALQUIER combinación de flags ───────────
 //    (los services de Customers/Billing ya devuelven DB o store según su flag)
 export class ServiceSuspensionDataProvider implements SuspensionDataProvider {
-  async loadCustomers(): Promise<CustomerLite[]> {
-    const clients = await getCustomersService().list({});
+  async loadCustomers(tenantId?: string): Promise<CustomerLite[]> {
+    const clients = await getCustomersService().list(tenantId ? { tenantId } : {});
     return clients.map(toLite);
   }
-  async getCustomer(id: string): Promise<CustomerLite | null> {
-    const c = await getCustomersService().getById(id);
+  async getCustomer(id: string, tenantId?: string): Promise<CustomerLite | null> {
+    const c = await getCustomersService().getById(id, tenantId);
     return c ? toLite(c) : null;
   }
-  async loadInvoices(): Promise<Invoice[]> {
+  async loadInvoices(tenantId?: string): Promise<Invoice[]> {
     // EnrichedInvoice extiende Invoice (incluye paidAmount/pendingAmount).
-    return getBillingService().listInvoices();
+    return getBillingService().listInvoices(tenantId);
   }
 }
 

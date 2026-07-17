@@ -1,10 +1,12 @@
 import { isDomainOnDb } from '../../config/feature-flags';
 import { BadRequestError, NotFoundError } from '../../common/errors';
 import { isSupabaseAdminConfigured, supabaseAdmin } from '../../services/supabase-admin';
+import { getCustomersService } from '../customers/service';
 import {
   client360Memory,
   uid,
   stamp,
+  matchesTenant,
   type ActivityLogEntry,
   type AlternateContact,
   type ClientDocument,
@@ -19,20 +21,32 @@ export class Client360Service {
     return supabaseAdmin;
   }
 
-  listTags(clientId: string) {
+  /** Asserts the client exists and belongs to the tenant (P0 IDOR guard). */
+  async assertClientOwned(clientId: string, tenantId: string): Promise<void> {
+    const client = await getCustomersService().getById(clientId, tenantId);
+    if (!client) throw new NotFoundError('Customer not found', 'NOT_FOUND');
+  }
+
+  async listTags(clientId: string, tenantId: string) {
+    await this.assertClientOwned(clientId, tenantId);
     if (this.useDb) {
       return this.admin.from('client_tags').select('*').eq('client_id', clientId).then(({ data, error }) => {
         if (error) throw error;
         return (data ?? []).map(this.rowToTag);
       });
     }
-    return Promise.resolve(client360Memory.tags.filter((t) => t.clientId === clientId));
+    return Promise.resolve(
+      client360Memory.tags.filter((t) => t.clientId === clientId && matchesTenant(t.tenantId, tenantId)),
+    );
   }
 
-  async addTag(clientId: string, label: string, color?: string) {
+  async addTag(clientId: string, tenantId: string, label: string, color?: string) {
+    await this.assertClientOwned(clientId, tenantId);
     const trimmed = label.trim();
     if (!trimmed) throw new BadRequestError('Missing label', 'MISSING_FIELD');
-    const tag: ClientTag = { id: uid('tag'), clientId, label: trimmed, color: color || '#6366f1', createdAt: stamp() };
+    const tag: ClientTag = {
+      id: uid('tag'), clientId, tenantId, label: trimmed, color: color || '#6366f1', createdAt: stamp(),
+    };
     if (this.useDb) {
       const { error } = await this.admin.from('client_tags').insert({
         id: tag.id, client_id: clientId, label: tag.label, color: tag.color, created_at: tag.createdAt,
@@ -41,36 +55,44 @@ export class Client360Service {
     } else {
       client360Memory.tags.unshift(tag);
     }
-    await this.logActivity(clientId, { action: 'tag_added', newValue: trimmed });
+    await this.logActivity(clientId, tenantId, { action: 'tag_added', newValue: trimmed });
     return tag;
   }
 
-  async removeTag(clientId: string, tagId: string) {
+  async removeTag(clientId: string, tenantId: string, tagId: string) {
+    await this.assertClientOwned(clientId, tenantId);
     if (this.useDb) {
       const { error } = await this.admin.from('client_tags').delete().eq('id', tagId).eq('client_id', clientId);
       if (error) throw error;
     } else {
-      const idx = client360Memory.tags.findIndex((t) => t.id === tagId && t.clientId === clientId);
+      const idx = client360Memory.tags.findIndex(
+        (t) => t.id === tagId && t.clientId === clientId && matchesTenant(t.tenantId, tenantId),
+      );
       if (idx < 0) throw new NotFoundError('Tag not found', 'NOT_FOUND');
       client360Memory.tags.splice(idx, 1);
     }
     return { ok: true };
   }
 
-  listContacts(clientId: string) {
+  async listContacts(clientId: string, tenantId: string) {
+    await this.assertClientOwned(clientId, tenantId);
     if (this.useDb) {
       return this.admin.from('client_alternate_contacts').select('*').eq('client_id', clientId).then(({ data, error }) => {
         if (error) throw error;
         return (data ?? []).map(this.rowToContact);
       });
     }
-    return Promise.resolve(client360Memory.contacts.filter((c) => c.clientId === clientId));
+    return Promise.resolve(
+      client360Memory.contacts.filter((c) => c.clientId === clientId && matchesTenant(c.tenantId, tenantId)),
+    );
   }
 
-  async addContact(clientId: string, body: Record<string, unknown>) {
+  async addContact(clientId: string, tenantId: string, body: Record<string, unknown>) {
+    await this.assertClientOwned(clientId, tenantId);
     const contact: AlternateContact = {
       id: uid('ctc'),
       clientId,
+      tenantId,
       name: body.name ? String(body.name) : undefined,
       phone: body.phone ? String(body.phone) : undefined,
       email: body.email ? String(body.email) : undefined,
@@ -93,17 +115,21 @@ export class Client360Service {
     return contact;
   }
 
-  listDocuments(clientId: string) {
+  async listDocuments(clientId: string, tenantId: string) {
+    await this.assertClientOwned(clientId, tenantId);
     if (this.useDb) {
       return this.admin.from('client_documents').select('*').eq('client_id', clientId).then(({ data, error }) => {
         if (error) throw error;
         return (data ?? []).map(this.rowToDocument);
       });
     }
-    return Promise.resolve(client360Memory.documents.filter((d) => d.clientId === clientId));
+    return Promise.resolve(
+      client360Memory.documents.filter((d) => d.clientId === clientId && matchesTenant(d.tenantId, tenantId)),
+    );
   }
 
-  async addDocument(clientId: string, body: Record<string, unknown>, uploadedBy?: string) {
+  async addDocument(clientId: string, tenantId: string, body: Record<string, unknown>, uploadedBy?: string) {
+    await this.assertClientOwned(clientId, tenantId);
     const fileName = String(body.fileName || '').trim();
     if (!fileName) throw new BadRequestError('Missing fileName', 'MISSING_FIELD');
     const storagePath = body.storagePath ? String(body.storagePath).trim() : undefined;
@@ -113,6 +139,7 @@ export class Client360Service {
     const doc: ClientDocument = {
       id: uid('doc'),
       clientId,
+      tenantId,
       docType: (String(body.docType || 'other') as ClientDocument['docType']),
       fileName,
       storagePath,
@@ -129,11 +156,12 @@ export class Client360Service {
     } else {
       client360Memory.documents.unshift(doc);
     }
-    await this.logActivity(clientId, { action: 'document_added', newValue: fileName });
+    await this.logActivity(clientId, tenantId, { action: 'document_added', newValue: fileName });
     return doc;
   }
 
-  listActivity(clientId: string, limit = 50) {
+  async listActivity(clientId: string, tenantId: string, limit = 50) {
+    await this.assertClientOwned(clientId, tenantId);
     if (this.useDb) {
       return this.admin.from('client_activity_log').select('*').eq('client_id', clientId)
         .order('created_at', { ascending: false }).limit(limit).then(({ data, error }) => {
@@ -142,14 +170,22 @@ export class Client360Service {
         });
     }
     return Promise.resolve(
-      client360Memory.activity.filter((a) => a.clientId === clientId).slice(0, limit),
+      client360Memory.activity
+        .filter((a) => a.clientId === clientId && matchesTenant(a.tenantId, tenantId))
+        .slice(0, limit),
     );
   }
 
-  async logActivity(clientId: string, entry: Partial<ActivityLogEntry> & { action: string }, actor?: { id?: string; role?: string }) {
+  async logActivity(
+    clientId: string,
+    tenantId: string,
+    entry: Partial<ActivityLogEntry> & { action: string },
+    actor?: { id?: string; role?: string },
+  ) {
     const row: ActivityLogEntry = {
       id: uid('act'),
       clientId,
+      tenantId,
       actorId: actor?.id ?? entry.actorId,
       actorRole: actor?.role ?? entry.actorRole,
       action: entry.action,
@@ -171,12 +207,13 @@ export class Client360Service {
     return row;
   }
 
-  async getExpediente(clientId: string) {
+  async getExpediente(clientId: string, tenantId: string) {
+    await this.assertClientOwned(clientId, tenantId);
     const [tags, contacts, documents, activity] = await Promise.all([
-      this.listTags(clientId),
-      this.listContacts(clientId),
-      this.listDocuments(clientId),
-      this.listActivity(clientId, 30),
+      this.listTags(clientId, tenantId),
+      this.listContacts(clientId, tenantId),
+      this.listDocuments(clientId, tenantId),
+      this.listActivity(clientId, tenantId, 30),
     ]);
     return { clientId, tags, contacts, documents, activity };
   }
@@ -185,6 +222,7 @@ export class Client360Service {
     return {
       id: String(row.id), clientId: String(row.client_id), label: String(row.label),
       color: String(row.color ?? '#6366f1'), createdAt: String(row.created_at),
+      tenantId: row.tenant_id ? String(row.tenant_id) : undefined,
     };
   }
 
@@ -196,6 +234,7 @@ export class Client360Service {
       email: row.email ? String(row.email) : undefined,
       channel: row.channel as AlternateContact['channel'],
       isPrimary: Boolean(row.is_primary), createdAt: String(row.created_at),
+      tenantId: row.tenant_id ? String(row.tenant_id) : undefined,
     };
   }
 
@@ -208,6 +247,7 @@ export class Client360Service {
       mimeType: row.mime_type ? String(row.mime_type) : undefined,
       uploadedBy: row.uploaded_by ? String(row.uploaded_by) : undefined,
       createdAt: String(row.created_at),
+      tenantId: row.tenant_id ? String(row.tenant_id) : undefined,
     };
   }
 
@@ -222,6 +262,7 @@ export class Client360Service {
       newValue: row.new_value ? String(row.new_value) : undefined,
       reason: row.reason ? String(row.reason) : undefined,
       createdAt: String(row.created_at),
+      tenantId: row.tenant_id ? String(row.tenant_id) : undefined,
     };
   }
 }

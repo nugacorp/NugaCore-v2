@@ -254,27 +254,42 @@ async function applyEvaluation(
 // ── API pública (async) ───────────────────────────────────────────────
 
 /** Estado de cobranza agregado de un cliente (carga sus facturas reales). */
-export async function evaluateBillingState(customerId: string, policy?: SuspensionPolicyV2, now = Date.now()) {
+export async function evaluateBillingState(
+  customerId: string,
+  policy?: SuspensionPolicyV2,
+  now = Date.now(),
+  tenantId?: string,
+) {
   const { repo, data } = getSuspensionService();
   const pol = policy ?? (await repo.getPolicy());
-  const invoices = (await data.loadInvoices()).filter((i) => i.clientId === customerId);
+  const invoices = (await data.loadInvoices(tenantId)).filter((i) => i.clientId === customerId);
   return aggregateBillingStatus(invoices, pol, now);
 }
 
-export async function evaluateCustomerById(customerId: string, actorId?: string): Promise<EvaluationResult | null> {
+export async function evaluateCustomerById(
+  customerId: string,
+  actorId?: string,
+  tenantId?: string,
+): Promise<EvaluationResult | null> {
   const { repo, data } = getSuspensionService();
-  const customer = await data.getCustomer(customerId);
+  const customer = await data.getCustomer(customerId, tenantId);
   if (!customer) return null;
   const policy = await repo.getPolicy();
-  const invoices = (await data.loadInvoices()).filter((i) => i.clientId === customerId);
+  const invoices = (await data.loadInvoices(tenantId)).filter((i) => i.clientId === customerId);
   return applyEvaluation(repo, customer, invoices, policy, actorId, Date.now());
 }
 
-export async function evaluateAllCustomers(actorId?: string): Promise<EvaluationResult[]> {
+export async function evaluateAllCustomers(
+  actorId?: string,
+  tenantId?: string,
+): Promise<EvaluationResult[]> {
   const { repo, data } = getSuspensionService();
   const policy = await repo.getPolicy();
   const now = Date.now();
-  const [customers, invoices] = await Promise.all([data.loadCustomers(), data.loadInvoices()]);
+  const [customers, invoices] = await Promise.all([
+    data.loadCustomers(tenantId),
+    data.loadInvoices(tenantId),
+  ]);
   const byCustomer = groupInvoices(invoices);
   const results: EvaluationResult[] = [];
   for (const customer of customers) {
@@ -284,12 +299,12 @@ export async function evaluateAllCustomers(actorId?: string): Promise<Evaluation
 }
 
 /** Vista de cobranza por cliente (read-only, sin efectos) para la UI. */
-export async function customerServiceView() {
+export async function customerServiceView(tenantId?: string) {
   const { repo, data } = getSuspensionService();
   const policy = await repo.getPolicy();
   const now = Date.now();
   const [customers, invoices, states, orders] = await Promise.all([
-    data.loadCustomers(), data.loadInvoices(), repo.listStates(), repo.listOrders(),
+    data.loadCustomers(tenantId), data.loadInvoices(tenantId), repo.listStates(), repo.listOrders(),
   ]);
   const byCustomer = groupInvoices(invoices);
   const openByCustomer = groupOpenOrders(orders);
@@ -317,12 +332,12 @@ export async function customerServiceView() {
 }
 
 /** KPIs de suspensión para el dashboard (read-only, sin efectos). */
-export async function suspensionKpis(now = Date.now()) {
+export async function suspensionKpis(now = Date.now(), tenantId?: string) {
   const { repo, data } = getSuspensionService();
   const policy = await repo.getPolicy();
   const today = new Date(now).toISOString().substring(0, 10);
   const [customers, invoices, orders] = await Promise.all([
-    data.loadCustomers(), data.loadInvoices(), repo.listOrders(),
+    data.loadCustomers(tenantId), data.loadInvoices(tenantId), repo.listOrders(),
   ]);
   const byCustomer = groupInvoices(invoices);
   const openByCustomer = groupOpenOrders(orders);

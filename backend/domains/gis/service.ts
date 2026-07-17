@@ -8,6 +8,7 @@ export interface GisMapFilters {
   planId?: string;
   towerId?: string;
   q?: string;
+  tenantId?: string;
 }
 
 export async function buildGisMapData(filters: GisMapFilters = {}) {
@@ -15,15 +16,17 @@ export async function buildGisMapData(filters: GisMapFilters = {}) {
   const planId = String(filters.planId || '').trim();
   const towerId = String(filters.towerId || '').trim();
   const q = String(filters.q || '').trim().toLowerCase();
+  const tenantId = filters.tenantId;
 
   const [towers, clients, plans, naps, onus, olts] = await Promise.all([
-    getNetworkService().listTowers({ status: status || undefined, q: q || undefined }),
+    getNetworkService().listTowers({ status: status || undefined, q: q || undefined, tenantId }),
     getCustomersService().list({
       status: parseClientStatus(status) ?? undefined,
       planId: planId || undefined,
       q: q || undefined,
+      tenantId,
     }),
-    getPlansService().list({}),
+    getPlansService().list({ tenantId }),
     getFtthService().listNaps(),
     getFtthService().listOnus(),
     getFtthService().listOlts(),
@@ -57,6 +60,7 @@ export async function buildGisMapData(filters: GisMapFilters = {}) {
       planId: planId || null,
       towerId: towerId || null,
       q: q || null,
+      tenantId: tenantId || null,
     },
     towers: filteredTowers,
     clients: filteredClients,

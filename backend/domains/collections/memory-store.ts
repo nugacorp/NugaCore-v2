@@ -1,5 +1,6 @@
 export interface PaymentPromise {
   id: string;
+  tenantId?: string;
   clientId: string;
   promisedDate: string;
   amountCents: number;
@@ -14,6 +15,7 @@ export interface PaymentPromise {
 
 export interface CashRegisterEntry {
   id: string;
+  tenantId?: string;
   collectorId?: string;
   collectorName?: string;
   clientId?: string;

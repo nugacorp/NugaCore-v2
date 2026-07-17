@@ -33,6 +33,7 @@ export type MikrotikActionStatus =
 
 export interface PaymentOrderRecord {
   id: string;
+  tenantId?: string;
   customerId: string;
   invoiceId: string;
   provider: PaymentProvider;
@@ -48,6 +49,7 @@ export interface PaymentOrderRecord {
 
 export interface PaymentOrderView {
   id: string;
+  tenantId?: string;
   customerId: string;
   invoiceId: string;
   provider: PaymentProvider;
@@ -74,6 +76,7 @@ export const PAYMENT_ORDER_STATUS_LABELS: Record<PaymentOrderStatus, string> = {
 
 export interface PaymentEventRecord {
   id: string;
+  tenantId?: string;
   provider: PaymentProvider;
   providerEventId: string;
   eventType: string;
@@ -99,6 +102,7 @@ export interface PaymentEventView {
 
 export interface MikrotikActionRecord {
   id: string;
+  tenantId?: string;
   customerId: string;
   routerId?: string;
   actionType: MikrotikActionType;
@@ -113,6 +117,7 @@ export interface MikrotikActionRecord {
 
 export interface MikrotikActionView {
   id: string;
+  tenantId?: string;
   customerId: string;
   routerId?: string;
   actionType: MikrotikActionType;
@@ -151,6 +156,7 @@ export interface CreatePaymentOrderInput {
   invoiceId: string;
   provider: PaymentProvider;
   amountCents: number;
+  tenantId?: string;
 }
 
 export interface ProcessWebhookInput {

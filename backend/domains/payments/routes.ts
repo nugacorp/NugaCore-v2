@@ -18,6 +18,7 @@ import { Router } from 'express';
 import { AppRole, READ_ROLES, requireRoles } from '../../common/rbac';
 import { BadRequestError, NotFoundError, asyncHandler } from '../../common/errors';
 import { logger } from '../../common/logger';
+import { tenantIdFromRequest } from '../tenancy/tenant-scope';
 import { getProvider } from './providers/index';
 import { getPaymentService } from './service';
 import { PaymentProvider } from './types';
@@ -33,7 +34,11 @@ router.get(
   requireRoles(READ_ROLES),
   asyncHandler(async (req, res) => {
     const { customerId, invoiceId } = req.query as Record<string, string | undefined>;
-    const orders = await getPaymentService().listOrders({ customerId, invoiceId });
+    const orders = await getPaymentService().listOrders({
+      customerId,
+      invoiceId,
+      tenantId: tenantIdFromRequest(req),
+    });
     res.json(orders);
   }),
 );
@@ -42,7 +47,7 @@ router.get(
   '/api/payments/orders/:id',
   requireRoles(READ_ROLES),
   asyncHandler(async (req, res) => {
-    const order = await getPaymentService().getOrder(req.params.id);
+    const order = await getPaymentService().getOrder(req.params.id, tenantIdFromRequest(req));
     if (!order) throw new NotFoundError('Payment order no encontrada.', 'NOT_FOUND');
     res.json(order);
   }),
@@ -87,6 +92,7 @@ router.post(
       invoiceId: String(invoiceId),
       provider: String(provider) as PaymentProvider,
       amountCents: resolvedCents,
+      tenantId: tenantIdFromRequest(req),
     });
     res.status(201).json(order);
   }),
@@ -99,7 +105,10 @@ router.get(
   requireRoles(READ_ROLES),
   asyncHandler(async (req, res) => {
     const { customerId } = req.query as Record<string, string | undefined>;
-    const actions = await getPaymentService().listActions({ customerId });
+    const actions = await getPaymentService().listActions({
+      customerId,
+      tenantId: tenantIdFromRequest(req),
+    });
     res.json(actions);
   }),
 );
@@ -112,7 +121,10 @@ router.post(
   asyncHandler(async (req, res) => {
     const result = await getPaymentService().reactivateCustomerService(
       req.params.customerId,
-      { triggeredBy: req.authContext?.userId ?? 'operator' },
+      {
+        triggeredBy: req.authContext?.userId ?? 'operator',
+        tenantId: tenantIdFromRequest(req),
+      },
     );
     res.json(result);
   }),

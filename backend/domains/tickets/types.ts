@@ -10,6 +10,8 @@ export interface SupportFilters {
   dateFrom?: string;
   dateTo?: string;
   q?: string;
+  /** Aislamiento multi-tenant; si se omite no se filtra (compat single-WISP). */
+  tenantId?: string;
 }
 
 export interface TicketCreateInput {
@@ -20,6 +22,7 @@ export interface TicketCreateInput {
   category: Ticket['category'];
   severity: Ticket['severity'];
   priority: Ticket['priority'];
+  tenantId?: string;
 }
 
 export interface TicketUpdateInput {
@@ -48,6 +51,7 @@ export interface WorkOrderCreateInput {
   technicianName?: string;
   status: TaskOrder['status'];
   checklist?: { item: string; done: boolean }[];
+  tenantId?: string;
 }
 
 export interface WorkOrderUpdateInput {

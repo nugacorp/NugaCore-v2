@@ -5,6 +5,8 @@ export interface Plan {
   speedMbpsUp: number;
   price: number;
   type: 'PPPoE' | 'Hotspot' | 'DHCP' | 'Static';
+  /** Tenant WISP (multi-tenant). Ausente ⇒ tenant-default. */
+  tenantId?: string;
 }
 
 export interface Client {
@@ -107,6 +109,7 @@ export interface Ticket {
   id: string;
   clientName: string;
   clientId?: string;
+  tenantId?: string;
   title: string;
   description: string;
   category: 'Internet' | 'Facturacion' | 'Instalacion' | 'Falla Red' | 'Otro';
@@ -142,6 +145,7 @@ export interface TaskOrder {
   type: 'installation' | 'repair' | 'migration' | 'reallocation';
   clientName: string;
   clientId: string;
+  tenantId?: string;
   address: string;
   phone: string;
   notes: string;
@@ -194,6 +198,8 @@ export interface Invoice {
   cfdiUuid?: string;
   items: { description: string; price: number; qty: number }[];
   payments: { date: string; amount: number; method: string; transactionId?: string }[];
+  /** Tenant WISP (multi-tenant). Ausente ⇒ tenant-default. */
+  tenantId?: string;
   // Campos enriquecidos por el backend (EnrichedInvoice). Opcionales y aditivos:
   // el contrato GET /api/billing/invoices siempre los incluye, pero se dejan
   // opcionales para no romper datos mock/legacy ni otros consumidores del tipo.

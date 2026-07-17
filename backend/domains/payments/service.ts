@@ -67,13 +67,13 @@ export class PaymentService {
 
   // ── Payment Orders ────────────────────────────────────────────────
 
-  async listOrders(filter?: { customerId?: string; invoiceId?: string }) {
+  async listOrders(filter?: { customerId?: string; invoiceId?: string; tenantId?: string }) {
     const orders = await this.repo.listOrders(filter);
     return orders.map(paymentOrderToView);
   }
 
-  async getOrder(id: string) {
-    const order = await this.repo.findOrderById(id);
+  async getOrder(id: string, tenantId?: string) {
+    const order = await this.repo.findOrderById(id, tenantId);
     return order ? paymentOrderToView(order) : null;
   }
 
@@ -81,13 +81,17 @@ export class PaymentService {
     if (!input.customerId?.trim()) throw new BadRequestError('customerId es obligatorio.');
     if (!input.invoiceId?.trim()) throw new BadRequestError('invoiceId es obligatorio.');
     const provider = assertValidProvider(input.provider);
+    const tenantId = input.tenantId || 'tenant-default';
 
     if (!Number.isInteger(input.amountCents) || input.amountCents <= 0) {
       throw new BadRequestError('amountCents debe ser un entero positivo (centavos).');
     }
 
-    // Validar que la factura existe y pertenece al cliente indicado
-    const invoice = await getBillingService().findInvoiceById(input.invoiceId);
+    // Validar que cliente y factura existen y pertenecen al tenant
+    const customer = await getCustomersService().getById(input.customerId, tenantId);
+    if (!customer) throw new BadRequestError(`Cliente '${input.customerId}' no encontrado.`);
+
+    const invoice = await getBillingService().findInvoiceById(input.invoiceId, tenantId);
     if (!invoice) throw new BadRequestError(`Factura '${input.invoiceId}' no encontrada.`);
     if (invoice.clientId !== input.customerId) {
       throw new BadRequestError(
@@ -110,6 +114,7 @@ export class PaymentService {
 
     const rec: PaymentOrderRecord = {
       id,
+      tenantId,
       customerId: input.customerId,
       invoiceId: input.invoiceId,
       provider,
@@ -123,7 +128,7 @@ export class PaymentService {
     };
 
     await this.repo.createOrder(rec);
-    logger.info('PaymentEngine: order creada', { orderId: id, provider, invoiceId: input.invoiceId });
+    logger.info('PaymentEngine: order creada', { orderId: id, provider, invoiceId: input.invoiceId, tenantId });
     return paymentOrderToView(rec);
   }
 
@@ -180,17 +185,19 @@ export class PaymentService {
     let mikrotikActionId: string | undefined;
 
     if (order) {
+      const orderTenantId = order.tenantId || 'tenant-default';
       // Marcar order como completada
-      await this.repo.updateOrderStatus(order.id, 'completed');
+      await this.repo.updateOrderStatus(order.id, 'completed', undefined, orderTenantId);
 
       // Integrar con Billing (idempotente: si la factura ya está paid, no duplica)
-      const invoiceResult = await this.confirmPaymentOnInvoice(order);
+      const invoiceResult = await this.confirmPaymentOnInvoice(order, orderTenantId);
       invoiceUpdated = invoiceResult.updated;
 
-      // Reactivación lógica del cliente
+      // Reactivación lógica del cliente (tenant de la order)
       const reactivation = await this.reactivateCustomerService(order.customerId, {
         triggeredBy: `webhook:${provider}:${providerEventId}`,
         invoiceId: order.invoiceId,
+        tenantId: orderTenantId,
       });
       reactivationTriggered = !reactivation.alreadyActive;
       mikrotikActionId = reactivation.mikrotikAction?.id;
@@ -198,7 +205,7 @@ export class PaymentService {
       // Vincular evento a la order
       await this.repo.markEventProcessed(eventId);
       logger.info('PaymentEngine: pago confirmado', {
-        orderId: order.id, invoiceId: order.invoiceId, customerId: order.customerId,
+        orderId: order.id, invoiceId: order.invoiceId, customerId: order.customerId, tenantId: orderTenantId,
       });
     } else if (provider === 'codi') {
       const reference = String(payload.reference ?? payload.referencia ?? '').toUpperCase();
@@ -207,12 +214,14 @@ export class PaymentService {
         const orders = await this.repo.listOrders({ invoiceId });
         const order = orders.find((o) => o.provider === 'codi') ?? orders[0];
         if (order) {
-          await this.repo.updateOrderStatus(order.id, 'completed');
-          const invoiceResult = await this.confirmPaymentOnInvoice(order);
+          const orderTenantId = order.tenantId || 'tenant-default';
+          await this.repo.updateOrderStatus(order.id, 'completed', undefined, orderTenantId);
+          const invoiceResult = await this.confirmPaymentOnInvoice(order, orderTenantId);
           invoiceUpdated = invoiceResult.updated;
           const reactivation = await this.reactivateCustomerService(order.customerId, {
             triggeredBy: `webhook:codi:${providerEventId}`,
             invoiceId: order.invoiceId,
+            tenantId: orderTenantId,
           });
           reactivationTriggered = !reactivation.alreadyActive;
           mikrotikActionId = reactivation.mikrotikAction?.id;
@@ -230,16 +239,18 @@ export class PaymentService {
         const billing = getBillingService();
         const invoice = await billing.findInvoiceById(invoiceId);
         if (invoice && invoice.status !== 'paid') {
+          const invoiceTenantId = invoice.tenantId || 'tenant-default';
           const amount = Number(payload.amount ?? payload.monto ?? invoice.pendingAmount ?? invoice.amount);
           await billing.recordPayment(invoice.id, {
             amount,
             method: 'Transferencia',
             transactionId: providerEventId,
-          });
+          }, invoiceTenantId);
           invoiceUpdated = true;
           const reactivation = await this.reactivateCustomerService(invoice.clientId, {
             triggeredBy: `webhook:codi:${providerEventId}`,
             invoiceId: invoice.id,
+            tenantId: invoiceTenantId,
           });
           reactivationTriggered = !reactivation.alreadyActive;
           mikrotikActionId = reactivation.mikrotikAction?.id;
@@ -270,11 +281,15 @@ export class PaymentService {
 
   // ── Billing integration ───────────────────────────────────────────
 
-  private async confirmPaymentOnInvoice(order: PaymentOrderRecord): Promise<{ updated: boolean }> {
+  private async confirmPaymentOnInvoice(
+    order: PaymentOrderRecord,
+    tenantId?: string,
+  ): Promise<{ updated: boolean }> {
     const billing = getBillingService();
-    const invoice = await billing.findInvoiceById(order.invoiceId);
+    const effectiveTenantId = tenantId || order.tenantId || 'tenant-default';
+    const invoice = await billing.findInvoiceById(order.invoiceId, effectiveTenantId);
     if (!invoice) {
-      logger.warn('PaymentEngine: factura no encontrada para order', { invoiceId: order.invoiceId });
+      logger.warn('PaymentEngine: factura no encontrada para order', { invoiceId: order.invoiceId, tenantId: effectiveTenantId });
       return { updated: false };
     }
 
@@ -288,9 +303,9 @@ export class PaymentService {
       amount: order.amountCents / 100,
       method: order.provider,
       transactionId: order.providerOrderId ?? order.id,
-    });
+    }, effectiveTenantId);
 
-    logger.info('PaymentEngine: factura marcada pagada', { invoiceId: order.invoiceId });
+    logger.info('PaymentEngine: factura marcada pagada', { invoiceId: order.invoiceId, tenantId: effectiveTenantId });
     return { updated: true };
   }
 
@@ -298,17 +313,18 @@ export class PaymentService {
 
   async reactivateCustomerService(
     customerId: string,
-    context?: { triggeredBy?: string; invoiceId?: string },
+    context?: { triggeredBy?: string; invoiceId?: string; tenantId?: string },
   ): Promise<ReactivationResult> {
     if (!customerId?.trim()) throw new BadRequestError('customerId es obligatorio.');
+    const tenantId = context?.tenantId || 'tenant-default';
 
     const dataProvider = buildPaymentDataProvider();
-    const client = await dataProvider.getCustomer(customerId);
+    const client = await dataProvider.getCustomer(customerId, tenantId);
     if (!client) throw new NotFoundError(`Cliente '${customerId}' no encontrado.`);
 
     // Idempotente: si ya está activo, no crear acción redundante
     if (client.status === 'active') {
-      logger.info('PaymentEngine: cliente ya activo, reactivación omitida', { customerId });
+      logger.info('PaymentEngine: cliente ya activo, reactivación omitida', { customerId, tenantId });
       return { customerId, alreadyActive: true, mikrotikAction: null, message: 'Cliente ya activo.' };
     }
 
@@ -317,7 +333,7 @@ export class PaymentService {
 
     // Cambio de estado lógico
     const prevStatus = client.status;
-    await dataProvider.reactivateCustomer(customerId);
+    await dataProvider.reactivateCustomer(customerId, tenantId);
 
     await getCustomersService().addTimelineEvent({
       clientId: customerId,
@@ -332,6 +348,7 @@ export class PaymentService {
     const router = routers.find((r) => r.encryptedPassword || r.hasCredentials) ?? routers[0];
     const actionRec: MikrotikActionRecord = {
       id: actionId,
+      tenantId,
       customerId,
       routerId: router?.id,
       actionType: 'reactivate',
@@ -393,13 +410,13 @@ export class PaymentService {
 
   // ── Mikrotik actions ──────────────────────────────────────────────
 
-  async listActions(filter?: { customerId?: string }) {
+  async listActions(filter?: { customerId?: string; tenantId?: string }) {
     const actions = await this.repo.listActions(filter);
     return actions.map(mikrotikActionToView);
   }
 
-  async getAction(id: string): Promise<MikrotikActionView | null> {
-    const all = await this.repo.listActions();
+  async getAction(id: string, tenantId?: string): Promise<MikrotikActionView | null> {
+    const all = await this.repo.listActions({ tenantId });
     const action = all.find((a) => a.id === id);
     return action ? mikrotikActionToView(action) : null;
   }

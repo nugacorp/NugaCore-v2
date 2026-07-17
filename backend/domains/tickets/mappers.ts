@@ -13,6 +13,7 @@ export interface TicketRow {
   sla_hours: number;
   technician_id: string | null;
   technician_name: string | null;
+  tenant_id?: string | null;
   created_at: string;
   updated_at: string;
 }
@@ -62,6 +63,7 @@ export interface WorkOrderRow {
   checklist: unknown;
   signature: string | null;
   photos: unknown;
+  tenant_id?: string | null;
   created_at: string;
 }
 
@@ -77,6 +79,7 @@ export const rowToTicket = (
   id: row.id,
   clientId: row.client_id ?? undefined,
   clientName: row.client_name,
+  tenantId: row.tenant_id || 'tenant-default',
   title: row.title,
   description: row.description,
   category: row.category as Ticket['category'],
@@ -123,6 +126,7 @@ export const ticketToRow = (ticket: Ticket): TicketRow => ({
   sla_hours: ticket.slaHours,
   technician_id: ticket.technicianId ?? null,
   technician_name: ticket.technicianName ?? null,
+  tenant_id: ticket.tenantId || 'tenant-default',
   created_at: new Date().toISOString(),
   updated_at: new Date().toISOString(),
 });
@@ -133,6 +137,7 @@ export const rowToWorkOrder = (row: WorkOrderRow): TaskOrder => ({
   type: row.type as TaskOrder['type'],
   clientId: row.client_id ?? '',
   clientName: row.client_name,
+  tenantId: row.tenant_id || 'tenant-default',
   address: row.address ?? '',
   phone: row.phone ?? '',
   notes: row.notes ?? '',
@@ -169,5 +174,6 @@ export const workOrderToRow = (order: TaskOrder): WorkOrderRow => ({
   checklist: order.checklist,
   signature: order.signature ?? null,
   photos: order.photos ?? [],
+  tenant_id: order.tenantId || 'tenant-default',
   created_at: new Date().toISOString(),
 });

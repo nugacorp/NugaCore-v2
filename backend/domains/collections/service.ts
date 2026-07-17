@@ -3,6 +3,9 @@ import { BadRequestError, NotFoundError } from '../../common/errors';
 import { isSupabaseAdminConfigured, supabaseAdmin } from '../../services/supabase-admin';
 import { collectionsMemory, uid, today, stamp, type CashRegisterEntry, type PaymentPromise } from './memory-store';
 
+const matchesTenant = (recordTenantId: string | undefined, tenantId: string): boolean =>
+  (recordTenantId || 'tenant-default') === tenantId;
+
 export class CollectionsService {
   private useDb = isDomainOnDb('billing') && isSupabaseAdminConfigured && Boolean(supabaseAdmin);
 
@@ -11,14 +14,18 @@ export class CollectionsService {
     return supabaseAdmin;
   }
 
-  listPromises(filters?: { clientId?: string; status?: string }) {
+  listPromises(filters?: { clientId?: string; status?: string; tenantId?: string }) {
+    const tenantId = filters?.tenantId;
     const rows = collectionsMemory.promises.filter((p) => {
+      const matchTenant = !tenantId || matchesTenant(p.tenantId, tenantId);
       const matchClient = !filters?.clientId || p.clientId === filters.clientId;
       const matchStatus = !filters?.status || p.status === filters.status;
-      return matchClient && matchStatus;
+      return matchTenant && matchClient && matchStatus;
     });
     if (this.useDb) {
-      return this.admin.from('payment_promises').select('*').then(({ data, error }) => {
+      let q = this.admin.from('payment_promises').select('*');
+      if (tenantId) q = q.eq('tenant_id', tenantId);
+      return q.then(({ data, error }) => {
         if (error) throw error;
         let list = (data ?? []).map(this.rowToPromise);
         if (filters?.clientId) list = list.filter((p) => p.clientId === filters.clientId);
@@ -29,12 +36,14 @@ export class CollectionsService {
     return Promise.resolve(rows);
   }
 
-  async createPromise(body: Record<string, unknown>, createdBy?: string) {
+  async createPromise(body: Record<string, unknown>, createdBy?: string, tenantId?: string) {
     const clientId = String(body.clientId || '').trim();
     const promisedDate = String(body.promisedDate || '').trim();
     if (!clientId || !promisedDate) throw new BadRequestError('clientId and promisedDate required', 'MISSING_FIELD');
+    const effectiveTenantId = tenantId || 'tenant-default';
     const promise: PaymentPromise = {
       id: uid('pp'),
+      tenantId: effectiveTenantId,
       clientId,
       promisedDate,
       amountCents: Math.round(Number(body.amountCents ?? (Number(body.amount ?? 0) * 100))),
@@ -55,11 +64,17 @@ export class CollectionsService {
     return promise;
   }
 
-  async fulfillPromise(id: string) {
-    const p = collectionsMemory.promises.find((x) => x.id === id);
+  async fulfillPromise(id: string, tenantId?: string) {
+    const p = collectionsMemory.promises.find((x) => {
+      if (x.id !== id) return false;
+      if (tenantId && !matchesTenant(x.tenantId, tenantId)) return false;
+      return true;
+    });
     if (!this.useDb && !p) throw new NotFoundError('Promise not found', 'NOT_FOUND');
     if (this.useDb) {
-      const { data, error } = await this.admin.from('payment_promises').update({ status: 'fulfilled', updated_at: stamp() }).eq('id', id).select('*').maybeSingle();
+      let q = this.admin.from('payment_promises').update({ status: 'fulfilled', updated_at: stamp() }).eq('id', id);
+      if (tenantId) q = q.eq('tenant_id', tenantId);
+      const { data, error } = await q.select('*').maybeSingle();
       if (error) throw error;
       if (!data) throw new NotFoundError('Promise not found', 'NOT_FOUND');
       return this.rowToPromise(data);
@@ -68,15 +83,18 @@ export class CollectionsService {
     return p!;
   }
 
-  listCashEntries(filters?: { date?: string; collectorId?: string }) {
+  listCashEntries(filters?: { date?: string; collectorId?: string; tenantId?: string }) {
     const date = filters?.date ?? today();
+    const tenantId = filters?.tenantId;
     const rows = collectionsMemory.cashEntries.filter((e) => {
+      const matchTenant = !tenantId || matchesTenant(e.tenantId, tenantId);
       const matchDate = e.entryDate === date;
       const matchCollector = !filters?.collectorId || e.collectorId === filters.collectorId;
-      return matchDate && matchCollector;
+      return matchTenant && matchDate && matchCollector;
     });
     if (this.useDb) {
       let q = this.admin.from('cash_register_entries').select('*').eq('entry_date', date);
+      if (tenantId) q = q.eq('tenant_id', tenantId);
       if (filters?.collectorId) q = q.eq('collector_id', filters.collectorId);
       return q.order('created_at', { ascending: false }).then(({ data, error }) => {
         if (error) throw error;
@@ -86,11 +104,17 @@ export class CollectionsService {
     return Promise.resolve(rows);
   }
 
-  async addCashEntry(body: Record<string, unknown>, collector?: { id?: string; name?: string }) {
+  async addCashEntry(
+    body: Record<string, unknown>,
+    collector?: { id?: string; name?: string },
+    tenantId?: string,
+  ) {
     const amountCents = Math.round(Number(body.amountCents ?? (Number(body.amount ?? 0) * 100)));
     if (amountCents <= 0) throw new BadRequestError('positive amount required', 'MISSING_FIELD');
+    const effectiveTenantId = tenantId || 'tenant-default';
     const entry: CashRegisterEntry = {
       id: uid('cash'),
+      tenantId: effectiveTenantId,
       collectorId: collector?.id,
       collectorName: collector?.name ?? (body.collectorName ? String(body.collectorName) : undefined),
       clientId: body.clientId ? String(body.clientId) : undefined,
@@ -112,8 +136,8 @@ export class CollectionsService {
     return entry;
   }
 
-  async getCashRegisterSummary(date?: string) {
-    const entries = await this.listCashEntries({ date: date ?? today() });
+  async getCashRegisterSummary(date?: string, tenantId?: string) {
+    const entries = await this.listCashEntries({ date: date ?? today(), tenantId });
     const totalCents = entries.reduce((s, e) => s + e.amountCents, 0);
     const byMethod = entries.reduce<Record<string, number>>((acc, e) => {
       acc[e.paymentMethod] = (acc[e.paymentMethod] ?? 0) + e.amountCents;
@@ -122,14 +146,17 @@ export class CollectionsService {
     return { date: date ?? today(), entryCount: entries.length, totalCents, byMethod, entries };
   }
 
-  async getActivePromisesCount() {
-    const list = await this.listPromises({ status: 'active' });
+  async getActivePromisesCount(tenantId?: string) {
+    const list = await this.listPromises({ status: 'active', tenantId });
     return list.length;
   }
 
   private rowToPromise(row: Record<string, unknown>): PaymentPromise {
     return {
-      id: String(row.id), clientId: String(row.client_id), promisedDate: String(row.promised_date),
+      id: String(row.id),
+      tenantId: row.tenant_id ? String(row.tenant_id) : 'tenant-default',
+      clientId: String(row.client_id),
+      promisedDate: String(row.promised_date),
       amountCents: Number(row.amount_cents), currency: String(row.currency),
       status: row.status as PaymentPromise['status'],
       blocksSuspension: Boolean(row.blocks_suspension),
@@ -141,7 +168,9 @@ export class CollectionsService {
 
   private promiseToRow(p: PaymentPromise) {
     return {
-      id: p.id, client_id: p.clientId, promised_date: p.promisedDate, amount_cents: p.amountCents,
+      id: p.id,
+      tenant_id: p.tenantId || 'tenant-default',
+      client_id: p.clientId, promised_date: p.promisedDate, amount_cents: p.amountCents,
       currency: p.currency, status: p.status, blocks_suspension: p.blocksSuspension,
       notes: p.notes ?? null, created_by: p.createdBy ?? null,
       created_at: p.createdAt, updated_at: p.updatedAt,
@@ -151,6 +180,7 @@ export class CollectionsService {
   private rowToCash(row: Record<string, unknown>): CashRegisterEntry {
     return {
       id: String(row.id),
+      tenantId: row.tenant_id ? String(row.tenant_id) : 'tenant-default',
       collectorId: row.collector_id ? String(row.collector_id) : undefined,
       collectorName: row.collector_name ? String(row.collector_name) : undefined,
       clientId: row.client_id ? String(row.client_id) : undefined,
@@ -165,7 +195,9 @@ export class CollectionsService {
 
   private cashToRow(e: CashRegisterEntry) {
     return {
-      id: e.id, collector_id: e.collectorId ?? null, collector_name: e.collectorName ?? null,
+      id: e.id,
+      tenant_id: e.tenantId || 'tenant-default',
+      collector_id: e.collectorId ?? null, collector_name: e.collectorName ?? null,
       client_id: e.clientId ?? null, invoice_id: e.invoiceId ?? null,
       amount_cents: e.amountCents, currency: e.currency, payment_method: e.paymentMethod,
       reference: e.reference ?? null, notes: e.notes ?? null,

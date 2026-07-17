@@ -39,6 +39,7 @@ export interface InvoiceRow {
   idempotency_key: string | null;
   created_by: string | null;
   cfdi_xml_url: string | null;
+  tenant_id?: string | null;
   created_at?: string;
   updated_at?: string;
 }
@@ -172,6 +173,7 @@ export const rowsToEnrichedInvoice = (
     dueDateStr: row.due_date,
     status,
     cfdiStatus,
+    tenantId: row.tenant_id || 'tenant-default',
     ...(row.cfdi_uuid ? { cfdiUuid: row.cfdi_uuid } : {}),
     items: items
       .sort((a, b) => a.sort_order - b.sort_order)
@@ -234,7 +236,8 @@ export const buildInvoiceInsertRow = (
   clientName: string,
   amountPesos: number,
   dueDateStr: string,
-): InvoiceInsertRow => {
+  tenantId = 'tenant-default',
+): InvoiceInsertRow & { tenant_id: string } => {
   const cents = Math.round(amountPesos * 100);
   return {
     id,
@@ -250,6 +253,7 @@ export const buildInvoiceInsertRow = (
     total_cents: cents,
     applied_cents: 0,
     credit_applied_cents: 0,
+    tenant_id: tenantId,
   };
 };
 

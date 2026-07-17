@@ -16,6 +16,7 @@ import { getCustomersService } from '../customers/service';
 import { getBillingService } from '../billing/service';
 import { isDomainOnDb } from '../../config/feature-flags';
 import { supabaseAdmin } from '../../services/supabase-admin';
+import { tenantIdFromRequest } from '../tenancy/tenant-scope';
 import type { Client } from '../../../src/types';
 
 const router = Router();
@@ -27,7 +28,15 @@ const SUSP_POLICY_ROLES = ['super admin', 'administrador'] as const;
 
 const toMsDays = (days: number): number => days * 24 * 60 * 60 * 1000;
 
-const findClientById = (clientId: string) => store.CLIENTS.find((client) => client.id === clientId);
+const matchesTenant = (recordTenantId: string | undefined, tenantId: string): boolean =>
+  (recordTenantId || 'tenant-default') === tenantId;
+
+const findClientById = (clientId: string, tenantId?: string) =>
+  store.CLIENTS.find((client) => {
+    if (client.id !== clientId) return false;
+    if (!tenantId) return true;
+    return matchesTenant(client.tenantId, tenantId);
+  });
 
 const hasOverdueBalanceBeyondGrace = (clientId: string): boolean => {
   const now = Date.now();
@@ -41,8 +50,8 @@ const hasOverdueBalanceBeyondGrace = (clientId: string): boolean => {
   });
 };
 
-const suspendClient = (clientId: string, reason: string, source: 'manual' | 'automation', actorId?: string) => {
-  const client = findClientById(clientId);
+const suspendClient = (clientId: string, reason: string, source: 'manual' | 'automation', actorId?: string, tenantId?: string) => {
+  const client = findClientById(clientId, tenantId);
   if (!client) return null;
   if (client.status === 'suspended') return client;
 
@@ -71,8 +80,8 @@ const suspendClient = (clientId: string, reason: string, source: 'manual' | 'aut
   return client;
 };
 
-const reactivateClient = (clientId: string, reason: string, source: 'manual' | 'automation', actorId?: string) => {
-  const client = findClientById(clientId);
+const reactivateClient = (clientId: string, reason: string, source: 'manual' | 'automation', actorId?: string, tenantId?: string) => {
+  const client = findClientById(clientId, tenantId);
   if (!client) return null;
   if (client.status === 'active') return client;
 
@@ -151,9 +160,11 @@ router.post('/api/suspension/run', requireRoles([...SUSP_EVALUATE_ROLES]), (req,
   }
 
   const actorId = req.authContext?.userId;
+  const tenantId = tenantIdFromRequest(req);
   const details: Array<{ clientId: string; action: 'suspend' | 'reactivate'; reason: string }> = [];
 
-  for (const client of store.CLIENTS) {
+  const tenantClients = store.CLIENTS.filter((c) => matchesTenant(c.tenantId, tenantId));
+  for (const client of tenantClients) {
     if (client.status === 'lead' || client.status === 'baja') continue;
 
     const mustSuspend = hasOverdueBalanceBeyondGrace(client.id);
@@ -161,7 +172,7 @@ router.post('/api/suspension/run', requireRoles([...SUSP_EVALUATE_ROLES]), (req,
 
     if (mustSuspend && client.status !== 'suspended') {
       const reason = `Regla automatica: morosidad vencida sobre ventana de gracia (${store.SUSPENSION_POLICY.graceDays} dias).`;
-      suspendClient(client.id, reason, 'automation', actorId);
+      suspendClient(client.id, reason, 'automation', actorId, tenantId);
       details.push({ clientId: client.id, action: 'suspend', reason });
       continue;
     }
@@ -172,7 +183,7 @@ router.post('/api/suspension/run', requireRoles([...SUSP_EVALUATE_ROLES]), (req,
       client.status === 'suspended'
     ) {
       const reason = 'Regla automatica: saldo vencido regularizado, se reactiva servicio.';
-      reactivateClient(client.id, reason, 'automation', actorId);
+      reactivateClient(client.id, reason, 'automation', actorId, tenantId);
       details.push({ clientId: client.id, action: 'reactivate', reason });
     }
   }
@@ -197,8 +208,9 @@ router.post('/api/suspension/run', requireRoles([...SUSP_EVALUATE_ROLES]), (req,
 router.post('/api/suspension/clients/:id/suspend', requireRoles([...SUSP_EVALUATE_ROLES]), (req, res) => {
   if (legacySuspensionDisabled()) return rejectLegacySuspension(res);
   const clientId = req.params.id;
+  const tenantId = tenantIdFromRequest(req);
   const reason = String(req.body.reason || 'Suspension manual solicitada por operacion.');
-  const client = suspendClient(clientId, reason, 'manual', req.authContext?.userId);
+  const client = suspendClient(clientId, reason, 'manual', req.authContext?.userId, tenantId);
 
   if (!client) {
     return res.status(404).json({ error: 'Customer not found' });
@@ -210,8 +222,9 @@ router.post('/api/suspension/clients/:id/suspend', requireRoles([...SUSP_EVALUAT
 router.post('/api/suspension/clients/:id/reactivate', requireRoles([...SUSP_EVALUATE_ROLES]), (req, res) => {
   if (legacySuspensionDisabled()) return rejectLegacySuspension(res);
   const clientId = req.params.id;
+  const tenantId = tenantIdFromRequest(req);
   const reason = String(req.body.reason || 'Reactivacion manual solicitada por operacion.');
-  const client = reactivateClient(clientId, reason, 'manual', req.authContext?.userId);
+  const client = reactivateClient(clientId, reason, 'manual', req.authContext?.userId, tenantId);
 
   if (!client) {
     return res.status(404).json({ error: 'Customer not found' });
@@ -264,8 +277,8 @@ router.put('/api/suspension/policies', requireRoles([...SUSP_POLICY_ROLES]), asy
 }));
 
 // ── Estado de clientes (read-only) ────────────────────────────────────
-router.get('/api/suspension/customers', requireRoles([...SUSP_VIEW_ROLES]), asyncHandler(async (_req, res) => {
-  res.json(await customerServiceView());
+router.get('/api/suspension/customers', requireRoles([...SUSP_VIEW_ROLES]), asyncHandler(async (req, res) => {
+  res.json(await customerServiceView(tenantIdFromRequest(req)));
 }));
 
 // ── Órdenes ───────────────────────────────────────────────────────────
@@ -287,7 +300,8 @@ router.get('/api/suspension/events', requireRoles([...SUSP_VIEW_ROLES]), asyncHa
 
 // ── Evaluación (genera órdenes; NO ejecuta) ───────────────────────────
 router.post('/api/suspension/evaluate/:customerId', requireRoles([...SUSP_EVALUATE_ROLES]), asyncHandler(async (req, res) => {
-  const result = await evaluateCustomerById(req.params.customerId, req.authContext?.userId);
+  const tenantId = tenantIdFromRequest(req);
+  const result = await evaluateCustomerById(req.params.customerId, req.authContext?.userId, tenantId);
   if (!result) {
     res.status(404).json({ error: 'Customer not found' });
     return;
@@ -296,7 +310,8 @@ router.post('/api/suspension/evaluate/:customerId', requireRoles([...SUSP_EVALUA
 }));
 
 router.post('/api/suspension/evaluate-all', requireRoles([...SUSP_EVALUATE_ROLES]), asyncHandler(async (req, res) => {
-  const results = await evaluateAllCustomers(req.authContext?.userId);
+  const tenantId = tenantIdFromRequest(req);
+  const results = await evaluateAllCustomers(req.authContext?.userId, tenantId);
   const summary = {
     evaluated: results.length,
     suspensionOrders: results.filter((r) => r.action === 'create_suspension').length,
@@ -348,6 +363,7 @@ router.post('/api/suspension/test-tools/scenario', requireRoles(['super admin'])
   const billing = getBillingService();
   const planId = String(req.body?.planId || 'plan-basic');
   const amount = Number(req.body?.amount) || 449;
+  const tenantId = tenantIdFromRequest(req);
 
   // 1. Cliente de prueba (status según escenario).
   const clientId = await customers.generateClientId();
@@ -362,6 +378,7 @@ router.post('/api/suspension/test-tools/scenario', requireRoles(['super admin'])
     address: 'Test', city: 'Test', lat: 0, lng: 0,
     planId, ip: '10.255.255.1',
     pppoeUser: `test_${clientId}`,
+    tenantId,
   };
   await customers.create(client);
 
@@ -424,7 +441,8 @@ router.delete('/api/suspension/test-tools/customer/:id', requireRoles(['super ad
     return;
   }
   const customerId = req.params.id;
-  const customer = await getCustomersService().getById(customerId);
+  const tenantId = tenantIdFromRequest(req);
+  const customer = await getCustomersService().getById(customerId, tenantId);
 
   // Idempotente: si ya no existe, respuesta controlada (no 500).
   if (!customer) {

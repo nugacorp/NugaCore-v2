@@ -18,3 +18,12 @@ export const applyTenantEq = <T extends { eq: (column: string, value: string) =>
   if (!tenantId) return query;
   return query.eq('tenant_id', tenantId);
 };
+
+/** Tenant efectivo de un registro (legacy sin stamp → tenant-default). */
+export const resolveRecordTenantId = (tenantId: string | undefined | null): string =>
+  tenantId || DEFAULT_TENANT_ID;
+
+export const belongsToTenant = (
+  recordTenantId: string | undefined | null,
+  tenantId: string,
+): boolean => resolveRecordTenantId(recordTenantId) === tenantId;

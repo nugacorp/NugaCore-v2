@@ -34,9 +34,9 @@ export function listSlaBreaches(tickets: Ticket[] = store.TICKETS): Ticket[] {
   return tickets.filter((t) => isTicketSlaBreached(t));
 }
 
-export async function listSlaBreachesFromSupport(): Promise<Ticket[]> {
+export async function listSlaBreachesFromSupport(tenantId?: string): Promise<Ticket[]> {
   const { getSupportService } = await import('../tickets/service');
-  const tickets = await getSupportService().listTickets({});
+  const tickets = await getSupportService().listTickets({}, tenantId);
   return listSlaBreaches(tickets);
 }
 
