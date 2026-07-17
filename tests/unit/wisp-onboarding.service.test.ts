@@ -20,19 +20,55 @@ describe('WispOnboardingService', () => {
       password: 'secreto123',
       fullName: 'Ana Owner',
       city: 'CDMX',
+      phone: '5551234567',
     });
     expect(reg.tenantId).toBeTruthy();
     expect(reg.onboarding.status).toBe('in_progress');
+    // Datos del registro ya persisten: no repetir paso company.
+    expect(reg.onboarding.companyName).toBe('Red Alfa');
+    expect(reg.onboarding.city).toBe('CDMX');
+    expect(reg.onboarding.contactPhone).toBe('5551234567');
+    expect(reg.onboarding.completedSteps).toContain('company');
+    expect(reg.onboarding.currentStep).toBe('zone');
     expect(reg.emailConfirmationRequired).toBe(false);
     expect(await svc.isOnboardingRequired(reg.tenantId)).toBe(true);
 
-    await svc.saveCompany(reg.tenantId, { companyName: 'Red Alfa', city: 'CDMX' });
     await svc.saveZone(reg.tenantId, { zoneName: 'Zona Norte' });
     await svc.saveBilling(reg.tenantId, { billingCycleDay: 5, billingCycleTime: '09:00' });
     await svc.saveRouter(reg.tenantId, { routerName: 'CHR-01' });
     const done = await svc.complete(reg.tenantId);
     expect(done.status).toBe('completed');
     expect(await svc.isOnboardingRequired(reg.tenantId)).toBe(false);
+  });
+
+  it('getStatus repara filas antiguas con empresa del registro sin paso company', async () => {
+    const svc = getWispOnboardingService();
+    const reg = await svc.register({
+      companyName: 'Red Legacy',
+      slug: 'red-legacy',
+      email: 'owner@redlegacy.test',
+      password: 'secreto123',
+      fullName: 'Legacy Owner',
+      city: 'Ensenada',
+    });
+    // Simula fila antigua (antes del skip de company).
+    await (svc as unknown as {
+      repo: {
+        upsert: (s: Record<string, unknown>) => Promise<unknown>;
+      };
+    }).repo.upsert({
+      tenantId: reg.tenantId,
+      status: 'in_progress',
+      currentStep: 'company',
+      companyName: 'Red Legacy',
+      city: 'Ensenada',
+      completedSteps: [],
+      updatedAt: new Date().toISOString(),
+    });
+    const healed = await svc.getStatus(reg.tenantId);
+    expect(healed?.completedSteps).toContain('company');
+    expect(healed?.currentStep).toBe('zone');
+    expect(healed?.companyName).toBe('Red Legacy');
   });
 
   it('tenant-default no fuerza onboarding', async () => {
