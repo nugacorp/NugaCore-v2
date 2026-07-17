@@ -29,6 +29,7 @@ router.post('/api/wisp-onboarding/register', asyncHandler(async (req, res) => {
     fullName: String(body.fullName || ''),
     phone: body.phone ? String(body.phone) : undefined,
     city: body.city ? String(body.city) : undefined,
+    emailRedirectTo: body.emailRedirectTo ? String(body.emailRedirectTo) : undefined,
   });
   res.status(201).json(result);
 }));

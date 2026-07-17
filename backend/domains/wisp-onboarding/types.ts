@@ -28,6 +28,8 @@ export interface RegisterWispInput {
   fullName: string;
   phone?: string;
   city?: string;
+  /** Redirect tras confirmar correo (mismo origen que APP_URL). */
+  emailRedirectTo?: string;
 }
 
 export interface RegisterWispResult {
@@ -36,6 +38,10 @@ export interface RegisterWispResult {
   email: string;
   slug: string;
   onboarding: WispOnboardingState;
+  /** true cuando el alta usó Supabase Auth sin auto-confirmar el correo. */
+  emailConfirmationRequired: boolean;
+  /** true si Supabase aceptó encolar el correo de confirmación. */
+  confirmationEmailSent: boolean;
   /** Solo en modos sin Supabase Auth real (dev/store). */
   note?: string;
 }

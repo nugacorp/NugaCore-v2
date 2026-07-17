@@ -71,6 +71,19 @@ describe('Hardening — sin bypass de autenticación', () => {
     expect(appTsx).toContain('onboardingRequired');
     expect(appTsx).toContain('RegisterWispForm');
   });
+
+  it('LoginForm expone recuperación y reenvío de confirmación', () => {
+    expect(loginForm).toContain('resetPasswordForEmail');
+    expect(loginForm).toContain('¿Olvidaste tu contraseña?');
+    expect(loginForm).toContain('Reenviar confirmación');
+    expect(loginForm).toContain("type: 'signup'");
+  });
+
+  it('App maneja reset de contraseña vía enlace Supabase', () => {
+    expect(appTsx).toContain('ResetPasswordForm');
+    expect(appTsx).toContain('PASSWORD_RECOVERY');
+    expect(appTsx).toContain('/reset-password');
+  });
 });
 
 describe('Hardening — cache busting', () => {

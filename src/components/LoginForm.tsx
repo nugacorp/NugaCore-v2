@@ -54,7 +54,16 @@ export default function LoginForm({ onLoginSuccess, onBack, onGoRegister }: Logi
         });
 
         if (error) {
-          throw new Error(error.message);
+          const msg = error.message || '';
+          if (/email not confirmed/i.test(msg)) {
+            throw new Error(
+              'Debes confirmar tu correo antes de entrar. Revisa tu bandeja o usa «Reenviar confirmación».',
+            );
+          }
+          if (/invalid login credentials/i.test(msg)) {
+            throw new Error('Correo o contraseña incorrectos.');
+          }
+          throw new Error(msg);
         }
 
         if (data?.user) {
@@ -107,17 +116,46 @@ export default function LoginForm({ onLoginSuccess, onBack, onGoRegister }: Logi
         if (error) throw error;
         setRecoveryStatus({
           type: 'success',
-          message: 'Se ha enviado un enlace de restablecimiento a tu correo.',
+          message: 'Si el correo existe, recibirás un enlace para restablecer la contraseña.',
         });
       } else {
         setRecoveryStatus({
-          type: 'success',
-          message: `[Simulación] Correo enviado a ${recoveryEmail}.`,
+          type: 'error',
+          message: 'Auth no está configurada; no se puede enviar recuperación.',
         });
       }
     } catch (err) {
       clientLog.error(err);
       setRecoveryStatus({ type: 'error', message: getErrorMessage(err, 'Error al enviar correo de recuperación.') });
+    } finally {
+      setLoading(false);
+    }
+  };
+
+  const handleResendConfirmation = async () => {
+    setErrorMessage('');
+    setSuccessMessage('');
+    const target = (email || recoveryEmail).trim();
+    if (!target) {
+      setErrorMessage('Ingresa tu correo para reenviar la confirmación.');
+      return;
+    }
+    if (!isSupabaseConfigured || !supabase) {
+      setErrorMessage('Auth no está configurada en este entorno.');
+      return;
+    }
+    setLoading(true);
+    try {
+      const { error } = await supabase.auth.resend({
+        type: 'signup',
+        email: target,
+        options: { emailRedirectTo: `${window.location.origin}/auth/callback` },
+      });
+      if (error) throw error;
+      setSuccessMessage(`Si la cuenta existe y falta confirmar, enviamos un correo a ${target}.`);
+    } catch (err) {
+      clientLog.error(err);
+      setErrorMessage(getErrorMessage(err, 'No se pudo reenviar la confirmación.'));
     } finally {
       setLoading(false);
     }
@@ -240,6 +278,18 @@ export default function LoginForm({ onLoginSuccess, onBack, onGoRegister }: Logi
                 <span>{loading ? 'Validando…' : 'Iniciar sesión'}</span>
                 {!loading && <ArrowRight className="w-3.5 h-3.5" />}
               </button>
+
+              <p className="text-center text-[11px] text-slate-500 pt-1">
+                ¿No llegó el correo de alta?{' '}
+                <button
+                  type="button"
+                  onClick={() => void handleResendConfirmation()}
+                  className="text-sky-400 hover:text-sky-300 font-semibold"
+                  disabled={loading}
+                >
+                  Reenviar confirmación
+                </button>
+              </p>
 
               {onGoRegister && (
                 <p className="text-center text-xs text-slate-500 pt-2">

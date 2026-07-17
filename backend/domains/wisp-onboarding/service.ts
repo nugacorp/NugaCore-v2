@@ -2,6 +2,10 @@ import { randomUUID } from 'node:crypto';
 import { BadRequestError } from '../../common/errors';
 import { logger } from '../../common/logger';
 import { isSupabaseAdminConfigured, supabaseAdmin } from '../../services/supabase-admin';
+import {
+  resolveAuthRedirectUrl,
+  sendSignupConfirmationEmail,
+} from '../auth/auth-email';
 import { getNetworkService } from '../network/service';
 import { getTenancyService } from '../tenancy/service';
 import {
@@ -101,22 +105,26 @@ export class WispOnboardingService {
 
     let userId: string = randomUUID();
     let note: string | undefined;
+    let emailConfirmationRequired = false;
+    let confirmationEmailSent = false;
+    const emailRedirectTo = resolveAuthRedirectUrl(input.emailRedirectTo, '/auth/callback');
 
     if (isSupabaseAdminConfigured && supabaseAdmin) {
       const { data: created, error } = await supabaseAdmin.auth.admin.createUser({
         email,
         password,
-        email_confirm: true,
+        // Requiere el toggle "Confirm email" en Supabase Auth + correo SMTP/plantilla.
+        email_confirm: false,
         user_metadata: { full_name: fullName, phone: phone || null },
         app_metadata: {},
       });
       if (error || !created.user) {
-        throw new BadRequestError(
-          error?.message || 'No se pudo crear el usuario',
-          'USER_CREATE_FAILED',
-        );
+        const msg = error?.message || 'No se pudo crear el usuario';
+        const code = /already|exists|registered/i.test(msg) ? 'EMAIL_EXISTS' : 'USER_CREATE_FAILED';
+        throw new BadRequestError(msg, code);
       }
       userId = created.user.id;
+      emailConfirmationRequired = true;
 
       await supabaseAdmin.from('users_profile').upsert({
         id: userId,
@@ -135,6 +143,12 @@ export class WispOnboardingService {
           user_id: userId,
           role_id: roleRow.id,
         }, { onConflict: 'user_id,role_id' });
+      }
+
+      const sent = await sendSignupConfirmationEmail(email, emailRedirectTo);
+      confirmationEmailSent = sent.sent;
+      if (!sent.sent) {
+        note = 'Cuenta creada, pero no se pudo enviar el correo de confirmación. Usa «Reenviar confirmación» en el login.';
       }
     } else {
       note = 'Usuario creado en modo store (sin Supabase Auth). Configura Supabase para login real.';
@@ -183,6 +197,8 @@ export class WispOnboardingService {
       email,
       slug: tenant.slug,
       onboarding,
+      emailConfirmationRequired,
+      confirmationEmailSent,
       note,
     };
   }

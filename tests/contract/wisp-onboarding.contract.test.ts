@@ -31,6 +31,9 @@ describe('API — WISP onboarding', () => {
     expect(res.body.tenantId).toBeTruthy();
     expect(res.body.slug).toBe('wisp-beta');
     expect(res.body.onboarding.status).toBe('in_progress');
+    // Sin Supabase Auth en tests: no exige confirmación por correo.
+    expect(res.body.emailConfirmationRequired).toBe(false);
+    expect(res.body.confirmationEmailSent).toBe(false);
   });
 
   it('GET /api/wisp-onboarding/status con tenant-default no exige wizard', async () => {
