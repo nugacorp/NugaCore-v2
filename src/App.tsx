@@ -34,10 +34,12 @@ const PortalModule = lazyWithRetry(() => import('./components/PortalModule'));
 const TechPwaModule = lazyWithRetry(() => import('./modules/tech-pwa/TechPwaModule'));
 import LoginForm from './components/LoginForm';
 import LandingPage from './components/LandingPage';
+import RegisterWispForm from './components/RegisterWispForm';
+import WispOnboardingWizard from './components/WispOnboardingWizard';
 import IsolatedAppShell from './components/IsolatedAppShell';
 import UserMenu from './components/UserMenu';
 import TopAlertsBell from './components/TopAlertsBell';
-import { authSession, restoreSessionProfileFromSupabase } from './lib/authSession';
+import { authSession, fetchProfileFromBackend, restoreSessionProfileFromSupabase } from './lib/authSession';
 import { UserSessionProfile, isSupabaseConfigured, supabase } from './lib/supabase';
 import { canAccessTab, getDefaultTabByRole } from './lib/rbac';
 import { getAppScope, resolveEntryTab, isIsolatedScope, forcedTabForScope } from './lib/appScope';
@@ -124,6 +126,7 @@ const isMikrotikWorkspaceTab = (tabId: string): boolean =>
 
 export default function App() {
   const [showLogin, setShowLogin] = useState<boolean>(false);
+  const [showRegister, setShowRegister] = useState<boolean>(false);
   const [userSession, setUserSession] = useState<UserSessionProfile | null>(() => authSession.readProfile());
   const [sessionBootstrapped, setSessionBootstrapped] = useState<boolean>(!isSupabaseConfigured);
 
@@ -318,6 +321,9 @@ export default function App() {
     if (userSession) {
       headers['x-user-role'] = userSession.role;
       headers['x-user-id'] = userSession.id;
+      if (userSession.tenantId) {
+        headers['x-tenant-id'] = userSession.tenantId;
+      }
     }
 
     return headers;
@@ -1058,20 +1064,67 @@ export default function App() {
 
   if (!userSession) {
     // Isolated scopes skip LandingPage — go directly to LoginForm
-    if (showLogin || isIsolatedScope(getAppScope())) {
+    if (showRegister && !isIsolatedScope(getAppScope())) {
       return (
-        <LoginForm 
-          onLoginSuccess={handleLoginSuccess} 
-          onBack={isIsolatedScope(getAppScope()) ? undefined : () => setShowLogin(false)} 
-        />
-      );
-    } else {
-      return (
-        <LandingPage
-          onEnterLogin={() => setShowLogin(true)}
+        <RegisterWispForm
+          onRegistered={handleLoginSuccess}
+          onBack={() => setShowRegister(false)}
+          onGoLogin={() => {
+            setShowRegister(false);
+            setShowLogin(true);
+          }}
         />
       );
     }
+    if (showLogin || isIsolatedScope(getAppScope())) {
+      return (
+        <LoginForm
+          onLoginSuccess={handleLoginSuccess}
+          onBack={isIsolatedScope(getAppScope()) ? undefined : () => setShowLogin(false)}
+          onGoRegister={isIsolatedScope(getAppScope()) ? undefined : () => {
+            setShowLogin(false);
+            setShowRegister(true);
+          }}
+        />
+      );
+    }
+    return (
+      <LandingPage
+        onEnterLogin={() => {
+          setShowRegister(false);
+          setShowLogin(true);
+        }}
+        onEnterRegister={() => {
+          setShowLogin(false);
+          setShowRegister(true);
+        }}
+      />
+    );
+  }
+
+  // Onboarding WISP obligatorio (no aplica a portal/tech aislados)
+  if (
+    userSession.onboardingRequired
+    && !isIsolatedScope(getAppScope())
+    && (userSession.role === 'Administrador' || userSession.role === 'Super Admin')
+  ) {
+    return (
+      <WispOnboardingWizard
+        getAuthHeaders={getAuthHeaders}
+        tenantId={userSession.tenantId}
+        companyHint={userSession.full_name}
+        onCompleted={async () => {
+          const token = authSession.readAccessToken();
+          const refreshed = token ? await fetchProfileFromBackend(token) : null;
+          if (refreshed) {
+            setUserSession(refreshed);
+            authSession.save(refreshed, token);
+          } else {
+            setUserSession({ ...userSession, onboardingRequired: false });
+          }
+        }}
+      />
+    );
   }
 
   // Isolated scopes (portal / tech-pwa): render with minimal shell, no Sidebar

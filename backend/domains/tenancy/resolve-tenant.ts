@@ -1,6 +1,5 @@
 import type { AuthContext } from '../../common/auth-context';
 import { isHardenedRuntime } from '../../config/env';
-import { isMultiTenantEnabled } from './flags';
 import { getTenancyService } from './service';
 import { DEFAULT_TENANT_ID } from './types';
 
@@ -8,20 +7,19 @@ import { DEFAULT_TENANT_ID } from './types';
  * Resuelve el tenant activo para un usuario.
  *
  * Orden:
- * 1. Si multi-tenant OFF → siempre DEFAULT_TENANT_ID
- * 2. Header `x-tenant-id` si el usuario es miembro (o trusted-headers en dev)
- * 3. Primera membresía activa del usuario
- * 4. DEFAULT_TENANT_ID
+ * 1. Header/claim `x-tenant-id` / app_metadata si el usuario es miembro
+ * 2. Primera membresía activa
+ * 3. DEFAULT_TENANT_ID (legacy single-WISP / staging sin memberships)
+ *
+ * Nota: ya no se apaga por MULTI_TENANT_ENABLED — los WISP nuevos deben
+ * resolver siempre su tenant para no mezclar datos. El flag solo documenta
+ * el modo operativo en /api/tenancy/status.
  */
 export const resolveTenantIdForUser = async (params: {
   userId: string;
   requestedTenantId?: string | null;
   source: AuthContext['source'];
 }): Promise<string> => {
-  if (!isMultiTenantEnabled()) {
-    return DEFAULT_TENANT_ID;
-  }
-
   const service = getTenancyService();
   const memberships = await service.listMembershipsForUser(params.userId);
   const memberTenantIds = new Set(memberships.map((m) => m.tenantId));
@@ -29,7 +27,6 @@ export const resolveTenantIdForUser = async (params: {
   const requested = (params.requestedTenantId || '').trim();
   if (requested) {
     if (memberTenantIds.has(requested)) return requested;
-    // En trusted-headers (dev) permitir override explícito para pruebas.
     if (params.source === 'trusted-headers' && !isHardenedRuntime) {
       return requested;
     }

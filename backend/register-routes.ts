@@ -45,6 +45,7 @@ import portalRoutes from './domains/portal/routes';
 import routerConfigAuditRoutes from './domains/router-config-audit/routes';
 import radiusRoutes from './domains/radius/routes';
 import tenancyRoutes from './domains/tenancy/routes';
+import wispOnboardingRoutes from './domains/wisp-onboarding/routes';
 import jobsRoutes from './domains/jobs/routes';
 
 export function registerRoutes(app: Express): void {
@@ -94,5 +95,6 @@ export function registerRoutes(app: Express): void {
   app.use(routerConfigAuditRoutes);
   app.use(radiusRoutes);
   app.use(tenancyRoutes);
+  app.use(wispOnboardingRoutes);
   app.use(jobsRoutes);
 }

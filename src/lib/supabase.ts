@@ -29,6 +29,11 @@ export interface UserSessionProfile {
   phone?: string;
   role: 'Super Admin' | 'Administrador' | 'Cobranza' | 'Técnico' | 'Soporte' | 'Solo lectura';
   avatar_url?: string;
+  /** Tenant WISP activo (aislado). */
+  tenantId?: string;
+  /** Wizard WISP obligatorio pendiente. */
+  onboardingRequired?: boolean;
+  onboardingStep?: string;
   /** Origen de la identidad verificada por el backend. */
   source?: 'supabase-jwt' | 'trusted-headers';
   /** Acciones permitidas para el rol (desde /api/auth/me). */
@@ -50,35 +55,4 @@ export function normalizeUserRole(value: string | null | undefined): UserRole {
   return 'Solo lectura';
 }
 
-// ====================================================================
-// Quick-login de STAGING (Fase 4.3.1 hardening).
-//
-// Solo PRE-RELLENA el email de los usuarios de staging para acelerar la
-// validación de Hermes. NO contiene passwords, NI tokens, NI perfiles
-// embebidos: la autenticación real ocurre vía Supabase con la contraseña
-// que el operador teclea (el password de staging vive root-only, ver
-// docs/STAGING_AUTH_USERS.md).
-//
-// Gateado por VITE_ENABLE_QUICK_LOGIN: apagado por defecto, de modo que el
-// bundle de PRODUCCIÓN no muestra ningún acceso rápido.
-// ====================================================================
-export interface QuickLoginEntry {
-  role: UserRole;
-  email: string;
-  label: string;
-}
-
-export const STAGING_QUICK_LOGINS: QuickLoginEntry[] = [
-  { role: 'Super Admin', email: 'superadmin@staging.nugacore.local', label: 'Super Admin' },
-  { role: 'Administrador', email: 'admin@staging.nugacore.local', label: 'Administrador' },
-  { role: 'Cobranza', email: 'billing@staging.nugacore.local', label: 'Cobranza' },
-  { role: 'Técnico', email: 'tech@staging.nugacore.local', label: 'Técnico' },
-  { role: 'Soporte', email: 'support@staging.nugacore.local', label: 'Soporte' },
-  { role: 'Solo lectura', email: 'readonly@staging.nugacore.local', label: 'Solo lectura' },
-];
-
-/**
- * ¿Mostrar el panel de quick-login (prefill de email)? Apagado por defecto.
- * Habilitar SOLO en staging con `VITE_ENABLE_QUICK_LOGIN=true` en build-time.
- */
-export const isQuickLoginEnabled = (viteEnv.VITE_ENABLE_QUICK_LOGIN || '').trim() === 'true';
+// Quick-login de staging eliminado: login profesional multi-tenant (correo + contraseña).

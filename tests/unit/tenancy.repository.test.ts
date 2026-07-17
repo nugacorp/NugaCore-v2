@@ -56,17 +56,17 @@ describe('TenancyService status + resolve', () => {
     expect(status.multiTenantEnabled).toBe(true);
   });
 
-  it('resolveTenantIdForUser usa default con multi-tenant OFF', async () => {
+  it('resolveTenantIdForUser usa default si no hay memberships', async () => {
+    resetTenancyService();
     const id = await resolveTenantIdForUser({
-      userId: 'any',
-      requestedTenantId: 'tenant-other',
-      source: 'trusted-headers',
+      userId: 'any-user-without-membership',
+      requestedTenantId: null,
+      source: 'supabase-jwt',
     });
     expect(id).toBe(DEFAULT_TENANT_ID);
   });
 
-  it('resolveTenantIdForUser respeta membership cuando multi-tenant ON', async () => {
-    process.env.MULTI_TENANT_ENABLED = 'true';
+  it('resolveTenantIdForUser respeta membership (siempre, no solo con flag)', async () => {
     resetTenancyService();
     const { getTenancyService } = await import('../../backend/domains/tenancy/service');
     const svc = getTenancyService();

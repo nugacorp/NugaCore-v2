@@ -4,7 +4,6 @@ import { store } from '../../../backend/state/store';
 import { asyncHandler } from '../../common/errors';
 import { READ_ROLES, requireRoles } from '../../common/rbac';
 import { getCustomersService } from '../customers/service';
-import { isMultiTenantEnabled } from '../tenancy/flags';
 import { tenantIdFromRequest } from '../tenancy/tenant-scope';
 import { getFtthService } from './ftth-service';
 import { getNetworkService } from './service';
@@ -58,7 +57,7 @@ const recalculateTowerStatusFromSectors = (towerId: string): void => {
 router.get('/api/network-towers', requireRoles(READ_ROLES), asyncHandler(async (req, res) => {
   const status = parseTowerStatus(req.query.status);
   const q = String(req.query.q || '').trim();
-  const tenantId = isMultiTenantEnabled() ? tenantIdFromRequest(req) : undefined;
+  const tenantId = tenantIdFromRequest(req);
   const rows = await getNetworkService().listTowers({
     status: status ?? undefined,
     q: q || undefined,
@@ -68,7 +67,7 @@ router.get('/api/network-towers', requireRoles(READ_ROLES), asyncHandler(async (
 }));
 
 router.get('/api/network-towers/:id', requireRoles(READ_ROLES), asyncHandler(async (req, res) => {
-  const tenantId = isMultiTenantEnabled() ? tenantIdFromRequest(req) : undefined;
+  const tenantId = tenantIdFromRequest(req);
   const tower = await getNetworkService().getTower(req.params.id, tenantId);
   if (!tower) {
     return res.status(404).json({ error: 'Tower not found' });
@@ -77,7 +76,7 @@ router.get('/api/network-towers/:id', requireRoles(READ_ROLES), asyncHandler(asy
 }));
 
 router.get('/api/network-towers/:id/onboarding', requireRoles(READ_ROLES), asyncHandler(async (req, res) => {
-  const tenantId = isMultiTenantEnabled() ? tenantIdFromRequest(req) : undefined;
+  const tenantId = tenantIdFromRequest(req);
   const profile = await getNetworkService().getTowerOnboarding(req.params.id, tenantId);
   if (!profile) return res.status(404).json({ error: 'Onboarding profile not found' });
   res.json(profile);

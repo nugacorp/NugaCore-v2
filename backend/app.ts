@@ -3,6 +3,7 @@ import { attachAuthContext } from './common/auth-context';
 import { errorHandler, notFoundHandler } from './common/errors';
 import { applyHttpSecurity } from './common/http-security';
 import { logger } from './common/logger';
+import { enforceWispOnboarding } from './common/require-onboarding';
 import { attachRequestId } from './common/request-context';
 import { attachSecurityAudit } from './common/security-audit';
 import { registerRoutes } from './register-routes';
@@ -24,6 +25,7 @@ export function createApp() {
   });
   app.use(attachAuthContext);
   app.use(attachSecurityAudit);
+  app.use(enforceWispOnboarding);
 
   registerRoutes(app);
 

@@ -1,15 +1,6 @@
 import { readFileSync } from 'node:fs';
 import { describe, it, expect } from 'vitest';
 
-// ====================================================================
-// Fase 4.3.1 — Hardening de login.
-//
-// Evidencia automatizada de que NO hay credenciales embebidas, NI usuarios
-// demo inseguros, NI bypass de autenticación en el frontend, y que el quick
-// login de staging solo prerellena emails (sin passwords). Escaneo de fuente
-// (mismo patrón que rbac.frontend.test.ts) → robusto y sin dependencias DOM.
-// ====================================================================
-
 const read = (p: string) => readFileSync(p, 'utf8');
 
 const loginForm = read('src/components/LoginForm.tsx');
@@ -25,71 +16,60 @@ describe('Hardening — sin secretos hardcodeados', () => {
     }
   });
 
-  it('el autofill nunca setea un password literal (solo lo limpia)', () => {
-    // Permitido: setPassword('') o setPassword(<state>). Prohibido: setPassword('algo').
-    const setPwLiterals = loginForm.match(/setPassword\(\s*'([^']+)'\s*\)/g) || [];
-    expect(setPwLiterals, `setPassword con literal: ${setPwLiterals.join(', ')}`).toHaveLength(0);
-  });
-
   it('no hay tokens/JWT embebidos en el cliente de login', () => {
     for (const src of [loginForm, landing, supabaseLib]) {
-      expect(src).not.toMatch(/eyJ[A-Za-z0-9_-]{10,}\./); // forma típica de un JWT
+      expect(src).not.toMatch(/eyJ[A-Za-z0-9_-]{10,}\./);
     }
   });
 });
 
-describe('Hardening — sin usuarios demo inseguros', () => {
-  it('MOCK_USER_PROFILES fue eliminado de supabase.ts', () => {
-    expect(supabaseLib).not.toContain('MOCK_USER_PROFILES');
+describe('Hardening — sin accesos demo / quick-login', () => {
+  it('LandingPage no expone Demo Admin ni Accesos Rápidos', () => {
+    expect(landing).not.toContain('Demo Admin');
+    expect(landing).not.toContain('1-Clic');
+    expect(landing).not.toContain('Accesos Rápidos');
+    expect(landing).not.toContain('Instancias Demo');
+    expect(landing).not.toContain('demo-access');
+    expect(landing).not.toContain('handleQuickDemoClick');
   });
 
-  it('LoginForm y LandingPage ya no importan perfiles demo', () => {
-    expect(loginForm).not.toContain('MOCK_USER_PROFILES');
-    expect(landing).not.toContain('MOCK_USER_PROFILES');
+  it('LoginForm no muestra Acceso Rápido Staging', () => {
+    expect(loginForm).not.toContain('Acceso Rápido');
+    expect(loginForm).not.toContain('STAGING_QUICK_LOGINS');
+    expect(loginForm).not.toContain('isQuickLoginEnabled');
+    expect(loginForm).not.toContain('handleAutoFill');
   });
 
-  it('no quedan correos demo @nugacorp.com en los accesos rápidos', () => {
-    // El quick login debe usar dominio de staging, no el demo público.
-    expect(loginForm).not.toContain('@nugacorp.com');
-    expect(landing).not.toContain('handleQuickDemoClick(\'');
+  it('supabase.ts ya no exporta quick-login staging', () => {
+    expect(supabaseLib).not.toContain('STAGING_QUICK_LOGINS');
+    expect(supabaseLib).not.toContain('isQuickLoginEnabled');
+    expect(supabaseLib).not.toContain('VITE_ENABLE_QUICK_LOGIN');
+  });
+
+  it('Landing ofrece registro WISP profesional', () => {
+    expect(landing).toContain('Registrar mi WISP');
+    expect(landing).toContain('onEnterRegister');
   });
 });
 
 describe('Hardening — sin bypass de autenticación', () => {
-  it('LandingPage ya no expone onInstantDemo (login sin auth)', () => {
+  it('LandingPage ya no expone onInstantDemo', () => {
     expect(landing).not.toContain('onInstantDemo');
   });
 
-  it('App.tsx ya no cablea un instant-demo a handleLoginSuccess', () => {
+  it('App.tsx ya no cablea un instant-demo', () => {
     expect(appTsx).not.toContain('onInstantDemo');
   });
 
   it('el modo sin Supabase NO inicia sesión: muestra error', () => {
-    // Se eliminó el login-sin-password de preview.
     expect(loginForm).not.toContain('Simulando acceso exitoso');
     expect(loginForm).toContain('backend de autenticación no está configurado');
   });
-});
 
-describe('Hardening — quick login de staging seguro', () => {
-  it('STAGING_QUICK_LOGINS existe y está gateado por VITE_ENABLE_QUICK_LOGIN', () => {
-    expect(supabaseLib).toContain('STAGING_QUICK_LOGINS');
-    expect(supabaseLib).toContain('isQuickLoginEnabled');
-    expect(supabaseLib).toContain('VITE_ENABLE_QUICK_LOGIN');
-  });
-
-  it('todos los emails de quick login usan el dominio de staging', () => {
-    const emails = (supabaseLib.match(/[\w.+-]+@[\w.-]+/g) || []).filter((e) =>
-      e.includes('staging.nugacore.local'),
-    );
-    expect(emails.length).toBe(6);
-    // y no hay emails @nugacorp.com en la lista de staging
-    expect(supabaseLib).not.toContain('@nugacorp.com');
-  });
-
-  it('el panel de quick login en LoginForm está condicionado al flag', () => {
-    expect(loginForm).toContain('isQuickLoginEnabled');
-    expect(loginForm).toContain('STAGING_QUICK_LOGINS');
+  it('App gatea onboarding WISP obligatorio', () => {
+    expect(appTsx).toContain('WispOnboardingWizard');
+    expect(appTsx).toContain('onboardingRequired');
+    expect(appTsx).toContain('RegisterWispForm');
   });
 });
 

@@ -49,6 +49,13 @@ Claim opcional: `app_metadata.tenant_id` (solo service_role); también requiere 
 - Customers (`/api/clients*`)
 - Network towers + onboarding
 - RADIUS sessions
+- WireGuard servers/peers (API scoped; **host-apply worker sigue global** → un `wg0` de plataforma)
+
+## Onboarding WISP obligatorio
+
+Nuevos WISP: `POST /api/wisp-onboarding/register` → tenant + membership owner → wizard
+(empresa → zona → día/hora de corte → primer router) gateado en `App.tsx` hasta `complete`.
+`tenant-default` (legacy/staging) no fuerza el wizard.
 
 Otros dominios deben adoptar `tenantIdFromRequest(req)` + `.eq('tenant_id', …)` / stamp en create.
 

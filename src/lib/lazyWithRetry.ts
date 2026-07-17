@@ -38,7 +38,7 @@ export async function importWithChunkRetry<T extends ComponentType<unknown>>(
   } catch (error) {
     if (!isChunkLoadError(error)) throw error;
 
-    let reloaded = false;
+    let reloaded: boolean;
     try {
       reloaded = sessionStorage.getItem(CHUNK_RELOAD_KEY) === '1';
     } catch {

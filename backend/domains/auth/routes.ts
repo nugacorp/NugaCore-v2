@@ -2,6 +2,7 @@ import { Router } from 'express';
 import { asyncHandler } from '../../common/errors';
 import { listRolePermissions } from '../../common/action-permissions';
 import { isSupabaseAdminConfigured, supabaseAdmin } from '../../services/supabase-admin';
+import { getWispOnboardingService } from '../wisp-onboarding/service';
 
 const router = Router();
 
@@ -46,6 +47,21 @@ router.get('/api/auth/me', asyncHandler(async (req, res) => {
     }
   }
 
+  let onboardingRequired: boolean;
+  let onboardingStep: string | null = null;
+  try {
+    const onboarding = getWispOnboardingService();
+    onboardingRequired = await onboarding.isOnboardingRequired(tenantId);
+    if (onboardingRequired) {
+      const state = await onboarding.getStatus(tenantId);
+      onboardingStep = state?.currentStep ?? 'company';
+    }
+  } catch {
+    // Fail-closed: si no podemos verificar, no saltar el wizard en tenants nuevos.
+    onboardingRequired = tenantId !== 'tenant-default';
+    onboardingStep = onboardingRequired ? 'company' : null;
+  }
+
   res.json({
     userId,
     email,
@@ -54,6 +70,8 @@ router.get('/api/auth/me', asyncHandler(async (req, res) => {
     avatarUrl,
     role,
     tenantId,
+    onboardingRequired,
+    onboardingStep,
     permissions: listRolePermissions(role),
     source,
   });

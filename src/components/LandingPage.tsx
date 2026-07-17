@@ -6,7 +6,6 @@ import {
   Users, 
   DollarSign, 
   MapPin, 
-  Sparkles, 
   Wifi, 
   ClipboardCheck, 
   Server,
@@ -15,9 +14,10 @@ import {
 } from 'lucide-react';
 interface LandingPageProps {
   onEnterLogin: () => void;
+  onEnterRegister?: () => void;
 }
 
-export default function LandingPage({ onEnterLogin }: LandingPageProps) {
+export default function LandingPage({ onEnterLogin, onEnterRegister }: LandingPageProps) {
   // Calculator States
   const [clientCount, setClientCount] = useState<number>(350);
   const [avgPlanPrice, setAvgPlanPrice] = useState<number>(25);
@@ -51,13 +51,6 @@ export default function LandingPage({ onEnterLogin }: LandingPageProps) {
     { name: "Anillo Industrial Norte", location: "Fibra Troncal 3", load: "54%", status: "Optimo", rx: "-19.1 dBm" }
   ];
 
-  // Hardening 4.3.1: se eliminó el "instant demo" que iniciaba sesión con un
-  // perfil mock SIN autenticación. Los accesos de la landing ahora enrutan al
-  // login real (Supabase). No hay bypass de autenticación.
-  const handleQuickDemoClick = () => {
-    onEnterLogin();
-  };
-
   return (
     <div id="nugacore-landing" className="min-h-screen bg-slate-950 font-sans text-slate-100 selection:bg-indigo-600/30 selection:text-white relative overflow-x-hidden">
       
@@ -86,19 +79,20 @@ export default function LandingPage({ onEnterLogin }: LandingPageProps) {
             <a href="#features" className="hover:text-white transition-colors">Módulos</a>
             <a href="#roi-calculator" className="hover:text-white transition-colors">Calculadora ROI</a>
             <a href="#telemetry" className="hover:text-white transition-colors">Simulación NOC</a>
-            <a href="#demo-access" className="flex items-center space-x-1 text-indigo-400 hover:text-indigo-300">
-              <Sparkles className="w-3.5 h-3.5 text-yellow-500 animate-pulse" />
-              <span>Accesos Rápidos</span>
+            <a href="#wisp-register" className="hover:text-indigo-300 text-indigo-400 transition-colors">
+              Registrar WISP
             </a>
           </nav>
 
           <div className="flex items-center space-x-3">
-            <button
-              onClick={handleQuickDemoClick}
-              className="hidden sm:inline-flex items-center px-4 py-2 border border-slate-800 hover:border-indigo-500/50 hover:bg-slate-900/60 rounded-xl text-xs font-semibold font-mono text-slate-300 transition"
-            >
-              Demo Admin (1-Clic)
-            </button>
+            {onEnterRegister && (
+              <button
+                onClick={onEnterRegister}
+                className="hidden sm:inline-flex items-center px-4 py-2 border border-slate-700 hover:border-emerald-500/50 hover:bg-slate-900/60 rounded-xl text-xs font-semibold text-slate-200 transition"
+              >
+                Registrar mi WISP
+              </button>
+            )}
             <button
               onClick={onEnterLogin}
               className="bg-indigo-600 hover:bg-indigo-500 active:bg-indigo-700 text-white px-5 py-2.5 rounded-xl text-xs font-bold transition flex items-center space-x-1.5 shadow-md shadow-indigo-600/10"
@@ -131,21 +125,22 @@ export default function LandingPage({ onEnterLogin }: LandingPageProps) {
             Administra de punta a punta tu ISP. Controla facturación recurrente guiada por colas del router, suspende deudores automáticamente vía MikroTik APIs, y diagnositica incidentes con Copiloto de Inteligencia Artificial para el NOC.
           </p>
 
-          <div className="flex flex-col sm:flex-row items-center justify-center gap-3.5 max-w-md mx-auto pt-4">
+          <div className="flex flex-col sm:flex-row items-center justify-center gap-3.5 max-w-lg mx-auto pt-4">
             <button
               onClick={onEnterLogin}
               className="w-full bg-gradient-to-r from-indigo-600 to-sky-600 hover:from-indigo-500 hover:to-sky-500 text-white py-3.5 px-6 rounded-2xl font-bold text-sm transition shadow-lg shadow-indigo-600/15 flex items-center justify-center space-x-2 text-center"
             >
-              <span>Ingresar con mis Credenciales</span>
+              <span>Ingresar a mi consola</span>
               <ArrowRight className="w-4 h-4" />
             </button>
-            <button
-              onClick={handleQuickDemoClick}
-              className="w-full bg-slate-900 hover:bg-slate-850 border border-slate-800 hover:border-slate-700 text-slate-300 py-3.5 px-6 rounded-2xl font-semibold text-sm transition flex items-center justify-center space-x-2 text-center"
-            >
-              <Sparkles className="w-4 h-4 text-amber-400" />
-              <span>Instancias Demo Rápido</span>
-            </button>
+            {onEnterRegister && (
+              <button
+                onClick={onEnterRegister}
+                className="w-full bg-slate-900 hover:bg-slate-800 border border-slate-700 hover:border-emerald-500/40 text-slate-100 py-3.5 px-6 rounded-2xl font-semibold text-sm transition flex items-center justify-center space-x-2 text-center"
+              >
+                <span>Registrar mi WISP</span>
+              </button>
+            )}
           </div>
 
           {/* Quick Metrics Line */}
@@ -529,92 +524,35 @@ export default function LandingPage({ onEnterLogin }: LandingPageProps) {
         </div>
       </section>
 
-      {/* QUICK INSTANT DEMO HUB & USER LOGIN INTERACTIVELY */}
-      <section id="demo-access" className="py-16 bg-slate-900 border-t border-slate-800 px-4 sm:px-6 relative overflow-hidden">
-        <div className="absolute top-1/2 left-1/2 -translate-x-1/2 -translate-y-1/2 w-96 h-96 bg-indigo-500/10 rounded-full blur-[110px] pointer-events-none"></div>
-        <div className="max-w-4xl mx-auto space-y-10 text-center relative z-10">
-          
+      {/* Registro WISP — CTA profesional (sin demos / quick-login) */}
+      <section id="wisp-register" className="py-16 bg-slate-900 border-t border-slate-800 px-4 sm:px-6 relative overflow-hidden">
+        <div className="absolute top-1/2 left-1/2 -translate-x-1/2 -translate-y-1/2 w-96 h-96 bg-emerald-500/10 rounded-full blur-[110px] pointer-events-none"></div>
+        <div className="max-w-3xl mx-auto space-y-8 text-center relative z-10">
           <div className="space-y-3">
-            <h2 className="text-2xl sm:text-4xl font-extrabold text-white tracking-tight">Prueba el Poder de NugaCore Ahora</h2>
-            <p className="text-xs sm:text-sm text-slate-400 max-w-2xl mx-auto font-mono">
-              Para simplificar tu revisión, puedes elegir cualquiera de los roles operacionales pre-registrado para ingresar directamente y evaluar flujos de red:
+            <h2 className="text-2xl sm:text-4xl font-extrabold text-white tracking-tight">
+              Activa tu WISP en NugaCore
+            </h2>
+            <p className="text-sm text-slate-400 max-w-2xl mx-auto leading-relaxed">
+              Crea la cuenta de tu empresa, define tu primera zona, configura el día de corte
+              y conecta tu primer router. Cada WISP opera aislado: misma plataforma, datos separados.
             </p>
           </div>
-
-          <div className="grid grid-cols-1 sm:grid-cols-4 gap-4">
-            
-            {/* Roles selector button 1 */}
+          <div className="flex flex-col sm:flex-row items-center justify-center gap-3 max-w-md mx-auto">
+            {onEnterRegister && (
+              <button
+                onClick={onEnterRegister}
+                className="w-full bg-emerald-600 hover:bg-emerald-500 text-white py-3.5 px-6 rounded-2xl font-bold text-sm transition shadow-lg shadow-emerald-900/30"
+              >
+                Empezar registro
+              </button>
+            )}
             <button
-              onClick={handleQuickDemoClick}
-              className="bg-slate-950 hover:bg-slate-850 p-5 rounded-2xl border border-slate-850 hover:border-indigo-500/50 transition text-left flex flex-col justify-between h-40 group"
+              onClick={onEnterLogin}
+              className="w-full bg-slate-950 hover:bg-slate-850 border border-slate-700 text-slate-200 py-3.5 px-6 rounded-2xl font-semibold text-sm transition"
             >
-              <div>
-                <span className="text-[10px] uppercase tracking-wider font-bold text-indigo-400 font-mono">Ing. del NOC</span>
-                <h4 className="text-sm font-bold text-white mt-1 group-hover:text-indigo-300">Rodrigo Nuga</h4>
-                <p className="text-[11px] text-slate-500 font-mono mt-1">Super Admin</p>
-              </div>
-              <div className="flex items-center justify-between text-[11px] text-slate-400 font-mono pt-4 border-t border-slate-900 w-full">
-                <span>Acceder</span>
-                <ArrowRight className="w-3.5 h-3.5 group-hover:translate-x-1 transition-transform" />
-              </div>
+              Ya tengo cuenta
             </button>
-
-            {/* Roles selector button 2 */}
-            <button
-              onClick={handleQuickDemoClick}
-              className="bg-slate-950 hover:bg-slate-850 p-5 rounded-2xl border border-slate-850 hover:border-emerald-500/50 transition text-left flex flex-col justify-between h-40 group"
-            >
-              <div>
-                <span className="text-[10px] uppercase tracking-wider font-bold text-emerald-400 font-mono">Finanzas</span>
-                <h4 className="text-sm font-bold text-white mt-1 group-hover:text-emerald-300">Luisa Rojas</h4>
-                <p className="text-[11px] text-slate-500 font-mono mt-1">Cobranza</p>
-              </div>
-              <div className="flex items-center justify-between text-[11px] text-slate-400 font-mono pt-4 border-t border-slate-900 w-full">
-                <span>Acceder</span>
-                <ArrowRight className="w-3.5 h-3.5 group-hover:translate-x-1 transition-transform" />
-              </div>
-            </button>
-
-            {/* Roles selector button 3 */}
-            <button
-              onClick={handleQuickDemoClick}
-              className="bg-slate-950 hover:bg-slate-850 p-5 rounded-2xl border border-slate-850 hover:border-amber-500/50 transition text-left flex flex-col justify-between h-40 group"
-            >
-              <div>
-                <span className="text-[10px] uppercase tracking-wider font-bold text-amber-400 font-mono">Planta Externa</span>
-                <h4 className="text-sm font-bold text-white mt-1 group-hover:text-amber-300">Carlos Mendoza</h4>
-                <p className="text-[11px] text-slate-500 font-mono mt-1">Técnico Operador</p>
-              </div>
-              <div className="flex items-center justify-between text-[11px] text-slate-400 font-mono pt-4 border-t border-slate-900 w-full">
-                <span>Acceder</span>
-                <ArrowRight className="w-3.5 h-3.5 group-hover:translate-x-1 transition-transform" />
-              </div>
-            </button>
-
-            {/* Roles selector button 4 */}
-            <button
-              onClick={handleQuickDemoClick}
-              className="bg-slate-950 hover:bg-slate-850 p-5 rounded-2xl border border-slate-850 hover:border-blue-500/50 transition text-left flex flex-col justify-between h-40 group"
-            >
-              <div>
-                <span className="text-[10px] uppercase tracking-wider font-bold text-blue-400 font-mono">Atención Soporte</span>
-                <h4 className="text-sm font-bold text-white mt-1 group-hover:text-blue-300">Sofía Valenzuela</h4>
-                <p className="text-[11px] text-slate-500 font-mono mt-1">Soporte NOC</p>
-              </div>
-              <div className="flex items-center justify-between text-[11px] text-slate-400 font-mono pt-4 border-t border-slate-900 w-full">
-                <span>Acceder</span>
-                <ArrowRight className="w-3.5 h-3.5 group-hover:translate-x-1 transition-transform" />
-              </div>
-            </button>
-
           </div>
-
-          <div className="pt-6">
-            <p className="text-xs text-slate-500">
-              ¿Quieres configurar tu propia base de datos Supabase? Te informará sobre la detección automática de entornos en <span className="font-mono text-slate-400">.env.example</span>.
-            </p>
-          </div>
-
         </div>
       </section>
 
