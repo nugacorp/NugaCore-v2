@@ -36,6 +36,7 @@ import {
   resolvePaymentAmount,
   type BillingBadgeTone,
 } from '../lib/billingView';
+import PlansAdminPanel from './PlansAdminPanel';
 
 interface BillingModuleProps {
   invoices: Invoice[];
@@ -91,7 +92,7 @@ export default function BillingModule({
 }: BillingModuleProps) {
   const canManage = canManageBilling(userRole);
 
-  const [billingTab, setBillingTab] = useState<'invoices' | 'collections'>('invoices');
+  const [billingTab, setBillingTab] = useState<'plans' | 'invoices' | 'collections'>('plans');
   const [promises, setPromises] = useState<PaymentPromiseRow[]>([]);
   const [cashRegister, setCashRegister] = useState<CashRegisterSummary | null>(null);
   const [promiseClientId, setPromiseClientId] = useState('');
@@ -396,8 +397,16 @@ export default function BillingModule({
 
   return (
     <div className="space-y-6 text-slate-200 p-6 bg-slate-900 min-h-screen font-sans">
-      {/* Tab bar: Facturas | Cobranza operativa */}
+      {/* Tab bar: Planes | Facturas | Cobranza */}
       <div className="flex gap-2 border-b border-slate-800 pb-2">
+        <button
+          type="button"
+          id="billing-tab-plans"
+          onClick={() => setBillingTab('plans')}
+          className={`px-4 py-2 rounded-t-xl text-xs font-mono uppercase ${billingTab === 'plans' ? 'bg-slate-950 text-sky-300 border border-b-0 border-slate-800' : 'text-slate-500'}`}
+        >
+          Planes
+        </button>
         <button
           type="button"
           id="billing-tab-invoices"
@@ -415,6 +424,16 @@ export default function BillingModule({
           <Wallet className="w-3.5 h-3.5" /> Cobranza
         </button>
       </div>
+
+      {billingTab === 'plans' && (
+        <div id="billing-plans-panel" className="bg-slate-950 border border-slate-800 rounded-xl p-4">
+          <PlansAdminPanel
+            getAuthHeaders={getAuthHeaders}
+            canManage={userRole === 'Super Admin' || userRole === 'Administrador'}
+            userRole={userRole}
+          />
+        </div>
+      )}
 
       {billingTab === 'collections' && (
         <div id="billing-collections-panel" className="grid grid-cols-1 lg:grid-cols-2 gap-6">

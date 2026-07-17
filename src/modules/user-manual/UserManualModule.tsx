@@ -128,7 +128,8 @@ const SECTIONS: ManualSection[] = [
     icon: CreditCard,
     summary: 'Catálogo de planes, emisión de facturas y registro de cobros.',
     steps: [
-      'Entra a "Clientes → Facturación / Planes".',
+      'Entra a "Facturación → Planes" para crear el catálogo (megas + precio + tipo PPPoE/Queue).',
+      'Al dar de alta un cliente en Clientes, elige zona (corte + router) y plan; se encola la provisión MikroTik.',
       'Genera o edita facturas de un cliente.',
       'Registra el pago de una factura (total o parcial) y consulta el estado de cuenta.',
     ],
