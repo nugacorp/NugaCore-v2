@@ -8,7 +8,7 @@ describe('FTTH nap_ports embed', () => {
       resolve(__dirname, '../../backend/domains/network/ftth-service.ts'),
       'utf8',
     );
-    expect(src).toContain("nap_ports!nap_id(*)");
-    expect(src).not.toMatch(/\.select\('*\s*,\s*nap_ports\(\*\)'/);
+    expect(src).toContain('nap_ports!nap_id(*)');
+    expect(src.includes("select('*, nap_ports(*)')")).toBe(false);
   });
 });
