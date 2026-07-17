@@ -2,8 +2,31 @@ import type { SupabaseClient } from '@supabase/supabase-js';
 import { store } from '../../state/store';
 import type { IntegrationSettingsPatch, IntegrationSettingsRecord } from './types';
 import { nowIso } from '../../common/time';
+import { encryptSecret, decryptSecret } from '../../services/crypto';
 
 const DEFAULT_ID = 'default';
+
+// Cifrado en reposo de credenciales (AES-256-GCM, reutiliza MIKROTIK_CREDENTIALS_KEY).
+// Solo se aplica en el límite con la DB (rowToRecord/recordToRow): el record en
+// memoria y el store siempre manejan texto plano. Únicamente las credenciales reales
+// se cifran; CLABE/merchant/beneficiario NO (son datos que el cliente ve para pagar).
+const encField = (value: string): string | null => {
+  const v = (value ?? '').trim();
+  return v ? encryptSecret(v) : null;
+};
+
+// Tolera valores legacy en texto plano: si no descifra (formato inválido o auth tag
+// que no coincide), se devuelve tal cual. Así la migración a cifrado no rompe filas
+// escritas antes de este cambio.
+const decField = (value: unknown): string => {
+  const raw = String(value ?? '');
+  if (!raw) return '';
+  try {
+    return decryptSecret(raw);
+  } catch {
+    return raw;
+  }
+};
 
 export const emptyIntegrationSettings = (): IntegrationSettingsRecord => ({
   id: DEFAULT_ID,
@@ -32,21 +55,21 @@ const rowToRecord = (row: Record<string, unknown>): IntegrationSettingsRecord =>
   id: String(row.id ?? DEFAULT_ID),
   stripeEnabled: Boolean(row.stripe_enabled),
   stripePublishableKey: String(row.stripe_publishable_key ?? ''),
-  stripeSecretKey: String(row.stripe_secret_key ?? ''),
-  stripeWebhookSecret: String(row.stripe_webhook_secret ?? ''),
+  stripeSecretKey: decField(row.stripe_secret_key),
+  stripeWebhookSecret: decField(row.stripe_webhook_secret),
   whatsappEnabled: Boolean(row.whatsapp_enabled),
   whatsappPhoneNumberId: String(row.whatsapp_phone_number_id ?? ''),
-  whatsappAccessToken: String(row.whatsapp_access_token ?? ''),
+  whatsappAccessToken: decField(row.whatsapp_access_token),
   whatsappBusinessAccountId: String(row.whatsapp_business_account_id ?? ''),
-  whatsappWebhookVerifyToken: String(row.whatsapp_webhook_verify_token ?? ''),
+  whatsappWebhookVerifyToken: decField(row.whatsapp_webhook_verify_token),
   telegramEnabled: Boolean(row.telegram_enabled),
-  telegramBotToken: String(row.telegram_bot_token ?? ''),
+  telegramBotToken: decField(row.telegram_bot_token),
   telegramBotUsername: String(row.telegram_bot_username ?? ''),
   codiEnabled: Boolean(row.codi_enabled),
   codiMerchantId: String(row.codi_merchant_id ?? ''),
   codiBeneficiaryName: String(row.codi_beneficiary_name ?? ''),
   codiClabe: String(row.codi_clabe ?? ''),
-  codiWebhookSecret: String(row.codi_webhook_secret ?? ''),
+  codiWebhookSecret: decField(row.codi_webhook_secret),
   codiCertificateRef: String(row.codi_certificate_ref ?? ''),
   updatedAt: String(row.updated_at ?? nowIso()),
 });
@@ -55,21 +78,21 @@ const recordToRow = (rec: IntegrationSettingsRecord) => ({
   id: rec.id,
   stripe_enabled: rec.stripeEnabled,
   stripe_publishable_key: rec.stripePublishableKey || null,
-  stripe_secret_key: rec.stripeSecretKey || null,
-  stripe_webhook_secret: rec.stripeWebhookSecret || null,
+  stripe_secret_key: encField(rec.stripeSecretKey),
+  stripe_webhook_secret: encField(rec.stripeWebhookSecret),
   whatsapp_enabled: rec.whatsappEnabled,
   whatsapp_phone_number_id: rec.whatsappPhoneNumberId || null,
-  whatsapp_access_token: rec.whatsappAccessToken || null,
+  whatsapp_access_token: encField(rec.whatsappAccessToken),
   whatsapp_business_account_id: rec.whatsappBusinessAccountId || null,
-  whatsapp_webhook_verify_token: rec.whatsappWebhookVerifyToken || null,
+  whatsapp_webhook_verify_token: encField(rec.whatsappWebhookVerifyToken),
   telegram_enabled: rec.telegramEnabled,
-  telegram_bot_token: rec.telegramBotToken || null,
+  telegram_bot_token: encField(rec.telegramBotToken),
   telegram_bot_username: rec.telegramBotUsername || null,
   codi_enabled: rec.codiEnabled,
   codi_merchant_id: rec.codiMerchantId || null,
   codi_beneficiary_name: rec.codiBeneficiaryName || null,
   codi_clabe: rec.codiClabe || null,
-  codi_webhook_secret: rec.codiWebhookSecret || null,
+  codi_webhook_secret: encField(rec.codiWebhookSecret),
   codi_certificate_ref: rec.codiCertificateRef || null,
   updated_at: rec.updatedAt,
 });

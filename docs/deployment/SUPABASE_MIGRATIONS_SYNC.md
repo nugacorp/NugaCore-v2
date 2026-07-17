@@ -5,11 +5,12 @@ Proyecto Supabase: `elshnzkceutvjzxvzqad` (nugacore-staging).
 
 ## Estado actual (2026-07-16, tras barrido de las 48 ramas)
 
-**Totalmente reconciliado. Cero migraciones pendientes.** Las **35 migraciones**
-que existen en **cualquier rama del repo** (no solo en `main`) están aplicadas y
-registradas en `supabase_migrations.schema_migrations`. El historial remoto tiene
-**36 registros**: las 35 + 1 huérfano, cuyo origen ya está **confirmado** y es
-inocuo (ver abajo).
+**Reconciliación actualizada.** Staging tiene aplicadas y registradas las
+migraciones de advisors (`20260717013000`, `20260717020000`, `20260717030000`),
+el fail-closed de onboarding (`20260717040000`) y el parche adicional
+`20260718174436_rls_policies_inventory_transfers_warehouses`. El único advisor
+security que queda activo es de Dashboard/Auth (`auth_leaked_password_protection`),
+no resoluble por SQL.
 
 **Ninguna tabla de `public` queda sin RLS** (verificado contra `pg_class.relrowsecurity`).
 
@@ -37,6 +38,17 @@ Resultado 2026-07-16: **A) vacío**, **B) solo `20260619033952`**.
 > (merges #34 FTTH, #35 integrations, #37 onboarding/WG, #38 reconciliación).
 > Staging ya las tenía aplicadas/registradas; no hay drift archivo↔historial
 > pendiente por ramas de agente.
+
+### Reconciliación 2026-07-17 · hardening de producción (secretos + onboarding)
+
+| Versión | Migración | Acción |
+|---|---|---|
+| 20260717040000 | onboarding_status_fail_closed | **Nueva.** `tenants.onboarding_status` pasa de `DEFAULT 'completed'` (fail-open) a `DEFAULT 'in_progress'` (fail-closed): un tenant nuevo exige el wizard salvo que se marque `completed` explícitamente. Cierra el hueco en que, si el `UPDATE ... 'in_progress'` del alta fallaba, el WISP se saltaba el onboarding obligatorio. **Filas existentes intactas** (2 tenants siguen `completed`). Verificado: tenant nuevo nace `in_progress`. **Aplicada y registrada.** |
+
+Además, sin migración (cambio de código de aplicación): **cifrado en reposo de las
+credenciales de `wisp_integration_settings`** — ver "Pendientes / notas" abajo (deuda
+resuelta). No toca el esquema; cambia cómo `SupabaseIntegrationsRepository` escribe/lee
+las columnas de secretos.
 
 ### Reconciliación 2026-07-17 · advisor SECURITY DEFINER
 
@@ -190,12 +202,19 @@ columnas ni datos. (Tabla vacía al aplicar: 0 filas.)
   `fiber_threads`, `wisp_integration_settings`).
   **La regla ya se está siguiendo**: `20260716220000` (`wisp_onboarding`) trae su
   RLS + política en la propia migración, sin necesitar parche posterior.
-- **Secretos en claro en `wisp_integration_settings`** (deuda, no bloqueante): RLS
-  ya impide el acceso de `anon`/`authenticated`, pero `stripe_secret_key`,
-  `whatsapp_access_token`, `telegram_bot_token` y `codi_webhook_secret` se guardan
-  sin cifrar; quedan legibles para cualquiera con la service_role key o acceso a la
-  DB, y en los backups. Evaluar Supabase Vault (`vault.create_secret`) o mover las
-  credenciales a variables de entorno del backend. Ver `docs/runbooks/SECRET_ROTATION_RUNBOOK.md`.
+- **Secretos en `wisp_integration_settings` — RESUELTO (2026-07-17): cifrado en reposo.**
+  Antes, `stripe_secret_key`, `stripe_webhook_secret`, `whatsapp_access_token`,
+  `whatsapp_webhook_verify_token`, `telegram_bot_token` y `codi_webhook_secret` se
+  guardaban sin cifrar (legibles con la service_role key y en los backups). Ahora
+  `SupabaseIntegrationsRepository` (`backend/domains/integrations/repository.ts`) los
+  **cifra en el límite con la DB** (AES-256-GCM vía `services/crypto`, reutilizando
+  `MIKROTIK_CREDENTIALS_KEY` — el mismo esquema que ya cifra los passwords de router).
+  El record en memoria sigue en texto plano; solo la columna en DB va cifrada. La
+  lectura tolera valores legacy en texto plano (si no descifra, los devuelve tal cual),
+  así que la migración es transparente. `codi_clabe`/`beneficiary`/`merchant` quedan en
+  claro a propósito (son los datos que el cliente ve para pagar, no credenciales).
+  Cobertura: `tests/unit/integrations.repository.encryption.test.ts`. La tabla estaba
+  vacía en staging (0 filas), así que no hubo backfill; el próximo `save` escribe cifrado.
 - **Registro huérfano `20260619033952` — ORIGEN CONFIRMADO (2026-07-16), inocuo.**
   Está en el historial remoto y no tiene archivo en ninguna rama. **La hipótesis
   previa era errónea**: no era el vestigio de config_snapshots. Su nombre real es
