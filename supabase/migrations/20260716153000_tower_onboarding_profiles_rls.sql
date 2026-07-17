@@ -16,7 +16,7 @@ BEGIN
       'CREATE POLICY tower_onboarding_profiles_service_role '
       || 'ON public.tower_onboarding_profiles '
       || 'FOR ALL '
-      || 'USING (auth.role() = ''service_role'') '
-      || 'WITH CHECK (auth.role() = ''service_role'');';
+      || 'USING ((select auth.role()) = ''service_role'') '
+      || 'WITH CHECK ((select auth.role()) = ''service_role'');';
   END IF;
 END $$;

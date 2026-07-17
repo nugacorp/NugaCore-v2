@@ -33,8 +33,8 @@ BEGIN
       ) THEN
         EXECUTE format(
           'CREATE POLICY %I ON public.%I FOR ALL '
-          || 'USING (auth.role() = ''service_role'') '
-          || 'WITH CHECK (auth.role() = ''service_role'');',
+          || 'USING ((select auth.role()) = ''service_role'') '
+          || 'WITH CHECK ((select auth.role()) = ''service_role'');',
           pol_name,
           t
         );

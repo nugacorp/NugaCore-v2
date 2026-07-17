@@ -43,6 +43,7 @@ Resultado 2026-07-16: **A) vacío**, **B) solo `20260619033952`**.
 | Versión | Migración | Acción |
 |---|---|---|
 | 20260717013000 | revoke_is_tenant_member_execute | **Nueva.** Revoca `EXECUTE` de `public.is_tenant_member(text)` a `PUBLIC`/`anon`/`authenticated`; deja solo `service_role`. Cierra advisor WARN `anon_security_definer_function_executable` + `authenticated_security_definer_function_executable`. |
+| 20260717020000 | rls_auth_initplan_service_role | **Nueva.** Reescribe políticas `*_service_role` (y `portal_user_bindings_service`) con `(select auth.role())` para cerrar advisor WARN `auth_rls_initplan` (lint 0003). Idempotente vía `pg_policies`. |
 
 > **Queda en Dashboard (no SQL):** `auth_leaked_password_protection` → Auth →
 > Attack Protection / Password security → **Leaked password protection ON**.
