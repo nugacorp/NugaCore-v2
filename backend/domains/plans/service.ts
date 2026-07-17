@@ -138,9 +138,9 @@ export class PlansService {
     return patch;
   }
 
-  /** Lanza ConflictError (409) si ya existe un plan con ese nombre. */
-  async assertNameAvailable(name: string): Promise<void> {
-    const existing = await this.repo.findByName(name);
+  /** Lanza ConflictError (409) si ya existe un plan con ese nombre en el tenant. */
+  async assertNameAvailable(name: string, tenantId?: string): Promise<void> {
+    const existing = await this.repo.findByName(name, tenantId);
     if (existing) {
       throw new ConflictError('Plan name already exists', 'DUPLICATE_NAME');
     }
@@ -151,8 +151,8 @@ export class PlansService {
     return this.repo.list(filters);
   }
 
-  getById(id: string): Promise<PlanRecord | null> {
-    return this.repo.findById(id);
+  getById(id: string, tenantId?: string): Promise<PlanRecord | null> {
+    return this.repo.findById(id, tenantId);
   }
 
   generatePlanId(): Promise<string> {
@@ -163,16 +163,16 @@ export class PlansService {
     return this.repo.create(plan);
   }
 
-  update(id: string, patch: Partial<PlanRecord>): Promise<PlanRecord | null> {
-    return this.repo.update(id, patch);
+  update(id: string, patch: Partial<PlanRecord>, tenantId?: string): Promise<PlanRecord | null> {
+    return this.repo.update(id, patch, tenantId);
   }
 
-  remove(id: string): Promise<boolean> {
-    return this.repo.remove(id);
+  remove(id: string, tenantId?: string): Promise<boolean> {
+    return this.repo.remove(id, tenantId);
   }
 
-  isInUse(id: string): Promise<boolean> {
-    return this.repo.isInUse(id);
+  isInUse(id: string, tenantId?: string): Promise<boolean> {
+    return this.repo.isInUse(id, tenantId);
   }
 }
 

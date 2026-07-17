@@ -48,7 +48,15 @@ Claim opcional: `app_metadata.tenant_id` (solo service_role); también requiere 
 
 ## Dominios ya scoped (app-layer)
 
-- Customers (`/api/clients*`)
+- Customers (`/api/clients*`) + Client-360 (`/api/clients/:id/*` con ownership check)
+- Plans (`/api/plans*`)
+- Billing / invoices / payments ledger (`/api/billing*`)
+- Payment engine orders (`/api/payments*`) — webhooks usan el tenant del order
+- Collections (promises + cash register)
+- Tickets + work orders (`/api/tickets*`, `/api/workorders*`)
+- Suspension evaluate / KPIs / legacy suspend-reactivate (scoped por tenant)
+- Dashboard stats, billing KPIs, zones, control-center, system metrics
+- GIS map-data / customers / towers
 - Network towers + onboarding
 - RADIUS sessions
 - WireGuard servers/peers (API scoped; **host-apply worker sigue global** → un `wg0` de plataforma)
@@ -56,14 +64,25 @@ Claim opcional: `app_metadata.tenant_id` (solo service_role); también requiere 
   `mikrotik_routers` + `router_enrollment`; API filtra; hydrate/worker puede
   seguir cargando el cache global)
 
+## Gaps conocidos (siguiente ola)
+
+- Portal staff preview / bindings: endurecer tenant en auth portal
+- Commercial / finance-operational / reports / inventory non-router: parcialmente schema-ready
+- `NOC_ALERTS` en memoria aún sin `tenantId` de fila
+- Workers globales (WG host-apply, MikroTik hydrate) pueden leer cache multi-tenant
+
 ## Onboarding WISP obligatorio
 
 Nuevos WISP: `POST /api/wisp-onboarding/register` → tenant + membership owner → wizard
 (empresa → zona → día/hora de corte → primer router) gateado en `App.tsx` hasta `complete`.
 `tenant-default` (legacy/staging) no fuerza el wizard.
 
-Otros dominios deben adoptar `tenantIdFromRequest(req)` + `.eq('tenant_id', …)` / stamp en create.
+API: `tenantIdFromRequest(req)` + `.eq('tenant_id', …)` / stamp en create. No confiar solo en DEFAULT SQL.
 
-## Migración
+## Migraciones
 
-`supabase/migrations/20260716200000_multi_tenant_foundation.sql`
+- `supabase/migrations/20260716200000_multi_tenant_foundation.sql` — tenants, memberships, SSOT base
+- `supabase/migrations/20260717040000_*.sql` — mikrotik_routers / router_enrollment
+- `supabase/migrations/20260717050000_multi_tenant_complete_ssot.sql` — tickets, payments,
+  suspension, inventory, FTTH, commercial, client-360 tables, etc. (+ `commercial_quotes`,
+  `mikrotik_actions`)

@@ -31,6 +31,7 @@ export interface PlanRow {
   tech_type: PlanTechType;
   business_type: PlanBusinessType;
   is_active: boolean;
+  tenant_id?: string | null;
 }
 
 // --- DB -> App ---------------------------------------------------------
@@ -43,6 +44,7 @@ export const rowToPlan = (row: PlanRow): PlanRecord => ({
   type: row.tech_type,
   businessType: row.business_type,
   isActive: row.is_active,
+  tenantId: row.tenant_id || 'tenant-default',
 });
 
 // --- App -> DB (alta: PlanRecord completo) ----------------------------
@@ -55,6 +57,7 @@ export const planToRow = (plan: PlanRecord): PlanRow => ({
   tech_type: plan.type,
   business_type: plan.businessType,
   is_active: plan.isActive,
+  tenant_id: plan.tenantId || 'tenant-default',
 });
 
 // --- App -> DB (edición: solo las claves presentes en el patch) -------

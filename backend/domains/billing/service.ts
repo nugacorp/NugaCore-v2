@@ -188,40 +188,52 @@ export class BillingService {
 
   // ── Métodos delegados ─────────────────────────────────────────────
 
-  listInvoices(): Promise<EnrichedInvoice[]> {
-    return this.repo.listInvoices();
+  listInvoices(tenantId?: string): Promise<EnrichedInvoice[]> {
+    return this.repo.listInvoices(tenantId);
   }
 
-  findInvoiceById(id: string): Promise<EnrichedInvoice | null> {
-    return this.repo.findInvoiceById(id);
+  findInvoiceById(id: string, tenantId?: string): Promise<EnrichedInvoice | null> {
+    return this.repo.findInvoiceById(id, tenantId);
   }
 
-  getAccountState(invoiceId: string): Promise<AccountStateResult | null> {
-    return this.repo.getAccountState(invoiceId);
+  getAccountState(invoiceId: string, tenantId?: string): Promise<AccountStateResult | null> {
+    return this.repo.getAccountState(invoiceId, tenantId);
   }
 
-  getAccountSummary(): Promise<AccountSummaryResult> {
-    return this.repo.getAccountSummary();
+  getAccountSummary(tenantId?: string): Promise<AccountSummaryResult> {
+    return this.repo.getAccountSummary(tenantId);
   }
 
-  getRevenueReport(): Promise<RevenueReportResult> {
-    return this.repo.getRevenueReport();
+  getRevenueReport(tenantId?: string): Promise<RevenueReportResult> {
+    return this.repo.getRevenueReport(tenantId);
   }
 
   createInvoice(input: InvoiceCreateInput): Promise<EnrichedInvoice> {
     return this.repo.createInvoice(input);
   }
 
-  updateInvoice(id: string, input: InvoiceUpdateInput): Promise<EnrichedInvoice | null> {
-    return this.repo.updateInvoice(id, input);
+  updateInvoice(
+    id: string,
+    input: InvoiceUpdateInput,
+    tenantId?: string,
+  ): Promise<EnrichedInvoice | null> {
+    return this.repo.updateInvoice(id, input, tenantId);
   }
 
-  recordPayment(invoiceId: string, input: PaymentRecordInput): Promise<EnrichedInvoice> {
-    return this.repo.recordPayment(invoiceId, input);
+  recordPayment(
+    invoiceId: string,
+    input: PaymentRecordInput,
+    tenantId?: string,
+  ): Promise<EnrichedInvoice> {
+    return this.repo.recordPayment(invoiceId, input, tenantId);
   }
 
-  cancelInvoice(id: string, reason?: string): Promise<EnrichedInvoice | null> {
-    return this.repo.cancelInvoice(id, reason);
+  cancelInvoice(
+    id: string,
+    reason?: string,
+    tenantId?: string,
+  ): Promise<EnrichedInvoice | null> {
+    return this.repo.cancelInvoice(id, reason, tenantId);
   }
 
   generateInvoiceId(): Promise<string> {
@@ -231,8 +243,12 @@ export class BillingService {
   // ── Foundation: balance, pagos como recurso y ciclo ─────────────────
 
   /** Estado de cuenta consolidado de un cliente (saldo actual, vencido, último pago). */
-  async getCustomerBalance(customerId: string, fallbackName?: string): Promise<AccountBalance> {
-    const invoices = (await this.repo.listInvoices()).filter((i) => i.clientId === customerId);
+  async getCustomerBalance(
+    customerId: string,
+    fallbackName?: string,
+    tenantId?: string,
+  ): Promise<AccountBalance> {
+    const invoices = (await this.repo.listInvoices(tenantId)).filter((i) => i.clientId === customerId);
     const active = invoices.filter((i) => i.status !== 'canceled');
 
     const currentBalance = roundMoney(active.reduce((s, i) => s + i.pendingAmount, 0));
@@ -258,8 +274,12 @@ export class BillingService {
   }
 
   /** Lista de pagos como recurso (proyección de las aplicaciones de pago). */
-  async listPayments(filter?: { customerId?: string; invoiceId?: string }): Promise<PaymentRecord[]> {
-    const invoices = await this.repo.listInvoices();
+  async listPayments(filter?: {
+    customerId?: string;
+    invoiceId?: string;
+    tenantId?: string;
+  }): Promise<PaymentRecord[]> {
+    const invoices = await this.repo.listInvoices(filter?.tenantId);
     let records = invoices.flatMap(invoiceToPaymentRecords);
     if (filter?.customerId) records = records.filter((p) => p.customerId === filter.customerId);
     if (filter?.invoiceId) records = records.filter((p) => p.invoiceId === filter.invoiceId);
@@ -270,11 +290,14 @@ export class BillingService {
    * Registra un pago como recurso (POST /api/billing/payments).
    * Valida, delega en recordPayment y devuelve el PaymentRecord + la factura.
    */
-  async createPayment(body: CreatePaymentBody): Promise<{ payment: PaymentRecord; invoice: EnrichedInvoice }> {
+  async createPayment(
+    body: CreatePaymentBody,
+    tenantId?: string,
+  ): Promise<{ payment: PaymentRecord; invoice: EnrichedInvoice }> {
     if (!body.invoiceId || typeof body.invoiceId !== 'string') {
       throw new BadRequestError('Missing required field: invoiceId', 'MISSING_FIELD');
     }
-    const invoice = await this.repo.findInvoiceById(body.invoiceId);
+    const invoice = await this.repo.findInvoiceById(body.invoiceId, tenantId);
     if (!invoice) {
       throw new BadRequestError('Invoice not found', 'INVOICE_NOT_FOUND');
     }
@@ -289,7 +312,7 @@ export class BillingService {
       transactionId: (typeof body.reference === 'string' && body.reference) || body.transactionId,
     });
 
-    const updated = await this.repo.recordPayment(invoice.id, paymentInput);
+    const updated = await this.repo.recordPayment(invoice.id, paymentInput, tenantId);
     const records = invoiceToPaymentRecords(updated);
     const payment = records[records.length - 1];
     return { payment, invoice: updated };
