@@ -97,8 +97,9 @@ export const attachAuthContext = async (req: Request, _res: Response, next: Next
         try {
           tenantId = await resolveTenantIdForUser({
             userId: data.user.id,
-            // Header / claim solo se aceptan si hay membership (ver resolve-tenant).
-            requestedTenantId: requestedTenantId || claimTenant,
+            // Header solo con membership; claim JWT (app_metadata) puede reparar owner.
+            requestedTenantId: requestedTenantId,
+            jwtClaimTenantId: claimTenant,
             source: 'supabase-jwt',
           });
         } catch (tenantErr) {

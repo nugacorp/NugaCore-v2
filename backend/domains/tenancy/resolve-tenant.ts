@@ -1,4 +1,5 @@
 import type { AuthContext } from '../../common/auth-context';
+import { logger } from '../../common/logger';
 import { isHardenedRuntime } from '../../config/env';
 import { getTenancyService } from './service';
 import { DEFAULT_TENANT_ID } from './types';
@@ -8,8 +9,9 @@ import { DEFAULT_TENANT_ID } from './types';
  *
  * Orden:
  * 1. Header/claim `x-tenant-id` / app_metadata si el usuario es miembro
- * 2. Primera membresía activa
- * 3. DEFAULT_TENANT_ID (legacy single-WISP / staging sin memberships)
+ * 2. JWT app_metadata.tenant_id si el tenant existe (repara membership huérfana)
+ * 3. Primera membresía activa
+ * 4. DEFAULT_TENANT_ID (legacy single-WISP / staging sin memberships)
  *
  * Nota: ya no se apaga por MULTI_TENANT_ENABLED — los WISP nuevos deben
  * resolver siempre su tenant para no mezclar datos. El flag solo documenta
@@ -18,6 +20,8 @@ import { DEFAULT_TENANT_ID } from './types';
 export const resolveTenantIdForUser = async (params: {
   userId: string;
   requestedTenantId?: string | null;
+  /** Solo app_metadata.tenant_id del JWT (service_role). Nunca confiar el header aquí. */
+  jwtClaimTenantId?: string | null;
   source: AuthContext['source'];
 }): Promise<string> => {
   const service = getTenancyService();
@@ -29,6 +33,30 @@ export const resolveTenantIdForUser = async (params: {
     if (memberTenantIds.has(requested)) return requested;
     if (params.source === 'trusted-headers' && !isHardenedRuntime) {
       return requested;
+    }
+  }
+
+  // Claim JWT: si el tenant existe pero falta membership (registro parcial), reparar.
+  const claim = (params.jwtClaimTenantId || '').trim();
+  if (claim && params.source === 'supabase-jwt') {
+    if (memberTenantIds.has(claim)) return claim;
+    const tenant = await service.getTenant(claim);
+    if (tenant) {
+      try {
+        await service.ensureMembership({
+          tenantId: claim,
+          userId: params.userId,
+          role: 'owner',
+          status: 'active',
+        });
+      } catch (err) {
+        logger.warn('No se pudo reparar membership para claim de tenant', {
+          tenantId: claim,
+          userId: params.userId,
+          message: err instanceof Error ? err.message : String(err),
+        });
+      }
+      return claim;
     }
   }
 

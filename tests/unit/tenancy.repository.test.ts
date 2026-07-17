@@ -91,4 +91,39 @@ describe('TenancyService status + resolve', () => {
     // Sin membership en foreign → primera membership
     expect(denied).toBe(tenant.id);
   });
+
+  it('resolveTenantIdForUser repara membership desde jwtClaimTenantId', async () => {
+    resetTenancyService();
+    const { getTenancyService } = await import('../../backend/domains/tenancy/service');
+    const svc = getTenancyService();
+    const tenant = await svc.createTenant({
+      name: 'Claim WISP',
+      slug: 'claim-wisp',
+    });
+
+    const resolved = await resolveTenantIdForUser({
+      userId: 'owner-claim',
+      requestedTenantId: null,
+      jwtClaimTenantId: tenant.id,
+      source: 'supabase-jwt',
+    });
+    expect(resolved).toBe(tenant.id);
+    const memberships = await svc.listMembershipsForUser('owner-claim');
+    expect(memberships.some((m) => m.tenantId === tenant.id)).toBe(true);
+  });
+
+  it('resolveTenantIdForUser no eleva por x-tenant-id sin membership', async () => {
+    resetTenancyService();
+    const { getTenancyService } = await import('../../backend/domains/tenancy/service');
+    const svc = getTenancyService();
+    const foreign = await svc.createTenant({ name: 'Foreign', slug: 'foreign-wisp' });
+
+    const resolved = await resolveTenantIdForUser({
+      userId: 'stranger',
+      requestedTenantId: foreign.id,
+      source: 'supabase-jwt',
+    });
+    expect(resolved).toBe(DEFAULT_TENANT_ID);
+    expect(await svc.listMembershipsForUser('stranger')).toHaveLength(0);
+  });
 });
