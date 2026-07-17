@@ -112,8 +112,8 @@ export interface MetricsSnapshot {
 // ── Cálculos puros por fuente oficial ─────────────────────────────────
 
 /** Clientes por estatus — FUENTE OFICIAL: CRM (CustomersService). */
-export async function getCustomerMetrics(): Promise<CustomerMetrics> {
-  const clients = await getCustomersService().list({});
+export async function getCustomerMetrics(tenantId?: string): Promise<CustomerMetrics> {
+  const clients = await getCustomersService().list(tenantId ? { tenantId } : {});
   const count = (status: string) => clients.filter((c) => c.status === status).length;
   const suspended = count('suspended');
   const baja = count('baja');
@@ -128,10 +128,10 @@ export async function getCustomerMetrics(): Promise<CustomerMetrics> {
 
 /** MRR — FUENTE OFICIAL: Billing/Revenue. Suscripciones que facturan
  *  (active + suspended) × precio del plan. CRM no recalcula MRR. */
-export async function getMrr(): Promise<number> {
+export async function getMrr(tenantId?: string): Promise<number> {
   const [clients, plans] = await Promise.all([
-    getCustomersService().list({}),
-    getPlansService().list({}),
+    getCustomersService().list(tenantId ? { tenantId } : {}),
+    getPlansService().list(tenantId ? { tenantId } : {}),
   ]);
   const priceById = new Map(plans.map((p) => [p.id, p.price]));
   return round(
@@ -146,9 +146,9 @@ export async function getMrr(): Promise<number> {
 
 /** Cobranza — FUENTE OFICIAL: Billing (BillingService.listInvoices()).
  *  Misma lógica que /api/dashboard/billing-kpis: aquí vive UNA sola vez. */
-export async function getBillingMetrics(now = new Date()): Promise<BillingMetrics> {
+export async function getBillingMetrics(now = new Date(), tenantId?: string): Promise<BillingMetrics> {
   const month = monthKey(now);
-  const invoices = (await getBillingService().listInvoices()).filter((inv) => inv.status !== 'canceled');
+  const invoices = (await getBillingService().listInvoices(tenantId)).filter((inv) => inv.status !== 'canceled');
   const issuedThisMonth = invoices.filter((inv) => String(inv.dateStr || '').startsWith(month));
 
   const facturacionMes = round(issuedThisMonth.reduce((s, inv) => s + inv.amount, 0));
@@ -172,7 +172,7 @@ export async function getBillingMetrics(now = new Date()): Promise<BillingMetric
 
   return {
     month,
-    mrr: await getMrr(),
+    mrr: await getMrr(tenantId),
     facturacionMes,
     cobradoMes,
     pendienteCobro,
@@ -183,8 +183,8 @@ export async function getBillingMetrics(now = new Date()): Promise<BillingMetric
 }
 
 /** Tickets — FUENTE OFICIAL: SupportService (respeta USE_DB_SUPPORT). */
-export async function getTicketMetrics(): Promise<TicketMetrics> {
-  const tickets = await getSupportService().listTickets({});
+export async function getTicketMetrics(tenantId?: string): Promise<TicketMetrics> {
+  const tickets = await getSupportService().listTickets(tenantId ? { tenantId } : {});
   const active = tickets.filter((t) => t.status !== 'resolved' && t.status !== 'closed').length;
   const resolved = tickets.filter((t) => t.status === 'resolved' || t.status === 'closed').length;
   return { active, resolved, total: active + resolved };
@@ -253,13 +253,13 @@ export async function getServiceStatusMetrics(): Promise<ServiceStatusMetrics> {
 
 const nowStamp = () => new Date().toISOString().replace('T', ' ').substring(0, 16);
 
-export async function getMetricsSnapshot(): Promise<MetricsSnapshot> {
+export async function getMetricsSnapshot(tenantId?: string): Promise<MetricsSnapshot> {
   const [customers, billing, capacity, serviceStatus, tickets, inventory] = await Promise.all([
-    getCustomerMetrics(),
-    getBillingMetrics(),
+    getCustomerMetrics(tenantId),
+    getBillingMetrics(new Date(), tenantId),
     getCapacityMetrics(),
     getServiceStatusMetrics(),
-    getTicketMetrics(),
+    getTicketMetrics(tenantId),
     getInventoryMetrics(),
   ]);
   return {

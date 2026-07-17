@@ -17,9 +17,9 @@ import { DEFAULT_TENANT_ID } from '../tenancy/types';
  */
 export async function buildControlCenter(tenantId: string = DEFAULT_TENANT_ID) {
   const [snapshot, billingKpis, suspensionResults, commercialAppts, slaBreaches] = await Promise.all([
-    getMetricsSnapshot(),
-    buildBillingKpis(),
-    evaluateAllCustomers().catch(() => [] as Awaited<ReturnType<typeof evaluateAllCustomers>>),
+    getMetricsSnapshot(tenantId),
+    buildBillingKpis(tenantId),
+    evaluateAllCustomers(undefined, tenantId).catch(() => [] as Awaited<ReturnType<typeof evaluateAllCustomers>>),
     getCommercialService().listAppointments({ from: new Date().toISOString().substring(0, 10) }),
     listSlaBreachesFromSupport(),
   ]);

@@ -194,9 +194,9 @@ export const buildZoneEquipment = (
   return rows;
 };
 
-export const buildZoneStatusReport = async (): Promise<ZoneStatusReport> => {
+export const buildZoneStatusReport = async (tenantId?: string): Promise<ZoneStatusReport> => {
   const [towers, routers] = await Promise.all([
-    getNetworkService().listTowers({}),
+    getNetworkService().listTowers(tenantId ? { tenantId } : {}),
     Promise.resolve(nocReadOnlyRepository.listRouters()),
   ]);
   const referenceTimestampMs = resolveReferenceTimestampMs(routers);

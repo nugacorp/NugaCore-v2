@@ -21,20 +21,20 @@ const nowStamp = () => new Date().toISOString().replace('T', ' ').substring(0, 1
 const monthKey = (date: Date) => `${date.getFullYear()}-${String(date.getMonth() + 1).padStart(2, '0')}`;
 
 // Ingresos del mes previo derivados de facturas vía Billing (SSOT).
-const monthRevenueFromBilling = async (key: string): Promise<number> => {
-  const invoices = await getBillingService().listInvoices();
+const monthRevenueFromBilling = async (key: string, tenantId?: string): Promise<number> => {
+  const invoices = await getBillingService().listInvoices(tenantId);
   return invoices
     .filter((inv) => String(inv.dateStr || '').startsWith(key))
     .reduce((acc, inv) => acc + inv.amount, 0);
 };
 
-const countLeadConversions = async (monthPrefix: string): Promise<number> => {
+const countLeadConversions = async (monthPrefix: string, tenantId?: string): Promise<number> => {
   if (!isDomainOnDb('customers')) {
     return store.CLIENT_TIMELINE.filter((event) => (
       event.eventType === 'lead_conversion' && String(event.createdAt).startsWith(monthPrefix)
     )).length;
   }
-  const clients = await getCustomersService().list({});
+  const clients = await getCustomersService().list(tenantId ? { tenantId } : {});
   let count = 0;
   for (const client of clients) {
     const history = await getCustomersService().getHistory(client.id);
@@ -46,21 +46,21 @@ const countLeadConversions = async (monthPrefix: string): Promise<number> => {
 };
 
 // Deriva los KPIs ejecutivos (tasas y tendencias) a partir del snapshot SSOT.
-const buildExecutiveKpis = async (snapshot: MetricsSnapshot) => {
+const buildExecutiveKpis = async (snapshot: MetricsSnapshot, tenantId?: string) => {
   const now = new Date();
   const currentMonth = monthKey(now);
   const previousMonth = monthKey(new Date(now.getFullYear(), now.getMonth() - 1, 1));
 
   const currentRevenue = snapshot.billing.facturacionMes;
-  const previousRevenue = await monthRevenueFromBilling(previousMonth);
+  const previousRevenue = await monthRevenueFromBilling(previousMonth, tenantId);
   const currentCollection = snapshot.billing.cobradoMes;
 
   const monthlyGrowthPct = previousRevenue > 0
     ? Number((((currentRevenue - previousRevenue) / previousRevenue) * 100).toFixed(2))
     : currentRevenue > 0 ? 100 : 0;
 
-  const leadConversionsCurrentMonth = await countLeadConversions(currentMonth);
-  const leadConversionsPreviousMonth = await countLeadConversions(previousMonth);
+  const leadConversionsCurrentMonth = await countLeadConversions(currentMonth, tenantId);
+  const leadConversionsPreviousMonth = await countLeadConversions(previousMonth, tenantId);
 
   const clientGrowthPct = leadConversionsPreviousMonth > 0
     ? Number((((leadConversionsCurrentMonth - leadConversionsPreviousMonth) / leadConversionsPreviousMonth) * 100).toFixed(2))
@@ -112,14 +112,14 @@ const buildExecutiveKpis = async (snapshot: MetricsSnapshot) => {
   };
 };
 
-const buildRevenueTrend = async (months = 6) => {
+const buildRevenueTrend = async (months = 6, tenantId?: string) => {
   const keys: string[] = [];
   const now = new Date();
   for (let i = months - 1; i >= 0; i--) {
     keys.push(monthKey(new Date(now.getFullYear(), now.getMonth() - i, 1)));
   }
 
-  const invoices = await getBillingService().listInvoices();
+  const invoices = await getBillingService().listInvoices(tenantId);
   const trend = keys.map((key) => {
     const monthInvoices = invoices.filter((inv) => String(inv.dateStr || '').startsWith(key));
     const facturado = monthInvoices.reduce((acc, inv) => acc + inv.amount, 0);
@@ -189,11 +189,11 @@ const calculateMonitoringOverview = () => {
 // (antes sumaban el histórico completo, inconsistentes con billing-kpis).
 // Exportado para que el auditor de consistencia valide el cableado real.
 // ────────────────────────────────────────────────────────────────────
-export async function buildDashboardStats() {
-  const snapshot = await getMetricsSnapshot();
-  const kpis = await buildExecutiveKpis(snapshot);
+export async function buildDashboardStats(tenantId?: string) {
+  const snapshot = await getMetricsSnapshot(tenantId);
+  const kpis = await buildExecutiveKpis(snapshot, tenantId);
   // Motor de Suspensiones (Fase 4.5/4.5.1) — read-only, sin efectos.
-  const suspension = await suspensionKpis();
+  const suspension = await suspensionKpis(Date.now(), tenantId);
   const provisioning = provisioningService.summary();
   // Automation Engine (PROD-8) — read-only: cuenta decisiones pendientes.
   const automationQueue = automationService.pendingDecisionsCount();
@@ -235,14 +235,15 @@ export async function buildDashboardStats() {
   };
 }
 
-router.get('/api/dashboard-stats', requireRoles(READ_ROLES), asyncHandler(async (_req, res) => {
-  res.json(await buildDashboardStats());
+router.get('/api/dashboard-stats', requireRoles(READ_ROLES), asyncHandler(async (req, res) => {
+  res.json(await buildDashboardStats(tenantIdFromRequest(req)));
 }));
 
-router.get('/api/dashboard/executive-summary', requireRoles(READ_ROLES), asyncHandler(async (_req, res) => {
-  const snapshot = await getMetricsSnapshot();
-  const kpis = await buildExecutiveKpis(snapshot);
-  const trend = await buildRevenueTrend(6);
+router.get('/api/dashboard/executive-summary', requireRoles(READ_ROLES), asyncHandler(async (req, res) => {
+  const tenantId = tenantIdFromRequest(req);
+  const snapshot = await getMetricsSnapshot(tenantId);
+  const kpis = await buildExecutiveKpis(snapshot, tenantId);
+  const trend = await buildRevenueTrend(6, tenantId);
 
   res.json({
     kpis,
@@ -257,11 +258,12 @@ router.get('/api/dashboard/executive-summary', requireRoles(READ_ROLES), asyncHa
 }));
 
 router.get('/api/dashboard/kpi-trends', requireRoles(READ_ROLES), asyncHandler(async (req, res) => {
+  const tenantId = tenantIdFromRequest(req);
   const months = Math.max(3, Math.min(12, Number(req.query.months) || 6));
   res.json({
     generatedAt: nowStamp(),
     months,
-    revenue: await buildRevenueTrend(months),
+    revenue: await buildRevenueTrend(months, tenantId),
   });
 }));
 
@@ -272,8 +274,8 @@ router.get('/api/dashboard/kpi-trends', requireRoles(READ_ROLES), asyncHandler(a
 // USE_DB_BILLING. La MISMA lógica que alimenta `cobranzaMes`/`facturacionMes`
 // del dashboard: una sola fuente, sin recálculos divergentes.
 // ────────────────────────────────────────────────────────────────────
-export async function buildBillingKpis() {
-  const m = await getBillingMetrics();
+export async function buildBillingKpis(tenantId?: string) {
+  const m = await getBillingMetrics(new Date(), tenantId);
   return {
     generatedAt: nowStamp(),
     month: m.month,
@@ -286,8 +288,8 @@ export async function buildBillingKpis() {
   };
 }
 
-router.get('/api/dashboard/billing-kpis', requireRoles(READ_ROLES), asyncHandler(async (_req, res) => {
-  res.json(await buildBillingKpis());
+router.get('/api/dashboard/billing-kpis', requireRoles(READ_ROLES), asyncHandler(async (req, res) => {
+  res.json(await buildBillingKpis(tenantIdFromRequest(req)));
 }));
 
 router.get('/api/notifications/settings', requireRoles(READ_ROLES), (_req, res) => {
@@ -485,8 +487,8 @@ router.get('/api/dashboard/control-center', requireRoles(READ_ROLES), asyncHandl
   res.json(await buildControlCenter(tenantIdFromRequest(req)));
 }));
 
-router.get('/api/dashboard/zones', requireRoles(READ_ROLES), asyncHandler(async (_req, res) => {
-  res.json(await buildZoneStatusReport());
+router.get('/api/dashboard/zones', requireRoles(READ_ROLES), asyncHandler(async (req, res) => {
+  res.json(await buildZoneStatusReport(tenantIdFromRequest(req)));
 }));
 
 export default router;
