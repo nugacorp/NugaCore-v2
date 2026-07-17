@@ -14,6 +14,7 @@ import {
 } from 'lucide-react';
 import { isSupabaseConfigured, supabase, UserSessionProfile } from '../lib/supabase';
 import { fetchProfileFromBackend } from '../lib/authSession';
+import { messageForAuthEmailError } from '../lib/authEmailErrors';
 
 interface LoginFormProps {
   onLoginSuccess: (userProfile: UserSessionProfile, accessToken?: string) => void;
@@ -154,7 +155,7 @@ export default function LoginForm({ onLoginSuccess, onBack, onGoRegister }: Logi
       setSuccessMessage(`Si la cuenta existe y falta confirmar, enviamos un correo a ${target}.`);
     } catch (err) {
       clientLog.error(err);
-      setErrorMessage(getErrorMessage(err, 'No se pudo reenviar la confirmación.'));
+      setErrorMessage(messageForAuthEmailError(err, 'No se pudo reenviar la confirmación.'));
     } finally {
       setLoading(false);
     }
