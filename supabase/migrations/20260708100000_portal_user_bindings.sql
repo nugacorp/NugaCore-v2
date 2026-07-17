@@ -18,5 +18,5 @@ ALTER TABLE public.portal_user_bindings ENABLE ROW LEVEL SECURITY;
 -- Solo service role gestiona bindings; clientes no leen la tabla directamente.
 CREATE POLICY portal_user_bindings_service ON public.portal_user_bindings
   FOR ALL
-  USING (auth.role() = 'service_role')
-  WITH CHECK (auth.role() = 'service_role');
+  USING ((select auth.role()) = 'service_role')
+  WITH CHECK ((select auth.role()) = 'service_role');

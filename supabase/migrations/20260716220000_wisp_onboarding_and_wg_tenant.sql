@@ -46,8 +46,8 @@ ALTER TABLE public.wisp_onboarding ENABLE ROW LEVEL SECURITY;
 
 DROP POLICY IF EXISTS wisp_onboarding_service_role ON public.wisp_onboarding;
 CREATE POLICY wisp_onboarding_service_role ON public.wisp_onboarding
-  FOR ALL USING (auth.role() = 'service_role')
-  WITH CHECK (auth.role() = 'service_role');
+  FOR ALL USING ((select auth.role()) = 'service_role')
+  WITH CHECK ((select auth.role()) = 'service_role');
 
 -- ── WireGuard tenant columns ─────────────────────────────────────────
 ALTER TABLE public.wireguard_servers

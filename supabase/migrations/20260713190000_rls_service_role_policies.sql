@@ -31,8 +31,8 @@ BEGIN
     pol_name := r.tablename || '_service_role';
     EXECUTE format(
       'CREATE POLICY %I ON public.%I FOR ALL '
-      || 'USING (auth.role() = ''service_role'') '
-      || 'WITH CHECK (auth.role() = ''service_role'');',
+      || 'USING ((select auth.role()) = ''service_role'') '
+      || 'WITH CHECK ((select auth.role()) = ''service_role'');',
       pol_name,
       r.tablename
     );

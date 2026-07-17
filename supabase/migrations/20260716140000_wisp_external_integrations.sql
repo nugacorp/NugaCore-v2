@@ -51,7 +51,7 @@ BEGIN
       'CREATE POLICY wisp_integration_settings_service_role '
       || 'ON public.wisp_integration_settings '
       || 'FOR ALL '
-      || 'USING (auth.role() = ''service_role'') '
-      || 'WITH CHECK (auth.role() = ''service_role'');';
+      || 'USING ((select auth.role()) = ''service_role'') '
+      || 'WITH CHECK ((select auth.role()) = ''service_role'');';
   END IF;
 END $$;
