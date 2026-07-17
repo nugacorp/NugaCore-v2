@@ -53,7 +53,10 @@ const providers: Record<PaymentProvider, IPaymentProvider> = {
   manual: new ManualProvider(),
   mercado_pago: new MercadoPagoProvider(),
   openpay: new OpenPayProvider(),
-  spei: new ManualProvider(),
+  // SPEI/CoDi por OpenPay (method='bank_account'): CLABE virtual + referencia.
+  // Reemplaza el ManualProvider placeholder. Gateado por credenciales OpenPay
+  // (sin ellas, modo simulado seguro). Ver openpay.provider.ts.
+  spei: new OpenPayProvider('spei', 'bank_account'),
   codi: new CodiProvider(),
 };
 
