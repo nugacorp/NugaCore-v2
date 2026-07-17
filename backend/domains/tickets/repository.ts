@@ -8,6 +8,7 @@ import { store } from '../../state/store';
 import { isDomainOnDb } from '../../config/feature-flags';
 import { isSupabaseAdminConfigured, supabaseAdmin } from '../../services/supabase-admin';
 import { logger } from '../../common/logger';
+import { belongsToTenant } from '../tenancy/tenant-scope';
 import {
   TicketAttachmentRow,
   TicketHistoryRow,
@@ -28,28 +29,28 @@ import type {
 } from './types';
 
 export interface SupportRepository {
-  listTechnicians(): Promise<{ id: string; name: string }[]>;
+  listTechnicians(tenantId?: string): Promise<{ id: string; name: string }[]>;
   listTickets(filters: SupportFilters): Promise<Ticket[]>;
-  getTicket(id: string): Promise<Ticket | null>;
+  getTicket(id: string, tenantId?: string): Promise<Ticket | null>;
   createTicket(input: TicketCreateInput): Promise<Ticket>;
-  updateTicket(id: string, patch: TicketUpdateInput): Promise<Ticket | null>;
-  deleteTicket(id: string): Promise<boolean>;
-  assignTicket(id: string, technicianId?: string, technicianName?: string): Promise<Ticket | null>;
-  setTicketStatus(id: string, status: Ticket['status']): Promise<Ticket | null>;
-  addTicketMessage(id: string, message: string, sender?: string): Promise<Ticket | null>;
-  addTicketAttachment(id: string, attachment: { name: string; url: string; type?: string; uploadedBy?: string }): Promise<Ticket | null>;
-  getTicketHistory(id: string): Promise<NonNullable<Ticket['history']>>;
+  updateTicket(id: string, patch: TicketUpdateInput, tenantId?: string): Promise<Ticket | null>;
+  deleteTicket(id: string, tenantId?: string): Promise<boolean>;
+  assignTicket(id: string, technicianId?: string, technicianName?: string, tenantId?: string): Promise<Ticket | null>;
+  setTicketStatus(id: string, status: Ticket['status'], tenantId?: string): Promise<Ticket | null>;
+  addTicketMessage(id: string, message: string, sender?: string, tenantId?: string): Promise<Ticket | null>;
+  addTicketAttachment(id: string, attachment: { name: string; url: string; type?: string; uploadedBy?: string }, tenantId?: string): Promise<Ticket | null>;
+  getTicketHistory(id: string, tenantId?: string): Promise<NonNullable<Ticket['history']>>;
   generateTicketId(): Promise<string>;
   generateWorkOrderId(): Promise<string>;
   listWorkOrders(filters: SupportFilters): Promise<TaskOrder[]>;
-  getWorkOrderAgenda(filters: { technicianId?: string; from?: string; to?: string }): Promise<{ date: string; count: number; workOrders: TaskOrder[] }[]>;
-  getWorkOrder(id: string): Promise<TaskOrder | null>;
+  getWorkOrderAgenda(filters: { technicianId?: string; from?: string; to?: string; tenantId?: string }): Promise<{ date: string; count: number; workOrders: TaskOrder[] }[]>;
+  getWorkOrder(id: string, tenantId?: string): Promise<TaskOrder | null>;
   createWorkOrder(input: WorkOrderCreateInput): Promise<TaskOrder>;
-  updateWorkOrder(id: string, patch: WorkOrderUpdateInput): Promise<TaskOrder | null>;
-  deleteWorkOrder(id: string): Promise<boolean>;
-  toggleChecklistItem(id: string, index: number): Promise<TaskOrder | null>;
-  updateWorkOrderStatus(id: string, status: TaskOrder['status']): Promise<TaskOrder | null>;
-  addWorkOrderEvidence(id: string, evidence: { kind: string; url: string }): Promise<TaskOrder | null>;
+  updateWorkOrder(id: string, patch: WorkOrderUpdateInput, tenantId?: string): Promise<TaskOrder | null>;
+  deleteWorkOrder(id: string, tenantId?: string): Promise<boolean>;
+  toggleChecklistItem(id: string, index: number, tenantId?: string): Promise<TaskOrder | null>;
+  updateWorkOrderStatus(id: string, status: TaskOrder['status'], tenantId?: string): Promise<TaskOrder | null>;
+  addWorkOrderEvidence(id: string, evidence: { kind: string; url: string }, tenantId?: string): Promise<TaskOrder | null>;
 }
 
 const nowStamp = () => new Date().toISOString().replace('T', ' ').substring(0, 16);
@@ -78,7 +79,11 @@ const appendWorkOrderHistory = (order: TaskOrder, action: string, detail: string
 };
 
 const updateRelatedClientOnCompletedOrder = (order: TaskOrder) => {
-  const client = store.CLIENTS.find((c) => c.id === order.clientId);
+  const client = store.CLIENTS.find((c) => {
+    if (c.id !== order.clientId) return false;
+    if (!order.tenantId) return true;
+    return belongsToTenant(c.tenantId, order.tenantId);
+  });
   if (client && client.status === 'lead') {
     client.status = 'active';
     client.installationDate = new Date().toISOString().substring(0, 10);
@@ -90,16 +95,23 @@ const updateRelatedClientOnCompletedOrder = (order: TaskOrder) => {
   }
 };
 
+const matchesTenant = (recordTenantId: string | undefined | null, tenantId?: string): boolean =>
+  !tenantId || belongsToTenant(recordTenantId, tenantId);
+
 export class StoreSupportRepository implements SupportRepository {
-  async listTechnicians() {
-    const byOrder = store.WORK_ORDERS.map((wo) => ({
-      id: wo.assignedTechnicianId || wo.technicianName.toLowerCase().replace(/[^a-z0-9]/g, '-'),
-      name: wo.technicianName,
-    }));
-    const byTicket = store.TICKETS.filter((tk) => !!tk.technicianName).map((tk) => ({
-      id: tk.technicianId || tk.technicianName!.toLowerCase().replace(/[^a-z0-9]/g, '-'),
-      name: tk.technicianName!,
-    }));
+  async listTechnicians(tenantId?: string) {
+    const byOrder = store.WORK_ORDERS
+      .filter((wo) => matchesTenant(wo.tenantId, tenantId))
+      .map((wo) => ({
+        id: wo.assignedTechnicianId || wo.technicianName.toLowerCase().replace(/[^a-z0-9]/g, '-'),
+        name: wo.technicianName,
+      }));
+    const byTicket = store.TICKETS
+      .filter((tk) => !!tk.technicianName && matchesTenant(tk.tenantId, tenantId))
+      .map((tk) => ({
+        id: tk.technicianId || tk.technicianName!.toLowerCase().replace(/[^a-z0-9]/g, '-'),
+        name: tk.technicianName!,
+      }));
     const unique = new Map<string, { id: string; name: string }>();
     [...byOrder, ...byTicket].forEach((row) => {
       if (!unique.has(row.id)) unique.set(row.id, row);
@@ -108,8 +120,9 @@ export class StoreSupportRepository implements SupportRepository {
   }
 
   async listTickets(filters: SupportFilters): Promise<Ticket[]> {
-    const { status, severity, priority, technicianId, clientId, q } = filters;
+    const { status, severity, priority, technicianId, clientId, q, tenantId } = filters;
     return store.TICKETS.filter((ticket) => {
+      const matchesTenantFilter = matchesTenant(ticket.tenantId, tenantId);
       const matchesStatus = !status || ticket.status === status;
       const matchesSeverity = !severity || ticket.severity === severity;
       const matchesPriority = !priority || ticket.priority === priority;
@@ -119,21 +132,26 @@ export class StoreSupportRepository implements SupportRepository {
         || ticket.title.toLowerCase().includes(q)
         || ticket.clientName.toLowerCase().includes(q)
         || ticket.description.toLowerCase().includes(q);
-      return matchesStatus && matchesSeverity && matchesPriority && matchesTechnician && matchesClient && matchesQ;
+      return matchesTenantFilter && matchesStatus && matchesSeverity && matchesPriority && matchesTechnician && matchesClient && matchesQ;
     });
   }
 
-  async getTicket(id: string) {
-    return store.TICKETS.find((t) => t.id === id) ?? null;
+  async getTicket(id: string, tenantId?: string) {
+    const ticket = store.TICKETS.find((t) => t.id === id) ?? null;
+    if (!ticket || !matchesTenant(ticket.tenantId, tenantId)) return null;
+    return ticket;
   }
 
   async createTicket(input: TicketCreateInput): Promise<Ticket> {
-    const client = input.clientId ? store.CLIENTS.find((c) => c.id === input.clientId) : undefined;
+    const client = input.clientId
+      ? store.CLIENTS.find((c) => c.id === input.clientId && matchesTenant(c.tenantId, input.tenantId))
+      : undefined;
     const createdAt = nowStamp();
     const newTicket: Ticket = {
       id: await this.generateTicketId(),
-      clientName: client ? client.name : 'Cliente Generico',
+      clientName: client ? client.name : input.clientName || 'Cliente Generico',
       clientId: input.clientId,
+      tenantId: input.tenantId || 'tenant-default',
       title: input.title,
       description: input.description || 'Sin descripcion',
       category: input.category,
@@ -153,8 +171,8 @@ export class StoreSupportRepository implements SupportRepository {
     return newTicket;
   }
 
-  async updateTicket(id: string, patch: TicketUpdateInput) {
-    const ticket = store.TICKETS.find((t) => t.id === id);
+  async updateTicket(id: string, patch: TicketUpdateInput, tenantId?: string) {
+    const ticket = await this.getTicket(id, tenantId);
     if (!ticket) return null;
     const changes: string[] = [];
     if (patch.title !== undefined) { ticket.title = patch.title; changes.push('titulo'); }
@@ -173,15 +191,15 @@ export class StoreSupportRepository implements SupportRepository {
     return ticket;
   }
 
-  async deleteTicket(id: string) {
-    const exists = store.TICKETS.some((t) => t.id === id);
-    if (!exists) return false;
+  async deleteTicket(id: string, tenantId?: string) {
+    const ticket = await this.getTicket(id, tenantId);
+    if (!ticket) return false;
     store.TICKETS = store.TICKETS.filter((t) => t.id !== id);
     return true;
   }
 
-  async assignTicket(id: string, technicianId?: string, technicianName?: string) {
-    const ticket = store.TICKETS.find((t) => t.id === id);
+  async assignTicket(id: string, technicianId?: string, technicianName?: string, tenantId?: string) {
+    const ticket = await this.getTicket(id, tenantId);
     if (!ticket) return null;
     if (technicianId) ticket.technicianId = technicianId;
     if (technicianName) ticket.technicianName = technicianName;
@@ -190,24 +208,24 @@ export class StoreSupportRepository implements SupportRepository {
     return ticket;
   }
 
-  async setTicketStatus(id: string, status: Ticket['status']) {
-    const ticket = store.TICKETS.find((t) => t.id === id);
+  async setTicketStatus(id: string, status: Ticket['status'], tenantId?: string) {
+    const ticket = await this.getTicket(id, tenantId);
     if (!ticket) return null;
     ticket.status = status;
     appendTicketHistory(ticket, 'status_change', `Estado actualizado a ${status}.`, 'support');
     return ticket;
   }
 
-  async addTicketMessage(id: string, message: string, sender?: string) {
-    const ticket = store.TICKETS.find((t) => t.id === id);
+  async addTicketMessage(id: string, message: string, sender?: string, tenantId?: string) {
+    const ticket = await this.getTicket(id, tenantId);
     if (!ticket) return null;
     ticket.messages.push({ sender: sender || 'Soporte NugaCore', message, date: nowStamp() });
     appendTicketHistory(ticket, 'comment', 'Nuevo comentario agregado al ticket.', sender || 'support');
     return ticket;
   }
 
-  async addTicketAttachment(id: string, attachment: { name: string; url: string; type?: string; uploadedBy?: string }) {
-    const ticket = store.TICKETS.find((t) => t.id === id);
+  async addTicketAttachment(id: string, attachment: { name: string; url: string; type?: string; uploadedBy?: string }, tenantId?: string) {
+    const ticket = await this.getTicket(id, tenantId);
     if (!ticket) return null;
     ticket.attachments = ticket.attachments || [];
     ticket.attachments.unshift({
@@ -222,8 +240,8 @@ export class StoreSupportRepository implements SupportRepository {
     return ticket;
   }
 
-  async getTicketHistory(id: string) {
-    const ticket = store.TICKETS.find((t) => t.id === id);
+  async getTicketHistory(id: string, tenantId?: string) {
+    const ticket = await this.getTicket(id, tenantId);
     return ticket?.history || [];
   }
 
@@ -236,8 +254,9 @@ export class StoreSupportRepository implements SupportRepository {
   }
 
   async listWorkOrders(filters: SupportFilters) {
-    const { status, type, technicianId, dateFrom, dateTo, q } = filters;
+    const { status, type, technicianId, dateFrom, dateTo, q, tenantId } = filters;
     return store.WORK_ORDERS.filter((order) => {
+      const matchesTenantFilter = matchesTenant(order.tenantId, tenantId);
       const matchesStatus = !status || order.status === status;
       const matchesType = !type || order.type === type;
       const matchesTech = !technicianId || order.assignedTechnicianId === technicianId;
@@ -248,16 +267,17 @@ export class StoreSupportRepository implements SupportRepository {
         || order.clientName.toLowerCase().includes(q)
         || order.address.toLowerCase().includes(q)
         || order.technicianName.toLowerCase().includes(q);
-      return matchesStatus && matchesType && matchesTech && matchesFrom && matchesTo && matchesQ;
+      return matchesTenantFilter && matchesStatus && matchesType && matchesTech && matchesFrom && matchesTo && matchesQ;
     });
   }
 
-  async getWorkOrderAgenda(filters: { technicianId?: string; from?: string; to?: string }) {
+  async getWorkOrderAgenda(filters: { technicianId?: string; from?: string; to?: string; tenantId?: string }) {
     const rows = store.WORK_ORDERS.filter((item) => {
+      const matchesTenantFilter = matchesTenant(item.tenantId, filters.tenantId);
       const matchesTechnician = !filters.technicianId || item.assignedTechnicianId === filters.technicianId;
       const matchesFrom = !filters.from || item.date >= filters.from;
       const matchesTo = !filters.to || item.date <= filters.to;
-      return matchesTechnician && matchesFrom && matchesTo;
+      return matchesTenantFilter && matchesTechnician && matchesFrom && matchesTo;
     });
     const grouped = rows.reduce<Record<string, TaskOrder[]>>((acc, item) => {
       if (!acc[item.date]) acc[item.date] = [];
@@ -271,12 +291,16 @@ export class StoreSupportRepository implements SupportRepository {
     }));
   }
 
-  async getWorkOrder(id: string) {
-    return store.WORK_ORDERS.find((o) => o.id === id) ?? null;
+  async getWorkOrder(id: string, tenantId?: string) {
+    const order = store.WORK_ORDERS.find((o) => o.id === id) ?? null;
+    if (!order || !matchesTenant(order.tenantId, tenantId)) return null;
+    return order;
   }
 
   async createWorkOrder(input: WorkOrderCreateInput) {
-    const client = store.CLIENTS.find((c) => c.id === input.clientId);
+    const client = store.CLIENTS.find((c) =>
+      c.id === input.clientId && matchesTenant(c.tenantId, input.tenantId),
+    );
     if (!client) throw new Error('Invalid clientId');
     const order: TaskOrder = {
       id: await this.generateWorkOrderId(),
@@ -284,6 +308,7 @@ export class StoreSupportRepository implements SupportRepository {
       type: input.type,
       clientName: client.name,
       clientId: client.id,
+      tenantId: input.tenantId || 'tenant-default',
       address: input.address ?? client.address,
       phone: input.phone ?? client.phone,
       notes: input.notes ?? 'Sin notas',
@@ -303,8 +328,8 @@ export class StoreSupportRepository implements SupportRepository {
     return order;
   }
 
-  async updateWorkOrder(id: string, patch: WorkOrderUpdateInput) {
-    const order = store.WORK_ORDERS.find((o) => o.id === id);
+  async updateWorkOrder(id: string, patch: WorkOrderUpdateInput, tenantId?: string) {
+    const order = await this.getWorkOrder(id, tenantId);
     if (!order) return null;
     if (patch.title !== undefined) order.title = patch.title;
     if (patch.type !== undefined) order.type = patch.type;
@@ -325,23 +350,23 @@ export class StoreSupportRepository implements SupportRepository {
     return order;
   }
 
-  async deleteWorkOrder(id: string) {
-    const exists = store.WORK_ORDERS.some((o) => o.id === id);
-    if (!exists) return false;
+  async deleteWorkOrder(id: string, tenantId?: string) {
+    const order = await this.getWorkOrder(id, tenantId);
+    if (!order) return false;
     store.WORK_ORDERS = store.WORK_ORDERS.filter((o) => o.id !== id);
     return true;
   }
 
-  async toggleChecklistItem(id: string, index: number) {
-    const order = store.WORK_ORDERS.find((o) => o.id === id);
+  async toggleChecklistItem(id: string, index: number, tenantId?: string) {
+    const order = await this.getWorkOrder(id, tenantId);
     if (!order || !order.checklist[index]) return null;
     order.checklist[index].done = !order.checklist[index].done;
     appendWorkOrderHistory(order, 'checklist', `Checklist item ${index + 1} toggled.`, 'technician');
     return order;
   }
 
-  async updateWorkOrderStatus(id: string, status: TaskOrder['status']) {
-    const order = store.WORK_ORDERS.find((o) => o.id === id);
+  async updateWorkOrderStatus(id: string, status: TaskOrder['status'], tenantId?: string) {
+    const order = await this.getWorkOrder(id, tenantId);
     if (!order) return null;
     order.status = status;
     if (status === 'completed') updateRelatedClientOnCompletedOrder(order);
@@ -349,8 +374,8 @@ export class StoreSupportRepository implements SupportRepository {
     return order;
   }
 
-  async addWorkOrderEvidence(id: string, evidence: { kind: string; url: string }) {
-    const order = store.WORK_ORDERS.find((o) => o.id === id);
+  async addWorkOrderEvidence(id: string, evidence: { kind: string; url: string }, tenantId?: string) {
+    const order = await this.getWorkOrder(id, tenantId);
     if (!order) return null;
     order.evidences = order.evidences || [];
     order.evidences.unshift({
@@ -383,12 +408,13 @@ export class SupabaseSupportRepository implements SupportRepository {
     );
   }
 
-  async listTechnicians() {
-    return new StoreSupportRepository().listTechnicians();
+  async listTechnicians(tenantId?: string) {
+    return new StoreSupportRepository().listTechnicians(tenantId);
   }
 
   async listTickets(filters: SupportFilters) {
     let query = this.db.from('tickets').select('*');
+    if (filters.tenantId) query = query.eq('tenant_id', filters.tenantId);
     if (filters.status) query = query.eq('status', filters.status);
     if (filters.severity) query = query.eq('severity', filters.severity);
     if (filters.priority) query = query.eq('priority', filters.priority);
@@ -406,8 +432,10 @@ export class SupabaseSupportRepository implements SupportRepository {
     );
   }
 
-  async getTicket(id: string) {
-    const { data, error } = await this.db.from('tickets').select('*').eq('id', id).maybeSingle();
+  async getTicket(id: string, tenantId?: string) {
+    let query = this.db.from('tickets').select('*').eq('id', id);
+    if (tenantId) query = query.eq('tenant_id', tenantId);
+    const { data, error } = await query.maybeSingle();
     if (error) throw error;
     if (!data) return null;
     return this.hydrateTicket(data as TicketRow);
@@ -420,6 +448,7 @@ export class SupabaseSupportRepository implements SupportRepository {
       id,
       clientId: input.clientId,
       clientName: input.clientName,
+      tenantId: input.tenantId || 'tenant-default',
       title: input.title,
       description: input.description || 'Sin descripcion',
       category: input.category,
@@ -449,10 +478,12 @@ export class SupabaseSupportRepository implements SupportRepository {
         message: input.description,
       });
     }
-    return (await this.getTicket(id))!;
+    return (await this.getTicket(id, input.tenantId))!;
   }
 
-  async updateTicket(id: string, patch: TicketUpdateInput) {
+  async updateTicket(id: string, patch: TicketUpdateInput, tenantId?: string) {
+    const existing = await this.getTicket(id, tenantId);
+    if (!existing) return null;
     const dbPatch: Record<string, unknown> = { updated_at: new Date().toISOString() };
     if (patch.title !== undefined) dbPatch.title = patch.title;
     if (patch.description !== undefined) dbPatch.description = patch.description;
@@ -465,36 +496,44 @@ export class SupabaseSupportRepository implements SupportRepository {
     if (patch.status !== undefined) dbPatch.status = patch.status;
     if (patch.technicianId !== undefined) dbPatch.technician_id = patch.technicianId;
     if (patch.technicianName !== undefined) dbPatch.technician_name = patch.technicianName;
-    const { error } = await this.db.from('tickets').update(dbPatch).eq('id', id);
+    let query = this.db.from('tickets').update(dbPatch).eq('id', id);
+    if (tenantId) query = query.eq('tenant_id', tenantId);
+    const { error } = await query;
     if (error) throw error;
-    return this.getTicket(id);
+    return this.getTicket(id, tenantId);
   }
 
-  async deleteTicket(id: string) {
-    const { error, count } = await this.db.from('tickets').delete({ count: 'exact' }).eq('id', id);
+  async deleteTicket(id: string, tenantId?: string) {
+    let query = this.db.from('tickets').delete({ count: 'exact' }).eq('id', id);
+    if (tenantId) query = query.eq('tenant_id', tenantId);
+    const { error, count } = await query;
     if (error) throw error;
     return (count ?? 0) > 0;
   }
 
-  async assignTicket(id: string, technicianId?: string, technicianName?: string) {
-    return this.updateTicket(id, { technicianId, technicianName, status: 'assigned' });
+  async assignTicket(id: string, technicianId?: string, technicianName?: string, tenantId?: string) {
+    return this.updateTicket(id, { technicianId, technicianName, status: 'assigned' }, tenantId);
   }
 
-  async setTicketStatus(id: string, status: Ticket['status']) {
-    return this.updateTicket(id, { status });
+  async setTicketStatus(id: string, status: Ticket['status'], tenantId?: string) {
+    return this.updateTicket(id, { status }, tenantId);
   }
 
-  async addTicketMessage(id: string, message: string, sender?: string) {
+  async addTicketMessage(id: string, message: string, sender?: string, tenantId?: string) {
+    const existing = await this.getTicket(id, tenantId);
+    if (!existing) return null;
     await this.db.from('ticket_messages').insert({
       id: 'tm-' + Date.now(),
       ticket_id: id,
       sender: sender || 'Soporte NugaCore',
       message,
     });
-    return this.getTicket(id);
+    return this.getTicket(id, tenantId);
   }
 
-  async addTicketAttachment(id: string, attachment: { name: string; url: string; type?: string; uploadedBy?: string }) {
+  async addTicketAttachment(id: string, attachment: { name: string; url: string; type?: string; uploadedBy?: string }, tenantId?: string) {
+    const existing = await this.getTicket(id, tenantId);
+    if (!existing) return null;
     await this.db.from('ticket_attachments').insert({
       id: 'att-' + Date.now(),
       ticket_id: id,
@@ -503,11 +542,11 @@ export class SupabaseSupportRepository implements SupportRepository {
       type: attachment.type ?? null,
       uploaded_by: attachment.uploadedBy ?? null,
     });
-    return this.getTicket(id);
+    return this.getTicket(id, tenantId);
   }
 
-  async getTicketHistory(id: string) {
-    const ticket = await this.getTicket(id);
+  async getTicketHistory(id: string, tenantId?: string) {
+    const ticket = await this.getTicket(id, tenantId);
     return ticket?.history ?? [];
   }
 
@@ -521,6 +560,7 @@ export class SupabaseSupportRepository implements SupportRepository {
 
   async listWorkOrders(filters: SupportFilters) {
     let query = this.db.from('work_orders').select('*');
+    if (filters.tenantId) query = query.eq('tenant_id', filters.tenantId);
     if (filters.status) query = query.eq('status', filters.status);
     if (filters.type) query = query.eq('type', filters.type);
     if (filters.technicianId) query = query.eq('assigned_technician_id', filters.technicianId);
@@ -538,11 +578,12 @@ export class SupabaseSupportRepository implements SupportRepository {
     return orders;
   }
 
-  async getWorkOrderAgenda(filters: { technicianId?: string; from?: string; to?: string }) {
+  async getWorkOrderAgenda(filters: { technicianId?: string; from?: string; to?: string; tenantId?: string }) {
     const orders = await this.listWorkOrders({
       technicianId: filters.technicianId,
       dateFrom: filters.from,
       dateTo: filters.to,
+      tenantId: filters.tenantId,
     });
     const grouped = orders.reduce<Record<string, TaskOrder[]>>((acc, item) => {
       if (!acc[item.date]) acc[item.date] = [];
@@ -556,8 +597,10 @@ export class SupabaseSupportRepository implements SupportRepository {
     }));
   }
 
-  async getWorkOrder(id: string) {
-    const { data, error } = await this.db.from('work_orders').select('*').eq('id', id).maybeSingle();
+  async getWorkOrder(id: string, tenantId?: string) {
+    let query = this.db.from('work_orders').select('*').eq('id', id);
+    if (tenantId) query = query.eq('tenant_id', tenantId);
+    const { data, error } = await query.maybeSingle();
     if (error) throw error;
     return data ? rowToWorkOrder(data as WorkOrderRow) : null;
   }
@@ -570,6 +613,7 @@ export class SupabaseSupportRepository implements SupportRepository {
       type: input.type,
       clientId: input.clientId,
       clientName: input.clientName,
+      tenantId: input.tenantId || 'tenant-default',
       address: input.address ?? '',
       phone: input.phone ?? '',
       notes: input.notes ?? '',
@@ -586,45 +630,53 @@ export class SupabaseSupportRepository implements SupportRepository {
     });
     const { error } = await this.db.from('work_orders').insert(row);
     if (error) throw error;
-    return (await this.getWorkOrder(id))!;
+    return (await this.getWorkOrder(id, input.tenantId))!;
   }
 
-  async updateWorkOrder(id: string, patch: WorkOrderUpdateInput) {
+  async updateWorkOrder(id: string, patch: WorkOrderUpdateInput, tenantId?: string) {
+    const existing = await this.getWorkOrder(id, tenantId);
+    if (!existing) return null;
     const dbPatch: Record<string, unknown> = {};
     if (patch.title !== undefined) dbPatch.title = patch.title;
     if (patch.type !== undefined) dbPatch.type = patch.type;
     if (patch.status !== undefined) dbPatch.status = patch.status;
     if (patch.checklist !== undefined) dbPatch.checklist = patch.checklist;
-    const { error } = await this.db.from('work_orders').update(dbPatch).eq('id', id);
+    let query = this.db.from('work_orders').update(dbPatch).eq('id', id);
+    if (tenantId) query = query.eq('tenant_id', tenantId);
+    const { error } = await query;
     if (error) throw error;
-    return this.getWorkOrder(id);
+    return this.getWorkOrder(id, tenantId);
   }
 
-  async deleteWorkOrder(id: string) {
-    const { error, count } = await this.db.from('work_orders').delete({ count: 'exact' }).eq('id', id);
+  async deleteWorkOrder(id: string, tenantId?: string) {
+    let query = this.db.from('work_orders').delete({ count: 'exact' }).eq('id', id);
+    if (tenantId) query = query.eq('tenant_id', tenantId);
+    const { error, count } = await query;
     if (error) throw error;
     return (count ?? 0) > 0;
   }
 
-  async toggleChecklistItem(id: string, index: number) {
-    const order = await this.getWorkOrder(id);
+  async toggleChecklistItem(id: string, index: number, tenantId?: string) {
+    const order = await this.getWorkOrder(id, tenantId);
     if (!order || !order.checklist[index]) return null;
     order.checklist[index].done = !order.checklist[index].done;
-    return this.updateWorkOrder(id, { checklist: order.checklist });
+    return this.updateWorkOrder(id, { checklist: order.checklist }, tenantId);
   }
 
-  async updateWorkOrderStatus(id: string, status: TaskOrder['status']) {
-    return this.updateWorkOrder(id, { status });
+  async updateWorkOrderStatus(id: string, status: TaskOrder['status'], tenantId?: string) {
+    return this.updateWorkOrder(id, { status }, tenantId);
   }
 
-  async addWorkOrderEvidence(id: string, evidence: { kind: string; url: string }) {
+  async addWorkOrderEvidence(id: string, evidence: { kind: string; url: string }, tenantId?: string) {
+    const existing = await this.getWorkOrder(id, tenantId);
+    if (!existing) return null;
     await this.db.from('work_order_evidences').insert({
       id: 'ev-' + Date.now(),
       work_order_id: id,
       kind: evidence.kind,
       url: evidence.url,
     });
-    return this.getWorkOrder(id);
+    return this.getWorkOrder(id, tenantId);
   }
 }
 
