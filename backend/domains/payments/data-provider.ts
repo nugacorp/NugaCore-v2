@@ -22,8 +22,8 @@ export interface CustomerLite {
 }
 
 export interface PaymentDataProvider {
-  getCustomer(id: string): Promise<CustomerLite | null>;
-  reactivateCustomer(id: string): Promise<void>;
+  getCustomer(id: string, tenantId?: string): Promise<CustomerLite | null>;
+  reactivateCustomer(id: string, tenantId?: string): Promise<void>;
 }
 
 const toLite = (c: Client): CustomerLite => ({
@@ -33,26 +33,37 @@ const toLite = (c: Client): CustomerLite => ({
   pppoeUser: c.pppoeUser,
 });
 
+const matchesTenant = (recordTenantId: string | undefined, tenantId: string): boolean =>
+  (recordTenantId || 'tenant-default') === tenantId;
+
 // ── Store directo: rápido y determinista (USE_DB_CUSTOMERS=false) ──────
 export class StorePaymentDataProvider implements PaymentDataProvider {
-  async getCustomer(id: string): Promise<CustomerLite | null> {
-    const c = store.CLIENTS.find((x) => x.id === id);
+  async getCustomer(id: string, tenantId?: string): Promise<CustomerLite | null> {
+    const c = store.CLIENTS.find((x) => {
+      if (x.id !== id) return false;
+      if (tenantId && !matchesTenant(x.tenantId, tenantId)) return false;
+      return true;
+    });
     return c ? toLite(c) : null;
   }
-  async reactivateCustomer(id: string): Promise<void> {
-    const c = store.CLIENTS.find((x) => x.id === id);
+  async reactivateCustomer(id: string, tenantId?: string): Promise<void> {
+    const c = store.CLIENTS.find((x) => {
+      if (x.id !== id) return false;
+      if (tenantId && !matchesTenant(x.tenantId, tenantId)) return false;
+      return true;
+    });
     if (c) c.status = 'active';
   }
 }
 
 // ── Vía CustomersService: correcto con USE_DB_CUSTOMERS=true ──────────
 export class ServicePaymentDataProvider implements PaymentDataProvider {
-  async getCustomer(id: string): Promise<CustomerLite | null> {
-    const c = await getCustomersService().getById(id);
+  async getCustomer(id: string, tenantId?: string): Promise<CustomerLite | null> {
+    const c = await getCustomersService().getById(id, tenantId);
     return c ? toLite(c) : null;
   }
-  async reactivateCustomer(id: string): Promise<void> {
-    await getCustomersService().update(id, { status: 'active' });
+  async reactivateCustomer(id: string, tenantId?: string): Promise<void> {
+    await getCustomersService().update(id, { status: 'active' }, tenantId);
   }
 }
 

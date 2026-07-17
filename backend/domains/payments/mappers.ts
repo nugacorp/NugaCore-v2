@@ -22,6 +22,7 @@ import {
 
 export interface PaymentOrderRow {
   id: string;
+  tenant_id?: string | null;
   customer_id: string;
   invoice_id: string;
   provider: string;
@@ -37,6 +38,7 @@ export interface PaymentOrderRow {
 
 export interface PaymentEventRow {
   id: string;
+  tenant_id?: string | null;
   provider: string;
   provider_event_id: string;
   event_type: string;
@@ -49,6 +51,7 @@ export interface PaymentEventRow {
 
 export interface MikrotikActionRow {
   id: string;
+  tenant_id?: string | null;
   customer_id: string;
   router_id?: string | null;
   action_type: string;
@@ -65,6 +68,7 @@ export interface MikrotikActionRow {
 
 export const rowToPaymentOrder = (r: PaymentOrderRow): PaymentOrderRecord => ({
   id: r.id,
+  tenantId: r.tenant_id || 'tenant-default',
   customerId: r.customer_id,
   invoiceId: r.invoice_id,
   provider: r.provider as PaymentProvider,
@@ -80,6 +84,7 @@ export const rowToPaymentOrder = (r: PaymentOrderRow): PaymentOrderRecord => ({
 
 export const paymentOrderToRow = (rec: PaymentOrderRecord): Record<string, unknown> => ({
   id: rec.id,
+  tenant_id: rec.tenantId || 'tenant-default',
   customer_id: rec.customerId,
   invoice_id: rec.invoiceId,
   provider: rec.provider,
@@ -95,6 +100,7 @@ export const paymentOrderToRow = (rec: PaymentOrderRecord): Record<string, unkno
 
 export const paymentOrderToView = (rec: PaymentOrderRecord): PaymentOrderView => ({
   id: rec.id,
+  tenantId: rec.tenantId || 'tenant-default',
   customerId: rec.customerId,
   invoiceId: rec.invoiceId,
   provider: rec.provider,
@@ -112,6 +118,7 @@ export const paymentOrderToView = (rec: PaymentOrderRecord): PaymentOrderView =>
 
 export const rowToPaymentEvent = (r: PaymentEventRow): PaymentEventRecord => ({
   id: r.id,
+  tenantId: r.tenant_id || 'tenant-default',
   provider: r.provider as PaymentProvider,
   providerEventId: r.provider_event_id,
   eventType: r.event_type,
@@ -137,6 +144,7 @@ export const paymentEventToView = (rec: PaymentEventRecord): PaymentEventView =>
 
 export const rowToMikrotikAction = (r: MikrotikActionRow): MikrotikActionRecord => ({
   id: r.id,
+  tenantId: r.tenant_id || 'tenant-default',
   customerId: r.customer_id,
   routerId: r.router_id ?? undefined,
   actionType: r.action_type as MikrotikActionType,
@@ -151,6 +159,7 @@ export const rowToMikrotikAction = (r: MikrotikActionRow): MikrotikActionRecord 
 
 export const mikrotikActionToRow = (rec: MikrotikActionRecord): Record<string, unknown> => ({
   id: rec.id,
+  tenant_id: rec.tenantId || 'tenant-default',
   customer_id: rec.customerId,
   router_id: rec.routerId ?? null,
   action_type: rec.actionType,
@@ -165,6 +174,7 @@ export const mikrotikActionToRow = (rec: MikrotikActionRecord): Record<string, u
 
 export const mikrotikActionToView = (rec: MikrotikActionRecord): MikrotikActionView => ({
   id: rec.id,
+  tenantId: rec.tenantId || 'tenant-default',
   customerId: rec.customerId,
   routerId: rec.routerId,
   actionType: rec.actionType,

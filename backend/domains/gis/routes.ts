@@ -3,6 +3,7 @@ import { asyncHandler } from '../../common/errors';
 import { READ_ROLES, requireRoles } from '../../common/rbac';
 import { getCustomersService, parseClientStatus } from '../customers/service';
 import { getNetworkService } from '../network/service';
+import { tenantIdFromRequest } from '../tenancy/tenant-scope';
 import { buildGisMapData } from './service';
 const router = Router();
 
@@ -26,6 +27,7 @@ router.get('/api/gis/map-data', requireRoles(READ_ROLES), asyncHandler(async (re
     planId: req.query.planId ? String(req.query.planId) : undefined,
     towerId: req.query.towerId ? String(req.query.towerId) : undefined,
     q: req.query.q ? String(req.query.q) : undefined,
+    tenantId: tenantIdFromRequest(req),
   }));
 }));
 
@@ -33,6 +35,7 @@ router.get('/api/gis/customers', requireRoles(READ_ROLES), asyncHandler(async (r
   const rows = await getCustomersService().list({
     status: parseClientStatus(req.query.status) ?? undefined,
     planId: req.query.planId ? String(req.query.planId) : undefined,
+    tenantId: tenantIdFromRequest(req),
   });
   res.json(rows);
 }));
@@ -40,6 +43,7 @@ router.get('/api/gis/customers', requireRoles(READ_ROLES), asyncHandler(async (r
 router.get('/api/gis/towers', requireRoles(READ_ROLES), asyncHandler(async (req, res) => {
   const rows = await getNetworkService().listTowers({
     status: req.query.status ? String(req.query.status) : undefined,
+    tenantId: tenantIdFromRequest(req),
   });
   res.json(rows);
 }));
