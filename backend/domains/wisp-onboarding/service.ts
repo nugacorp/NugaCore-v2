@@ -132,6 +132,7 @@ export class WispOnboardingService {
     let note: string | undefined;
     let emailConfirmationRequired = false;
     let confirmationEmailSent = false;
+    let confirmationEmailErrorCode: RegisterWispResult['confirmationEmailErrorCode'];
     const emailRedirectTo = resolveAuthRedirectUrl(input.emailRedirectTo, '/auth/callback');
 
     try {
@@ -231,8 +232,11 @@ export class WispOnboardingService {
       if (isSupabaseAdminConfigured && supabaseAdmin && emailConfirmationRequired) {
         const sent = await sendSignupConfirmationEmail(email, emailRedirectTo);
         confirmationEmailSent = sent.sent;
+        confirmationEmailErrorCode = sent.errorCode;
         if (!sent.sent) {
-          note = 'Cuenta creada, pero no se pudo enviar el correo de confirmación. Usa «Reenviar confirmación» en el login.';
+          note = sent.errorCode === 'EMAIL_RATE_LIMITED'
+            ? 'Cuenta creada, pero Supabase alcanzó el límite de correos. Espera unos minutos (a veces hasta 1 h) y usa «Reenviar confirmación», o inicia sesión si ya te confirmaron la cuenta.'
+            : 'Cuenta creada, pero no se pudo enviar el correo de confirmación. Usa «Reenviar confirmación» en el login.';
         }
       }
 
@@ -244,6 +248,7 @@ export class WispOnboardingService {
         onboarding,
         emailConfirmationRequired,
         confirmationEmailSent,
+        confirmationEmailErrorCode,
         note,
       };
     } catch (err) {

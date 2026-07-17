@@ -10,4 +10,10 @@ describe('RegisterWispForm — reenviar confirmación', () => {
     expect(source).toContain("type: 'signup'");
     expect(source).toContain('auth.resend');
   });
+
+  it('explica el rate limit de Supabase y ofrece ir al login', () => {
+    expect(source).toContain('EMAIL_RATE_LIMITED');
+    expect(source).toContain('límite de correos');
+    expect(source).toMatch(/Ir a iniciar sesión/);
+  });
 });

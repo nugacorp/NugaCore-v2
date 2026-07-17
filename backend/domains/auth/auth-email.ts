@@ -24,17 +24,37 @@ export const resolveAuthRedirectUrl = (
   }
 };
 
+export type SignupEmailSendResult = {
+  sent: boolean;
+  error?: string;
+  /** Código estable para la UI (p. ej. EMAIL_RATE_LIMITED). */
+  errorCode?: 'EMAIL_RATE_LIMITED' | 'EMAIL_SEND_FAILED' | 'ANON_KEY_MISSING';
+};
+
+export function classifySignupEmailError(message: string): SignupEmailSendResult['errorCode'] {
+  const lower = message.toLowerCase();
+  if (
+    lower.includes('rate limit')
+    || lower.includes('too many requests')
+    || lower.includes('over_email_send_rate_limit')
+    || lower.includes('email rate limit exceeded')
+  ) {
+    return 'EMAIL_RATE_LIMITED';
+  }
+  return 'EMAIL_SEND_FAILED';
+}
+
 /**
  * Dispara el correo de confirmación de Supabase Auth (plantilla Signup).
- * createUser(admin) no envía correo; hace falta resend con la anon key.
+ * createUser(admin) no envía correo; hace falta resend con la anon/publishable key.
  */
 export async function sendSignupConfirmationEmail(
   email: string,
   emailRedirectTo: string,
-): Promise<{ sent: boolean; error?: string }> {
+): Promise<SignupEmailSendResult> {
   if (!env.SUPABASE_URL || !env.SUPABASE_ANON_KEY) {
     logger.warn('Confirmación de email: falta SUPABASE_ANON_KEY; no se pudo enviar correo');
-    return { sent: false, error: 'SUPABASE_ANON_KEY missing' };
+    return { sent: false, error: 'SUPABASE_ANON_KEY missing', errorCode: 'ANON_KEY_MISSING' };
   }
 
   const anon = createClient(env.SUPABASE_URL, env.SUPABASE_ANON_KEY, {
@@ -48,8 +68,13 @@ export async function sendSignupConfirmationEmail(
   });
 
   if (error) {
-    logger.warn('Confirmación de email: resend falló', { email, message: error.message });
-    return { sent: false, error: error.message };
+    const errorCode = classifySignupEmailError(error.message);
+    logger.warn('Confirmación de email: resend falló', {
+      email,
+      message: error.message,
+      errorCode,
+    });
+    return { sent: false, error: error.message, errorCode };
   }
 
   logger.info('Confirmación de email: correo de signup enviado', { email });
