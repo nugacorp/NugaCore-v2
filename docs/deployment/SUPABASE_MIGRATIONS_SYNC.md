@@ -38,6 +38,15 @@ Resultado 2026-07-16: **A) vacío**, **B) solo `20260619033952`**.
 > Staging ya las tenía aplicadas/registradas; no hay drift archivo↔historial
 > pendiente por ramas de agente.
 
+### Reconciliación 2026-07-17 · advisor SECURITY DEFINER
+
+| Versión | Migración | Acción |
+|---|---|---|
+| 20260717013000 | revoke_is_tenant_member_execute | **Nueva.** Revoca `EXECUTE` de `public.is_tenant_member(text)` a `PUBLIC`/`anon`/`authenticated`; deja solo `service_role`. Cierra advisor WARN `anon_security_definer_function_executable` + `authenticated_security_definer_function_executable`. |
+
+> **Queda en Dashboard (no SQL):** `auth_leaked_password_protection` → Auth →
+> Attack Protection / Password security → **Leaked password protection ON**.
+
 ### Reconciliación 2026-07-16 · noche (WISP onboarding + WG multi-tenant)
 
 | Versión | Migración | Acción |
