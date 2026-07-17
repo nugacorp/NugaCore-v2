@@ -1,4 +1,12 @@
 import React, { useState } from 'react';
+import {
+  DollarSign,
+  Shield,
+  Briefcase,
+  Plus,
+  Trash2,
+  Clock,
+} from 'lucide-react';
 import ExternalIntegrationsPanel from './owner/ExternalIntegrationsPanel';
 import { Client, Invoice, Ticket as SupportTicket } from '../types';
 

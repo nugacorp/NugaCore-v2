@@ -7,7 +7,6 @@ import { getNetworkService } from '../network/service';
 import { getPaymentService } from '../payments/service';
 import {
   applyIntegrationPatch,
-  emptyIntegrationSettings,
   IntegrationsRepository,
   StoreIntegrationsRepository,
   SupabaseIntegrationsRepository,
