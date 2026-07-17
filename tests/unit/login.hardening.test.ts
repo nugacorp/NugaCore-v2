@@ -72,6 +72,14 @@ describe('Hardening — sin bypass de autenticación', () => {
     expect(appTsx).toContain('RegisterWispForm');
   });
 
+  it('App no hace poll de /api/alerts durante onboarding WISP', () => {
+    // refreshAlerts debe cortar antes del fetch cuando onboardingRequired.
+    expect(appTsx).toMatch(
+      /refreshAlerts[\s\S]{0,400}onboardingRequired[\s\S]{0,80}return/,
+    );
+    expect(appTsx).toContain("fetchJson<NocAlert[]>('/api/alerts')");
+  });
+
   it('LoginForm expone recuperación y reenvío de confirmación', () => {
     expect(loginForm).toContain('resetPasswordForEmail');
     expect(loginForm).toContain('¿Olvidaste tu contraseña?');

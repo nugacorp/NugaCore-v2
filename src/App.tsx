@@ -683,6 +683,8 @@ export default function App() {
 
   const refreshAlerts = useCallback(async () => {
     if (!sessionBootstrapped || !userSession) return;
+    // El gate de negocio responde 403 ONBOARDING_REQUIRED; no spamear consola.
+    if (userSession.onboardingRequired) return;
     if (Date.now() < rateLimitUntilMs) return;
     if (typeof document !== 'undefined' && document.visibilityState !== 'visible') return;
     try {
@@ -693,12 +695,16 @@ export default function App() {
         setRateLimitMessage(err.retryAfterMs);
         return;
       }
+      const msg = err instanceof Error ? err.message : String(err || '');
+      if (/onboarding incomplete|ONBOARDING_REQUIRED/i.test(msg)) {
+        return;
+      }
       clientLog.error(err);
     }
   }, [sessionBootstrapped, userSession, rateLimitUntilMs, fetchJson, setRateLimitMessage]);
 
   useEffect(() => {
-    if (!sessionBootstrapped || !userSession) return;
+    if (!sessionBootstrapped || !userSession || userSession.onboardingRequired) return;
     void refreshAlerts();
     const id = window.setInterval(() => {
       void refreshAlerts();
