@@ -79,9 +79,6 @@ export default function LandingPage({ onEnterLogin, onEnterRegister }: LandingPa
             <a href="#features" className="hover:text-white transition-colors">Módulos</a>
             <a href="#roi-calculator" className="hover:text-white transition-colors">Calculadora ROI</a>
             <a href="#telemetry" className="hover:text-white transition-colors">Simulación NOC</a>
-            <a href="#wisp-register" className="hover:text-indigo-300 text-indigo-400 transition-colors">
-              Registrar WISP
-            </a>
           </nav>
 
           <div className="flex items-center space-x-3">
