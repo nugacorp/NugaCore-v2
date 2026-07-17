@@ -2,6 +2,7 @@ import React, { useMemo, useState } from 'react';
 import { AlertCircle, ArrowRight, Building2, CheckCircle2, ChevronLeft, Mail, User } from 'lucide-react';
 import { getErrorMessage } from '../lib/errors';
 import { clientLog } from '../lib/clientLog';
+import { isSupabaseConfigured, supabase } from '../lib/supabase';
 
 interface RegisterWispFormProps {
   onBack?: () => void;
@@ -26,6 +27,7 @@ export default function RegisterWispForm({ onBack, onGoLogin }: RegisterWispForm
   const [city, setCity] = useState('');
   const [phone, setPhone] = useState('');
   const [loading, setLoading] = useState(false);
+  const [resending, setResending] = useState(false);
   const [error, setError] = useState('');
   const [ok, setOk] = useState('');
   const [awaitingEmail, setAwaitingEmail] = useState(false);
@@ -81,7 +83,7 @@ export default function RegisterWispForm({ onBack, onGoLogin }: RegisterWispForm
         setOk(
           body.confirmationEmailSent
             ? `Te enviamos un correo a ${email}. Confirma el enlace para activar tu cuenta e inicia sesión.`
-            : `Cuenta creada para ${email}. Si no llega el correo, en el login usa «Reenviar confirmación».`,
+            : `Cuenta creada para ${email}. El correo no se pudo enviar automáticamente; usa «Reenviar confirmación» abajo.`,
         );
       } else {
         setOk(body.note || 'WISP creado. Ya puedes iniciar sesión.');
@@ -91,6 +93,34 @@ export default function RegisterWispForm({ onBack, onGoLogin }: RegisterWispForm
       setError(getErrorMessage(err, 'Error al registrar el WISP'));
     } finally {
       setLoading(false);
+    }
+  };
+
+  const handleResendConfirmation = async () => {
+    setError('');
+    const target = email.trim().toLowerCase();
+    if (!target) {
+      setError('No hay correo para reenviar la confirmación.');
+      return;
+    }
+    if (!isSupabaseConfigured || !supabase) {
+      setError('Auth no está configurada en este entorno.');
+      return;
+    }
+    setResending(true);
+    try {
+      const { error: resendErr } = await supabase.auth.resend({
+        type: 'signup',
+        email: target,
+        options: { emailRedirectTo: `${window.location.origin}/auth/callback` },
+      });
+      if (resendErr) throw resendErr;
+      setOk(`Reenviamos el correo de confirmación a ${target}. Revisa bandeja y spam.`);
+    } catch (err) {
+      clientLog.error(err);
+      setError(getErrorMessage(err, 'No se pudo reenviar la confirmación.'));
+    } finally {
+      setResending(false);
     }
   };
 
@@ -120,18 +150,34 @@ export default function RegisterWispForm({ onBack, onGoLogin }: RegisterWispForm
                 <CheckCircle2 className="w-4 h-4 shrink-0" /> {ok}
               </div>
             )}
+            {error && (
+              <div className="p-3 bg-rose-950/70 border border-rose-900 rounded-xl text-xs text-rose-200 flex gap-2 text-left">
+                <AlertCircle className="w-4 h-4 shrink-0" /> {error}
+              </div>
+            )}
             <p className="text-xs text-slate-400 leading-relaxed">
               Sin confirmar el correo no podrás iniciar sesión. Revisa spam si no lo ves en unos minutos.
             </p>
-            {onGoLogin && (
+            <div className="space-y-2.5">
               <button
                 type="button"
-                onClick={onGoLogin}
-                className="w-full bg-sky-600 hover:bg-sky-500 text-white font-bold text-sm py-3 rounded-xl"
+                id="register-resend-confirmation"
+                disabled={resending || loading}
+                onClick={() => void handleResendConfirmation()}
+                className="w-full bg-emerald-700 hover:bg-emerald-600 text-white font-bold text-sm py-3 rounded-xl disabled:opacity-50"
               >
-                Ir a iniciar sesión
+                {resending ? 'Reenviando…' : 'Reenviar confirmación'}
               </button>
-            )}
+              {onGoLogin && (
+                <button
+                  type="button"
+                  onClick={onGoLogin}
+                  className="w-full bg-sky-600 hover:bg-sky-500 text-white font-bold text-sm py-3 rounded-xl"
+                >
+                  Ir a iniciar sesión
+                </button>
+              )}
+            </div>
           </div>
         ) : (
           <form onSubmit={handleSubmit} className="p-8 space-y-4">
