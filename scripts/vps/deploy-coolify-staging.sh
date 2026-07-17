@@ -106,6 +106,17 @@ if [[ "$ADD_SNMP_ENV" == "true" ]]; then
   upsert_env "USE_DB_MIKROTIK" "true"
   upsert_env "SEED_DEMO_DATA" "false"
   upsert_env "PUBLIC_DEPLOYMENT" "true"
+  upsert_env "APP_URL" "${APP_URL}"
+  # Runtime anon key: el backend la usa para auth.resend (confirmación de email).
+  # Si no viene en el entorno, intenta el secret file local del VPS (sin imprimir).
+  if [[ -z "${SUPABASE_ANON_KEY:-}" && -f /root/nugacore-staging-secrets.env ]]; then
+    SUPABASE_ANON_KEY="$(grep -E '^(SUPABASE_ANON_KEY|VITE_SUPABASE_ANON_KEY)=' /root/nugacore-staging-secrets.env | head -1 | cut -d= -f2- | tr -d '\r' || true)"
+  fi
+  if [[ -n "${SUPABASE_ANON_KEY:-}" ]]; then
+    upsert_env "SUPABASE_ANON_KEY" "${SUPABASE_ANON_KEY}"
+  else
+    log "SUPABASE_ANON_KEY ausente — el alta WISP no podrá enviar correo de confirmación desde el backend"
+  fi
   upsert_env "CSP_ENABLED" "true"
   upsert_env "CSP_CONNECT_SRC" "https://elshnzkceutvjzxvzqad.supabase.co"
   upsert_env "SNMP_POLLER_ENABLED" "true"
