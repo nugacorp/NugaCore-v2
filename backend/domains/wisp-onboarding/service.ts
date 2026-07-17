@@ -104,103 +104,135 @@ export class WispOnboardingService {
     }
 
     let userId: string = randomUUID();
+    let createdAuthUserId: string | undefined;
     let note: string | undefined;
     let emailConfirmationRequired = false;
     let confirmationEmailSent = false;
     const emailRedirectTo = resolveAuthRedirectUrl(input.emailRedirectTo, '/auth/callback');
 
-    if (isSupabaseAdminConfigured && supabaseAdmin) {
-      const { data: created, error } = await supabaseAdmin.auth.admin.createUser({
-        email,
-        password,
-        // Requiere el toggle "Confirm email" en Supabase Auth + correo SMTP/plantilla.
-        email_confirm: false,
-        user_metadata: { full_name: fullName, phone: phone || null },
-        app_metadata: {},
+    try {
+      if (isSupabaseAdminConfigured && supabaseAdmin) {
+        const { data: created, error } = await supabaseAdmin.auth.admin.createUser({
+          email,
+          password,
+          // Requiere el toggle "Confirm email" en Supabase Auth + correo SMTP/plantilla.
+          email_confirm: false,
+          user_metadata: { full_name: fullName, phone: phone || null },
+          app_metadata: {},
+        });
+        if (error || !created.user) {
+          const msg = error?.message || 'No se pudo crear el usuario';
+          const code = /already|exists|registered/i.test(msg) ? 'EMAIL_EXISTS' : 'USER_CREATE_FAILED';
+          throw new BadRequestError(msg, code);
+        }
+        userId = created.user.id;
+        createdAuthUserId = userId;
+        emailConfirmationRequired = true;
+
+        await supabaseAdmin.from('users_profile').upsert({
+          id: userId,
+          email,
+          full_name: fullName,
+          phone: phone || null,
+        }, { onConflict: 'id' });
+
+        const { data: roleRow } = await supabaseAdmin
+          .from('roles')
+          .select('id')
+          .eq('name', 'Administrador')
+          .maybeSingle();
+        if (roleRow?.id) {
+          await supabaseAdmin.from('user_roles').upsert({
+            user_id: userId,
+            role_id: roleRow.id,
+          }, { onConflict: 'user_id,role_id' });
+        }
+
+        const sent = await sendSignupConfirmationEmail(email, emailRedirectTo);
+        confirmationEmailSent = sent.sent;
+        if (!sent.sent) {
+          note = 'Cuenta creada, pero no se pudo enviar el correo de confirmación. Usa «Reenviar confirmación» en el login.';
+        }
+      } else {
+        note = 'Usuario creado en modo store (sin Supabase Auth). Configura Supabase para login real.';
+        logger.warn('WISP register sin Supabase Auth — solo store/tenancy');
+      }
+
+      const tenant = await tenancy.createTenant({
+        name: companyName,
+        slug,
+        status: 'active',
+        ownerUserId: userId,
       });
-      if (error || !created.user) {
-        const msg = error?.message || 'No se pudo crear el usuario';
-        const code = /already|exists|registered/i.test(msg) ? 'EMAIL_EXISTS' : 'USER_CREATE_FAILED';
-        throw new BadRequestError(msg, code);
-      }
-      userId = created.user.id;
-      emailConfirmationRequired = true;
 
-      await supabaseAdmin.from('users_profile').upsert({
-        id: userId,
-        email,
-        full_name: fullName,
-        phone: phone || null,
-      }, { onConflict: 'id' });
+      if (isSupabaseAdminConfigured && supabaseAdmin) {
+        const { data: tenantRow, error: tenantCheckErr } = await supabaseAdmin
+          .from('tenants')
+          .select('id')
+          .eq('id', tenant.id)
+          .maybeSingle();
+        if (tenantCheckErr || !tenantRow) {
+          throw new BadRequestError(
+            'El tenant no quedó persistido en la base de datos. Revisa USE_DB_TENANCY / Supabase.',
+            'TENANT_NOT_PERSISTED',
+          );
+        }
 
-      const { data: roleRow } = await supabaseAdmin
-        .from('roles')
-        .select('id')
-        .eq('name', 'Administrador')
-        .maybeSingle();
-      if (roleRow?.id) {
-        await supabaseAdmin.from('user_roles').upsert({
-          user_id: userId,
-          role_id: roleRow.id,
-        }, { onConflict: 'user_id,role_id' });
-      }
+        const { error: statusErr } = await supabaseAdmin
+          .from('tenants')
+          .update({ onboarding_status: 'in_progress' })
+          .eq('id', tenant.id);
+        if (statusErr) {
+          throw new BadRequestError(
+            `Tenant creado pero onboarding_status falló: ${statusErr.message}`,
+            'ONBOARDING_STATUS_FAILED',
+          );
+        }
 
-      const sent = await sendSignupConfirmationEmail(email, emailRedirectTo);
-      confirmationEmailSent = sent.sent;
-      if (!sent.sent) {
-        note = 'Cuenta creada, pero no se pudo enviar el correo de confirmación. Usa «Reenviar confirmación» en el login.';
-      }
-    } else {
-      note = 'Usuario creado en modo store (sin Supabase Auth). Configura Supabase para login real.';
-      logger.warn('WISP register sin Supabase Auth — solo store/tenancy');
-    }
-
-    const tenant = await tenancy.createTenant({
-      name: companyName,
-      slug,
-      status: 'active',
-      ownerUserId: userId,
-    });
-
-    if (isSupabaseAdminConfigured && supabaseAdmin) {
-      const { error: statusErr } = await supabaseAdmin
-        .from('tenants')
-        .update({ onboarding_status: 'in_progress' })
-        .eq('id', tenant.id);
-      if (statusErr) {
-        throw new BadRequestError(
-          `Tenant creado pero onboarding_status falló: ${statusErr.message}`,
-          'ONBOARDING_STATUS_FAILED',
-        );
+        await supabaseAdmin.auth.admin.updateUserById(userId, {
+          app_metadata: { tenant_id: tenant.id },
+        });
       }
 
-      await supabaseAdmin.auth.admin.updateUserById(userId, {
-        app_metadata: { tenant_id: tenant.id },
+      const onboarding = await this.repo.upsert({
+        tenantId: tenant.id,
+        status: 'in_progress',
+        currentStep: 'company',
+        companyName,
+        contactEmail: email,
+        contactPhone: phone,
+        city,
+        completedSteps: [],
+        updatedAt: new Date().toISOString(),
       });
+
+      return {
+        tenantId: tenant.id,
+        userId,
+        email,
+        slug: tenant.slug,
+        onboarding,
+        emailConfirmationRequired,
+        confirmationEmailSent,
+        note,
+      };
+    } catch (err) {
+      // Evitar usuario Auth huérfano si falla tenant/onboarding (permite reintentar el mismo correo).
+      if (createdAuthUserId && isSupabaseAdminConfigured && supabaseAdmin) {
+        const { error: delErr } = await supabaseAdmin.auth.admin.deleteUser(createdAuthUserId);
+        if (delErr) {
+          logger.warn('WISP register: no se pudo borrar usuario Auth tras fallo', {
+            userId: createdAuthUserId,
+            message: delErr.message,
+          });
+        } else {
+          logger.info('WISP register: usuario Auth revertido tras fallo', {
+            userId: createdAuthUserId,
+          });
+        }
+      }
+      throw err;
     }
-
-    const onboarding = await this.repo.upsert({
-      tenantId: tenant.id,
-      status: 'in_progress',
-      currentStep: 'company',
-      companyName,
-      contactEmail: email,
-      contactPhone: phone,
-      city,
-      completedSteps: [],
-      updatedAt: new Date().toISOString(),
-    });
-
-    return {
-      tenantId: tenant.id,
-      userId,
-      email,
-      slug: tenant.slug,
-      onboarding,
-      emailConfirmationRequired,
-      confirmationEmailSent,
-      note,
-    };
   }
 
   async saveCompany(
