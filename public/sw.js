@@ -1,6 +1,6 @@
 /* NugaTech PWA — shell offline (OLA 4).
  * Network-first para HTML y /assets/*: evita chunks JS obsoletos tras deploy. */
-const CACHE_SHELL = 'nugacore-shell-v6';
+const CACHE_SHELL = 'nugacore-shell-v7';
 const OFFLINE_URLS = ['/manifest.json'];
 
 self.addEventListener('install', (event) => {

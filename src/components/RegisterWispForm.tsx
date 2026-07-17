@@ -3,6 +3,7 @@ import { AlertCircle, ArrowRight, Building2, CheckCircle2, ChevronLeft, Mail, Us
 import { getErrorMessage } from '../lib/errors';
 import { clientLog } from '../lib/clientLog';
 import { isSupabaseConfigured, supabase } from '../lib/supabase';
+import { messageForAuthEmailError } from '../lib/authEmailErrors';
 
 interface RegisterWispFormProps {
   onBack?: () => void;
@@ -118,7 +119,7 @@ export default function RegisterWispForm({ onBack, onGoLogin }: RegisterWispForm
       setOk(`Reenviamos el correo de confirmación a ${target}. Revisa bandeja y spam.`);
     } catch (err) {
       clientLog.error(err);
-      setError(getErrorMessage(err, 'No se pudo reenviar la confirmación.'));
+      setError(messageForAuthEmailError(err, 'No se pudo reenviar la confirmación.'));
     } finally {
       setResending(false);
     }
@@ -158,23 +159,26 @@ export default function RegisterWispForm({ onBack, onGoLogin }: RegisterWispForm
             <p className="text-xs text-slate-400 leading-relaxed">
               Sin confirmar el correo no podrás iniciar sesión. Revisa spam si no lo ves en unos minutos.
             </p>
-            <div className="space-y-2.5">
+            <div className="space-y-2.5 pt-1">
               <button
                 type="button"
                 id="register-resend-confirmation"
                 disabled={resending || loading}
                 onClick={() => void handleResendConfirmation()}
-                className="w-full bg-emerald-700 hover:bg-emerald-600 text-white font-bold text-sm py-3 rounded-xl disabled:opacity-50"
+                className="w-full bg-emerald-600 hover:bg-emerald-500 text-white font-bold text-sm py-3.5 rounded-xl disabled:opacity-50 shadow-lg shadow-emerald-950/40"
               >
                 {resending ? 'Reenviando…' : 'Reenviar confirmación'}
               </button>
+              <p className="text-[11px] text-slate-500">
+                Si ves «rate limit», espera unos minutos: Supabase limita cuántos correos se pueden enviar.
+              </p>
               {onGoLogin && (
                 <button
                   type="button"
                   onClick={onGoLogin}
-                  className="w-full bg-sky-600 hover:bg-sky-500 text-white font-bold text-sm py-3 rounded-xl"
+                  className="w-full border border-slate-700 hover:border-sky-600/50 hover:bg-slate-950 text-sky-300 font-semibold text-sm py-3 rounded-xl"
                 >
-                  Ir a iniciar sesión
+                  Ya confirmé · Ir a iniciar sesión
                 </button>
               )}
             </div>
