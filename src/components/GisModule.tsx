@@ -149,7 +149,7 @@ export default function GisModule({
           </div>
           <div className="bg-slate-950/80 border border-violet-900/40 px-3.5 py-1.5 rounded-xl">
             <span className="text-[9px] text-violet-400 font-bold block uppercase mb-1">OLTs</span>
-            <span className="text-sm font-black text-white">{Math.max(olts.length, 1)}</span>
+            <span className="text-sm font-black text-white">{olts.length}</span>
           </div>
           <div className="bg-slate-950/80 border border-sky-900/40 px-3.5 py-1.5 rounded-xl">
             <span className="text-[9px] text-sky-400 font-bold block uppercase mb-1">Abonados FTTH</span>
