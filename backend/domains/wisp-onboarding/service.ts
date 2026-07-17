@@ -99,7 +99,7 @@ export class WispOnboardingService {
       throw new BadRequestError('Ese identificador de WISP ya está en uso', 'SLUG_TAKEN');
     }
 
-    let userId = randomUUID();
+    let userId: string = randomUUID();
     let note: string | undefined;
 
     if (isSupabaseAdminConfigured && supabaseAdmin) {
