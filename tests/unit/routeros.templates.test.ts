@@ -219,7 +219,7 @@ describe('Generator — Core templates', () => {
 
   it('por defecto crea bridge + LAN sin agregar puertos (WISP los añade a mano)', () => {
     const result = generateFromTemplate({ templateId: 'router_base_wireguard', ...WG_PARAMS });
-    expect(result.script).toContain('nugacore-templates-1.0.7');
+    expect(result.script).toContain(TEMPLATE_LIBRARY_VERSION);
     expect(result.script).toContain('/interface bridge add name="bridge-lan"');
     expect(result.script).toContain('address="192.168.1.1/24" interface="bridge-lan"');
     expect(result.script).toContain('NugaCore-pool-LAN');
