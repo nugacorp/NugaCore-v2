@@ -31,12 +31,16 @@ export const rowToTenant = (row: TenantRow): Tenant => ({
   createdAt: String(row.created_at ?? new Date().toISOString()),
 });
 
-export const tenantToRow = (tenant: Tenant): TenantRow => ({
+export const tenantToRow = (
+  tenant: Tenant,
+  extras?: { onboardingStatus?: 'completed' | 'in_progress' },
+): TenantRow & { onboarding_status?: string } => ({
   id: tenant.id,
   name: tenant.name,
   slug: tenant.slug,
   status: tenant.status,
   created_at: tenant.createdAt,
+  ...(extras?.onboardingStatus ? { onboarding_status: extras.onboardingStatus } : {}),
 });
 
 export const rowToMembership = (row: TenantMembershipRow): TenantMembership => ({

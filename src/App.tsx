@@ -237,6 +237,25 @@ export default function App() {
         return;
       }
 
+      // Enlace de confirmación vencido / inválido: limpia hash y manda a login.
+      const authError = hashParams.get('error') || queryParams.get('error');
+      const authErrorCode = hashParams.get('error_code') || queryParams.get('error_code');
+      if (authError || authErrorCode === 'otp_expired') {
+        if (!mounted) return;
+        setUserSession(null);
+        authSession.clear();
+        setShowLogin(true);
+        setShowRegister(false);
+        setNotice(
+          authErrorCode === 'otp_expired'
+            ? 'El enlace de confirmación expiró. Inicia sesión y usa «Reenviar confirmación», o registra de nuevo.'
+            : 'No se pudo confirmar el correo. Solicita un enlace nuevo desde el login.',
+        );
+        window.history.replaceState({}, '', '/');
+        setSessionBootstrapped(true);
+        return;
+      }
+
       const restored = await restoreSessionProfileFromSupabase();
       if (!mounted) return;
       if (restored) {
@@ -601,6 +620,12 @@ export default function App() {
 
   useEffect(() => {
     if (!sessionBootstrapped || !userSession) {
+      setLoading(false);
+      return;
+    }
+
+    // Mientras el wizard WISP está activo no dispares APIs de negocio (403 ONBOARDING_REQUIRED).
+    if (userSession.onboardingRequired) {
       setLoading(false);
       return;
     }

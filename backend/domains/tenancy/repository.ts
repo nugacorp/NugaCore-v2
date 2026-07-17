@@ -179,9 +179,10 @@ export class SupabaseTenancyRepository implements TenancyRepository {
       status: input.status ?? 'active',
       createdAt: new Date().toISOString(),
     };
+    // WISP nuevos: onboarding obligatorio. tenant-default y seeds no pasan por aquí.
     const { data, error } = await this.client
       .from(TENANTS_TABLE)
-      .insert(tenantToRow(tenant))
+      .insert(tenantToRow(tenant, { onboardingStatus: 'in_progress' }))
       .select('*')
       .single();
     if (error) return fail('createTenant', error);

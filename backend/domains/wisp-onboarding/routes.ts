@@ -61,6 +61,7 @@ router.put(
       companyName: String(body.companyName || ''),
       contactPhone: body.contactPhone ? String(body.contactPhone) : undefined,
       city: body.city ? String(body.city) : undefined,
+      ownerUserId: req.authContext?.userId,
     }));
   }),
 );
@@ -75,6 +76,7 @@ router.put(
       zoneName: String(body.zoneName || ''),
       lat: body.lat != null ? Number(body.lat) : undefined,
       lng: body.lng != null ? Number(body.lng) : undefined,
+      ownerUserId: req.authContext?.userId,
     }));
   }),
 );

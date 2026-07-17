@@ -75,4 +75,21 @@ describe('WispOnboardingService', () => {
     const svc = getWispOnboardingService();
     expect(await svc.isOnboardingRequired('tenant-default')).toBe(false);
   });
+
+  it('saveCompany recrea tenant ausente para no fallar por FK', async () => {
+    const { getTenancyService } = await import('../../backend/domains/tenancy/service');
+    const tenancy = getTenancyService();
+    const orphanId = 'tenant-orphan-heal-01';
+    expect(await tenancy.getTenant(orphanId)).toBeNull();
+
+    const svc = getWispOnboardingService();
+    const saved = await svc.saveCompany(orphanId, {
+      companyName: 'Heal Corp',
+      city: 'Tijuana',
+      ownerUserId: 'user-heal-1',
+    });
+    expect(saved.companyName).toBe('Heal Corp');
+    expect(saved.completedSteps).toContain('company');
+    expect(await tenancy.getTenant(orphanId)).toBeTruthy();
+  });
 });

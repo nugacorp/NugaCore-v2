@@ -265,10 +265,65 @@ export class WispOnboardingService {
     }
   }
 
+  /**
+   * Evita 500 por FK si el JWT apunta a un tenant_id que nunca se persistió
+   * (registro parcial / tenancy en memoria). Crea la fila y membership owner.
+   */
+  private async ensureTenantExists(
+    tenantId: string,
+    companyName: string,
+    ownerUserId?: string,
+  ): Promise<void> {
+    if (!tenantId || tenantId === 'tenant-default') return;
+    const tenancy = getTenancyService();
+    const existing = await tenancy.getTenant(tenantId);
+    if (existing) {
+      if (ownerUserId) {
+        try {
+          await tenancy.ensureMembership({
+            tenantId,
+            userId: ownerUserId,
+            role: 'owner',
+            status: 'active',
+          });
+        } catch {
+          /* membership opcional si ya existe / race */
+        }
+      }
+      return;
+    }
+
+    const baseSlug = slugify(companyName) || `wisp-${tenantId.replace(/^tenant-/, '').slice(0, 12)}`;
+    const tenants = await tenancy.listTenants();
+    let slug = baseSlug;
+    if (tenants.some((t) => t.slug === slug && t.id !== tenantId)) {
+      slug = `${baseSlug}-${tenantId.slice(-6)}`.replace(/-+/g, '-').slice(0, 48);
+    }
+
+    logger.warn('Onboarding: recreando tenant ausente en DB', { tenantId, slug });
+    await tenancy.createTenant({
+      id: tenantId,
+      name: companyName.trim() || slug,
+      slug,
+      status: 'active',
+      ownerUserId,
+    });
+    if (isSupabaseAdminConfigured && supabaseAdmin) {
+      await supabaseAdmin
+        .from('tenants')
+        .update({ onboarding_status: 'in_progress' })
+        .eq('id', tenantId);
+    }
+  }
+
   async saveCompany(
     tenantId: string,
-    payload: { companyName: string; contactPhone?: string; city?: string },
+    payload: { companyName: string; contactPhone?: string; city?: string; ownerUserId?: string },
   ): Promise<WispOnboardingState> {
+    const companyName = String(payload.companyName || '').trim();
+    if (!companyName) throw new BadRequestError('companyName requerido', 'MISSING_FIELD');
+    await this.ensureTenantExists(tenantId, companyName, payload.ownerUserId);
+
     const prev = (await this.repo.get(tenantId)) || {
       tenantId,
       status: 'in_progress' as const,
@@ -276,8 +331,6 @@ export class WispOnboardingService {
       completedSteps: [] as OnboardingStep[],
       updatedAt: new Date().toISOString(),
     };
-    const companyName = String(payload.companyName || '').trim();
-    if (!companyName) throw new BadRequestError('companyName requerido', 'MISSING_FIELD');
     const completedSteps = markStep(prev, 'company');
     return this.repo.upsert({
       ...prev,
@@ -292,12 +345,30 @@ export class WispOnboardingService {
 
   async saveZone(
     tenantId: string,
-    payload: { zoneName: string; lat?: number; lng?: number },
+    payload: { zoneName: string; lat?: number; lng?: number; ownerUserId?: string },
   ): Promise<WispOnboardingState> {
-    const prev = await this.repo.get(tenantId);
-    if (!prev) throw new BadRequestError('Onboarding no iniciado', 'ONBOARDING_MISSING');
     const zoneName = String(payload.zoneName || '').trim();
     if (!zoneName) throw new BadRequestError('zoneName requerido', 'MISSING_FIELD');
+
+    let prev = await this.repo.get(tenantId);
+    if (!prev) {
+      // Reparar: sesión con tenant_id pero sin fila onboarding (ni a veces sin tenants).
+      await this.ensureTenantExists(tenantId, zoneName, payload.ownerUserId);
+      prev = await this.repo.upsert({
+        tenantId,
+        status: 'in_progress',
+        currentStep: 'zone',
+        companyName: zoneName,
+        completedSteps: ['company'],
+        updatedAt: new Date().toISOString(),
+      });
+    } else {
+      await this.ensureTenantExists(
+        tenantId,
+        prev.companyName || zoneName,
+        payload.ownerUserId,
+      );
+    }
 
     const network = getNetworkService();
     const towerId = `t-${tenantId.slice(0, 8)}-${Date.now().toString(36)}`;
