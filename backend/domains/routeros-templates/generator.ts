@@ -154,7 +154,8 @@ ${opts?.snmp ? `/snmp community remove [find where comment~"NugaCore"]\n` : ''}/
 /interface wireguard remove [find where name~"NugaCore"]
 /system scheduler remove [find where comment~"NugaCore"]
 /ip firewall filter remove [find where comment~"NugaCore"]
-/ip firewall nat remove [find where comment~"NugaCore"]`;
+/ip firewall nat remove [find where comment~"NugaCore"]
+/ip firewall address-list remove [find where comment~"NugaCore"]`;
 
 // ── Secciones comunes ─────────────────────────────────────────────
 
@@ -251,6 +252,69 @@ const sectionNat = (_d: Defaults): string => `
   /ip firewall nat add action=masquerade chain=srcnat out-interface-list=WAN comment="NugaCore NAT"
 }`;
 
+/**
+ * Control de acceso clientes (modelo tipo WispHub, listas nc-*).
+ * - nc-authorized → navega libre
+ * - nc-warning → aviso HTTP (redirect 80)
+ * - nc-suspended → redirect al portal + resto bloqueado
+ * - nc-mgmt-servers → IPs del portal NugaCore (siempre alcanzables)
+ *
+ * En existing_config NO se pone drop global (evita cortar clientes legacy).
+ * En factory_reset sí se niega el forward no autorizado.
+ */
+const sectionClientAccessControl = (mode: TemplateApplyMode): string => {
+  const dropUnauthorized =
+    mode === 'factory_reset'
+      ? `
+:if ([:len [/ip firewall filter find chain=forward action=drop in-interface-list=LAN comment="NugaCore ACL drop unauthorized"]] = 0) do={
+  /ip firewall filter add chain=forward action=drop in-interface-list=LAN comment="NugaCore ACL drop unauthorized"
+}`
+      : `
+# drop unauthorized: omitido en existing_config (activa con template factory o añade la regla a mano)`;
+
+  return `
+# --- ACL clientes (address-lists + NAT redirect + filter) ---
+# Listas: nc-authorized | nc-warning | nc-suspended | nc-mgmt-servers
+# (se crean al primer add desde NugaCore; UI puede etiquetar Moroso/Aviso).
+
+# Portal / servidores de gestión siempre alcanzables (añade IPs del portal a nc-mgmt-servers).
+:if ([:len [/ip firewall filter find chain=forward action=accept dst-address-list=nc-mgmt-servers comment="NugaCore ACL allow portal"]] = 0) do={
+  /ip firewall filter add chain=forward action=accept dst-address-list=nc-mgmt-servers comment="NugaCore ACL allow portal"
+}
+:if ([:len [/ip firewall filter find chain=forward action=accept src-address-list=nc-authorized comment="NugaCore ACL allow authorized"]] = 0) do={
+  /ip firewall filter add chain=forward action=accept src-address-list=nc-authorized connection-state=new,established,related comment="NugaCore ACL allow authorized"
+}
+:if ([:len [/ip firewall filter find chain=forward action=accept connection-state=established,related comment="NugaCore ACL established"]] = 0) do={
+  /ip firewall filter add chain=forward action=accept connection-state=established,related comment="NugaCore ACL established"
+}
+:if ([:len [/ip firewall filter find chain=forward action=accept protocol=udp dst-port=53 comment="NugaCore ACL DNS"]] = 0) do={
+  /ip firewall filter add chain=forward action=accept protocol=udp dst-port=53 comment="NugaCore ACL DNS"
+}
+:if ([:len [/ip firewall filter find chain=forward action=accept protocol=tcp dst-port=53 comment="NugaCore ACL DNS TCP"]] = 0) do={
+  /ip firewall filter add chain=forward action=accept protocol=tcp dst-port=53 comment="NugaCore ACL DNS TCP"
+}
+${dropUnauthorized}
+
+# NAT: morosos/aviso → portal (añade IPs del portal a nc-mgmt-servers desde NugaCore).
+:if ([:len [/ip firewall nat find chain=dstnat action=accept src-address-list=nc-suspended dst-address-list=nc-mgmt-servers comment="NugaCore ACL suspended to portal"]] = 0) do={
+  /ip firewall nat add chain=dstnat action=accept src-address-list=nc-suspended dst-address-list=nc-mgmt-servers comment="NugaCore ACL suspended to portal"
+}
+:if ([:len [/ip firewall nat find chain=dstnat action=accept src-address-list=nc-warning dst-address-list=nc-mgmt-servers comment="NugaCore ACL warning to portal"]] = 0) do={
+  /ip firewall nat add chain=dstnat action=accept src-address-list=nc-warning dst-address-list=nc-mgmt-servers comment="NugaCore ACL warning to portal"
+}
+# Suspendidos: redirect TCP (menos DNS) al web local/portal; DNS queda libre para resolver el portal.
+:if ([:len [/ip firewall nat find chain=dstnat action=redirect protocol=tcp src-address-list=nc-suspended dst-port=!53,8291 comment="NugaCore ACL suspend TCP"]] = 0) do={
+  /ip firewall nat add chain=dstnat action=redirect to-ports=80 protocol=tcp src-address-list=nc-suspended dst-port=!53,8291 comment="NugaCore ACL suspend TCP"
+}
+:if ([:len [/ip firewall nat find chain=dstnat action=redirect protocol=udp src-address-list=nc-suspended dst-port=!53,8291 comment="NugaCore ACL suspend UDP"]] = 0) do={
+  /ip firewall nat add chain=dstnat action=redirect to-ports=80 protocol=udp src-address-list=nc-suspended dst-port=!53,8291 comment="NugaCore ACL suspend UDP"
+}
+# Aviso: solo HTTP (sigue con el resto del tráfico si está en nc-authorized).
+:if ([:len [/ip firewall nat find chain=dstnat action=redirect protocol=tcp src-address-list=nc-warning dst-port=80 comment="NugaCore ACL warning HTTP"]] = 0) do={
+  /ip firewall nat add chain=dstnat action=redirect to-ports=80 protocol=tcp src-address-list=nc-warning dst-port=80 comment="NugaCore ACL warning HTTP"
+}`;
+};
+
 const sectionFirewall = (mode: TemplateApplyMode): string => {
   const dropWan =
     mode === 'factory_reset'
@@ -259,14 +323,15 @@ const sectionFirewall = (mode: TemplateApplyMode): string => {
 }`
       : `# drop WAN: omitido (modo existing_config; evita cortar acceso de gestión en routers en servicio)`;
   return `
-# --- Firewall básico ---
+# --- Firewall básico (gestión del router) ---
 :if ([:len [/ip firewall filter find chain=input action=accept connection-state=established,related comment~"NugaCore"]] = 0) do={
   /ip firewall filter add chain=input action=accept connection-state=established,related comment="NugaCore established"
 }
 :if ([:len [/ip firewall filter find chain=input action=accept in-interface-list=LAN comment~"NugaCore"]] = 0) do={
   /ip firewall filter add chain=input action=accept in-interface-list=LAN comment="NugaCore allow LAN"
 }
-${dropWan}`;
+${dropWan}
+${sectionClientAccessControl(mode)}`;
 };
 
 /**

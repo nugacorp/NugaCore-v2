@@ -7,6 +7,7 @@
 // ====================================================================
 
 import type { Client, Plan } from '../../../src/types';
+import { buildAuthorizeCommands } from '../mikrotik/access-control';
 
 export interface CustomerMikrotikPlanContext {
   client: Pick<Client, 'id' | 'name'> &
@@ -30,23 +31,32 @@ export const buildCustomerMikrotikCommands = (ctx: CustomerMikrotikPlanContext):
   const limit = rateLimit(ctx.plan.speedMbpsDown, ctx.plan.speedMbpsUp);
   const queueName = `q-${user}`;
 
+  const authorize = buildAuthorizeCommands({
+    customerId: ctx.client.id,
+    customerName: ctx.client.name,
+    ip,
+    pppoeUser: user,
+  });
+
   switch (ctx.plan.type) {
     case 'PPPoE':
       return [
         `/ppp secret add name="${user}" password="${pass}" service=pppoe profile=default comment="${comment}"`,
         `/queue simple add name="${queueName}" target=${ip}/32 max-limit=${limit} comment="${comment}"`,
+        ...authorize,
       ];
     case 'Hotspot':
       return [
         `/ip hotspot user add name="${user}" password="${pass}" profile=default comment="${comment}"`,
         `/queue simple add name="${queueName}" target=${ip}/32 max-limit=${limit} comment="${comment}"`,
+        ...authorize,
       ];
     case 'DHCP':
     case 'Static':
     default:
       return [
         `/queue simple add name="${queueName}" target=${ip}/32 max-limit=${limit} comment="${comment}"`,
-        `/ip firewall address-list add list=nugacore-active address=${ip} comment="${comment}"`,
+        ...authorize,
       ];
   }
 };

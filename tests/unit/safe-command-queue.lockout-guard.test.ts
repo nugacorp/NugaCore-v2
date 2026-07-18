@@ -10,7 +10,8 @@ describe('planRouterOsCommands', () => {
       payload: { pppoeUser: 'user1', ip: '10.100.10.5' },
     });
     expect(plan.some((c) => c.includes('/ppp secret disable'))).toBe(true);
-    expect(plan.some((c) => c.includes('address-list add'))).toBe(true);
+    expect(plan.some((c) => c.includes('list=nc-suspended') && c.includes('address-list add'))).toBe(true);
+    expect(plan.some((c) => c.includes('list=nc-authorized') && c.includes('remove'))).toBe(true);
   });
 });
 
