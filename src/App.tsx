@@ -31,6 +31,7 @@ const PaymentsModule = lazyWithRetry(() => import('./components/PaymentsModule')
 const CommercialModule = lazyWithRetry(() => import('./components/CommercialModule'));
 const ReportsModule = lazyWithRetry(() => import('./components/ReportsModule'));
 const PortalModule = lazyWithRetry(() => import('./components/PortalModule'));
+const PortalAdminModule = lazyWithRetry(() => import('./components/PortalAdminModule'));
 const TechPwaModule = lazyWithRetry(() => import('./modules/tech-pwa/TechPwaModule'));
 import LoginForm from './components/LoginForm';
 import LandingPage from './components/LandingPage';
@@ -1698,6 +1699,10 @@ export default function App() {
 
             {activeTab === 'reports' && (
               <ReportsModule getAuthHeaders={getAuthHeaders} />
+            )}
+
+            {activeTab === 'portal-admin' && (
+              <PortalAdminModule getAuthHeaders={getAuthHeaders} />
             )}
 
             {activeTab === 'portal' && (

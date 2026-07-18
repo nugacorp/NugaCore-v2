@@ -29,6 +29,7 @@ export type AppTab =
   | 'commercial'
   | 'reports'
   | 'portal'
+  | 'portal-admin'
   | 'tech-pwa'
   | 'user-manual';
 
@@ -39,9 +40,9 @@ export type AppTab =
 // la VISIBILIDAD del módulo.
 // ====================================================================
 const roleTabs: Record<UserRole, AppTab[]> = {
-  'Super Admin':  ['dashboard', 'noc', 'crm', 'commercial', 'billing', 'finance', 'suspension', 'payments', 'network', 'mikrotik', 'wireguard', 'routeros-resources', 'routeros-templates', 'router-enrollment', 'support', 'tech-pwa', 'inventory', 'inventory-routers', 'gis', 'owner', 'reports', 'portal', 'manual-safe-mode', 'safe-command-queue', 'routeros-readonly', 'inventory-sync', 'provisioning', 'user-manual'],
-  'Administrador':['dashboard', 'noc', 'crm', 'commercial', 'billing', 'suspension', 'payments', 'network', 'wireguard', 'routeros-resources', 'routeros-templates', 'router-enrollment', 'support', 'tech-pwa', 'inventory', 'inventory-routers', 'gis', 'reports', 'portal', 'manual-safe-mode', 'safe-command-queue', 'routeros-readonly', 'inventory-sync', 'provisioning', 'user-manual'],
-  'Cobranza':     ['dashboard', 'crm', 'commercial', 'billing', 'finance', 'suspension', 'payments', 'reports', 'portal', 'provisioning', 'user-manual'],
+  'Super Admin':  ['dashboard', 'noc', 'crm', 'commercial', 'billing', 'finance', 'suspension', 'payments', 'network', 'mikrotik', 'wireguard', 'routeros-resources', 'routeros-templates', 'router-enrollment', 'support', 'tech-pwa', 'inventory', 'inventory-routers', 'gis', 'owner', 'reports', 'portal', 'portal-admin', 'manual-safe-mode', 'safe-command-queue', 'routeros-readonly', 'inventory-sync', 'provisioning', 'user-manual'],
+  'Administrador':['dashboard', 'noc', 'crm', 'commercial', 'billing', 'suspension', 'payments', 'network', 'wireguard', 'routeros-resources', 'routeros-templates', 'router-enrollment', 'support', 'tech-pwa', 'inventory', 'inventory-routers', 'gis', 'reports', 'portal', 'portal-admin', 'manual-safe-mode', 'safe-command-queue', 'routeros-readonly', 'inventory-sync', 'provisioning', 'user-manual'],
+  'Cobranza':     ['dashboard', 'crm', 'commercial', 'billing', 'finance', 'suspension', 'payments', 'reports', 'portal', 'portal-admin', 'provisioning', 'user-manual'],
   'Técnico':      ['dashboard', 'noc', 'crm', 'suspension', 'network', 'mikrotik', 'routeros-resources', 'routeros-templates', 'router-enrollment', 'support', 'tech-pwa', 'inventory', 'inventory-routers', 'gis', 'portal', 'manual-safe-mode', 'safe-command-queue', 'routeros-readonly', 'inventory-sync', 'provisioning', 'user-manual'],
   'Soporte':      ['dashboard', 'noc', 'crm', 'commercial', 'support', 'tech-pwa', 'inventory-routers', 'gis', 'portal', 'manual-safe-mode', 'safe-command-queue', 'routeros-readonly', 'inventory-sync', 'provisioning', 'user-manual'],
   'Solo lectura': ['dashboard', 'noc', 'crm', 'commercial', 'billing', 'suspension', 'network', 'inventory-routers', 'gis', 'reports', 'portal', 'manual-safe-mode', 'safe-command-queue', 'routeros-readonly', 'inventory-sync', 'provisioning', 'user-manual'],
@@ -62,9 +63,6 @@ const roleTabs: Record<UserRole, AppTab[]> = {
 //  - automation / notifications: labs DRY RUN de motores internos; retirados
 //    de la UI operativa del WISP (sin acceso por rol). Las alertas del operador
 //    viven en la campana de la barra superior (NOC alerts), no en esos módulos.
-//  - portal / tech-pwa: apps aisladas (`/?app=portal` y `/?app=tech`). No van
-//    en el menú WISP para evitar que un operador “entre al portal” y vea el
-//    shell admin; el enlace se copia desde CRM / ficha cliente.
 // No se eliminan ni se les quita acceso (salvo automation/notifications):
 // solo se ocultan del sidebar.
 // ====================================================================
@@ -80,8 +78,6 @@ const SIDEBAR_HIDDEN_TABS: ReadonlySet<AppTab> = new Set<AppTab>([
   'provisioning',
   'automation',
   'notifications',
-  'portal',
-  'tech-pwa',
 ]);
 
 export function isSidebarHiddenTab(tab: string): boolean {
@@ -143,8 +139,9 @@ export const MODULE_LABELS: Record<AppTab, string> = {
   'user-manual': 'Manual de Usuario',
   commercial: 'Prospectos',
   reports: 'Reportes',
-  portal: 'Portal Cliente',
-  'tech-pwa': 'App Técnicos',
+  portal: 'App del Cliente',
+  'portal-admin': 'Portal del Cliente',
+  'tech-pwa': 'App del Técnico',
 };
 
 export const getModuleLabel = (tab: string): string => MODULE_LABELS[tab as AppTab] || tab;

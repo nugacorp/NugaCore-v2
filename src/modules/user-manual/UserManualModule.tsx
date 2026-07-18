@@ -243,7 +243,8 @@ const SECTIONS: ManualSection[] = [
     icon: HelpCircle,
     summary: 'Dudas comunes sobre módulos visibles, infraestructura interna y seguridad.',
     steps: [
-      '¿Portal y App Técnicos por qué no salen en el menú? Son apps aisladas: usa /?app=portal&client=<id> y /?app=tech.',
+      '¿Dónde configuro el portal del cliente? Menú Apps → Portal del Cliente: activa o desactiva cada función con los checkboxes.',
+      '¿Dónde abro la app del cliente o del técnico? Menú Apps → App del Cliente o App del Técnico, o usa /?app=portal&client=<id> y /?app=tech.',
       '¿Dónde veo alertas? En la campana de la barra superior derecha (NOC).',
       '¿Dónde está WireGuard? Interno: se crea automáticamente al dar de alta un router.',
       '¿Por qué no veo Modo Seguro ni Cola Dry-Run? Son herramientas internas; no son operación diaria.',

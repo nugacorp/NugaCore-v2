@@ -4,6 +4,7 @@
 # Uso:
 #   BRANCH=cursor/snmp-live-mikrotik-wizard-cb99 bash scripts/vps/deploy-coolify-staging.sh
 #   ADD_SNMP_ENV=true bash scripts/vps/deploy-coolify-staging.sh
+#   NUGACORE_LIVE_MODE=true BRANCH=main bash scripts/vps/deploy-coolify-staging.sh
 set -euo pipefail
 
 BRANCH="${BRANCH:-main}"
@@ -127,13 +128,19 @@ if [[ "$ADD_SNMP_ENV" == "true" ]]; then
   upsert_env "SNMP_POLLER_ENABLED" "true"
   upsert_env "SNMP_POLLER_INTERVAL_MS" "120000"
   upsert_env "NOC_POLLER_ENABLED" "true"
-  # Lectura live al CHR por VPN (check-online / inventario). Writes siguen gated.
+  # Lectura live al CHR por VPN (check-online / inventario). Writes siguen gated salvo NUGACORE_LIVE_MODE.
   # FORCE_MIKROTIK_WORKER_LIVE=false para apagar en un deploy.
   if [[ "${FORCE_MIKROTIK_WORKER_LIVE:-true}" == "true" ]]; then
     upsert_env "MIKROTIK_WORKER_LIVE" "true"
     upsert_env "MIKROTIK_WORKER_COMMIT" "false"
   else
     upsert_env "MIKROTIK_WORKER_LIVE" "false"
+  fi
+  if [[ "${NUGACORE_LIVE_MODE:-false}" == "true" ]]; then
+    upsert_env "NUGACORE_LIVE_MODE" "true"
+    log "NUGACORE_LIVE_MODE=true — master gate activo (todos los subsistemas live)"
+  else
+    upsert_env "NUGACORE_LIVE_MODE" "false"
   fi
   ensure_wg_host_apply_env
 fi
