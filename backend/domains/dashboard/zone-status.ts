@@ -195,11 +195,20 @@ export const buildZoneEquipment = (
 };
 
 export const buildZoneStatusReport = async (tenantId?: string): Promise<ZoneStatusReport> => {
+  const network = getNetworkService();
   const [towers, routers] = await Promise.all([
-    getNetworkService().listTowers(tenantId ? { tenantId } : {}),
+    network.listTowers(tenantId ? { tenantId } : {}),
     Promise.resolve(nocReadOnlyRepository.listRouters()),
   ]);
   const referenceTimestampMs = resolveReferenceTimestampMs(routers);
+
+  const onboardingByTower = new Map<string, string>();
+  await Promise.all(
+    towers.map(async (tower) => {
+      const profile = await network.getTowerOnboarding(tower.id, tenantId);
+      if (profile?.zoneName) onboardingByTower.set(tower.id, profile.zoneName);
+    }),
+  );
 
   const zones: ZoneStatusRow[] = towers.map((tower) => {
     const equipment = buildZoneEquipment(tower, routers, referenceTimestampMs);
@@ -211,7 +220,8 @@ export const buildZoneStatusReport = async (tenantId?: string): Promise<ZoneStat
 
     return {
       zoneId: tower.id,
-      zoneName: tower.name,
+      // Preferir nombre de zona del onboarding; el name de torre puede llevar sufijo de tenant.
+      zoneName: onboardingByTower.get(tower.id) || tower.name,
       siteStatus: tower.status,
       overallStatus,
       equipmentOnline,
