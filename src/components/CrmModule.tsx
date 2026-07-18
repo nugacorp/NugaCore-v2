@@ -27,6 +27,7 @@ import {
   Check,
   Trash2,
 } from 'lucide-react';
+
 import { Client, Plan, Tower, TowerOnboardingProfile, NapBox } from '../types';
 
 type ZoneOption = {

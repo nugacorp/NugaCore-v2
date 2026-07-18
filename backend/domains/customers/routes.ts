@@ -12,6 +12,7 @@ import { requestReactivation, requestSuspension } from '../service-status/servic
 import { ipamService } from '../ipam/service';
 import { tenantIdFromRequest } from '../tenancy/tenant-scope';
 import { getNetworkService } from '../network/service';
+
 import { getFtthService } from '../network/ftth-service';
 import { provisioningService } from '../provisioning/service';
 import { buildCustomerMikrotikPlanSteps } from '../provisioning/customer-mikrotik-plan';
@@ -95,6 +96,7 @@ router.post('/api/clients', requireRoles(['super admin', 'administrador', 'tecni
     equipmentReservationId,
     mac,
     billingZoneId,
+
     napId,
     napPort,
   } = req.body;
@@ -292,6 +294,7 @@ router.post('/api/clients', requireRoles(['super admin', 'administrador', 'tecni
       });
     } catch (err) {
       logger.warn('No se pudo encolar provisioning CREATE_CUSTOMER', {
+
         clientId: newClient.id,
         message: err instanceof Error ? err.message : String(err),
       });
