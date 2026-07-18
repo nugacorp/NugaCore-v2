@@ -28,4 +28,9 @@ describe('Separación FTTH mapa vs WISP sitios', () => {
   it('Sidebar etiqueta GIS como Mapa FTTH', () => {
     expect(sidebar).toContain("name: 'Mapa FTTH'");
   });
+
+  it('contador OLT muestra valor real (sin mínimo artificial)', () => {
+    expect(gis).toContain('{olts.length}');
+    expect(gis).not.toContain('Math.max(olts.length, 1)');
+  });
 });

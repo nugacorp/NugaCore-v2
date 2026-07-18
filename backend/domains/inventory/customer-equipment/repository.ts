@@ -1,9 +1,19 @@
-import { store } from '../../../state/store';
+import { store, seedDemoData } from '../../../state/store';
 import type {
   CreateEquipmentReservationInput,
   CustomerEquipment,
   EquipmentReservation,
 } from './types';
+
+/** Categorías de inventario instalables en alta de cliente. */
+const INSTALL_CATEGORIES = new Set(['CPE', 'Fiber', 'Other', 'Antenna']);
+
+const kindFromCategory = (category: string): CustomerEquipment['kind'] => {
+  if (category === 'CPE') return 'CPE';
+  if (category === 'Fiber') return 'ONU';
+  if (category === 'Antenna') return 'CPE';
+  return 'OTHER';
+};
 
 const MOCK_ACCESSORIES: CustomerEquipment[] = [
   {
@@ -30,18 +40,24 @@ export class CustomerEquipmentRepository {
   private readonly reservations: EquipmentReservation[] = [];
 
   listEquipment(): CustomerEquipment[] {
-    const cpes = store.INVENTORY
-      .filter((item) => item.category === 'CPE' && item.qty > 0)
+    const fromInventory = store.INVENTORY
+      .filter((item) => INSTALL_CATEGORIES.has(item.category) && (item.qty > 0 || item.serials.length > 0))
       .map<CustomerEquipment>((item) => ({
         id: item.id,
-        kind: 'CPE',
+        kind: kindFromCategory(item.category),
         name: item.name,
         brand: item.brand,
         model: item.model,
-        availableQty: item.qty,
+        availableQty: Math.max(item.qty, item.serials.length),
         serials: [...item.serials],
       }));
-    return [...cpes, ...MOCK_ACCESSORIES.map((item) => ({ ...item, serials: [...item.serials] }))];
+
+    if (!seedDemoData()) return fromInventory;
+
+    return [
+      ...fromInventory,
+      ...MOCK_ACCESSORIES.map((item) => ({ ...item, serials: [...item.serials] })),
+    ];
   }
 
   listReservations(): EquipmentReservation[] {

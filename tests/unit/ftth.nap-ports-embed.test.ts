@@ -9,6 +9,6 @@ describe('FTTH nap_ports embed', () => {
       'utf8',
     );
     expect(src).toContain('nap_ports!nap_id(*)');
-    expect(src.includes("select('*, nap_ports(*)')")).toBe(false);
+    expect(src).not.toMatch(/\.select\('*\s*,\s*nap_ports\(\*\)'/);
   });
 });

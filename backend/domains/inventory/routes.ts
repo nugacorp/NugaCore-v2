@@ -21,9 +21,30 @@ const WRITE_ROLES = ['super admin', 'administrador', 'tecnico'] as const;
 // ====================================================================
 // Customer equipment (reservas) — sin cambios de contrato.
 // ====================================================================
-router.get('/api/inventory/customer-equipment', requireRoles(READ_ROLES), (_req, res) => {
+router.get('/api/inventory/customer-equipment', requireRoles(READ_ROLES), asyncHandler(async (_req, res) => {
+  // Preferir inventario real (DB/store) sobre mocks.
+  try {
+    const items = await getInventoryService().listItems({});
+    const mapped = items
+      .filter((item) => ['CPE', 'Fiber', 'Other', 'Antenna'].includes(item.category)
+        && (item.qty > 0 || (item.serials?.length ?? 0) > 0))
+      .map((item) => ({
+        id: item.id,
+        kind: item.category === 'Fiber' ? 'ONU' : item.category === 'CPE' || item.category === 'Antenna' ? 'CPE' : 'OTHER',
+        name: item.name,
+        brand: item.brand,
+        model: item.model,
+        availableQty: Math.max(item.qty, item.serials?.length ?? 0),
+        serials: [...(item.serials || [])],
+      }));
+    if (mapped.length > 0) {
+      return res.json(mapped);
+    }
+  } catch {
+    // fallback al listado del servicio (store + mocks condicionales)
+  }
   res.json(customerEquipmentService.listEquipment());
-});
+}));
 
 router.get('/api/inventory/customer-equipment/reservations', requireRoles(READ_ROLES), (_req, res) => {
   res.json(customerEquipmentService.listReservations());
@@ -36,6 +57,30 @@ router.post(
     try {
       const reservation = customerEquipmentService.reserve({
         equipmentId: String(req.body?.equipmentId || ''),
+        serial: String(req.body?.serial || ''),
+        mac: String(req.body?.mac || ''),
+        customerLabel: String(req.body?.customerLabel || ''),
+      });
+      res.status(201).json(reservation);
+    } catch (error) {
+      if (error instanceof EquipmentReservationError) {
+        return res.status(400).json({ error: error.message, code: error.code });
+      }
+      throw error;
+    }
+  },
+);
+
+router.post(
+  '/api/inventory/customer-equipment/manual-reservations',
+  requireRoles(['super admin', 'administrador', 'tecnico', 'soporte']),
+  (req, res) => {
+    try {
+      const reservation = customerEquipmentService.reserveManual({
+        name: String(req.body?.name || ''),
+        kind: (String(req.body?.kind || 'CPE') as 'CPE' | 'POE' | 'POWER_SUPPLY' | 'ONU' | 'OTHER'),
+        brand: req.body?.brand ? String(req.body.brand) : undefined,
+        model: req.body?.model ? String(req.body.model) : undefined,
         serial: String(req.body?.serial || ''),
         mac: String(req.body?.mac || ''),
         customerLabel: String(req.body?.customerLabel || ''),

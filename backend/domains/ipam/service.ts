@@ -154,7 +154,8 @@ export class IpamService {
     if (!pool) return null;
 
     const cidr = parseCidr(pool.cidr);
-    if (!cidr || cidr.prefix > 30) {
+    // Pools manuales (/0) o demasiado grandes: no enumerar; el operador escribe IP.
+    if (!cidr || cidr.prefix > 30 || cidr.prefix < 8) {
       return {
         routerId: pool.routerId,
         poolId: pool.id,
@@ -224,10 +225,13 @@ export class IpamService {
 
     const parsed = parseCidr(pool.cidr);
     const ipNumber = ipv4ToNumber(ip);
-    const reserved = new Set([pool.gateway, ...pool.reservedIps]);
+    const reserved = new Set(
+      [pool.gateway, ...pool.reservedIps].filter((value) => value && value !== '0.0.0.0'),
+    );
     if (
       reserved.has(ip) ||
-      (parsed && ipNumber !== null && (ipNumber === parsed.network || ipNumber === parsed.broadcast))
+      (parsed && parsed.prefix >= 8 && ipNumber !== null
+        && (ipNumber === parsed.network || ipNumber === parsed.broadcast))
     ) {
       return {
         ...base,

@@ -8,10 +8,12 @@ import {
 } from '../../backend/domains/ipam/providers';
 
 describe('IPAM providers', () => {
-  it('usa mock por defecto y ante valores desconocidos', () => {
-    expect(resolveIpamProviderName({})).toBe('mock');
-    expect(resolveIpamProviderName({ IPAM_PROVIDER: 'unknown' })).toBe('mock');
-    expect(resolveIpamProvider({}).source).toBe('mock');
+  it('usa registry por defecto (routers reales); mock solo con opt-in', () => {
+    expect(resolveIpamProviderName({})).toBe('registry');
+    expect(resolveIpamProviderName({ IPAM_PROVIDER: 'unknown' })).toBe('registry');
+    expect(resolveIpamProvider({}).source).toBe('registry');
+    expect(resolveIpamProviderName({ IPAM_PROVIDER: 'mock' })).toBe('mock');
+    expect(resolveIpamProvider({ IPAM_PROVIDER: 'mock' }).source).toBe('mock');
   });
 
   it('resuelve routeros sólo con opt-in explícito', () => {

@@ -12,6 +12,7 @@ import { requestReactivation, requestSuspension } from '../service-status/servic
 import { ipamService } from '../ipam/service';
 import { tenantIdFromRequest } from '../tenancy/tenant-scope';
 import { getNetworkService } from '../network/service';
+import { getFtthService } from '../network/ftth-service';
 import { provisioningService } from '../provisioning/service';
 import { buildCustomerMikrotikPlanSteps } from '../provisioning/customer-mikrotik-plan';
 import { logger } from '../../common/logger';
@@ -94,6 +95,8 @@ router.post('/api/clients', requireRoles(['super admin', 'administrador', 'tecni
     equipmentReservationId,
     mac,
     billingZoneId,
+    napId,
+    napPort,
   } = req.body;
 
   // Validación de entrada (lanza 400 si es inválida).
@@ -290,6 +293,44 @@ router.post('/api/clients', requireRoles(['super admin', 'administrador', 'tecni
     } catch (err) {
       logger.warn('No se pudo encolar provisioning CREATE_CUSTOMER', {
         clientId: newClient.id,
+        message: err instanceof Error ? err.message : String(err),
+      });
+    }
+  }
+
+  // FTTH: ocupar puerto NAP + registrar ONU (best-effort).
+  const normalizedNapId = String(napId || '').trim();
+  const normalizedNapPort = Number(napPort);
+  if (
+    String(connectionType || newClient.connectionType || '').toUpperCase() === 'FTTH'
+    && normalizedNapId
+    && Number.isFinite(normalizedNapPort)
+    && normalizedNapPort > 0
+  ) {
+    try {
+      await getFtthService().updateNapPort(normalizedNapId, normalizedNapPort, {
+        status: 'occupied',
+        client: newClient.name,
+      });
+      const newOnu: OnuFTTH = {
+        id: store.getUniqueOnuId(),
+        clientId: newClient.id,
+        clientName: newClient.name,
+        oltId: 'olt-pending',
+        port: normalizedNapPort,
+        mac: String(mac || newClient.mac || '00:00:00:00:00:00'),
+        signalDb: -22,
+        status: 'online',
+        brand: 'Generic',
+        model: 'ONT',
+        napId: normalizedNapId,
+        napPort: normalizedNapPort,
+      };
+      store.ONUS.push(newOnu);
+    } catch (err) {
+      logger.warn('No se pudo asignar NAP/ONU en alta FTTH', {
+        clientId: newClient.id,
+        napId: normalizedNapId,
         message: err instanceof Error ? err.message : String(err),
       });
     }

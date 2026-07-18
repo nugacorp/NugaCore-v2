@@ -50,7 +50,7 @@ export interface AvailableIpsResult {
   cidr: string;
   totalAvailable: number;
   ips: string[];
-  source: 'mock-local' | 'routeros-read-only';
+  source: 'mock-local' | 'routeros-read-only' | 'registry';
 }
 
 export interface IpamCapacitySeed {

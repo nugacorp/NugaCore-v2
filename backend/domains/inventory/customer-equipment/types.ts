@@ -1,4 +1,4 @@
-export type CustomerEquipmentKind = 'CPE' | 'POE' | 'POWER_SUPPLY';
+export type CustomerEquipmentKind = 'CPE' | 'POE' | 'POWER_SUPPLY' | 'ONU' | 'OTHER';
 
 export interface CustomerEquipment {
   id: string;
@@ -12,6 +12,16 @@ export interface CustomerEquipment {
 
 export interface CreateEquipmentReservationInput {
   equipmentId: string;
+  serial: string;
+  mac: string;
+  customerLabel: string;
+}
+
+export interface ManualEquipmentReservationInput {
+  name: string;
+  kind: CustomerEquipmentKind;
+  brand?: string;
+  model?: string;
   serial: string;
   mac: string;
   customerLabel: string;
