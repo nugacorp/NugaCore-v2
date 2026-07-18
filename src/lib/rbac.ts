@@ -8,6 +8,7 @@ export type AppTab =
   | 'finance'
   | 'suspension'
   | 'network'
+  | 'olt'
   | 'mikrotik'
   | 'wireguard'
   | 'routeros-resources'
@@ -40,10 +41,10 @@ export type AppTab =
 // la VISIBILIDAD del módulo.
 // ====================================================================
 const roleTabs: Record<UserRole, AppTab[]> = {
-  'Super Admin':  ['dashboard', 'noc', 'crm', 'commercial', 'billing', 'finance', 'suspension', 'payments', 'network', 'mikrotik', 'wireguard', 'routeros-resources', 'routeros-templates', 'router-enrollment', 'support', 'tech-pwa', 'inventory', 'inventory-routers', 'gis', 'owner', 'reports', 'portal', 'portal-admin', 'manual-safe-mode', 'safe-command-queue', 'routeros-readonly', 'inventory-sync', 'provisioning', 'user-manual'],
-  'Administrador':['dashboard', 'noc', 'crm', 'commercial', 'billing', 'suspension', 'payments', 'network', 'wireguard', 'routeros-resources', 'routeros-templates', 'router-enrollment', 'support', 'tech-pwa', 'inventory', 'inventory-routers', 'gis', 'reports', 'portal', 'portal-admin', 'manual-safe-mode', 'safe-command-queue', 'routeros-readonly', 'inventory-sync', 'provisioning', 'user-manual'],
+  'Super Admin':  ['dashboard', 'noc', 'crm', 'commercial', 'billing', 'finance', 'suspension', 'payments', 'network', 'olt', 'mikrotik', 'wireguard', 'routeros-resources', 'routeros-templates', 'router-enrollment', 'support', 'tech-pwa', 'inventory', 'inventory-routers', 'gis', 'owner', 'reports', 'portal', 'portal-admin', 'manual-safe-mode', 'safe-command-queue', 'routeros-readonly', 'inventory-sync', 'provisioning', 'user-manual'],
+  'Administrador':['dashboard', 'noc', 'crm', 'commercial', 'billing', 'suspension', 'payments', 'network', 'olt', 'wireguard', 'routeros-resources', 'routeros-templates', 'router-enrollment', 'support', 'tech-pwa', 'inventory', 'inventory-routers', 'gis', 'reports', 'portal', 'portal-admin', 'manual-safe-mode', 'safe-command-queue', 'routeros-readonly', 'inventory-sync', 'provisioning', 'user-manual'],
   'Cobranza':     ['dashboard', 'crm', 'commercial', 'billing', 'finance', 'suspension', 'payments', 'reports', 'portal', 'portal-admin', 'provisioning', 'user-manual'],
-  'Técnico':      ['dashboard', 'noc', 'crm', 'suspension', 'network', 'mikrotik', 'routeros-resources', 'routeros-templates', 'router-enrollment', 'support', 'tech-pwa', 'inventory', 'inventory-routers', 'gis', 'portal', 'manual-safe-mode', 'safe-command-queue', 'routeros-readonly', 'inventory-sync', 'provisioning', 'user-manual'],
+  'Técnico':      ['dashboard', 'noc', 'crm', 'suspension', 'network', 'olt', 'mikrotik', 'routeros-resources', 'routeros-templates', 'router-enrollment', 'support', 'tech-pwa', 'inventory', 'inventory-routers', 'gis', 'portal', 'manual-safe-mode', 'safe-command-queue', 'routeros-readonly', 'inventory-sync', 'provisioning', 'user-manual'],
   'Soporte':      ['dashboard', 'noc', 'crm', 'commercial', 'support', 'tech-pwa', 'inventory-routers', 'gis', 'portal', 'manual-safe-mode', 'safe-command-queue', 'routeros-readonly', 'inventory-sync', 'provisioning', 'user-manual'],
   'Solo lectura': ['dashboard', 'noc', 'crm', 'commercial', 'billing', 'suspension', 'network', 'inventory-routers', 'gis', 'reports', 'portal', 'manual-safe-mode', 'safe-command-queue', 'routeros-readonly', 'inventory-sync', 'provisioning', 'user-manual'],
 };
@@ -118,6 +119,7 @@ export const MODULE_LABELS: Record<AppTab, string> = {
   finance: 'Finanzas',
   suspension: 'Suspensiones',
   network: 'Torres y Sitios',
+  olt: 'OLTs',
   mikrotik: 'Panel MikroTik',
   wireguard: 'WireGuard (interno)',
   'routeros-resources': 'Scripts RouterOS',
