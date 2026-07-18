@@ -3,6 +3,7 @@ import { WarehouseItem } from '../../../src/types';
 import type { InventoryItemState } from '../../state/store';
 import { asyncHandler } from '../../common/errors';
 import { READ_ROLES, requireRoles } from '../../common/rbac';
+import { isDomainOnDb } from '../../config/feature-flags';
 import { tenantIdFromRequest } from '../tenancy/tenant-scope';
 import { getInventoryService } from './service';
 import { inventoryRoutersService } from './routers/service';
@@ -37,7 +38,7 @@ router.get('/api/inventory/customer-equipment', requireRoles(READ_ROLES), asyncH
         availableQty: Math.max(item.qty, item.serials?.length ?? 0),
         serials: [...(item.serials || [])],
       }));
-    if (mapped.length > 0) {
+    if (mapped.length > 0 && isDomainOnDb('inventory')) {
       return res.json(mapped);
     }
   } catch {

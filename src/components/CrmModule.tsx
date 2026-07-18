@@ -2004,7 +2004,7 @@ export default function CrmModule({
                     Reserva de equipo para instalación
                   </h4>
                   <p className="mt-1 text-[10px] text-slate-500">
-                    Equipos del inventario real. Si no está cargado, usa entrada manual (se agrega al inventario al reservar).
+                    Equipos del inventario real. Si no está cargado, usa entrada manual (se agrega al inventario al reservar). No descuenta ni modifica stock.
                   </p>
                 </div>
 

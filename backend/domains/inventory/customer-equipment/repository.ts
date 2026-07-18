@@ -52,7 +52,10 @@ export class CustomerEquipmentRepository {
         serials: [...item.serials],
       }));
 
-    if (!seedDemoData()) return fromInventory;
+    // En despliegue público con seeds apagadas el store queda vacío y no se
+    // deben inventar accesorios. En dev/test, si ya hay inventario demo en
+    // memoria, añadimos PoE/fuentes para completar el flujo de instalación.
+    if (!seedDemoData() && fromInventory.length === 0) return fromInventory;
 
     return [
       ...fromInventory,
