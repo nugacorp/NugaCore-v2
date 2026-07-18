@@ -6,6 +6,7 @@ const Dashboard = lazyWithRetry(() => import('./components/Dashboard'));
 const CrmModule = lazyWithRetry(() => import('./components/CrmModule'));
 const BillingModule = lazyWithRetry(() => import('./components/BillingModule'));
 const NetworkModule = lazyWithRetry(() => import('./components/NetworkModule'));
+const OltModule = lazyWithRetry(() => import('./components/OltModule'));
 const MikrotikModule = lazyWithRetry(() => import('./components/MikrotikModule'));
 const SupportModule = lazyWithRetry(() => import('./components/SupportModule'));
 const InventoryModule = lazyWithRetry(() => import('./components/InventoryModule'));
@@ -1526,6 +1527,9 @@ export default function App() {
                 onSaveTowerOnboarding={handleSaveTowerOnboarding}
                 getAuthHeaders={getAuthHeaders}
               />
+            )}
+            {activeTab === 'olt' && (
+              <OltModule getAuthHeaders={getAuthHeaders} />
             )}
 
             {activeTab === 'mikrotik' && (

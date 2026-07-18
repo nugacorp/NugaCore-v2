@@ -17,6 +17,7 @@ import ipamRoutes from './domains/ipam/routes';
 import manualSafeModeRoutes from './domains/manual-safe-mode/routes';
 import mikrotikRoutes from './domains/mikrotik/routes';
 import networkRoutes from './domains/network/routes';
+import oltRoutes from './domains/olt/routes';
 import nocRoutes from './domains/noc/routes';
 import nocTelemetryRoutes from './domains/noc-telemetry/routes';
 import nocPollerRoutes from './domains/noc-poller/routes';
@@ -66,6 +67,7 @@ export function registerRoutes(app: Express): void {
   app.use(suspensionRoutes);
   app.use(systemRoutes);
   app.use(networkRoutes);
+  app.use(oltRoutes);
   app.use(mikrotikRoutes);
   app.use(wireguardRoutes);
   app.use(routerosReadOnlyRoutes);

@@ -5,6 +5,7 @@ import {
   Users,
   CreditCard,
   Network,
+  Server,
   Wrench,
   Box,
   Map,
@@ -109,6 +110,7 @@ export default function Sidebar({
         { id: 'noc', name: 'NOC', icon: ShieldAlert },
         { id: 'gis', name: 'Mapa FTTH', icon: Map },
         { id: 'network', name: 'Torres y Sitios', icon: Network },
+        { id: 'olt', name: 'OLTs', icon: Server },
       ],
     },
     {

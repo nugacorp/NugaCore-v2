@@ -6,10 +6,10 @@ import type { UserRole } from '../../src/lib/supabase';
 const ALL_ROLES: UserRole[] = ['Super Admin', 'Administrador', 'Cobranza', 'Técnico', 'Soporte', 'Solo lectura'];
 
 describe('RBAC visual por rol (frontend)', () => {
-  it('Super Admin ve todos los módulos operativos (28)', () => {
+  it('Super Admin ve todos los módulos operativos (29)', () => {
     const t = getAllowedTabsByRole('Super Admin');
-    expect(t.length).toBe(28);
-    expect(t).toEqual(expect.arrayContaining(['mikrotik', 'wireguard', 'commercial', 'reports', 'portal', 'tech-pwa', 'routeros-resources', 'routeros-templates', 'router-enrollment', 'payments', 'owner', 'finance', 'billing', 'inventory', 'inventory-routers', 'suspension', 'manual-safe-mode', 'safe-command-queue', 'routeros-readonly', 'inventory-sync', 'provisioning', 'user-manual']));
+    expect(t.length).toBe(29);
+    expect(t).toEqual(expect.arrayContaining(['mikrotik', 'wireguard', 'olt', 'commercial', 'reports', 'portal', 'tech-pwa', 'routeros-resources', 'routeros-templates', 'router-enrollment', 'payments', 'owner', 'finance', 'billing', 'inventory', 'inventory-routers', 'suspension', 'manual-safe-mode', 'safe-command-queue', 'routeros-readonly', 'inventory-sync', 'provisioning', 'user-manual']));
     expect(t).not.toContain('automation');
     expect(t).not.toContain('notifications');
   });
