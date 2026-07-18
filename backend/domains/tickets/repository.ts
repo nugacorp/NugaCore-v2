@@ -28,12 +28,6 @@ import {
   workOrderToRow,
 } from './mappers';
 
-const TICKETS_TABLE = 'tickets';
-const WORK_ORDERS_TABLE = 'work_orders';
-
-const throwDb = (context: string, error: unknown): never => {
-  throw new Error(`Support DB error (${context}): ${dbErrorMessage(error)}`);
-};
 import type {
   SupportFilters,
   TicketCreateInput,
@@ -41,6 +35,13 @@ import type {
   WorkOrderCreateInput,
   WorkOrderUpdateInput,
 } from './types';
+
+const TICKETS_TABLE = 'tickets';
+const WORK_ORDERS_TABLE = 'work_orders';
+
+const throwDb = (context: string, error: unknown): never => {
+  throw new Error(`Support DB error (${context}): ${dbErrorMessage(error)}`);
+};
 
 export interface SupportRepository {
   listTechnicians(tenantId?: string): Promise<{ id: string; name: string }[]>;
@@ -466,6 +467,7 @@ export class SupabaseSupportRepository implements SupportRepository {
   }
 
   async getTicket(id: string, tenantId?: string) {
+
     const useTenantEq = this.shouldEqTenant(TICKETS_TABLE, tenantId);
     let query = this.db.from(TICKETS_TABLE).select('*').eq('id', id);
     if (useTenantEq) query = query.eq('tenant_id', tenantId!);
@@ -546,6 +548,7 @@ export class SupabaseSupportRepository implements SupportRepository {
     if (patch.status !== undefined) dbPatch.status = patch.status;
     if (patch.technicianId !== undefined) dbPatch.technician_id = patch.technicianId;
     if (patch.technicianName !== undefined) dbPatch.technician_name = patch.technicianName;
+
     const useTenantEq = this.shouldEqTenant(TICKETS_TABLE, tenantId);
     let query = this.db.from(TICKETS_TABLE).update(dbPatch).eq('id', id);
     if (useTenantEq) query = query.eq('tenant_id', tenantId!);
@@ -559,6 +562,7 @@ export class SupabaseSupportRepository implements SupportRepository {
   }
 
   async deleteTicket(id: string, tenantId?: string) {
+
     const existing = await this.getTicket(id, tenantId);
     if (!existing) return false;
     const { error, count } = await this.db.from(TICKETS_TABLE).delete({ count: 'exact' }).eq('id', id);
@@ -669,6 +673,7 @@ export class SupabaseSupportRepository implements SupportRepository {
   }
 
   async getWorkOrder(id: string, tenantId?: string) {
+
     const useTenantEq = this.shouldEqTenant(WORK_ORDERS_TABLE, tenantId);
     let query = this.db.from(WORK_ORDERS_TABLE).select('*').eq('id', id);
     if (useTenantEq) query = query.eq('tenant_id', tenantId!);
@@ -709,6 +714,7 @@ export class SupabaseSupportRepository implements SupportRepository {
       evidences: [],
       history: [],
     });
+
     let payload: Record<string, unknown> = stripTenantIdIfUnsupported(WORK_ORDERS_TABLE, { ...row });
     let { error } = await this.db.from(WORK_ORDERS_TABLE).insert(payload);
     if (error && isMissingTenantIdColumnError(error)) {
@@ -730,6 +736,7 @@ export class SupabaseSupportRepository implements SupportRepository {
     if (patch.type !== undefined) dbPatch.type = patch.type;
     if (patch.status !== undefined) dbPatch.status = patch.status;
     if (patch.checklist !== undefined) dbPatch.checklist = patch.checklist;
+
     const useTenantEq = this.shouldEqTenant(WORK_ORDERS_TABLE, tenantId);
     let query = this.db.from(WORK_ORDERS_TABLE).update(dbPatch).eq('id', id);
     if (useTenantEq) query = query.eq('tenant_id', tenantId!);
@@ -743,6 +750,7 @@ export class SupabaseSupportRepository implements SupportRepository {
   }
 
   async deleteWorkOrder(id: string, tenantId?: string) {
+
     const existing = await this.getWorkOrder(id, tenantId);
     if (!existing) return false;
     const { error, count } = await this.db.from(WORK_ORDERS_TABLE).delete({ count: 'exact' }).eq('id', id);

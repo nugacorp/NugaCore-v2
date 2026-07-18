@@ -7,6 +7,7 @@ import { getSupportService } from '../tickets/service';
 import { getCollectionsService } from '../collections/service';
 import { getCustomersService } from '../customers/service';
 import { portalAuthStatus, resolvePortalAuth, type PortalAuthContext } from './auth';
+
 import { getPortalConfig, isPortalFeatureEnabled, updatePortalConfig } from './config-service';
 import type { PortalFeatureKey } from './types';
 import type { Client } from '../../../src/types';
@@ -56,6 +57,7 @@ router.get('/api/portal/:clientId/summary', asyncHandler(async (req, res) => {
     status: 'active',
     tenantId: auth.tenantId,
   });
+
   const features = getPortalConfig(auth.tenantId).features;
   res.json({
     client: { id: client.id, name: client.name, status: client.status, planId: client.planId },
@@ -73,6 +75,7 @@ router.get('/api/portal/:clientId/summary', asyncHandler(async (req, res) => {
 
 router.get('/api/portal/:clientId/invoices', asyncHandler(async (req, res) => {
   const auth = await resolvePortalAuth(req);
+
   assertPortalFeature(auth.tenantId, 'invoices');
   const client = await loadPortalClient(auth);
   const invoices = await getBillingService().listInvoices(auth.tenantId);
@@ -81,6 +84,7 @@ router.get('/api/portal/:clientId/invoices', asyncHandler(async (req, res) => {
 
 router.get('/api/portal/:clientId/tickets', asyncHandler(async (req, res) => {
   const auth = await resolvePortalAuth(req);
+
   assertPortalFeature(auth.tenantId, 'tickets');
   const client = await loadPortalClient(auth);
   const tickets = await getSupportService().listTickets({ clientId: client.id }, auth.tenantId);
@@ -89,6 +93,7 @@ router.get('/api/portal/:clientId/tickets', asyncHandler(async (req, res) => {
 
 router.post('/api/portal/:clientId/tickets', asyncHandler(async (req, res) => {
   const auth = await resolvePortalAuth(req);
+
   assertPortalFeature(auth.tenantId, 'reportFailure');
   const client = await loadPortalClient(auth);
   const title = String(req.body?.title || req.body?.subject || 'Reporte portal').trim();
@@ -104,6 +109,7 @@ router.post('/api/portal/:clientId/tickets', asyncHandler(async (req, res) => {
 
 router.post('/api/portal/:clientId/payment-promise', asyncHandler(async (req, res) => {
   const auth = await resolvePortalAuth(req);
+
   assertPortalFeature(auth.tenantId, 'paymentPromise');
   const client = await loadPortalClient(auth);
   const promise = await getCollectionsService().createPromise({

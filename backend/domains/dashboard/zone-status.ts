@@ -195,6 +195,7 @@ export const buildZoneEquipment = (
 };
 
 export const buildZoneStatusReport = async (tenantId?: string): Promise<ZoneStatusReport> => {
+
   const network = getNetworkService();
   const [towers, routers] = await Promise.all([
     network.listTowers(tenantId ? { tenantId } : {}),
