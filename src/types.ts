@@ -548,6 +548,14 @@ export interface WispIntegrationsSettings {
     webhookSecretSet: boolean;
     certificateRef: string;
   };
+  openpay: {
+    enabled: boolean;
+    merchantId: string;
+    publicKey: string;
+    privateKeySet: boolean;
+    webhookSecretSet: boolean;
+    sandbox: boolean;
+  };
   mikrotik: {
     note: string;
   };
@@ -556,6 +564,7 @@ export interface WispIntegrationsSettings {
     whatsapp: IntegrationServiceStatus;
     telegram: IntegrationServiceStatus;
     codi: IntegrationServiceStatus;
+    openpay: IntegrationServiceStatus;
     mikrotik: IntegrationServiceStatus;
   };
 }

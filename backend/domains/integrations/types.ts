@@ -1,4 +1,4 @@
-export type IntegrationProviderKey = 'stripe' | 'whatsapp' | 'telegram' | 'codi';
+export type IntegrationProviderKey = 'stripe' | 'whatsapp' | 'telegram' | 'codi' | 'openpay';
 
 export interface IntegrationSettingsRecord {
   id: string;
@@ -20,6 +20,12 @@ export interface IntegrationSettingsRecord {
   codiClabe: string;
   codiWebhookSecret: string;
   codiCertificateRef: string;
+  openpayEnabled: boolean;
+  openpayMerchantId: string;
+  openpayPublicKey: string;
+  openpayPrivateKey: string;
+  openpayWebhookSecret: string;
+  openpaySandbox: boolean;
   updatedAt: string;
 }
 
@@ -49,6 +55,14 @@ export interface IntegrationSettingsPatch {
     clabe?: string;
     webhookSecret?: string;
     certificateRef?: string;
+  };
+  openpay?: {
+    enabled?: boolean;
+    merchantId?: string;
+    publicKey?: string;
+    privateKey?: string;
+    webhookSecret?: string;
+    sandbox?: boolean;
   };
 }
 

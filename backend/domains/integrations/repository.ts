@@ -48,6 +48,12 @@ export const emptyIntegrationSettings = (): IntegrationSettingsRecord => ({
   codiClabe: '',
   codiWebhookSecret: '',
   codiCertificateRef: '',
+  openpayEnabled: false,
+  openpayMerchantId: '',
+  openpayPublicKey: '',
+  openpayPrivateKey: '',
+  openpayWebhookSecret: '',
+  openpaySandbox: true,
   updatedAt: nowIso(),
 });
 
@@ -71,6 +77,14 @@ const rowToRecord = (row: Record<string, unknown>): IntegrationSettingsRecord =>
   codiClabe: String(row.codi_clabe ?? ''),
   codiWebhookSecret: decField(row.codi_webhook_secret),
   codiCertificateRef: String(row.codi_certificate_ref ?? ''),
+  openpayEnabled: Boolean(row.openpay_enabled),
+  openpayMerchantId: String(row.openpay_merchant_id ?? ''),
+  openpayPublicKey: String(row.openpay_public_key ?? ''),
+  openpayPrivateKey: decField(row.openpay_private_key),
+  openpayWebhookSecret: decField(row.openpay_webhook_secret),
+  openpaySandbox: row.openpay_sandbox === undefined || row.openpay_sandbox === null
+    ? true
+    : Boolean(row.openpay_sandbox),
   updatedAt: String(row.updated_at ?? nowIso()),
 });
 
@@ -94,6 +108,12 @@ const recordToRow = (rec: IntegrationSettingsRecord) => ({
   codi_clabe: rec.codiClabe || null,
   codi_webhook_secret: encField(rec.codiWebhookSecret),
   codi_certificate_ref: rec.codiCertificateRef || null,
+  openpay_enabled: rec.openpayEnabled,
+  openpay_merchant_id: rec.openpayMerchantId || null,
+  openpay_public_key: rec.openpayPublicKey || null,
+  openpay_private_key: encField(rec.openpayPrivateKey),
+  openpay_webhook_secret: encField(rec.openpayWebhookSecret),
+  openpay_sandbox: rec.openpaySandbox,
   updated_at: rec.updatedAt,
 });
 
@@ -176,6 +196,14 @@ export const applyIntegrationPatch = (
     if (patch.codi.clabe !== undefined) next.codiClabe = patch.codi.clabe;
     if (patch.codi.certificateRef !== undefined) next.codiCertificateRef = patch.codi.certificateRef;
     if (patch.codi.webhookSecret?.trim()) next.codiWebhookSecret = patch.codi.webhookSecret.trim();
+  }
+  if (patch.openpay) {
+    if (patch.openpay.enabled !== undefined) next.openpayEnabled = patch.openpay.enabled;
+    if (patch.openpay.merchantId !== undefined) next.openpayMerchantId = patch.openpay.merchantId;
+    if (patch.openpay.publicKey !== undefined) next.openpayPublicKey = patch.openpay.publicKey;
+    if (patch.openpay.sandbox !== undefined) next.openpaySandbox = patch.openpay.sandbox;
+    if (patch.openpay.privateKey?.trim()) next.openpayPrivateKey = patch.openpay.privateKey.trim();
+    if (patch.openpay.webhookSecret?.trim()) next.openpayWebhookSecret = patch.openpay.webhookSecret.trim();
   }
   return next;
 };

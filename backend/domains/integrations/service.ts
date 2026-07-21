@@ -14,6 +14,7 @@ import {
 import {
   buildIntegrationView,
   deliverInvoiceNotification,
+  testOpenPayConnection,
   testStripeConnection,
   testTelegramConnection,
   testWhatsAppConnection,
@@ -41,6 +42,7 @@ export class IntegrationsService {
       whatsapp: saved.whatsappEnabled,
       telegram: saved.telegramEnabled,
       codi: saved.codiEnabled,
+      openpay: saved.openpayEnabled,
     });
     return buildIntegrationView(saved);
   }
@@ -50,6 +52,7 @@ export class IntegrationsService {
     if (provider === 'stripe') return testStripeConnection(settings);
     if (provider === 'whatsapp') return testWhatsAppConnection(settings);
     if (provider === 'telegram') return testTelegramConnection(settings);
+    if (provider === 'openpay') return testOpenPayConnection(settings);
     if (provider === 'codi') {
       const ok =
         settings.codiEnabled &&

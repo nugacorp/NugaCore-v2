@@ -10,6 +10,8 @@ export const buildIntegrationView = (rec: IntegrationSettingsRecord) => {
   const telegramConfigured = maskSecret(rec.telegramBotToken);
   const codiConfigured =
     rec.codiClabe.trim().length >= 18 && rec.codiBeneficiaryName.trim().length > 0;
+  const openpayConfigured =
+    rec.openpayMerchantId.trim().length > 0 && maskSecret(rec.openpayPrivateKey);
 
   const status = (
     enabled: boolean,
@@ -50,6 +52,14 @@ export const buildIntegrationView = (rec: IntegrationSettingsRecord) => {
       webhookSecretSet: maskSecret(rec.codiWebhookSecret),
       certificateRef: rec.codiCertificateRef,
     },
+    openpay: {
+      enabled: rec.openpayEnabled,
+      merchantId: rec.openpayMerchantId,
+      publicKey: rec.openpayPublicKey,
+      privateKeySet: maskSecret(rec.openpayPrivateKey),
+      webhookSecretSet: maskSecret(rec.openpayWebhookSecret),
+      sandbox: rec.openpaySandbox,
+    },
     mikrotik: {
       note: 'Puerto API 8728 — configurar routers en Inventario / Red',
     },
@@ -58,6 +68,12 @@ export const buildIntegrationView = (rec: IntegrationSettingsRecord) => {
       whatsapp: status(rec.whatsappEnabled, whatsappConfigured, 'Conectado', 'No conectado'),
       telegram: status(rec.telegramEnabled, telegramConfigured, 'Conectado', 'No conectado'),
       codi: status(rec.codiEnabled, codiConfigured, 'Listo para cobros SPEI/CoDi', 'No configurado'),
+      openpay: status(
+        rec.openpayEnabled,
+        openpayConfigured,
+        rec.openpaySandbox ? 'Conectado (sandbox)' : 'Conectado (producción)',
+        'No configurado',
+      ),
       mikrotik: {
         enabled: true,
         configured: true,
@@ -228,6 +244,38 @@ export async function testTelegramConnection(settings: IntegrationSettingsRecord
     provider: 'telegram-bot-api',
     channel: 'TELEGRAM',
     preview: `@${data.result?.username || settings.telegramBotUsername || 'bot'}`,
+  };
+}
+
+export async function testOpenPayConnection(settings: IntegrationSettingsRecord): Promise<DeliveryResult> {
+  if (!settings.openpayMerchantId.trim() || !settings.openpayPrivateKey.trim()) {
+    return {
+      sent: false,
+      provider: 'openpay',
+      channel: 'OPENPAY',
+      error: 'Merchant ID y private key requeridos',
+    };
+  }
+  const base = settings.openpaySandbox ? 'https://sandbox-api.openpay.mx' : 'https://api.openpay.mx';
+  const auth = 'Basic ' + Buffer.from(`${settings.openpayPrivateKey.trim()}:`).toString('base64');
+  const res = await fetch(
+    `${base}/v1/${settings.openpayMerchantId.trim()}/charges?limit=1`,
+    { headers: { Authorization: auth } },
+  );
+  if (!res.ok) {
+    const err = await res.text().catch(() => '');
+    return {
+      sent: false,
+      provider: 'openpay',
+      channel: 'OPENPAY',
+      error: err.slice(0, 300) || `HTTP ${res.status}`,
+    };
+  }
+  return {
+    sent: true,
+    provider: 'openpay-api',
+    channel: 'OPENPAY',
+    preview: `Credenciales válidas (${settings.openpaySandbox ? 'sandbox' : 'producción'})`,
   };
 }
 
