@@ -1,7 +1,7 @@
 # Estado de sincronización de migraciones · GitHub ↔ Supabase
 
 Proyecto Supabase: `elshnzkceutvjzxvzqad` (nugacore-staging).
-Última reconciliación: **2026-07-16** (vía `psql` por el pooler).
+Última reconciliación: **2026-07-21** (vía `psql` por el pooler).
 
 ## Estado actual (2026-07-16, tras barrido de las 48 ramas)
 
@@ -38,6 +38,14 @@ Resultado 2026-07-16: **A) vacío**, **B) solo `20260619033952`**.
 > (merges #34 FTTH, #35 integrations, #37 onboarding/WG, #38 reconciliación).
 > Staging ya las tenía aplicadas/registradas; no hay drift archivo↔historial
 > pendiente por ramas de agente.
+
+### Reconciliación 2026-07-21 · credenciales OpenPay por WISP
+
+| Versión | Migración | Acción |
+|---|---|---|
+| 20260721120000 | openpay_integration_settings | **Nueva.** Añade a `public.wisp_integration_settings` seis columnas para OpenPay (tarjeta + SPEI/CoDi) por WISP: `openpay_enabled` (NOT NULL DEFAULT `false`), `openpay_merchant_id`, `openpay_public_key`, `openpay_private_key`, `openpay_webhook_secret` y `openpay_sandbox` (NOT NULL DEFAULT `true`). Aditiva e idempotente (`ADD COLUMN IF NOT EXISTS`); no crea tabla, así que reutiliza el RLS que la tabla ya trae desde `20260716140000` (verificado: `relrowsecurity = true` tras aplicar). Los secretos (`openpay_private_key`, `openpay_webhook_secret`) se cifran en la app (AES-256-GCM), igual que el resto de credenciales de la tabla. Estado previo: 0 columnas `openpay_*`; post: 6/6 presentes con sus defaults. **Aplicada y registrada.** Schema cache de PostgREST refrescado (`NOTIFY pgrst`). |
+
+**Barrido:** confirmado contra **todas** las ramas remotas (no solo el working tree) que era la única migración del repo sin aplicar en staging. La huérfana `20260619033952` sigue intacta (documentada abajo, inocua).
 
 ### Reconciliación 2026-07-17 · hardening de producción (secretos + onboarding)
 
