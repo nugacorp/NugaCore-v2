@@ -12,9 +12,12 @@ KEY_DIR="${WG_KEY_DIR:-/root/.wireguard}"
 TOKEN_FILE="${WG_HOST_APPLY_TOKEN_FILE:-${KEY_DIR}/host-apply.token}"
 AGENT_DIR="${WG_HOST_APPLY_DIR:-/opt/nugacore/wg-host-apply}"
 AGENT_PY="${AGENT_DIR}/wg-host-apply-agent.py"
+STATE_DIR="${WG_STATE_DIR:-/var/lib/nugacore-wg}"
 UNIT_PATH="/etc/systemd/system/nugacore-wg-host-apply.service"
 LISTEN_PORT="${WG_HOST_APPLY_PORT:-18765}"
-LISTEN_HOST="${WG_HOST_APPLY_LISTEN:-0.0.0.0}"
+# El agente v2 ya no escucha en 0.0.0.0: se liga a la IP del host en el bridge
+# de la app (red Coolify). T5 confirma la IP exacta del bridge en el VPS.
+LISTEN_HOST="${WG_HOST_APPLY_LISTEN:-10.0.1.1}"
 SERVER_KEY_FILE="${KEY_DIR}/nugacore-server.key"
 SECRETS_FILE="${SECRETS_FILE:-/root/nugacore-staging-secrets.env}"
 
@@ -24,10 +27,12 @@ fail() { printf '[wg-agent-install] ERROR: %s\n' "$1" >&2; exit 1; }
 [[ "$(id -u)" -eq 0 ]] || fail "ejecutar como root"
 command -v wg >/dev/null 2>&1 || fail "wireguard-tools no instalado (corre setup-wireguard-host.sh)"
 command -v python3 >/dev/null 2>&1 || fail "python3 requerido"
+command -v nft >/dev/null 2>&1 || fail "nftables (nft) requerido para el firewall del agente"
+command -v ip >/dev/null 2>&1 || fail "iproute2 (ip) requerido"
 [[ -f "$SERVER_KEY_FILE" ]] || fail "falta ${SERVER_KEY_FILE}"
 
-mkdir -p "$KEY_DIR" "$AGENT_DIR"
-chmod 700 "$KEY_DIR" "$AGENT_DIR"
+mkdir -p "$KEY_DIR" "$AGENT_DIR" "$STATE_DIR"
+chmod 700 "$KEY_DIR" "$AGENT_DIR" "$STATE_DIR"
 
 # ── Token ─────────────────────────────────────────────────────────────
 if [[ ! -f "$TOKEN_FILE" ]] || [[ ! -s "$TOKEN_FILE" ]]; then
@@ -66,12 +71,19 @@ else
 fi
 chmod 750 "$AGENT_PY"
 
+# ── wg-quick@wg0: el agente v2 es dueño único de wg0 ──────────────────
+# Se deshabilita y enmascara para que no compita por la interfaz tras reboot.
+systemctl disable --now wg-quick@wg0.service >/dev/null 2>&1 || true
+systemctl mask wg-quick@wg0.service >/dev/null 2>&1 || true
+log "wg-quick@wg0 deshabilitado y enmascarado (dueño único: el agente)"
+
 # ── systemd unit ──────────────────────────────────────────────────────
+# Sin After=wg-quick@wg0: el agente crea/levanta wg0 él mismo (fail-closed).
 cat >"$UNIT_PATH" <<EOF
 [Unit]
 Description=NugaCore WireGuard host-apply agent
 Wants=network-online.target
-After=network-online.target wg-quick@wg0.service
+After=network-online.target
 
 [Service]
 Type=simple
@@ -79,10 +91,12 @@ User=root
 Environment=WG_CONF=/etc/wireguard/wg0.conf
 Environment=WG_SERVER_KEY_FILE=${SERVER_KEY_FILE}
 Environment=WG_HOST_APPLY_TOKEN_FILE=${TOKEN_FILE}
+Environment=WG_STATE_FILE=${STATE_DIR}/state.json
 Environment=WG_HOST_APPLY_LISTEN=${LISTEN_HOST}
 Environment=WG_HOST_APPLY_PORT=${LISTEN_PORT}
 Environment=WG_PORT=13231
 Environment=WG_SERVER_IP=10.70.0.1
+Environment=WG_APP_SUBNET=${WG_APP_SUBNET:-10.0.1.0/24}
 ExecStart=/usr/bin/python3 ${AGENT_PY}
 Restart=always
 RestartSec=3
@@ -98,8 +112,9 @@ systemctl restart nugacore-wg-host-apply.service
 
 sleep 1
 systemctl is-active --quiet nugacore-wg-host-apply.service || fail "servicio no activo"
-curl -fsS -m 3 "http://127.0.0.1:${LISTEN_PORT}/health" >/dev/null \
-  || fail "health del agente falló en :${LISTEN_PORT}"
+# El listener se liga a ${LISTEN_HOST} (no 0.0.0.0): el health se prueba ahí.
+curl -fsS -m 3 "http://${LISTEN_HOST}:${LISTEN_PORT}/health" >/dev/null \
+  || fail "health del agente falló en ${LISTEN_HOST}:${LISTEN_PORT}"
 
 # Gateway docker0 típico para Coolify/app containers
 DOCKER_GW="$(ip -4 addr show docker0 2>/dev/null | awk '/inet /{print $2}' | cut -d/ -f1 || true)"
