@@ -214,6 +214,7 @@ export class WireguardService {
       encryptedPrivateKey: encryptSecret(kp.privateKey), encryptedPresharedKey: encryptSecret(psk),
       encryptionVersion: ENCRYPTION_VERSION, allocatedIp: ip, allowedCidr: peerAllowedCidr(server, input.allowedCidr),
       tenantId,
+      peerType: 'equipment',
       status: 'active', createdBy: actorId, createdAt: nowIso(), updatedAt: nowIso(),
     };
     await this.repo.createPeer(rec);
@@ -227,6 +228,7 @@ export class WireguardService {
         peerId: id,
         releasedAt: '',
         allocatedAt: nowIso(),
+        tenantId,
       });
     } else {
       const allocId = await this.repo.nextId('alloc');
@@ -235,6 +237,7 @@ export class WireguardService {
         serverId: server.id,
         ip,
         peerId: id,
+        tenantId,
         status: 'allocated',
         allocatedAt: nowIso(),
       });
@@ -272,7 +275,7 @@ export class WireguardService {
       lastRotatedAt: nowIso(),
     });
     const rotId = await this.repo.nextId('rotation');
-    await this.repo.recordRotation({ id: rotId, peerId, oldPublicKey: oldPub, newPublicKey: kp.publicKey, reason, actorId, createdAt: nowIso() });
+    await this.repo.recordRotation({ id: rotId, peerId, tenantId: peer.tenantId, oldPublicKey: oldPub, newPublicKey: kp.publicKey, reason, actorId, createdAt: nowIso() });
     logger.info('WireGuard: peer rotado', { peerId, serverId: server.id });
     // Full reconcile: quita pubkey vieja y aplica la nueva (evita peers huérfanos).
     await this.syncHostAfterMutation('rotatePeer');
