@@ -5,16 +5,21 @@
 
 import type { SupabaseClient } from '@supabase/supabase-js';
 import {
+  AllocatePeerInput,
+  AllocatePeerResult,
+  ENCRYPTION_VERSION,
   WireguardIpAllocation,
   WireguardKeyRotation,
   WireguardPeerRecord,
   WireguardServerRecord,
+  WireguardTenantSubnet,
 } from './types';
 import {
-  AllocationRow, PeerRow, RotationRow, ServerRow,
+  AllocationRow, PeerRow, RotationRow, ServerRow, TenantSubnetRow,
   allocationToRow, peerToRow, rotationToRow, serverToRow,
-  rowToAllocation, rowToPeer, rowToRotation, rowToServer,
+  rowToAllocation, rowToPeer, rowToRotation, rowToServer, rowToTenantSubnet,
 } from './mappers';
+import { nextFreeIp } from './ipam';
 
 export interface WireguardRepository {
   listServers(tenantId?: string): Promise<WireguardServerRecord[]>;
@@ -32,6 +37,16 @@ export interface WireguardRepository {
   createAllocation(rec: WireguardIpAllocation): Promise<WireguardIpAllocation>;
   updateAllocation(id: string, patch: Partial<WireguardIpAllocation>): Promise<void>;
 
+  /**
+   * Asignación ATÓMICA de un peer (cierra B-05): en una sola transacción
+   * serializada por tenant — upsert de subred (subnet_index=max+1), cuota
+   * (equipment activos < max_peers), IP dentro del /24 del tenant (liberadas
+   * del bloque primero) e inserción de allocation + peer. Errores tipados por
+   * mensaje: quota_exceeded, block_exhausted, subnet_pool_exhausted.
+   */
+  allocatePeer(input: AllocatePeerInput): Promise<AllocatePeerResult>;
+  listSubnets(tenantId?: string): Promise<WireguardTenantSubnet[]>;
+
   recordRotation(rec: WireguardKeyRotation): Promise<WireguardKeyRotation>;
   listRotations(peerId?: string): Promise<WireguardKeyRotation[]>;
 
@@ -43,12 +58,34 @@ export interface WireguardRepository {
 // ════════════════════════════════════════════════════════════════════
 const PREFIX = { server: 'wgs', peer: 'wgp', alloc: 'wgip', rotation: 'wgrot' } as const;
 
+const seedSubnets = (): WireguardTenantSubnet[] => [
+  // Bloque 0 = infra (espejo del seed de la migración).
+  { tenantId: 'tenant-default', subnetCidr: '10.70.0.0/24', subnetIndex: 0, maxPeers: 30 },
+];
+
 export class StoreWireguardRepository implements WireguardRepository {
   SERVERS: WireguardServerRecord[] = [];
   PEERS: WireguardPeerRecord[] = [];
   ALLOCATIONS: WireguardIpAllocation[] = [];
   ROTATIONS: WireguardKeyRotation[] = [];
+  SUBNETS: WireguardTenantSubnet[] = seedSubnets();
   private seq = { server: 1, peer: 1, alloc: 1, rotation: 1 };
+  // Mutex por tenant: réplica del pg_advisory_xact_lock(hash(tenant_id)) para
+  // serializar allocatePeer concurrentes del mismo tenant.
+  private tenantLocks = new Map<string, Promise<unknown>>();
+
+  private async withTenantLock<T>(tenantId: string, fn: () => Promise<T>): Promise<T> {
+    const prev = this.tenantLocks.get(tenantId) ?? Promise.resolve();
+    let release!: () => void;
+    const gate = new Promise<void>((r) => { release = r; });
+    this.tenantLocks.set(tenantId, prev.then(() => gate));
+    await prev.catch(() => {});
+    try {
+      return await fn();
+    } finally {
+      release();
+    }
+  }
 
   async nextId(kind: 'server' | 'peer' | 'alloc' | 'rotation') {
     return `${PREFIX[kind]}-${this.seq[kind]++}`;
@@ -102,6 +139,83 @@ export class StoreWireguardRepository implements WireguardRepository {
     if (a) Object.assign(a, patch);
   }
 
+  async listSubnets(tenantId?: string) {
+    return this.SUBNETS.filter((s) => !tenantId || s.tenantId === tenantId);
+  }
+
+  async allocatePeer(input: AllocatePeerInput): Promise<AllocatePeerResult> {
+    return this.withTenantLock(input.tenantId, async () => {
+      // 1) Subred del tenant (upsert; subnet_index = max+1).
+      let subnet = this.SUBNETS.find((s) => s.tenantId === input.tenantId);
+      if (!subnet) {
+        const nextIndex = this.SUBNETS.reduce((m, s) => Math.max(m, s.subnetIndex), -1) + 1;
+        if (nextIndex > 254) throw new Error('subnet_pool_exhausted');
+        subnet = {
+          tenantId: input.tenantId,
+          subnetCidr: `10.70.${nextIndex}.0/24`,
+          subnetIndex: nextIndex,
+          maxPeers: 30,
+          createdAt: new Date().toISOString(),
+        };
+        this.SUBNETS.push(subnet);
+      }
+
+      // 2) Cuota: solo equipment activos consumen.
+      const peerType = input.peerType || 'equipment';
+      if (peerType === 'equipment') {
+        const active = this.PEERS.filter((p) =>
+          (p.tenantId || 'tenant-default') === input.tenantId
+          && p.status === 'active'
+          && (p.peerType || 'equipment') === 'equipment').length;
+        if (active >= subnet.maxPeers) throw new Error('quota_exceeded');
+      }
+
+      // 3) IP dentro del /24 (.0/.1/.255 reservadas; liberadas del bloque primero).
+      const network = subnet.subnetCidr.split('/')[0];          // 10.70.X.0
+      const reservedIp = network.replace(/\.0$/, '.1');         // 10.70.X.1
+      const serverAllocs = this.ALLOCATIONS.filter((a) => a.serverId === input.serverId);
+      const ip = nextFreeIp(
+        serverAllocs.map((a) => ({ ip: a.ip, status: a.status })),
+        subnet.subnetCidr,
+        [reservedIp],
+      );
+      if (!ip) throw new Error('block_exhausted');
+      // Red de seguridad (espejo del índice único parcial de IP activa).
+      if (this.PEERS.some((p) => p.serverId === input.serverId && p.allocatedIp === ip && p.status === 'active')) {
+        throw new Error('ip_conflict');
+      }
+
+      // 4) Peer + allocation.
+      const now = new Date().toISOString();
+      const peer: WireguardPeerRecord = {
+        id: input.peerId, serverId: input.serverId, routerId: input.routerId, name: input.name,
+        publicKey: input.publicKey, encryptedPrivateKey: input.encryptedPrivateKey,
+        encryptedPresharedKey: input.encryptedPresharedKey,
+        encryptionVersion: input.encryptionVersion || ENCRYPTION_VERSION,
+        allocatedIp: ip, allowedCidr: input.allowedCidr, tenantId: input.tenantId, peerType,
+        status: 'active', createdBy: input.createdBy, createdAt: now, updatedAt: now,
+      };
+      this.PEERS.push(peer);
+
+      const existing = serverAllocs.find((a) => a.ip === ip);
+      let allocation: WireguardIpAllocation;
+      if (existing) {
+        Object.assign(existing, {
+          status: 'allocated', peerId: input.peerId, releasedAt: undefined,
+          allocatedAt: now, tenantId: input.tenantId,
+        });
+        allocation = existing;
+      } else {
+        allocation = {
+          id: input.allocId, serverId: input.serverId, ip, peerId: input.peerId,
+          tenantId: input.tenantId, status: 'allocated', allocatedAt: now,
+        };
+        this.ALLOCATIONS.push(allocation);
+      }
+      return { peer, allocation, subnet };
+    });
+  }
+
   async recordRotation(rec: WireguardKeyRotation) { this.ROTATIONS.unshift(rec); return rec; }
   async listRotations(peerId?: string) {
     return peerId ? this.ROTATIONS.filter((r) => r.peerId === peerId) : this.ROTATIONS;
@@ -109,6 +223,8 @@ export class StoreWireguardRepository implements WireguardRepository {
 
   reset() {
     this.SERVERS = []; this.PEERS = []; this.ALLOCATIONS = []; this.ROTATIONS = [];
+    this.SUBNETS = seedSubnets();
+    this.tenantLocks = new Map();
     this.seq = { server: 1, peer: 1, alloc: 1, rotation: 1 };
   }
 }
@@ -205,6 +321,7 @@ export class SupabaseWireguardRepository implements WireguardRepository {
     if (patch.peerId !== undefined) row.peer_id = patch.peerId || null;
     if ('releasedAt' in patch) row.released_at = patch.releasedAt || null;
     if (patch.allocatedAt !== undefined) row.allocated_at = patch.allocatedAt;
+    if (patch.tenantId !== undefined) row.tenant_id = patch.tenantId;
     if (Object.keys(row).length) {
       const { error } = await this.client.from('wireguard_ip_allocations').update(row).eq('id', id);
       if (error) throw new Error(`updateAllocation: ${error.message}`);
@@ -223,7 +340,61 @@ export class SupabaseWireguardRepository implements WireguardRepository {
     if (error) throw new Error(`listRotations: ${error.message}`);
     return (data || []).map((r) => rowToRotation(r as RotationRow));
   }
+
+  async listSubnets(tenantId?: string) {
+    let q = this.client.from('wireguard_tenant_subnets').select('*').order('subnet_index', { ascending: true });
+    if (tenantId) q = q.eq('tenant_id', tenantId);
+    const { data, error } = await q;
+    if (error) throw new Error(`listSubnets: ${error.message}`);
+    return (data || []).map((r) => rowToTenantSubnet(r as TenantSubnetRow));
+  }
+
+  async allocatePeer(input: AllocatePeerInput): Promise<AllocatePeerResult> {
+    // Delega la asignación atómica al RPC transaccional wg_allocate_peer.
+    const payload = {
+      id: input.peerId,
+      allocId: input.allocId,
+      name: input.name,
+      publicKey: input.publicKey,
+      routerId: input.routerId ?? null,
+      encryptedPrivateKey: input.encryptedPrivateKey ?? null,
+      encryptedPresharedKey: input.encryptedPresharedKey ?? null,
+      encryptionVersion: input.encryptionVersion ?? ENCRYPTION_VERSION,
+      allowedCidr: input.allowedCidr ?? null,
+      peerType: input.peerType ?? 'equipment',
+      createdBy: input.createdBy ?? null,
+    };
+    const { data, error } = await this.client.rpc('wg_allocate_peer', {
+      p_tenant_id: input.tenantId,
+      p_server_id: input.serverId,
+      p_peer: payload,
+    });
+    if (error) throw new Error(error.message);   // quota_exceeded / block_exhausted / ...
+    const res = data as {
+      peerId: string; allocId: string; allocatedIp: string;
+      subnetCidr: string; subnetIndex: number; maxPeers: number;
+    };
+    const now = new Date().toISOString();
+    const peer: WireguardPeerRecord = {
+      id: res.peerId, serverId: input.serverId, routerId: input.routerId, name: input.name,
+      publicKey: input.publicKey, encryptedPrivateKey: input.encryptedPrivateKey,
+      encryptedPresharedKey: input.encryptedPresharedKey,
+      encryptionVersion: input.encryptionVersion || ENCRYPTION_VERSION,
+      allocatedIp: res.allocatedIp, allowedCidr: input.allowedCidr, tenantId: input.tenantId,
+      peerType: input.peerType || 'equipment', status: 'active', createdBy: input.createdBy,
+      createdAt: now, updatedAt: now,
+    };
+    const allocation: WireguardIpAllocation = {
+      id: res.allocId, serverId: input.serverId, ip: res.allocatedIp, peerId: res.peerId,
+      tenantId: input.tenantId, status: 'allocated', allocatedAt: now,
+    };
+    const subnet: WireguardTenantSubnet = {
+      tenantId: input.tenantId, subnetCidr: res.subnetCidr,
+      subnetIndex: res.subnetIndex, maxPeers: res.maxPeers,
+    };
+    return { peer, allocation, subnet };
+  }
 }
 
 // Re-export para tests
-export type { ServerRow, PeerRow, AllocationRow, RotationRow };
+export type { ServerRow, PeerRow, AllocationRow, RotationRow, TenantSubnetRow };
