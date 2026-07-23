@@ -10,6 +10,13 @@ export const ENCRYPTION_VERSION = 'v1-aes-256-gcm';
 export type ServerStatus = 'active' | 'disabled';
 export type PeerStatus = 'active' | 'revoked';
 export type AllocationStatus = 'allocated' | 'released';
+export type PeerType = 'equipment' | 'person';
+/**
+ * Ciclo de apply al host wg0 (contrato v2). Independiente de PeerStatus:
+ * status='active' + apply_state='pending_apply' = peer vivo aún sin ACK de wg0.
+ * 'applied' corresponde al estado "active" del plan (ACK de revisión recibido).
+ */
+export type ApplyState = 'pending_apply' | 'applied' | 'apply_failed';
 
 // ── Servidor ───────────────────────────────────────────────────────────
 export interface WireguardServerRecord {
@@ -59,7 +66,11 @@ export interface WireguardPeerRecord {
   allocatedIp: string;
   allowedCidr?: string;
   tenantId?: string;
+  /** equipment consume cuota max_peers; person (staff VPN) no. Default equipment. */
+  peerType?: PeerType;
   status: PeerStatus;
+  /** Estado del apply al host wg0 (contrato v2). Default 'applied'. */
+  applyState?: ApplyState;
   lastRotatedAt?: string;
   revokedAt?: string;
   createdBy?: string;
@@ -76,6 +87,8 @@ export interface WireguardPeerView {
   allocatedIp: string;
   allowedCidr?: string;
   status: PeerStatus;
+  /** Sólo se expone con WIREGUARD_MULTITENANT encendido. */
+  applyState?: ApplyState;
   hasSecrets: boolean;
   lastRotatedAt?: string;
   revokedAt?: string;
@@ -88,6 +101,7 @@ export interface WireguardIpAllocation {
   serverId: string;
   ip: string;
   peerId?: string;
+  tenantId?: string;
   status: AllocationStatus;
   allocatedAt: string;
   releasedAt?: string;
@@ -96,11 +110,44 @@ export interface WireguardIpAllocation {
 export interface WireguardKeyRotation {
   id: string;
   peerId: string;
+  tenantId?: string;
   oldPublicKey?: string;
   newPublicKey: string;
   reason?: string;
   actorId?: string;
   createdAt: string;
+}
+
+// ── Subred /24 por tenant (wg0 compartido) ────────────────────────────────
+export interface WireguardTenantSubnet {
+  tenantId: string;
+  subnetCidr: string;   // p.ej. 10.70.1.0/24
+  subnetIndex: number;  // 0..254 (0 = infra)
+  maxPeers: number;
+  createdAt?: string;
+}
+
+// ── IPAM atómico (RPC wg_allocate_peer / réplica en memoria) ───────────────
+export interface AllocatePeerInput {
+  tenantId: string;
+  serverId: string;
+  peerId: string;
+  allocId: string;
+  name: string;
+  publicKey: string;
+  routerId?: string;
+  encryptedPrivateKey?: string;
+  encryptedPresharedKey?: string;
+  encryptionVersion?: string;
+  allowedCidr?: string;
+  peerType?: PeerType;
+  createdBy?: string;
+}
+
+export interface AllocatePeerResult {
+  peer: WireguardPeerRecord;
+  allocation: WireguardIpAllocation;
+  subnet: WireguardTenantSubnet;
 }
 
 // ── Secretos mostrados UNA sola vez ──────────────────────────────────────

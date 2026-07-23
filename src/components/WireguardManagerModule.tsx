@@ -1,23 +1,31 @@
 import React, { useState } from 'react';
 import { getErrorMessage } from '../lib/errors';
 import {
-  Shield, Plus, RefreshCw, Loader2, Server, Ban, Copy, Check, X,
+  Shield, Plus, RefreshCw, Loader2, Server, Ban, Copy, Check, X, AlertTriangle, Clock, Lock, Network,
 } from 'lucide-react';
 import type {
   WireguardServerView,
   WireguardPeerView,
   WireguardServerCreated,
   WireguardPeerCreated,
+  WireguardApplyState,
+  WireguardTenantBlock,
 } from '../types';
+import type { UserRole } from '../lib/supabase';
 
 interface Props {
   servers: WireguardServerView[];
   peers: WireguardPeerView[];
+  userRole: UserRole;
+  multiTenantEnabled: boolean;
+  /** Bloque /24 + cuota del tenant (multi-tenant). Ausente ⇒ no se muestra. */
+  tenantBlock?: WireguardTenantBlock | null;
   onRefresh: () => Promise<void>;
   onCreateServer: (payload: Record<string, unknown>) => Promise<WireguardServerCreated>;
   onCreatePeer: (payload: Record<string, unknown>) => Promise<WireguardPeerCreated>;
   onRotatePeer: (id: string) => Promise<WireguardPeerCreated>;
   onRevokePeer: (id: string) => Promise<void>;
+  onRetryPeer: (id: string) => Promise<void>;
 }
 
 type SecretModal =
@@ -31,7 +39,19 @@ const STATUS = {
   disabled: 'bg-slate-700/30 text-slate-300 border-slate-600/30',
 };
 
-export default function WireguardManagerModule({ servers, peers, onRefresh, onCreateServer, onCreatePeer, onRotatePeer, onRevokePeer }: Props) {
+// Estado del apply al host wg0 (contrato v2). 'applied' = túnel activo en el servidor.
+const APPLY_STATE: Record<WireguardApplyState, { label: string; cls: string }> = {
+  applied: { label: 'activo', cls: 'bg-emerald-500/15 text-emerald-400 border-emerald-500/20' },
+  pending_apply: { label: 'aplicando…', cls: 'bg-amber-500/15 text-amber-400 border-amber-500/20' },
+  apply_failed: { label: 'falló apply', cls: 'bg-rose-500/15 text-rose-400 border-rose-500/20' },
+};
+
+export default function WireguardManagerModule({ servers, peers, userRole, multiTenantEnabled, tenantBlock, onRefresh, onCreateServer, onCreatePeer, onRotatePeer, onRevokePeer, onRetryPeer }: Props) {
+  // Servidor = singleton global de plataforma: sólo Super Admin lo muta cuando
+  // el multi-tenant está activo. Roles no-plataforma lo ven en solo lectura.
+  const canManageServers = !multiTenantEnabled || userRole === 'Super Admin';
+  // Cuota de equipos del plan (multi-tenant): bloquea altas cuando used >= max.
+  const quotaFull = multiTenantEnabled && !!tenantBlock?.multiTenant && tenantBlock.used >= tenantBlock.maxPeers;
   const [busy, setBusy] = useState('');
   const [toast, setToast] = useState<{ kind: 'success' | 'error'; msg: string } | null>(null);
   const [secret, setSecret] = useState<SecretModal>(null);
@@ -91,6 +111,10 @@ export default function WireguardManagerModule({ servers, peers, onRefresh, onCr
     run('Revocando peer...', async () => { await onRevokePeer(id); await onRefresh(); flash('success', 'Peer revocado.'); });
   };
 
+  const retry = (id: string) => {
+    run('Reintentando apply...', async () => { await onRetryPeer(id); await onRefresh(); flash('success', 'Reintento de apply enviado.'); });
+  };
+
   return (
     <div className="space-y-6 text-slate-200 p-6 bg-slate-900 min-h-screen font-sans">
       {toast && (
@@ -114,10 +138,30 @@ export default function WireguardManagerModule({ servers, peers, onRefresh, onCr
         </div>
         <div className="flex items-center gap-2">
           <button onClick={() => onRefresh()} className="p-2 bg-slate-900 border border-slate-800 rounded-xl text-slate-400 hover:text-white"><RefreshCw className="w-3.5 h-3.5" /></button>
-          <button onClick={() => setShowServer(true)} className="flex items-center space-x-1.5 bg-slate-800 hover:bg-slate-700 text-white px-3 py-2 rounded-xl text-xs font-semibold border border-slate-700"><Server className="w-3.5 h-3.5" /><span>Servidor</span></button>
-          <button id="wg-add-peer" onClick={() => { setPServer(servers[0]?.id || ''); setShowPeer(true); }} disabled={servers.length === 0} className="flex items-center space-x-1.5 bg-indigo-600 hover:bg-indigo-500 disabled:bg-slate-800 text-white px-3 py-2 rounded-xl text-xs font-semibold"><Plus className="w-3.5 h-3.5" /><span>Peer</span></button>
+          {canManageServers ? (
+            <button id="wg-add-server" onClick={() => setShowServer(true)} className="flex items-center space-x-1.5 bg-slate-800 hover:bg-slate-700 text-white px-3 py-2 rounded-xl text-xs font-semibold border border-slate-700"><Server className="w-3.5 h-3.5" /><span>Servidor</span></button>
+          ) : (
+            <span id="wg-server-readonly" className="flex items-center space-x-1.5 bg-slate-900 text-slate-500 px-3 py-2 rounded-xl text-xs font-semibold border border-slate-800" title="El servidor WireGuard es un recurso global de plataforma (solo lectura para tu rol)."><Lock className="w-3.5 h-3.5" /><span>Servidor (solo lectura)</span></span>
+          )}
+          <button id="wg-add-peer" onClick={() => { setPServer(servers[0]?.id || ''); setShowPeer(true); }} disabled={servers.length === 0 || quotaFull} title={quotaFull ? 'Cuota de equipos del plan alcanzada.' : undefined} className="flex items-center space-x-1.5 bg-indigo-600 hover:bg-indigo-500 disabled:bg-slate-800 text-white px-3 py-2 rounded-xl text-xs font-semibold"><Plus className="w-3.5 h-3.5" /><span>Peer</span></button>
         </div>
       </div>
+
+      {/* Bloque /24 del tenant + uso de cuota (multi-tenant) */}
+      {multiTenantEnabled && tenantBlock?.multiTenant && (
+        <div id="wg-tenant-block" className="flex flex-col sm:flex-row sm:items-center gap-3 bg-slate-950 border border-slate-800 rounded-2xl p-4 text-[11px] font-mono">
+          <div className="flex items-center gap-2 text-slate-300">
+            <Network className="w-4 h-4 text-indigo-400" />
+            <span className="text-slate-500 uppercase text-[9px]">Bloque asignado</span>
+            <span className="text-indigo-300 font-bold text-sm">{tenantBlock.subnetCidr}</span>
+          </div>
+          <div className="flex items-center gap-2 text-slate-300 sm:ml-auto">
+            <span className="text-slate-500 uppercase text-[9px]">Uso de equipos</span>
+            <span className={`font-bold text-sm ${quotaFull ? 'text-rose-400' : 'text-white'}`}>{tenantBlock.used}/{tenantBlock.maxPeers}</span>
+            {quotaFull && <span className="text-rose-400">· Límite de {tenantBlock.maxPeers} equipos del plan alcanzado</span>}
+          </div>
+        </div>
+      )}
 
       {/* Servers */}
       <div>
@@ -144,35 +188,49 @@ export default function WireguardManagerModule({ servers, peers, onRefresh, onCr
         <div className="bg-slate-950 border border-slate-800 rounded-2xl overflow-hidden">
           <table className="w-full text-left text-[11px] font-mono">
             <thead className="text-slate-500 uppercase text-[10px] border-b border-slate-900">
-              <tr><th className="p-2.5">Nombre</th><th className="p-2.5">IP</th><th className="p-2.5">Router</th><th className="p-2.5">Estado</th><th className="p-2.5">Creado</th><th className="p-2.5 text-right">Acciones</th></tr>
+              <tr><th className="p-2.5">Nombre</th><th className="p-2.5">IP</th><th className="p-2.5">Router</th><th className="p-2.5">Estado</th>{multiTenantEnabled && <th className="p-2.5">Apply wg0</th>}<th className="p-2.5">Creado</th><th className="p-2.5 text-right">Acciones</th></tr>
             </thead>
             <tbody className="divide-y divide-slate-900">
               {peers.length === 0 ? (
-                <tr><td colSpan={6} className="p-4 text-center text-slate-500 italic">Sin peers.</td></tr>
-              ) : peers.map((p) => (
+                <tr><td colSpan={multiTenantEnabled ? 7 : 6} className="p-4 text-center text-slate-500 italic">Sin peers.</td></tr>
+              ) : peers.map((p) => {
+                const apply = APPLY_STATE[p.applyState ?? 'applied'];
+                return (
                 <tr key={p.id} id={`wg-peer-${p.id}`} className="hover:bg-slate-900/30">
                   <td className="p-2.5 text-slate-200">{p.name}</td>
                   <td className="p-2.5 text-indigo-300">{p.allocatedIp}</td>
                   <td className="p-2.5 text-slate-400">{p.routerId || '—'}</td>
                   <td className="p-2.5"><span className={`px-2 py-0.5 rounded text-[9px] uppercase border ${STATUS[p.status]}`}>{p.status}</span></td>
+                  {multiTenantEnabled && <td className="p-2.5">
+                    {p.status === 'active' ? (
+                      <span id={`wg-apply-${p.id}`} className={`inline-flex items-center gap-1 px-2 py-0.5 rounded text-[9px] uppercase border ${apply.cls}`}>
+                        {p.applyState === 'pending_apply' && <Clock className="w-3 h-3 animate-pulse" />}
+                        {p.applyState === 'apply_failed' && <AlertTriangle className="w-3 h-3" />}
+                        {apply.label}
+                      </span>
+                    ) : <span className="text-slate-600">—</span>}
+                  </td>}
                   <td className="p-2.5 text-slate-500">{p.createdAt.substring(0, 10)}{p.lastRotatedAt ? ' · rotado' : ''}</td>
                   <td className="p-2.5 text-right space-x-1">
                     {p.status === 'active' && (
                       <>
+                        {multiTenantEnabled && p.applyState === 'apply_failed' && (
+                          <button id={`wg-retry-${p.id}`} onClick={() => retry(p.id)} className="text-indigo-300 hover:text-indigo-200 mr-1 text-[10px] font-bold uppercase border border-indigo-500/30 rounded px-1.5 py-0.5" title="Reintentar aplicar al servidor">Reintentar</button>
+                        )}
                         <button onClick={() => rotate(p.id)} className="text-amber-400 hover:text-amber-300" title="Rotar claves"><RefreshCw className="w-3.5 h-3.5 inline" /></button>
                         <button onClick={() => revoke(p.id)} className="text-rose-400 hover:text-rose-300 ml-2" title="Revocar"><Ban className="w-3.5 h-3.5 inline" /></button>
                       </>
                     )}
                   </td>
                 </tr>
-              ))}
+              ); })}
             </tbody>
           </table>
         </div>
       </div>
 
       {/* Create server modal */}
-      {showServer && (
+      {showServer && canManageServers && (
         <Modal title="Crear servidor WireGuard" onClose={() => setShowServer(false)}>
           <form onSubmit={createServer} className="space-y-3 text-xs">
             <Field label="Nombre"><input required value={sName} onChange={(e) => setSName(e.target.value)} placeholder="VPN NugaCore CDMX" className="inp" /></Field>
@@ -209,6 +267,16 @@ export default function WireguardManagerModule({ servers, peers, onRefresh, onCr
             <SecretRow label="Server private key" value={secret.data.serverPrivateKey} copied={copied} onCopy={copy} />
           ) : (
             <div className="space-y-2">
+              {multiTenantEnabled && secret.data.peer.applyState !== 'applied' && (
+                <div id="wg-config-not-active" className="bg-amber-950/40 border border-amber-500/30 rounded-xl p-3 text-[11px] text-amber-200 flex items-start gap-2">
+                  <AlertTriangle className="w-4 h-4 shrink-0 mt-0.5" />
+                  <span>
+                    La configuración se generó, pero el túnel <b>aún no está activo</b> en el servidor
+                    (estado: {APPLY_STATE[secret.data.peer.applyState]?.label ?? secret.data.peer.applyState}).
+                    Puedes importar el script en el router; si el handshake no completa, usa <b>Reintentar</b> en la lista de peers.
+                  </span>
+                </div>
+              )}
               <SecretRow label="Peer private key" value={secret.data.privateKey} copied={copied} onCopy={copy} />
               <SecretRow label="Preshared key" value={secret.data.presharedKey} copied={copied} onCopy={copy} />
               <div className="text-[11px] font-mono text-slate-400 space-y-0.5 pt-1 border-t border-slate-900">

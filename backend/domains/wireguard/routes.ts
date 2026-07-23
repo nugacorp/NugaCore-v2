@@ -3,9 +3,11 @@
 // Los secretos (private/preshared key) se devuelven UNA sola vez al crear/rotar.
 // ====================================================================
 
+import type { NextFunction, Request, Response } from 'express';
 import { Router } from 'express';
 import { requireRoles } from '../../common/rbac';
-import { asyncHandler } from '../../common/errors';
+import { AppError, asyncHandler, notFoundHandler } from '../../common/errors';
+import { isWireguardMultitenantEnabled } from '../../config/feature-flags';
 import { tenantIdFromRequest } from '../tenancy/tenant-scope';
 import { getWireguardService } from './service';
 
@@ -13,6 +15,44 @@ const router = Router();
 const WG_ROLES = ['super admin', 'administrador'] as const;
 // Técnico necesita leer servidores/peers para generar scripts .rsc; no puede crear ni revocar.
 const WG_READ_ROLES = [...WG_ROLES, 'tecnico'] as const;
+const PEER_NAME_MAX_LENGTH = 64;
+const PEER_NAME_PATTERN = /^[\p{L}\p{N} ._-]+$/u;
+
+const requireMultitenantEndpoint = (req: Request, res: Response, next: NextFunction): void => {
+  if (!isWireguardMultitenantEnabled()) {
+    notFoundHandler(req, res);
+    return;
+  }
+  next();
+};
+
+const normalizePeerName = (value: unknown): string | null => {
+  if (typeof value !== 'string' || /[\r\n]/.test(value)) return null;
+  const normalized = value.normalize('NFC').trim();
+  if (!normalized || normalized.length > PEER_NAME_MAX_LENGTH || !PEER_NAME_PATTERN.test(normalized)) {
+    return null;
+  }
+  return normalized;
+};
+
+/**
+ * Mutaciones de servidor WG. En multi-tenant el servidor es un singleton GLOBAL
+ * de plataforma: sólo super admin puede mutarlo (se retira `administrador`).
+ * Con el flag apagado se mantiene el RBAC actual (super admin + administrador).
+ */
+const requireServerMutationRole = (req: Request, res: Response, next: NextFunction): void => {
+  const role = req.authContext?.role || null;
+  if (!role) {
+    res.status(401).json({ error: 'Unauthorized: missing verified auth context' });
+    return;
+  }
+  const allowed: readonly string[] = isWireguardMultitenantEnabled() ? ['super admin'] : WG_ROLES;
+  if (!allowed.includes(role)) {
+    res.status(403).json({ error: 'Forbidden: role does not have permission for this action' });
+    return;
+  }
+  next();
+};
 
 // ── Servidores ───────────────────────────────────────────────────────
 router.get('/api/wireguard/servers', requireRoles([...WG_READ_ROLES]), asyncHandler(async (req, res) => {
@@ -24,7 +64,12 @@ router.get('/api/wireguard/next-ip', requireRoles([...WG_READ_ROLES]), asyncHand
   res.json(await getWireguardService().previewNextIp(serverId, tenantIdFromRequest(req)));
 }));
 
-router.post('/api/wireguard/servers', requireRoles([...WG_ROLES]), asyncHandler(async (req, res) => {
+// Bloque /24 del tenant + uso de cuota (multi-tenant): para el Manager y el wizard.
+router.get('/api/wireguard/tenant-block', requireMultitenantEndpoint, requireRoles([...WG_READ_ROLES]), asyncHandler(async (req, res) => {
+  res.json(await getWireguardService().getTenantBlock(tenantIdFromRequest(req)));
+}));
+
+router.post('/api/wireguard/servers', requireServerMutationRole, asyncHandler(async (req, res) => {
   const { name, endpointHost, endpointPort, listenPort, vpnCidr, serverVpnIp, isDefault } = req.body || {};
   if (!name || !endpointHost) {
     res.status(400).json({ error: 'Missing required fields: name, endpointHost' });
@@ -62,9 +107,16 @@ router.post('/api/wireguard/peers', requireRoles([...WG_ROLES]), asyncHandler(as
     res.status(400).json({ error: 'Missing required fields: serverId, name' });
     return;
   }
+  const peerName = isWireguardMultitenantEnabled() ? normalizePeerName(name) : String(name);
+  if (peerName === null) {
+    res.status(400).json({
+      error: `El nombre del peer debe ser una sola línea de hasta ${PEER_NAME_MAX_LENGTH} caracteres (letras, números, espacio, punto, guion o guion bajo).`,
+    });
+    return;
+  }
   try {
     const created = await getWireguardService().createPeer({
-      serverId: String(serverId), name: String(name),
+      serverId: String(serverId), name: peerName,
       routerId: routerId ? String(routerId) : undefined,
       allowedCidr: allowedCidr ? String(allowedCidr) : undefined,
       tenantId: tenantIdFromRequest(req),
@@ -74,7 +126,14 @@ router.post('/api/wireguard/peers', requireRoles([...WG_ROLES]), asyncHandler(as
       securityWarning: 'La private key y la preshared key se muestran una sola vez. Guárdalas ahora; NugaCore solo conserva las versiones cifradas.',
     });
   } catch (err) {
-    res.status(400).json({ error: err instanceof Error ? err.message : 'Could not create peer' });
+    const message = err instanceof Error ? err.message : 'Could not create peer';
+    if (!isWireguardMultitenantEnabled()) {
+      res.status(400).json({ error: message });
+      return;
+    }
+    const status = err instanceof AppError ? err.statusCode : 400;
+    const code = err instanceof AppError ? err.code : 'WIREGUARD_PEER_CREATE_FAILED';
+    res.status(status).json({ error: message, code });
   }
 }));
 
@@ -93,6 +152,15 @@ router.post('/api/wireguard/peers/:id/rotate', requireRoles([...WG_ROLES]), asyn
     ...result,
     securityWarning: 'Nuevas claves: se muestran una sola vez. Reaplica el script en el router.',
   });
+}));
+
+router.post('/api/wireguard/peers/:id/retry-apply', requireMultitenantEndpoint, requireRoles([...WG_ROLES]), asyncHandler(async (req, res) => {
+  const peer = await getWireguardService().retryPeerApply(req.params.id, tenantIdFromRequest(req));
+  if (!peer) {
+    res.status(404).json({ error: 'Peer not found' });
+    return;
+  }
+  res.json(peer);
 }));
 
 router.delete('/api/wireguard/peers/:id', requireRoles([...WG_ROLES]), asyncHandler(async (req, res) => {

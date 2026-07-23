@@ -47,6 +47,7 @@ import { UserSessionProfile, isSupabaseConfigured, supabase } from './lib/supaba
 import { canAccessTab, getDefaultTabByRole } from './lib/rbac';
 import { getAppScope, resolveEntryTab, isIsolatedScope, forcedTabForScope } from './lib/appScope';
 import { fetchWithRateLimitBackoff, isApiRateLimitError } from './lib/apiBackoff';
+import { WIREGUARD_MULTITENANT_UI_ENABLED } from './config/frontend-feature-flags';
 
 import { 
   Client, 
@@ -75,7 +76,8 @@ import {
   WireguardServerView,
   WireguardPeerView,
   WireguardServerCreated,
-  WireguardPeerCreated
+  WireguardPeerCreated,
+  WireguardTenantBlock
 } from './types';
 
 import { AlertTriangle, RefreshCw, Menu, Sparkles, ArrowRight } from 'lucide-react';
@@ -366,6 +368,7 @@ export default function App() {
   const [suspensionPolicy, setSuspensionPolicy] = useState<SuspensionPolicy | null>(null);
   const [wgServers, setWgServers] = useState<WireguardServerView[]>([]);
   const [wgPeers, setWgPeers] = useState<WireguardPeerView[]>([]);
+  const [wgTenantBlock, setWgTenantBlock] = useState<WireguardTenantBlock | null>(null);
 
   const getAuthHeaders = useCallback(async (): Promise<Record<string, string>> => {
     const headers: Record<string, string> = {};
@@ -594,15 +597,18 @@ export default function App() {
       if (activeTab === 'wireguard' || routersOpenEnrollment) {
         attemptedFetch = true;
         try {
-          const [servers, peers] = await Promise.all([
+          const [servers, peers, block] = await Promise.all([
             fetchJson<WireguardServerView[]>('/api/wireguard/servers'),
             fetchJson<WireguardPeerView[]>('/api/wireguard/peers'),
+            WIREGUARD_MULTITENANT_UI_ENABLED ? fetchJson<WireguardTenantBlock>('/api/wireguard/tenant-block').catch(() => null) : Promise.resolve(null),
           ]);
           setWgServers(servers);
           setWgPeers(peers);
+          setWgTenantBlock(block);
         } catch {
           setWgServers([]);
           setWgPeers([]);
+          setWgTenantBlock(null);
         }
       }
     } catch (err) {
@@ -874,15 +880,18 @@ export default function App() {
   // Carga aislada: endpoints solo SA/Admin → un 403 NO rompe la carga global.
   async function loadWireguard() {
     try {
-      const [servers, peers] = await Promise.all([
-        fetchJson('/api/wireguard/servers'),
-        fetchJson('/api/wireguard/peers'),
+      const [servers, peers, block] = await Promise.all([
+        fetchJson<WireguardServerView[]>('/api/wireguard/servers'),
+        fetchJson<WireguardPeerView[]>('/api/wireguard/peers'),
+        WIREGUARD_MULTITENANT_UI_ENABLED ? fetchJson<WireguardTenantBlock>('/api/wireguard/tenant-block').catch(() => null) : Promise.resolve(null),
       ]);
       setWgServers(servers);
       setWgPeers(peers);
+      setWgTenantBlock(block);
     } catch {
       setWgServers([]);
       setWgPeers([]);
+      setWgTenantBlock(null);
     }
   }
 
@@ -903,6 +912,11 @@ export default function App() {
   };
   const handleRevokeWgPeer = async (id: string): Promise<void> => {
     await fetchJson(`/api/wireguard/peers/${id}`, { method: 'DELETE' });
+  };
+  const handleRetryWgPeer = async (id: string): Promise<void> => {
+    await fetchJson(`/api/wireguard/peers/${id}/retry-apply`, {
+      method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({}),
+    });
   };
 
   // ── Motor de Suspensiones (Fase 4.5) ─────────────────────────────────
@@ -1649,11 +1663,15 @@ export default function App() {
               <WireguardManagerModule
                 servers={wgServers}
                 peers={wgPeers}
+                userRole={userSession.role}
+                multiTenantEnabled={WIREGUARD_MULTITENANT_UI_ENABLED}
+                tenantBlock={wgTenantBlock}
                 onRefresh={loadWireguard}
                 onCreateServer={handleCreateWgServer}
                 onCreatePeer={handleCreateWgPeer}
                 onRotatePeer={handleRotateWgPeer}
                 onRevokePeer={handleRevokeWgPeer}
+                onRetryPeer={handleRetryWgPeer}
               />
             )}
 

@@ -37,30 +37,53 @@ export const poolRange = (cidr: string): { first: number; last: number } => {
  * Devuelve la siguiente IP libre del pool, prefiriendo IPs liberadas (menor
  * primero). Excluye `reserved` (p.ej. la IP del servidor) y las ya asignadas.
  * Devuelve null si el pool está agotado.
+ *
+ * La ruta multi-tenant activa `restrictReleasedToCidr`; la ruta legacy lo deja
+ * apagado para conservar byte-idéntica su selección histórica de releases.
  */
-export const nextFreeIp = (
+const findNextFreeIp = (
   allocations: IpAllocationLite[],
-  cidr: string = DEFAULT_WG_POOL,
-  reserved: string[] = [DEFAULT_SERVER_IP],
+  cidr: string,
+  reserved: string[],
+  restrictReleasedToCidr: boolean,
 ): string | null => {
   const reservedInts = new Set(reserved.map(ipToInt));
   const allocatedInts = new Set(
     allocations.filter((a) => a.status === 'allocated').map((a) => ipToInt(a.ip)),
   );
+  const { first, last } = poolRange(cidr);
+  const inPool = (n: number) => n >= first && n <= last;
 
-  // 1) Reutilizar la IP liberada más baja que no esté reservada ni re-asignada.
+  // 1) Reutilizar la IP liberada más baja DEL BLOQUE pedido, no reservada ni
+  //    re-asignada. Fuera del bloque no se toca (aislamiento entre tenants).
   const released = allocations
     .filter((a) => a.status === 'released')
     .map((a) => ipToInt(a.ip))
-    .filter((n) => !reservedInts.has(n) && !allocatedInts.has(n))
+    .filter((n) => (!restrictReleasedToCidr || inPool(n)) && !reservedInts.has(n) && !allocatedInts.has(n))
     .sort((a, b) => a - b);
   if (released.length > 0) return intToIp(released[0]);
 
-  // 2) Siguiente IP secuencial no usada.
-  const { first, last } = poolRange(cidr);
+  // 2) Siguiente IP secuencial no usada dentro del bloque. Las IPs a saltar
+  //    (servidor, .1 de gateway, etc.) llegan vía `reserved`.
+  // Compatibilidad legacy: siempre empieza en 10.70.0.2 como mínimo. En los
+  // bloques /24 multi-tenant, `first` ya desplaza este piso al bloque correcto.
   const startAt = Math.max(first, ipToInt(DEFAULT_SERVER_IP) + 1);
   for (let n = startAt; n <= last; n++) {
     if (!reservedInts.has(n) && !allocatedInts.has(n)) return intToIp(n);
   }
   return null;
 };
+
+/** Ruta legacy byte-idéntica: puede considerar releases fuera del CIDR pedido. */
+export const nextFreeIp = (
+  allocations: IpAllocationLite[],
+  cidr: string = DEFAULT_WG_POOL,
+  reserved: string[] = [DEFAULT_SERVER_IP],
+): string | null => findNextFreeIp(allocations, cidr, reserved, false);
+
+/** Ruta multi-tenant: nunca reutiliza una IP liberada de otro bloque /24. */
+export const nextFreeIpInCidr = (
+  allocations: IpAllocationLite[],
+  cidr: string,
+  reserved: string[],
+): string | null => findNextFreeIp(allocations, cidr, reserved, true);

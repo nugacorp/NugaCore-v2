@@ -86,7 +86,12 @@ ensure_wg_host_apply_env() {
   token="$(tr -d '\n\r' <"$token_file")"
   [[ -n "$token" ]] || return 0
 
-  gw="$(ip -4 addr show docker0 2>/dev/null | awk '/inet /{print $2}' | cut -d/ -f1 || true)"
+  # Debe coincidir con WG_HOST_APPLY_LISTEN del installer. Sin override, ambos
+  # detectan la gateway real de docker0 (IP de bind y URL para el contenedor).
+  gw="${WG_HOST_APPLY_LISTEN:-}"
+  if [[ -z "$gw" ]]; then
+    gw="$(ip -4 addr show docker0 2>/dev/null | awk '/inet /{print $2}' | cut -d/ -f1 || true)"
+  fi
   gw="${gw:-172.17.0.1}"
   url="http://${gw}:${port}/apply"
 

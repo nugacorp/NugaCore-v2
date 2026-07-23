@@ -11,17 +11,19 @@
 
 import { encryptSecret, decryptSecret } from '../../services/crypto';
 import { logger } from '../../common/logger';
-import { useDbWireguard } from '../../config/feature-flags';
+import { useDbWireguard, isWireguardMultitenantEnabled } from '../../config/feature-flags';
 import { BadRequestError, NotFoundError } from '../../common/errors';
 import { isSupabaseAdminConfigured, supabaseAdmin } from '../../services/supabase-admin';
+import { DEFAULT_TENANT_ID } from '../tenancy/types';
 import { generatePresharedKey, generateWgKeyPair } from './keys';
-import { DEFAULT_SERVER_IP, DEFAULT_WG_POOL, nextFreeIp } from './ipam';
+import { DEFAULT_SERVER_IP, DEFAULT_WG_POOL, nextFreeIp, nextFreeIpInCidr } from './ipam';
 import {
   StoreWireguardRepository,
   SupabaseWireguardRepository,
   WireguardRepository,
 } from './repository';
 import {
+  ApplyState,
   ENCRYPTION_VERSION,
   PeerCreatedOnce,
   ServerCreatedOnce,
@@ -33,9 +35,19 @@ import {
 
 import { nowIso } from '../../common/time';
 import {
-  configureHostApplyPeerLoader,
+  AppliedStateSnapshot,
+  DesiredWgState,
+  HostApplyResult,
+  checkHostCapacity,
+  configureHostApplyStateLoader,
   flushHostPeerSync,
 } from './host-apply';
+
+/** Deriva el /24 canónico del bloque a partir de una IP del túnel. */
+const subnetFromIp = (ip: string): string => {
+  const [a, b, c] = ip.split('/')[0].split('.');
+  return `${a}.${b}.${c}.0/24`;
+};
 
 /** CIDR de gestión/API: preferir el pool del servidor WG, no un default desalineado. */
 const peerAllowedCidr = (server: WireguardServerRecord, override?: string): string =>
@@ -61,22 +73,76 @@ export interface CreatePeerInput {
 }
 
 export class WireguardService {
+  private static readonly DESIRED_STATE_MAX_ATTEMPTS = 3;
+
   constructor(private readonly repo: WireguardRepository) {
     // Host-apply es PLATFORM-GLOBAL: todos los peers activos de todos los
     // tenants → un solo wg0. Nunca filtrar por tenant aquí (si no, un revoke
     // de tenant A borraría peers de B en el reconcile full).
-    configureHostApplyPeerLoader(async () => {
-      const peers = await this.repo.listPeers({ status: 'active' });
-      return peers.map((p) => ({
-        publicKey: p.publicKey,
-        allocatedIp: p.allocatedIp,
-        name: p.name,
-      }));
-    });
+    configureHostApplyStateLoader(
+      () => this.loadDesiredState(),
+      (result, snapshot) => this.ackAppliedState(result, snapshot),
+    );
   }
 
-  /** Sincroniza peers activos → host wg0 (await). No falla el flujo de negocio. */
-  private async syncHostAfterMutation(reason: string): Promise<void> {
+  /**
+   * Estado deseado para el host. Con el flag apagado replica el payload v1
+   * actual (peers sueltos, sin subredes/PSK/revisión) — sin consultas extra.
+   * Con el flag encendido añade PSK cifrada + tenantSubnet por peer + el
+   * conjunto de tenantSubnets y la revisión monotónica persistida.
+   */
+  private async loadDesiredState(): Promise<DesiredWgState> {
+    if (!isWireguardMultitenantEnabled()) {
+      const peers = await this.repo.listPeers({ status: 'active' });
+      return {
+        peers: peers.map((p) => ({ id: p.id, publicKey: p.publicKey, allocatedIp: p.allocatedIp, name: p.name })),
+        tenantSubnets: [],
+        revision: 0,
+      };
+    }
+
+    for (let attempt = 1; attempt <= WireguardService.DESIRED_STATE_MAX_ATTEMPTS; attempt += 1) {
+      const revisionBefore = await this.repo.getRevision();
+      const peers = await this.repo.listPeers({ status: 'active' });
+      const subnets = await this.repo.listSubnets();
+      const revisionAfter = await this.repo.getRevision();
+      if (revisionBefore !== revisionAfter) continue;
+
+      const byTenant = new Map(subnets.map((s) => [s.tenantId, s.subnetCidr]));
+      const cidrs = new Set(subnets.map((s) => s.subnetCidr));
+      const desiredPeers = peers.map((p) => {
+        const tenantSubnet = byTenant.get(p.tenantId || DEFAULT_TENANT_ID) || subnetFromIp(p.allocatedIp);
+        cidrs.add(tenantSubnet); // garantiza que cada IP caiga en una subred declarada
+        return {
+          id: p.id,
+          publicKey: p.publicKey,
+          allocatedIp: p.allocatedIp,
+          name: p.name,
+          encryptedPresharedKey: p.encryptedPresharedKey,
+          tenantSubnet,
+        };
+      });
+      return { peers: desiredPeers, tenantSubnets: Array.from(cidrs), revision: revisionAfter };
+    }
+
+    throw new Error('wireguard_desired_state_revision_not_stable');
+  }
+
+  /** Tras un apply v2 exitoso: ACK de estado (peers → applied + revisión). */
+  private async ackAppliedState(
+    _result: HostApplyResult,
+    snapshot: AppliedStateSnapshot,
+  ): Promise<void> {
+    if (!isWireguardMultitenantEnabled()) return;
+    await this.repo.ackAppliedSnapshot(snapshot.revision, snapshot.digest, snapshot.peerIds);
+  }
+
+  /**
+   * Sincroniza peers activos → host wg0 (await). Devuelve el resultado del
+   * apply (ya NO lo traga como éxito): el llamador ajusta el apply_state del
+   * peer según el ACK. No lanza; el flujo de negocio sigue vivo.
+   */
+  private async syncHostAfterMutation(reason: string): Promise<HostApplyResult> {
     try {
       const result = await flushHostPeerSync();
       if (!result.ok && !result.skipped) {
@@ -85,11 +151,11 @@ export class WireguardService {
           detail: result.detail,
         });
       }
+      return result;
     } catch (err) {
-      logger.warn('WireGuard: host-apply error tras mutación', {
-        reason,
-        error: err instanceof Error ? err.message : String(err),
-      });
+      const detail = err instanceof Error ? err.message : String(err);
+      logger.warn('WireGuard: host-apply error tras mutación', { reason, error: detail });
+      return { ok: false, detail };
     }
   }
 
@@ -105,6 +171,7 @@ export class WireguardService {
     return {
       id: rec.id, serverId: rec.serverId, routerId: rec.routerId, name: rec.name, publicKey: rec.publicKey,
       allocatedIp: rec.allocatedIp, allowedCidr: rec.allowedCidr, status: rec.status,
+      ...(isWireguardMultitenantEnabled() ? { applyState: rec.applyState || 'applied' } : {}),
       hasSecrets: !!rec.encryptedPrivateKey, lastRotatedAt: rec.lastRotatedAt, revokedAt: rec.revokedAt,
       createdAt: rec.createdAt,
     };
@@ -123,44 +190,111 @@ export class WireguardService {
   }
 
   // ── servidores ──────────────────────────────────────────────────────
+  // Multi-tenant: el servidor WG es un SINGLETON GLOBAL de plataforma —
+  // visible a todos los tenants (sin filtro). Con el flag apagado se mantiene
+  // el filtrado por tenant actual.
   async listServers(tenantId?: string): Promise<WireguardServerView[]> {
-    const servers = await this.repo.listServers(tenantId);
-    const peers = await this.repo.listPeers(tenantId ? { tenantId } : undefined);
+    const multi = isWireguardMultitenantEnabled();
+    const servers = await this.repo.listServers(multi ? undefined : tenantId);
+    const peers = await this.repo.listPeers(!multi && tenantId ? { tenantId } : undefined);
     return servers.map((s) => this.toServerView(s, peers.filter((p) => p.serverId === s.id && p.status === 'active').length));
   }
 
-  /** Servidor WireGuard por defecto del tenant (o null). */
+  /** Servidor WireGuard por defecto (global en multi-tenant, del tenant si no). */
   async getDefaultServer(tenantId?: string): Promise<WireguardServerView | null> {
-    const rec = await this.repo.getDefaultServer(tenantId);
+    const multi = isWireguardMultitenantEnabled();
+    const rec = await this.repo.getDefaultServer(multi ? undefined : tenantId);
     if (!rec) return null;
-    const peers = await this.repo.listPeers({ serverId: rec.id, status: 'active', tenantId });
+    const peers = await this.repo.listPeers({ serverId: rec.id, status: 'active', ...(multi ? {} : { tenantId }) });
     return this.toServerView(rec, peers.length);
   }
 
   /**
-   * Vista previa de la siguiente IP libre del pool (sin reservar).
-   * Para mostrar al operador antes de registrar un router WireGuard.
+   * Vista previa de la siguiente IP libre (sin reservar). Multi-tenant: la
+   * calcula dentro del bloque /24 del tenant de sesión. Con el flag apagado
+   * usa el pool del servidor (comportamiento actual).
    */
   async previewNextIp(serverId?: string, tenantId?: string): Promise<{ ip: string; serverId: string; serverName: string; preview: true }> {
+    const multi = isWireguardMultitenantEnabled();
     const rec = serverId
-      ? await this.repo.getServer(serverId, tenantId)
-      : await this.repo.getDefaultServer(tenantId);
+      ? await this.repo.getServer(serverId, multi ? undefined : tenantId)
+      : await this.repo.getDefaultServer(multi ? undefined : tenantId);
     if (!rec) throw new NotFoundError('No hay servidor WireGuard configurado.');
     const allocations = await this.repo.listAllocations(rec.id);
-    const ip = nextFreeIp(
+
+    if (!multi) {
+      const ip = nextFreeIp(
+        allocations.map((a) => ({ ip: a.ip, status: a.status })),
+        rec.vpnCidr,
+        [rec.serverVpnIp],
+      );
+      if (!ip) throw new Error('WireGuard IP pool exhausted');
+      return { ip, serverId: rec.id, serverName: rec.name, preview: true };
+    }
+
+    // Bloque /24 del tenant (o el próximo bloque a asignar si aún no tiene).
+    const tid = tenantId || DEFAULT_TENANT_ID;
+    const cidr = await this.tenantBlockCidr(tid);
+    const reserved = cidr.split('/')[0].replace(/\.0$/, '.1');   // 10.70.X.1
+    const ip = nextFreeIpInCidr(
       allocations.map((a) => ({ ip: a.ip, status: a.status })),
-      rec.vpnCidr,
-      [rec.serverVpnIp],
+      cidr,
+      [reserved],
     );
-    if (!ip) throw new Error('WireGuard IP pool exhausted');
+    if (!ip) throw new Error('WireGuard block exhausted');
     return { ip, serverId: rec.id, serverName: rec.name, preview: true };
+  }
+
+  /** /24 del tenant: el existente, o el próximo bloque secuencial libre. */
+  private async tenantBlockCidr(tenantId: string): Promise<string> {
+    const own = (await this.repo.listSubnets(tenantId))[0];
+    if (own) return own.subnetCidr;
+    const all = await this.repo.listSubnets();
+    const nextIndex = all.reduce((m, s) => Math.max(m, s.subnetIndex), -1) + 1;
+    return `10.70.${nextIndex}.0/24`;
+  }
+
+  /**
+   * Bloque /24 del tenant + uso de cuota (para el WireGuard Manager y el wizard).
+   * `used` cuenta sólo peers equipment activos (los person no consumen cuota).
+   */
+  async getTenantBlock(tenantId?: string): Promise<{
+    subnetCidr: string; subnetIndex: number; maxPeers: number; used: number; multiTenant: boolean;
+  }> {
+    const tid = tenantId || DEFAULT_TENANT_ID;
+    const own = (await this.repo.listSubnets(tid))[0];
+    const subnetCidr = own ? own.subnetCidr : await this.tenantBlockCidr(tid);
+    const subnetIndex = own ? own.subnetIndex : Number(subnetCidr.split('.')[2]);
+    const maxPeers = own?.maxPeers ?? 30;
+    const peers = await this.repo.listPeers({ tenantId: tid, status: 'active' });
+    const used = peers.filter((p) => (p.peerType || 'equipment') === 'equipment').length;
+    return { subnetCidr, subnetIndex, maxPeers, used, multiTenant: isWireguardMultitenantEnabled() };
+  }
+
+  /**
+   * Reintenta el apply de un peer al host (para peers en apply_failed). Reenvía
+   * el estado deseado completo; el agente re-aplica idempotente (misma revisión).
+   * Devuelve la vista del peer con su apply_state actualizado, o null si no existe.
+   */
+  async retryPeerApply(peerId: string, tenantId?: string): Promise<WireguardPeerView | null> {
+    const peer = await this.repo.getPeer(peerId, tenantId);
+    if (!peer) return null;
+    if (isWireguardMultitenantEnabled() && peer.applyState !== 'applied') {
+      await this.repo.updatePeer(peerId, { applyState: 'pending_apply' });
+    }
+    const result = await this.syncHostAfterMutation('retryPeerApply');
+    if (isWireguardMultitenantEnabled() && !result.skipped && !result.ok) {
+      await this.repo.updatePeer(peerId, { applyState: 'apply_failed' });
+    }
+    const fresh = await this.repo.getPeer(peerId, tenantId);
+    return fresh ? this.toPeerView(fresh) : null;
   }
 
   async createServer(input: CreateServerInput): Promise<ServerCreatedOnce> {
     const tenantId = input.tenantId || 'tenant-default';
-    // Si este servidor es default, quitar el default anterior del mismo tenant.
+    // El schema garantiza un único default global: desmarcarlo sin scope de tenant.
     if (input.isDefault) {
-      const prev = await this.repo.getDefaultServer(tenantId);
+      const prev = await this.repo.getDefaultServer();
       if (prev) await this.repo.updateServer(prev.id, { isDefault: false });
     }
     const kp = generateWgKeyPair();
@@ -181,9 +315,10 @@ export class WireguardService {
 
   /** Busca un servidor por ID y devuelve su vista, o null si no existe. */
   async findServer(id: string, tenantId?: string): Promise<WireguardServerView | null> {
-    const rec = await this.repo.getServer(id, tenantId);
+    const multi = isWireguardMultitenantEnabled();
+    const rec = await this.repo.getServer(id, multi ? undefined : tenantId);
     if (!rec) return null;
-    const peers = await this.repo.listPeers({ serverId: rec.id, status: 'active', tenantId });
+    const peers = await this.repo.listPeers({ serverId: rec.id, status: 'active', ...(multi ? {} : { tenantId }) });
     return this.toServerView(rec, peers.length);
   }
 
@@ -193,10 +328,15 @@ export class WireguardService {
   }
 
   async createPeer(input: CreatePeerInput, actorId?: string): Promise<PeerCreatedOnce> {
-    const tenantId = input.tenantId || 'tenant-default';
-    const server = await this.repo.getServer(input.serverId, tenantId);
+    const multi = isWireguardMultitenantEnabled();
+    const tenantId = input.tenantId || DEFAULT_TENANT_ID;
+    // Server global en multi-tenant (singleton de plataforma); por tenant si no.
+    const server = await this.repo.getServer(input.serverId, multi ? undefined : tenantId);
     if (!server) throw new NotFoundError(`Servidor WireGuard '${input.serverId}' no encontrado.`);
 
+    if (multi) return this.createPeerMultiTenant(server, input, tenantId, actorId);
+
+    // ── Ruta actual (flag apagado): IPAM por nextFreeIp, peer 'applied' ──
     const allocations = await this.repo.listAllocations(server.id);
     const ip = nextFreeIp(allocations.map((a) => ({ ip: a.ip, status: a.status })), server.vpnCidr, [server.serverVpnIp]);
     if (!ip) {
@@ -214,6 +354,7 @@ export class WireguardService {
       encryptedPrivateKey: encryptSecret(kp.privateKey), encryptedPresharedKey: encryptSecret(psk),
       encryptionVersion: ENCRYPTION_VERSION, allocatedIp: ip, allowedCidr: peerAllowedCidr(server, input.allowedCidr),
       tenantId,
+      peerType: 'equipment',
       status: 'active', createdBy: actorId, createdAt: nowIso(), updatedAt: nowIso(),
     };
     await this.repo.createPeer(rec);
@@ -227,6 +368,7 @@ export class WireguardService {
         peerId: id,
         releasedAt: '',
         allocatedAt: nowIso(),
+        tenantId,
       });
     } else {
       const allocId = await this.repo.nextId('alloc');
@@ -235,6 +377,7 @@ export class WireguardService {
         serverId: server.id,
         ip,
         peerId: id,
+        tenantId,
         status: 'allocated',
         allocatedAt: nowIso(),
       });
@@ -251,43 +394,150 @@ export class WireguardService {
     return this.peerOnce(server, rec, kp.privateKey, psk);
   }
 
+  /**
+   * Alta multi-tenant (flag encendido): asignación ATÓMICA vía RPC de T1
+   * (subred /24 + cuota + IP del bloque), estado pending_apply → applied con el
+   * ACK de revisión del agente, y gate de capacidad para altas fuera del bloque 0.
+   */
+  private async createPeerMultiTenant(
+    server: WireguardServerRecord,
+    input: CreatePeerInput,
+    tenantId: string,
+    actorId?: string,
+  ): Promise<PeerCreatedOnce> {
+    // Gate de capacidad (fail-closed) para altas fuera del bloque 0 (infra).
+    if (tenantId !== DEFAULT_TENANT_ID) {
+      const cap = await checkHostCapacity();
+      if (!cap.ok) {
+        throw new BadRequestError(
+          'El agente WireGuard del host no acredita capacidad multi-tenant ' +
+            '(schemaVersion≥2 + firewall activo). Alta bloqueada (fail-closed).',
+          'WIREGUARD_HOST_NOT_READY',
+        );
+      }
+    }
+
+    const kp = generateWgKeyPair();
+    const psk = generatePresharedKey();
+    const peerId = await this.repo.nextId('peer');
+    const allocId = await this.repo.nextId('alloc');
+
+    let alloc;
+    try {
+      alloc = await this.repo.allocatePeer({
+        tenantId, serverId: server.id, peerId, allocId,
+        name: input.name, publicKey: kp.publicKey, routerId: input.routerId,
+        encryptedPrivateKey: encryptSecret(kp.privateKey),
+        encryptedPresharedKey: encryptSecret(psk),
+        encryptionVersion: ENCRYPTION_VERSION,
+        allowedCidr: peerAllowedCidr(server, input.allowedCidr),
+        peerType: 'equipment', createdBy: actorId,
+      });
+    } catch (err) {
+      const msg = err instanceof Error ? err.message : String(err);
+      if (/quota_exceeded/.test(msg)) {
+        const max = (await this.repo.listSubnets(tenantId))[0]?.maxPeers ?? 30;
+        throw new BadRequestError(
+          `Límite de ${max} equipos del plan alcanzado. Contacta a soporte para ampliar tu plan.`,
+          'WIREGUARD_QUOTA_EXCEEDED',
+        );
+      }
+      if (/block_exhausted|subnet_pool_exhausted/.test(msg)) {
+        throw new BadRequestError(
+          'No hay direcciones IP disponibles en el bloque del WISP.',
+          'WIREGUARD_BLOCK_EXHAUSTED',
+        );
+      }
+      throw err;
+    }
+
+    // El RPC ya insertó pending_apply y bumpeó revision en la misma transacción (R4-01).
+    const result = await this.syncHostAfterMutation('createPeer');
+
+    let finalApply: ApplyState = 'pending_apply';
+    if (result.ok && !result.skipped) {
+      finalApply = 'applied';                       // ackAppliedState ya lo persistió
+    } else if (!result.skipped) {
+      finalApply = 'apply_failed';                  // el POST falló; visible en UI
+      await this.repo.updatePeer(peerId, { applyState: 'apply_failed' });
+    }
+
+    logger.info('WireGuard: peer creado (multi-tenant)', {
+      peerId, serverId: server.id, ip: alloc.allocation.ip, tenantId, applyState: finalApply,
+    });
+    return this.peerOnce(server, { ...alloc.peer, applyState: finalApply }, kp.privateKey, psk);
+  }
+
   async rotatePeer(
     peerId: string,
     actorId?: string,
     reason?: string,
     tenantId?: string,
   ): Promise<PeerCreatedOnce | null> {
+    const multi = isWireguardMultitenantEnabled();
     const peer = await this.repo.getPeer(peerId, tenantId);
     if (!peer || peer.status !== 'active') return null;
-    const server = await this.repo.getServer(peer.serverId, tenantId);
+    // Server global en multi-tenant (el peer del tenant apunta al singleton).
+    const server = await this.repo.getServer(peer.serverId, multi ? undefined : tenantId);
     if (!server) return null;
 
     const kp = generateWgKeyPair();
     const psk = generatePresharedKey();
     const oldPub = peer.publicKey;
-    const updated = await this.repo.updatePeer(peerId, {
-      publicKey: kp.publicKey,
-      encryptedPrivateKey: encryptSecret(kp.privateKey),
-      encryptedPresharedKey: encryptSecret(psk),
-      lastRotatedAt: nowIso(),
-    });
     const rotId = await this.repo.nextId('rotation');
-    await this.repo.recordRotation({ id: rotId, peerId, oldPublicKey: oldPub, newPublicKey: kp.publicKey, reason, actorId, createdAt: nowIso() });
+    const rotation = {
+      id: rotId, peerId, tenantId: peer.tenantId, oldPublicKey: oldPub,
+      newPublicKey: kp.publicKey, reason, actorId, createdAt: nowIso(),
+    };
+
+    let updated;
+    if (multi) {
+      // R4-01: mutación de claves + rotation + bump en la misma sección crítica.
+      updated = await this.repo.rotatePeerAtomic(peerId, {
+        publicKey: kp.publicKey,
+        encryptedPrivateKey: encryptSecret(kp.privateKey),
+        encryptedPresharedKey: encryptSecret(psk),
+        lastRotatedAt: nowIso(),
+        applyState: 'pending_apply' as ApplyState,
+      }, rotation);
+      if (!updated) return null;
+    } else {
+      updated = await this.repo.updatePeer(peerId, {
+        publicKey: kp.publicKey,
+        encryptedPrivateKey: encryptSecret(kp.privateKey),
+        encryptedPresharedKey: encryptSecret(psk),
+        lastRotatedAt: nowIso(),
+      });
+      await this.repo.recordRotation(rotation);
+    }
     logger.info('WireGuard: peer rotado', { peerId, serverId: server.id });
     // Full reconcile: quita pubkey vieja y aplica la nueva (evita peers huérfanos).
-    await this.syncHostAfterMutation('rotatePeer');
+    const result = await this.syncHostAfterMutation('rotatePeer');
+    if (multi && !result.skipped && !result.ok) {
+      await this.repo.updatePeer(peerId, { applyState: 'apply_failed' });
+      if (updated) updated.applyState = 'apply_failed';
+    } else if (multi && result.ok && !result.skipped && updated) {
+      updated.applyState = 'applied';
+    }
     return this.peerOnce(server, updated!, kp.privateKey, psk);
   }
 
   async revokePeer(peerId: string, tenantId?: string): Promise<boolean> {
+    const multi = isWireguardMultitenantEnabled();
     const peer = await this.repo.getPeer(peerId, tenantId);
     if (!peer) return false;
-    await this.repo.updatePeer(peerId, { status: 'revoked', revokedAt: nowIso() });
-    // Liberar la IP para reutilización.
-    const allocations = await this.repo.listAllocations(peer.serverId);
-    const alloc = allocations.find((a) => a.ip === peer.allocatedIp && a.status === 'allocated');
-    if (alloc) await this.repo.updateAllocation(alloc.id, { status: 'released', releasedAt: nowIso() });
+    if (multi) {
+      // R4-01: revoke + libera IP + bump en la misma sección crítica.
+      const ok = await this.repo.revokePeerAtomic(peerId, nowIso());
+      if (!ok) return false;
+    } else {
+      await this.repo.updatePeer(peerId, { status: 'revoked', revokedAt: nowIso() });
+      const allocations = await this.repo.listAllocations(peer.serverId);
+      const alloc = allocations.find((a) => a.ip === peer.allocatedIp && a.status === 'allocated');
+      if (alloc) await this.repo.updateAllocation(alloc.id, { status: 'released', releasedAt: nowIso() });
+    }
     logger.info('WireGuard: peer revocado', { peerId });
+    // Full reconcile: el peer revocado sale del estado deseado del host.
     await this.syncHostAfterMutation('revokePeer');
     return true;
   }
@@ -316,7 +566,8 @@ export class WireguardService {
         actorId,
       );
     }
-    const server = await this.repo.getServer(serverId, tenantId);
+    const multi = isWireguardMultitenantEnabled();
+    const server = await this.repo.getServer(serverId, multi ? undefined : tenantId);
     if (!server) throw new NotFoundError(`Servidor WireGuard '${serverId}' no encontrado.`);
     const privateKey = existing.encryptedPrivateKey ? decryptSecret(existing.encryptedPrivateKey) : '';
     const presharedKey = existing.encryptedPresharedKey ? decryptSecret(existing.encryptedPresharedKey) : '';

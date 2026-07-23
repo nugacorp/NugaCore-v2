@@ -4,8 +4,14 @@ import path from 'path';
 import {defineConfig} from 'vite';
 
 export default defineConfig(() => {
+  const wireguardMultitenant = ['1', 'true', 'yes', 'on'].includes(
+    String(process.env.WIREGUARD_MULTITENANT || '').trim().toLowerCase(),
+  );
   return {
     plugins: [react(), tailwindcss()],
+    define: {
+      __WIREGUARD_MULTITENANT__: JSON.stringify(wireguardMultitenant),
+    },
     resolve: {
       alias: {
         '@': path.resolve(__dirname, '.'),

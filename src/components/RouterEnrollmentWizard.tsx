@@ -22,6 +22,7 @@ import {
 } from 'lucide-react';
 import { UserRole } from '../lib/supabase';
 import { canStartEnrollment, canRevokeEnrollment } from '../lib/enrollmentRbac';
+import { WIREGUARD_MULTITENANT_UI_ENABLED } from '../config/frontend-feature-flags';
 
 // ── Tipos locales ──────────────────────────────────────────────────────
 
@@ -169,6 +170,8 @@ export default function RouterEnrollmentWizard({
   const [showRawScript, setShowRawScript] = useState(false);
   const [copied, setCopied] = useState(false);
   const [checkResult, setCheckResult] = useState<CheckOnlineResult | null>(null);
+  // IP sugerida dentro del bloque /24 del WISP (multi-tenant); informativa.
+  const [suggestedIp, setSuggestedIp] = useState<string>('');
 
   // ── Carga de datos ───────────────────────────────────────────────
 
@@ -197,6 +200,22 @@ export default function RouterEnrollmentWizard({
     if (form.wgServerId || servers.length === 0) return;
     setForm((prev) => ({ ...prev, wgServerId: servers[0].id }));
   }, [startInWizard, view, form.wgServerId, servers]);
+
+  // IP sugerida del bloque del WISP al entrar al paso "Servidor WireGuard".
+  useEffect(() => {
+    if (!WIREGUARD_MULTITENANT_UI_ENABLED || view !== 'wizard' || step !== 2 || !form.wgServerId) { setSuggestedIp(''); return; }
+    let cancelled = false;
+    (async () => {
+      try {
+        const api = createAuthorizedApi(getAuthHeaders);
+        const res = await api.get<{ ip: string }>(
+          `/api/wireguard/next-ip?serverId=${encodeURIComponent(form.wgServerId)}`,
+        );
+        if (!cancelled) setSuggestedIp(res?.ip || '');
+      } catch { if (!cancelled) setSuggestedIp(''); }
+    })();
+    return () => { cancelled = true; };
+  }, [view, step, form.wgServerId, getAuthHeaders]);
 
   // ── Wizard: acciones ─────────────────────────────────────────────
 
@@ -636,6 +655,17 @@ export default function RouterEnrollmentWizard({
             </div>
           ) : (
             <div className="space-y-2">
+              {WIREGUARD_MULTITENANT_UI_ENABLED && (
+                <p className="text-xs text-gray-500">
+                  El servidor WireGuard es un recurso compartido de plataforma: tus equipos reciben una IP dentro del bloque de tu WISP.
+                </p>
+              )}
+              {WIREGUARD_MULTITENANT_UI_ENABLED && suggestedIp && (
+                <div id="wg-suggested-ip" className="p-3 bg-indigo-900/20 border border-indigo-700/40 rounded-lg text-indigo-200 text-sm flex items-center gap-2">
+                  <Shield size={14} className="text-indigo-400" />
+                  <span>IP sugerida para este equipo (bloque de tu WISP): <b className="font-mono">{suggestedIp}</b></span>
+                </div>
+              )}
               {servers.map((srv) => (
                 <button
                   key={srv.id}
