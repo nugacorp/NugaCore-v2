@@ -21,6 +21,7 @@ from unittest import mock
 # El archivo del agente tiene guiones → se carga por ruta con importlib.
 _HERE = os.path.dirname(os.path.abspath(__file__))
 _AGENT_PATH = os.path.join(_HERE, "wg-host-apply-agent.py")
+_INSTALLER_PATH = os.path.join(_HERE, "install-wg-host-apply-agent.sh")
 _spec = importlib.util.spec_from_file_location("wg_host_apply_agent", _AGENT_PATH)
 agent = importlib.util.module_from_spec(_spec)
 _spec.loader.exec_module(agent)
@@ -506,6 +507,21 @@ class TestConntrackDrain(unittest.TestCase):
             agent.drain_conntrack(["10.70.1.0/24"])
         log.assert_called_once()
         self.assertIn("conntrack no instalado", log.call_args.args[0])
+
+
+class TestInstallerDockerForwarding(unittest.TestCase):
+    def test_installer_persists_docker_user_accept_for_wg_forwarding(self):
+        installer = Path(_INSTALLER_PATH).read_text(encoding="utf-8")
+        self.assertIn("After=network-online.target docker.service", installer)
+        self.assertIn("PartOf=docker.service", installer)
+        self.assertIn(
+            "ExecStartPre=-/usr/sbin/iptables -D DOCKER-USER -i wg0 -o wg0 -j ACCEPT",
+            installer,
+        )
+        self.assertIn(
+            "ExecStartPost=/usr/sbin/iptables -I DOCKER-USER 1 -i wg0 -o wg0 -j ACCEPT",
+            installer,
+        )
 
 
 class TestSubnetParsing(unittest.TestCase):
