@@ -451,9 +451,7 @@ export class WireguardService {
       throw err;
     }
 
-    // El RPC ya insertó pending_apply dentro de la misma transacción que IPAM.
-    // Bump ANTES del flush: la mutación y el reconcile envían revisión coherente.
-    await this.repo.bumpRevision();
+    // El RPC ya insertó pending_apply y bumpeó revision en la misma transacción (R4-01).
     const result = await this.syncHostAfterMutation('createPeer');
 
     let finalApply: ApplyState = 'pending_apply';
@@ -486,16 +484,32 @@ export class WireguardService {
     const kp = generateWgKeyPair();
     const psk = generatePresharedKey();
     const oldPub = peer.publicKey;
-    const updated = await this.repo.updatePeer(peerId, {
-      publicKey: kp.publicKey,
-      encryptedPrivateKey: encryptSecret(kp.privateKey),
-      encryptedPresharedKey: encryptSecret(psk),
-      lastRotatedAt: nowIso(),
-      ...(multi ? { applyState: 'pending_apply' as ApplyState } : {}),
-    });
     const rotId = await this.repo.nextId('rotation');
-    await this.repo.recordRotation({ id: rotId, peerId, tenantId: peer.tenantId, oldPublicKey: oldPub, newPublicKey: kp.publicKey, reason, actorId, createdAt: nowIso() });
-    if (multi) await this.repo.bumpRevision();
+    const rotation = {
+      id: rotId, peerId, tenantId: peer.tenantId, oldPublicKey: oldPub,
+      newPublicKey: kp.publicKey, reason, actorId, createdAt: nowIso(),
+    };
+
+    let updated;
+    if (multi) {
+      // R4-01: mutación de claves + rotation + bump en la misma sección crítica.
+      updated = await this.repo.rotatePeerAtomic(peerId, {
+        publicKey: kp.publicKey,
+        encryptedPrivateKey: encryptSecret(kp.privateKey),
+        encryptedPresharedKey: encryptSecret(psk),
+        lastRotatedAt: nowIso(),
+        applyState: 'pending_apply' as ApplyState,
+      }, rotation);
+      if (!updated) return null;
+    } else {
+      updated = await this.repo.updatePeer(peerId, {
+        publicKey: kp.publicKey,
+        encryptedPrivateKey: encryptSecret(kp.privateKey),
+        encryptedPresharedKey: encryptSecret(psk),
+        lastRotatedAt: nowIso(),
+      });
+      await this.repo.recordRotation(rotation);
+    }
     logger.info('WireGuard: peer rotado', { peerId, serverId: server.id });
     // Full reconcile: quita pubkey vieja y aplica la nueva (evita peers huérfanos).
     const result = await this.syncHostAfterMutation('rotatePeer');
@@ -512,12 +526,16 @@ export class WireguardService {
     const multi = isWireguardMultitenantEnabled();
     const peer = await this.repo.getPeer(peerId, tenantId);
     if (!peer) return false;
-    await this.repo.updatePeer(peerId, { status: 'revoked', revokedAt: nowIso() });
-    // Liberar la IP para reutilización.
-    const allocations = await this.repo.listAllocations(peer.serverId);
-    const alloc = allocations.find((a) => a.ip === peer.allocatedIp && a.status === 'allocated');
-    if (alloc) await this.repo.updateAllocation(alloc.id, { status: 'released', releasedAt: nowIso() });
-    if (multi) await this.repo.bumpRevision();
+    if (multi) {
+      // R4-01: revoke + libera IP + bump en la misma sección crítica.
+      const ok = await this.repo.revokePeerAtomic(peerId, nowIso());
+      if (!ok) return false;
+    } else {
+      await this.repo.updatePeer(peerId, { status: 'revoked', revokedAt: nowIso() });
+      const allocations = await this.repo.listAllocations(peer.serverId);
+      const alloc = allocations.find((a) => a.ip === peer.allocatedIp && a.status === 'allocated');
+      if (alloc) await this.repo.updateAllocation(alloc.id, { status: 'released', releasedAt: nowIso() });
+    }
     logger.info('WireGuard: peer revocado', { peerId });
     // Full reconcile: el peer revocado sale del estado deseado del host.
     await this.syncHostAfterMutation('revokePeer');

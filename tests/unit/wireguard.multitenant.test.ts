@@ -496,6 +496,80 @@ describe('WireGuard multi-tenant (flag WIREGUARD_MULTITENANT)', () => {
   });
 });
 
+describe('WireGuard multi-tenant — R4-01 mutación+bump atómicos', () => {
+  it('allocatePeer incrementa revision en la misma operación', async () => {
+    const repo = new StoreWireguardRepository();
+    expect(await repo.getRevision()).toBe(0);
+    await repo.allocatePeer({
+      tenantId: 'tenant-default', serverId: 'srv', peerId: 'p1', allocId: 'a1',
+      name: 'R1', publicKey: 'AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA=',
+      encryptedPrivateKey: 'enc-priv', encryptedPresharedKey: 'enc-psk',
+      encryptionVersion: 'v1-aes-256-gcm', allowedCidr: '10.70.0.2/32',
+    });
+    expect(await repo.getRevision()).toBe(1);
+    expect(repo.PEERS[0].applyState).toBe('pending_apply');
+  });
+
+  it('rotatePeerAtomic bumpea antes de que un ACK viejo pueda marcar applied', async () => {
+    const repo = new StoreWireguardRepository();
+    await repo.allocatePeer({
+      tenantId: 'tenant-default', serverId: 'srv', peerId: 'p-rot', allocId: 'a-rot',
+      name: 'R', publicKey: 'AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA=',
+      encryptedPrivateKey: 'enc-priv', encryptedPresharedKey: 'enc-psk',
+      encryptionVersion: 'v1-aes-256-gcm', allowedCidr: '10.70.0.2/32',
+    });
+    // Simula ACK N aplicado (desired=1, applied=1).
+    await repo.ackAppliedSnapshot(1, 'digest-n', ['p-rot']);
+    expect(repo.PEERS[0].applyState).toBe('applied');
+
+    const before = await repo.getRevision();
+    await repo.rotatePeerAtomic('p-rot', {
+      publicKey: 'BBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBB=',
+      encryptedPrivateKey: 'enc-priv-2', encryptedPresharedKey: 'enc-psk-2',
+      applyState: 'pending_apply', lastRotatedAt: new Date().toISOString(),
+    }, {
+      id: 'rot-1', peerId: 'p-rot', tenantId: 'tenant-default',
+      oldPublicKey: 'AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA=',
+      newPublicKey: 'BBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBB=',
+      createdAt: new Date().toISOString(),
+    });
+    expect(await repo.getRevision()).toBe(before + 1);
+    expect(repo.PEERS[0].applyState).toBe('pending_apply');
+
+    // ACK N (viejo) debe ser no-op: desired ya es N+1.
+    await repo.ackAppliedSnapshot(before, 'digest-n', ['p-rot']);
+    expect(repo.PEERS[0].applyState).toBe('pending_apply');
+  });
+
+  it('revokePeerAtomic bumpea revision en la misma operación', async () => {
+    const repo = new StoreWireguardRepository();
+    await repo.allocatePeer({
+      tenantId: 'tenant-default', serverId: 'srv', peerId: 'p-rev', allocId: 'a-rev',
+      name: 'R', publicKey: 'AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA=',
+      encryptedPrivateKey: 'enc-priv', encryptedPresharedKey: 'enc-psk',
+      encryptionVersion: 'v1-aes-256-gcm', allowedCidr: '10.70.0.2/32',
+    });
+    const before = await repo.getRevision();
+    await repo.revokePeerAtomic('p-rev', new Date().toISOString());
+    expect(await repo.getRevision()).toBe(before + 1);
+    expect(repo.PEERS[0].status).toBe('revoked');
+    expect(repo.ALLOCATIONS[0].status).toBe('released');
+  });
+
+  it('updatePeer de solo apply_state NO bumpea revision', async () => {
+    const repo = new StoreWireguardRepository();
+    await repo.allocatePeer({
+      tenantId: 'tenant-default', serverId: 'srv', peerId: 'p-as', allocId: 'a-as',
+      name: 'R', publicKey: 'AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA=',
+      encryptedPrivateKey: 'enc-priv', encryptedPresharedKey: 'enc-psk',
+      encryptionVersion: 'v1-aes-256-gcm', allowedCidr: '10.70.0.2/32',
+    });
+    const before = await repo.getRevision();
+    await repo.updatePeer('p-as', { applyState: 'apply_failed' });
+    expect(await repo.getRevision()).toBe(before);
+  });
+});
+
 describe('WireGuard multi-tenant — RBAC de mutación de servidor', () => {
   const SA = { 'x-user-role': 'super admin', 'x-user-id': 'sa' };
   const ADM = { 'x-user-role': 'administrador', 'x-user-id': 'adm' };

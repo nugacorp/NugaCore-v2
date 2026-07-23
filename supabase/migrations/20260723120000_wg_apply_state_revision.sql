@@ -173,3 +173,113 @@ REVOKE ALL ON FUNCTION public.wg_ack_applied_snapshot(bigint, text, text[]) FROM
 REVOKE ALL ON FUNCTION public.wg_ack_applied_snapshot(bigint, text, text[]) FROM anon;
 REVOKE ALL ON FUNCTION public.wg_ack_applied_snapshot(bigint, text, text[]) FROM authenticated;
 GRANT EXECUTE ON FUNCTION public.wg_ack_applied_snapshot(bigint, text, text[]) TO service_role;
+
+
+-- ====================================================================
+-- 5. RPC wg_rotate_peer — rotación atómica + bump (R4-01)
+-- ====================================================================
+CREATE OR REPLACE FUNCTION public.wg_rotate_peer(
+  p_peer_id text,
+  p_patch   jsonb,
+  p_rotation jsonb
+) RETURNS void
+LANGUAGE plpgsql
+SECURITY DEFINER
+SET search_path = public
+AS $$
+BEGIN
+  PERFORM 1 FROM public.wireguard_apply_state WHERE id = 'global' FOR UPDATE;
+  IF NOT FOUND THEN
+    INSERT INTO public.wireguard_apply_state (id, revision) VALUES ('global', 0);
+    PERFORM 1 FROM public.wireguard_apply_state WHERE id = 'global' FOR UPDATE;
+  END IF;
+
+  UPDATE public.wireguard_peers
+     SET public_key = COALESCE(p_patch->>'publicKey', public_key),
+         encrypted_private_key = COALESCE(p_patch->>'encryptedPrivateKey', encrypted_private_key),
+         encrypted_preshared_key = COALESCE(p_patch->>'encryptedPresharedKey', encrypted_preshared_key),
+         apply_state = COALESCE(p_patch->>'applyState', apply_state),
+         last_rotated_at = COALESCE((p_patch->>'lastRotatedAt')::timestamptz, last_rotated_at),
+         updated_at = now()
+   WHERE id = p_peer_id
+     AND status = 'active';
+  IF NOT FOUND THEN
+    RAISE EXCEPTION 'peer_not_found_or_inactive';
+  END IF;
+
+  INSERT INTO public.wireguard_key_rotations (
+    id, peer_id, tenant_id, old_public_key, new_public_key, reason, actor_id, created_at
+  ) VALUES (
+    p_rotation->>'id',
+    p_peer_id,
+    p_rotation->>'tenantId',
+    p_rotation->>'oldPublicKey',
+    p_rotation->>'newPublicKey',
+    p_rotation->>'reason',
+    p_rotation->>'actorId',
+    COALESCE((p_rotation->>'createdAt')::timestamptz, now())
+  );
+
+  INSERT INTO public.wireguard_apply_state (id, revision)
+  VALUES ('global', 1)
+  ON CONFLICT (id) DO UPDATE
+    SET revision = public.wireguard_apply_state.revision + 1,
+        updated_at = now();
+END;
+$$;
+
+REVOKE ALL ON FUNCTION public.wg_rotate_peer(text, jsonb, jsonb) FROM PUBLIC;
+REVOKE ALL ON FUNCTION public.wg_rotate_peer(text, jsonb, jsonb) FROM anon;
+REVOKE ALL ON FUNCTION public.wg_rotate_peer(text, jsonb, jsonb) FROM authenticated;
+GRANT EXECUTE ON FUNCTION public.wg_rotate_peer(text, jsonb, jsonb) TO service_role;
+
+
+-- ====================================================================
+-- 6. RPC wg_revoke_peer — revocación atómica + bump (R4-01)
+-- ====================================================================
+CREATE OR REPLACE FUNCTION public.wg_revoke_peer(
+  p_peer_id   text,
+  p_revoked_at timestamptz
+) RETURNS void
+LANGUAGE plpgsql
+SECURITY DEFINER
+SET search_path = public
+AS $$
+DECLARE
+  v_ip text;
+  v_server_id text;
+BEGIN
+  PERFORM 1 FROM public.wireguard_apply_state WHERE id = 'global' FOR UPDATE;
+  IF NOT FOUND THEN
+    INSERT INTO public.wireguard_apply_state (id, revision) VALUES ('global', 0);
+    PERFORM 1 FROM public.wireguard_apply_state WHERE id = 'global' FOR UPDATE;
+  END IF;
+
+  UPDATE public.wireguard_peers
+     SET status = 'revoked',
+         revoked_at = p_revoked_at,
+         updated_at = now()
+   WHERE id = p_peer_id
+  RETURNING allocated_ip, server_id INTO v_ip, v_server_id;
+  IF NOT FOUND THEN
+    RAISE EXCEPTION 'peer_not_found';
+  END IF;
+
+  UPDATE public.wireguard_ip_allocations
+     SET status = 'released', released_at = p_revoked_at
+   WHERE server_id = v_server_id
+     AND ip = v_ip
+     AND status = 'allocated';
+
+  INSERT INTO public.wireguard_apply_state (id, revision)
+  VALUES ('global', 1)
+  ON CONFLICT (id) DO UPDATE
+    SET revision = public.wireguard_apply_state.revision + 1,
+        updated_at = now();
+END;
+$$;
+
+REVOKE ALL ON FUNCTION public.wg_revoke_peer(text, timestamptz) FROM PUBLIC;
+REVOKE ALL ON FUNCTION public.wg_revoke_peer(text, timestamptz) FROM anon;
+REVOKE ALL ON FUNCTION public.wg_revoke_peer(text, timestamptz) FROM authenticated;
+GRANT EXECUTE ON FUNCTION public.wg_revoke_peer(text, timestamptz) TO service_role;

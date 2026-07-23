@@ -43,6 +43,22 @@ describe('WireGuard migrations — RPC security and concurrency contracts', () =
     expect(ipam).toMatch(/'active',\s*'pending_apply',\s*v_peer_type/i);
   });
 
+  it('bumps desired revision inside allocate/rotate/revoke content mutations', () => {
+    // allocate: bump en el mismo cuerpo, antes del RETURN
+    const allocFn = ipam.slice(ipam.indexOf('CREATE OR REPLACE FUNCTION public.wg_allocate_peer'));
+    expect(allocFn).toMatch(/wireguard_apply_state[\s\S]+revision\s*=[\s\S]+revision\s*\+\s*1/i);
+    expect(allocFn.indexOf('revision')).toBeLessThan(allocFn.lastIndexOf('RETURN jsonb_build_object'));
+
+    expect(applyState).toContain('public.wg_rotate_peer(');
+    expect(applyState).toContain('public.wg_revoke_peer(');
+    for (const name of ['wg_rotate_peer', 'wg_revoke_peer'] as const) {
+      const fn = applyState.slice(applyState.indexOf(`CREATE OR REPLACE FUNCTION public.${name}`));
+      expect(fn).toMatch(/FOR\s+UPDATE/i);
+      expect(fn).toMatch(/revision\s*=[\s\S]+revision\s*\+\s*1/i);
+      expect(applyState).toContain(`GRANT EXECUTE ON FUNCTION public.${name}`);
+    }
+  });
+
   it('locks and validates the ACK revision/digest before updating exact peer IDs', () => {
     expect(applyState).toContain('public.wg_ack_applied_snapshot(bigint, text, text[])');
     const ackFunction = applyState.slice(applyState.indexOf('CREATE OR REPLACE FUNCTION public.wg_ack_applied_snapshot'));

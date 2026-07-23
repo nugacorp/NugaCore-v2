@@ -47,6 +47,20 @@ export interface WireguardRepository {
   allocatePeer(input: AllocatePeerInput): Promise<AllocatePeerResult>;
   listSubnets(tenantId?: string): Promise<WireguardTenantSubnet[]>;
 
+  /**
+   * Rotación atómica (R4-01): actualiza claves + registra rotation + bumpea
+   * revision en la misma sección crítica. Sin ventana ACK-viejo.
+   */
+  rotatePeerAtomic(
+    peerId: string,
+    patch: Partial<WireguardPeerRecord>,
+    rotation: WireguardKeyRotation,
+  ): Promise<WireguardPeerRecord | null>;
+  /**
+   * Revocación atómica (R4-01): status=revoked + libera IP + bumpea revision.
+   */
+  revokePeerAtomic(peerId: string, revokedAt: string): Promise<boolean>;
+
   recordRotation(rec: WireguardKeyRotation): Promise<WireguardKeyRotation>;
   listRotations(peerId?: string): Promise<WireguardKeyRotation[]>;
 
@@ -85,12 +99,28 @@ export class StoreWireguardRepository implements WireguardRepository {
   // Mutex por tenant: réplica del pg_advisory_xact_lock(hash(tenant_id)) para
   // serializar allocatePeer concurrentes del mismo tenant.
   private tenantLocks = new Map<string, Promise<unknown>>();
+  // Mutex global de mutaciones de contenido (allocate/rotate/revoke) para que
+  // el bump de revision sea atómico con la mutación (R4-01).
+  private contentLock: Promise<unknown> = Promise.resolve();
 
   private async withTenantLock<T>(tenantId: string, fn: () => Promise<T>): Promise<T> {
     const prev = this.tenantLocks.get(tenantId) ?? Promise.resolve();
     let release!: () => void;
     const gate = new Promise<void>((r) => { release = r; });
     this.tenantLocks.set(tenantId, prev.then(() => gate));
+    await prev.catch(() => {});
+    try {
+      return await fn();
+    } finally {
+      release();
+    }
+  }
+
+  private async withContentLock<T>(fn: () => Promise<T>): Promise<T> {
+    const prev = this.contentLock;
+    let release!: () => void;
+    const gate = new Promise<void>((r) => { release = r; });
+    this.contentLock = prev.then(() => gate);
     await prev.catch(() => {});
     try {
       return await fn();
@@ -156,7 +186,7 @@ export class StoreWireguardRepository implements WireguardRepository {
   }
 
   async allocatePeer(input: AllocatePeerInput): Promise<AllocatePeerResult> {
-    return this.withTenantLock(input.tenantId, async () => {
+    return this.withContentLock(() => this.withTenantLock(input.tenantId, async () => {
       // 1) Subred del tenant (upsert; subnet_index = max+1).
       let subnet = this.SUBNETS.find((s) => s.tenantId === input.tenantId);
       if (!subnet) {
@@ -224,7 +254,36 @@ export class StoreWireguardRepository implements WireguardRepository {
         };
         this.ALLOCATIONS.push(allocation);
       }
+      // R4-01: bump en la misma sección crítica que la inserción.
+      this.revision += 1;
       return { peer, allocation, subnet };
+    }));
+  }
+
+  async rotatePeerAtomic(
+    peerId: string,
+    patch: Partial<WireguardPeerRecord>,
+    rotation: WireguardKeyRotation,
+  ): Promise<WireguardPeerRecord | null> {
+    return this.withContentLock(async () => {
+      const p = this.PEERS.find((x) => x.id === peerId);
+      if (!p || p.status !== 'active') return null;
+      Object.assign(p, patch, { updatedAt: new Date().toISOString() });
+      this.ROTATIONS.unshift(rotation);
+      this.revision += 1;
+      return p;
+    });
+  }
+
+  async revokePeerAtomic(peerId: string, revokedAt: string): Promise<boolean> {
+    return this.withContentLock(async () => {
+      const p = this.PEERS.find((x) => x.id === peerId);
+      if (!p) return false;
+      Object.assign(p, { status: 'revoked' as const, revokedAt, updatedAt: new Date().toISOString() });
+      const alloc = this.ALLOCATIONS.find((a) => a.ip === p.allocatedIp && a.status === 'allocated');
+      if (alloc) Object.assign(alloc, { status: 'released' as const, releasedAt: revokedAt });
+      this.revision += 1;
+      return true;
     });
   }
 
@@ -456,6 +515,49 @@ export class SupabaseWireguardRepository implements WireguardRepository {
       subnetIndex: res.subnetIndex, maxPeers: res.maxPeers,
     };
     return { peer, allocation, subnet };
+  }
+
+  async rotatePeerAtomic(
+    peerId: string,
+    patch: Partial<WireguardPeerRecord>,
+    rotation: WireguardKeyRotation,
+  ): Promise<WireguardPeerRecord | null> {
+    const { error } = await this.client.rpc('wg_rotate_peer', {
+      p_peer_id: peerId,
+      p_patch: {
+        publicKey: patch.publicKey ?? null,
+        encryptedPrivateKey: patch.encryptedPrivateKey ?? null,
+        encryptedPresharedKey: patch.encryptedPresharedKey ?? null,
+        applyState: patch.applyState ?? null,
+        lastRotatedAt: patch.lastRotatedAt ?? null,
+      },
+      p_rotation: {
+        id: rotation.id,
+        tenantId: rotation.tenantId,
+        oldPublicKey: rotation.oldPublicKey,
+        newPublicKey: rotation.newPublicKey,
+        reason: rotation.reason,
+        actorId: rotation.actorId ?? null,
+        createdAt: rotation.createdAt,
+      },
+    });
+    if (error) {
+      if (/peer_not_found_or_inactive/.test(error.message)) return null;
+      throw new Error(`rotatePeerAtomic: ${error.message}`);
+    }
+    return this.getPeer(peerId);
+  }
+
+  async revokePeerAtomic(peerId: string, revokedAt: string): Promise<boolean> {
+    const { error } = await this.client.rpc('wg_revoke_peer', {
+      p_peer_id: peerId,
+      p_revoked_at: revokedAt,
+    });
+    if (error) {
+      if (/peer_not_found/.test(error.message)) return false;
+      throw new Error(`revokePeerAtomic: ${error.message}`);
+    }
+    return true;
   }
 }
 

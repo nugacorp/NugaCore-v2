@@ -299,6 +299,13 @@ BEGIN
     VALUES (v_alloc_id, p_server_id, host(v_ip), v_peer_id, 'allocated', p_tenant_id);
   END IF;
 
+  -- R4-01: bump de revisión deseada en la MISMA transacción que la mutación.
+  INSERT INTO public.wireguard_apply_state (id, revision)
+  VALUES ('global', 1)
+  ON CONFLICT (id) DO UPDATE
+    SET revision = public.wireguard_apply_state.revision + 1,
+        updated_at = now();
+
   RETURN jsonb_build_object(
     'peerId',      v_peer_id,
     'allocId',     v_alloc_id,
