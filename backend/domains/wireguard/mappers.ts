@@ -43,6 +43,7 @@ export interface PeerRow {
   allocated_ip: string; allowed_cidr: string | null; status: WireguardPeerRecord['status'];
   tenant_id?: string | null;
   peer_type?: string | null;
+  apply_state?: string | null;
   last_rotated_at: string | null; revoked_at: string | null; created_by: string | null;
   created_at?: string; updated_at?: string;
 }
@@ -53,6 +54,7 @@ export const rowToPeer = (r: PeerRow): WireguardPeerRecord => ({
   encryptionVersion: r.encryption_version, allocatedIp: r.allocated_ip, allowedCidr: r.allowed_cidr || undefined,
   tenantId: r.tenant_id || 'tenant-default',
   peerType: (r.peer_type as WireguardPeerRecord['peerType']) || 'equipment',
+  applyState: (r.apply_state as WireguardPeerRecord['applyState']) || 'applied',
   status: r.status, lastRotatedAt: r.last_rotated_at || undefined, revokedAt: r.revoked_at || undefined,
   createdBy: r.created_by || undefined, createdAt: r.created_at || new Date().toISOString(), updatedAt: r.updated_at || new Date().toISOString(),
 });
@@ -63,6 +65,7 @@ export const peerToRow = (p: WireguardPeerRecord): Record<string, unknown> => ({
   encryption_version: p.encryptionVersion, allocated_ip: p.allocatedIp, allowed_cidr: p.allowedCidr || null,
   tenant_id: p.tenantId || 'tenant-default',
   peer_type: p.peerType || 'equipment',
+  apply_state: p.applyState || 'applied',
   status: p.status, last_rotated_at: p.lastRotatedAt || null, revoked_at: p.revokedAt || null, created_by: p.createdBy || null,
 });
 

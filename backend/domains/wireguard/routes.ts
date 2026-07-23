@@ -3,9 +3,11 @@
 // Los secretos (private/preshared key) se devuelven UNA sola vez al crear/rotar.
 // ====================================================================
 
+import type { NextFunction, Request, Response } from 'express';
 import { Router } from 'express';
 import { requireRoles } from '../../common/rbac';
-import { asyncHandler } from '../../common/errors';
+import { AppError, asyncHandler } from '../../common/errors';
+import { isWireguardMultitenantEnabled } from '../../config/feature-flags';
 import { tenantIdFromRequest } from '../tenancy/tenant-scope';
 import { getWireguardService } from './service';
 
@@ -13,6 +15,25 @@ const router = Router();
 const WG_ROLES = ['super admin', 'administrador'] as const;
 // Técnico necesita leer servidores/peers para generar scripts .rsc; no puede crear ni revocar.
 const WG_READ_ROLES = [...WG_ROLES, 'tecnico'] as const;
+
+/**
+ * Mutaciones de servidor WG. En multi-tenant el servidor es un singleton GLOBAL
+ * de plataforma: sólo super admin puede mutarlo (se retira `administrador`).
+ * Con el flag apagado se mantiene el RBAC actual (super admin + administrador).
+ */
+const requireServerMutationRole = (req: Request, res: Response, next: NextFunction): void => {
+  const role = req.authContext?.role || null;
+  if (!role) {
+    res.status(401).json({ error: 'Unauthorized: missing verified auth context' });
+    return;
+  }
+  const allowed: readonly string[] = isWireguardMultitenantEnabled() ? ['super admin'] : WG_ROLES;
+  if (!allowed.includes(role)) {
+    res.status(403).json({ error: 'Forbidden: role does not have permission for this action' });
+    return;
+  }
+  next();
+};
 
 // ── Servidores ───────────────────────────────────────────────────────
 router.get('/api/wireguard/servers', requireRoles([...WG_READ_ROLES]), asyncHandler(async (req, res) => {
@@ -24,7 +45,7 @@ router.get('/api/wireguard/next-ip', requireRoles([...WG_READ_ROLES]), asyncHand
   res.json(await getWireguardService().previewNextIp(serverId, tenantIdFromRequest(req)));
 }));
 
-router.post('/api/wireguard/servers', requireRoles([...WG_ROLES]), asyncHandler(async (req, res) => {
+router.post('/api/wireguard/servers', requireServerMutationRole, asyncHandler(async (req, res) => {
   const { name, endpointHost, endpointPort, listenPort, vpnCidr, serverVpnIp, isDefault } = req.body || {};
   if (!name || !endpointHost) {
     res.status(400).json({ error: 'Missing required fields: name, endpointHost' });
@@ -74,7 +95,9 @@ router.post('/api/wireguard/peers', requireRoles([...WG_ROLES]), asyncHandler(as
       securityWarning: 'La private key y la preshared key se muestran una sola vez. Guárdalas ahora; NugaCore solo conserva las versiones cifradas.',
     });
   } catch (err) {
-    res.status(400).json({ error: err instanceof Error ? err.message : 'Could not create peer' });
+    const status = err instanceof AppError ? err.statusCode : 400;
+    const code = err instanceof AppError ? err.code : 'WIREGUARD_PEER_CREATE_FAILED';
+    res.status(status).json({ error: err instanceof Error ? err.message : 'Could not create peer', code });
   }
 }));
 

@@ -229,6 +229,7 @@ const reconstructPeerConfigFromSnapshot = (
     allocatedIp: snap.assignedIp.replace(/\/\d+$/, ''),
     allowedCidr: snap.allowedCidr,
     status: 'active',
+    applyState: 'applied',
     hasSecrets: true,
     createdAt: '',
   };

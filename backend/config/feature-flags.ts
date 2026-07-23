@@ -98,6 +98,20 @@ export const useDbRouterEnrollment = (): boolean =>
 export const useDbWireguard = (): boolean =>
   asBool(process.env.USE_DB_WIREGUARD);
 
+// ── WireGuard multi-tenant (T3) ────────────────────────────────────────
+// WIREGUARD_MULTITENANT=true → contrato v2 (PSK en payload, tenantSubnet,
+// tenantSubnets, revisión monotónica), cutover al RPC atómico wg_allocate_peer,
+// estados de peer pending_apply/applied/apply_failed, visibilidad global de
+// servidores + mutaciones sólo super admin, gate de capacidad por /health.
+//
+//   false (default) → comportamiento actual (solo bloque 0, payload v1,
+//                     ruta de asignación por nextFreeIp, peers 'applied').
+//   true            → multi-tenant completo (subred /24 por WISP).
+//
+// Se lee en cada llamada (no se cachea en módulo) para poder alternarlo en tests.
+export const isWireguardMultitenantEnabled = (): boolean =>
+  asBool(process.env.WIREGUARD_MULTITENANT);
+
 // ── Multi-tenant / Tenancy (Fase 11) ──────────────────────────────────
 // MULTI_TENANT_ENABLED=true → aislamiento por tenant_id + memberships.
 // USE_DB_TENANCY=true → tenants/memberships en Supabase (si no, store).

@@ -20,7 +20,7 @@ const BASE_INPUT: StartEnrollmentInput = {
 };
 
 const MOCK_PEER: PeerCreatedOnce = {
-  peer: { id: 'wgp-1', serverId: 'wgs-1', name: 'TestRouter', publicKey: 'PUBKEY==', allocatedIp: '10.70.0.2/16', allowedCidr: '10.70.0.0/16', status: 'active', hasSecrets: true, createdAt: '' },
+  peer: { id: 'wgp-1', serverId: 'wgs-1', name: 'TestRouter', publicKey: 'PUBKEY==', allocatedIp: '10.70.0.2/16', allowedCidr: '10.70.0.0/16', status: 'active', applyState: 'applied', hasSecrets: true, createdAt: '' },
   privateKey: 'PRIVKEY==',
   presharedKey: 'PSK==',
   serverPublicKey: 'SERVERPUBKEY==',

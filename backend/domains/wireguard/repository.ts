@@ -50,6 +50,16 @@ export interface WireguardRepository {
   recordRotation(rec: WireguardKeyRotation): Promise<WireguardKeyRotation>;
   listRotations(peerId?: string): Promise<WireguardKeyRotation[]>;
 
+  // ── Revisión monotónica del contrato v2 (singleton global) ──────────────
+  /** Revisión deseada actual (para el reconcile: reenvía la misma). */
+  getRevision(): Promise<number>;
+  /** Incrementa y devuelve la nueva revisión (una por MUTACIÓN). */
+  bumpRevision(): Promise<number>;
+  /** Registra el último ACK del agente (observabilidad). */
+  setAppliedRevision(revision: number, digest?: string): Promise<void>;
+  /** Marca applied todos los peers vivos aún no aplicados (tras ACK de wg0). */
+  markPeersApplied(): Promise<void>;
+
   nextId(kind: 'server' | 'peer' | 'alloc' | 'rotation'): Promise<string>;
 }
 
@@ -69,6 +79,10 @@ export class StoreWireguardRepository implements WireguardRepository {
   ALLOCATIONS: WireguardIpAllocation[] = [];
   ROTATIONS: WireguardKeyRotation[] = [];
   SUBNETS: WireguardTenantSubnet[] = seedSubnets();
+  // Revisión monotónica del contrato v2 (réplica en memoria del singleton DB).
+  private revision = 0;
+  private appliedRevision: number | null = null;
+  private appliedDigest: string | null = null;
   private seq = { server: 1, peer: 1, alloc: 1, rotation: 1 };
   // Mutex por tenant: réplica del pg_advisory_xact_lock(hash(tenant_id)) para
   // serializar allocatePeer concurrentes del mismo tenant.
@@ -221,10 +235,23 @@ export class StoreWireguardRepository implements WireguardRepository {
     return peerId ? this.ROTATIONS.filter((r) => r.peerId === peerId) : this.ROTATIONS;
   }
 
+  async getRevision() { return this.revision; }
+  async bumpRevision() { this.revision += 1; return this.revision; }
+  async setAppliedRevision(revision: number, digest?: string) {
+    this.appliedRevision = revision;
+    this.appliedDigest = digest ?? null;
+  }
+  async markPeersApplied() {
+    for (const p of this.PEERS) {
+      if (p.status !== 'revoked' && p.applyState !== 'applied') p.applyState = 'applied';
+    }
+  }
+
   reset() {
     this.SERVERS = []; this.PEERS = []; this.ALLOCATIONS = []; this.ROTATIONS = [];
     this.SUBNETS = seedSubnets();
     this.tenantLocks = new Map();
+    this.revision = 0; this.appliedRevision = null; this.appliedDigest = null;
     this.seq = { server: 1, peer: 1, alloc: 1, rotation: 1 };
   }
 }
@@ -347,6 +374,31 @@ export class SupabaseWireguardRepository implements WireguardRepository {
     const { data, error } = await q;
     if (error) throw new Error(`listSubnets: ${error.message}`);
     return (data || []).map((r) => rowToTenantSubnet(r as TenantSubnetRow));
+  }
+
+  async getRevision() {
+    const { data, error } = await this.client
+      .from('wireguard_apply_state').select('revision').eq('id', 'global').maybeSingle();
+    if (error) throw new Error(`getRevision: ${error.message}`);
+    return Number((data as { revision?: number } | null)?.revision ?? 0);
+  }
+  async bumpRevision() {
+    const { data, error } = await this.client.rpc('wg_bump_revision');
+    if (error) throw new Error(`bumpRevision: ${error.message}`);
+    return Number(data);
+  }
+  async setAppliedRevision(revision: number, digest?: string) {
+    const { error } = await this.client.from('wireguard_apply_state')
+      .update({ applied_revision: revision, applied_digest: digest ?? null, updated_at: new Date().toISOString() })
+      .eq('id', 'global');
+    if (error) throw new Error(`setAppliedRevision: ${error.message}`);
+  }
+  async markPeersApplied() {
+    const { error } = await this.client.from('wireguard_peers')
+      .update({ apply_state: 'applied' })
+      .neq('status', 'revoked')
+      .neq('apply_state', 'applied');
+    if (error) throw new Error(`markPeersApplied: ${error.message}`);
   }
 
   async allocatePeer(input: AllocatePeerInput): Promise<AllocatePeerResult> {

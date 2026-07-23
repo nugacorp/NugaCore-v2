@@ -11,6 +11,12 @@ export type ServerStatus = 'active' | 'disabled';
 export type PeerStatus = 'active' | 'revoked';
 export type AllocationStatus = 'allocated' | 'released';
 export type PeerType = 'equipment' | 'person';
+/**
+ * Ciclo de apply al host wg0 (contrato v2). Independiente de PeerStatus:
+ * status='active' + apply_state='pending_apply' = peer vivo aún sin ACK de wg0.
+ * 'applied' corresponde al estado "active" del plan (ACK de revisión recibido).
+ */
+export type ApplyState = 'pending_apply' | 'applied' | 'apply_failed';
 
 // ── Servidor ───────────────────────────────────────────────────────────
 export interface WireguardServerRecord {
@@ -63,6 +69,8 @@ export interface WireguardPeerRecord {
   /** equipment consume cuota max_peers; person (staff VPN) no. Default equipment. */
   peerType?: PeerType;
   status: PeerStatus;
+  /** Estado del apply al host wg0 (contrato v2). Default 'applied'. */
+  applyState?: ApplyState;
   lastRotatedAt?: string;
   revokedAt?: string;
   createdBy?: string;
@@ -79,6 +87,8 @@ export interface WireguardPeerView {
   allocatedIp: string;
   allowedCidr?: string;
   status: PeerStatus;
+  /** Estado del apply al host wg0 (contrato v2). Default 'applied'. */
+  applyState: ApplyState;
   hasSecrets: boolean;
   lastRotatedAt?: string;
   revokedAt?: string;
