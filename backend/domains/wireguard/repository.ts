@@ -236,13 +236,25 @@ export class StoreWireguardRepository implements WireguardRepository {
   async getRevision() { return this.revision; }
   async bumpRevision() { this.revision += 1; return this.revision; }
   async ackAppliedSnapshot(revision: number, digest: string | undefined, peerIds: string[]) {
+    const currentRevision = this.appliedRevision;
+    const currentDigest = this.appliedDigest;
+    const acknowledgedDigest = digest ?? null;
+
+    if (currentRevision !== null) {
+      if (revision < currentRevision) return;
+      if (revision === currentRevision && acknowledgedDigest !== currentDigest) {
+        throw new Error('apply_snapshot_digest_mismatch');
+      }
+    }
+
     const ids = new Set(peerIds);
     for (const p of this.PEERS) {
       if (ids.has(p.id) && p.status === 'active') p.applyState = 'applied';
     }
-    if (this.appliedRevision === null || revision >= this.appliedRevision) {
+
+    if (currentRevision === null || revision > currentRevision) {
       this.appliedRevision = revision;
-      this.appliedDigest = digest ?? null;
+      this.appliedDigest = acknowledgedDigest;
     }
   }
 

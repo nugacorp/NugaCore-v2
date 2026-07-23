@@ -107,8 +107,8 @@ GRANT EXECUTE ON FUNCTION public.wg_bump_revision() TO service_role;
 -- 4. RPC wg_ack_applied_snapshot — ACK atómico ligado al snapshot enviado
 --
 -- Marca applied únicamente los IDs incluidos en el POST reconocido y avanza
--- applied_revision de forma monotónica. Un ACK concurrente/viejo nunca puede
--- retroceder la revisión ni sobreescribir el digest de una revisión más nueva.
+-- applied_revision de forma monotónica. La fila singleton se bloquea antes de
+-- tocar peers: ACKs viejos son no-op y misma revisión exige el mismo digest.
 -- ====================================================================
 CREATE OR REPLACE FUNCTION public.wg_ack_applied_snapshot(
   p_revision bigint,
@@ -119,9 +119,33 @@ LANGUAGE plpgsql
 SECURITY DEFINER
 SET search_path = public
 AS $$
+DECLARE
+  v_applied_revision bigint;
+  v_applied_digest   text;
 BEGIN
-  IF p_revision < 0 OR p_peer_ids IS NULL THEN
+  SELECT applied_revision, applied_digest
+    INTO v_applied_revision, v_applied_digest
+    FROM public.wireguard_apply_state
+   WHERE id = 'global'
+     FOR UPDATE;
+
+  IF NOT FOUND THEN
+    RAISE EXCEPTION 'missing_wireguard_apply_state';
+  END IF;
+
+  IF p_revision IS NULL OR p_revision < 0 OR p_peer_ids IS NULL THEN
     RAISE EXCEPTION 'invalid_apply_snapshot_ack';
+  END IF;
+
+  IF v_applied_revision IS NOT NULL THEN
+    IF p_revision < v_applied_revision THEN
+      RETURN;
+    END IF;
+
+    IF p_revision = v_applied_revision
+       AND p_digest IS DISTINCT FROM v_applied_digest THEN
+      RAISE EXCEPTION 'apply_snapshot_digest_mismatch';
+    END IF;
   END IF;
 
   UPDATE public.wireguard_peers
@@ -130,14 +154,13 @@ BEGIN
      AND status = 'active'
      AND apply_state <> 'applied';
 
-  UPDATE public.wireguard_apply_state
-     SET applied_digest = CASE
-           WHEN applied_revision IS NULL OR p_revision >= applied_revision THEN p_digest
-           ELSE applied_digest
-         END,
-         applied_revision = GREATEST(COALESCE(applied_revision, p_revision), p_revision),
-         updated_at = now()
-   WHERE id = 'global';
+  IF v_applied_revision IS NULL OR p_revision > v_applied_revision THEN
+    UPDATE public.wireguard_apply_state
+       SET applied_revision = p_revision,
+           applied_digest = p_digest,
+           updated_at = now()
+     WHERE id = 'global';
+  END IF;
 END;
 $$;
 

@@ -281,9 +281,9 @@ export class WireguardService {
 
   async createServer(input: CreateServerInput): Promise<ServerCreatedOnce> {
     const tenantId = input.tenantId || 'tenant-default';
-    // Si este servidor es default, quitar el default anterior del mismo tenant.
+    // El schema garantiza un único default global: desmarcarlo sin scope de tenant.
     if (input.isDefault) {
-      const prev = await this.repo.getDefaultServer(tenantId);
+      const prev = await this.repo.getDefaultServer();
       if (prev) await this.repo.updateServer(prev.id, { isDefault: false });
     }
     const kp = generateWgKeyPair();

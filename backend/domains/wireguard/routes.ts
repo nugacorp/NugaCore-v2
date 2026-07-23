@@ -107,8 +107,8 @@ router.post('/api/wireguard/peers', requireRoles([...WG_ROLES]), asyncHandler(as
     res.status(400).json({ error: 'Missing required fields: serverId, name' });
     return;
   }
-  const normalizedName = normalizePeerName(name);
-  if (!normalizedName) {
+  const peerName = isWireguardMultitenantEnabled() ? normalizePeerName(name) : String(name);
+  if (peerName === null) {
     res.status(400).json({
       error: `El nombre del peer debe ser una sola línea de hasta ${PEER_NAME_MAX_LENGTH} caracteres (letras, números, espacio, punto, guion o guion bajo).`,
     });
@@ -116,7 +116,7 @@ router.post('/api/wireguard/peers', requireRoles([...WG_ROLES]), asyncHandler(as
   }
   try {
     const created = await getWireguardService().createPeer({
-      serverId: String(serverId), name: normalizedName,
+      serverId: String(serverId), name: peerName,
       routerId: routerId ? String(routerId) : undefined,
       allowedCidr: allowedCidr ? String(allowedCidr) : undefined,
       tenantId: tenantIdFromRequest(req),

@@ -43,10 +43,18 @@ describe('WireGuard migrations — RPC security and concurrency contracts', () =
     expect(ipam).toMatch(/'active',\s*'pending_apply',\s*v_peer_type/i);
   });
 
-  it('ACKs an exact peer-id snapshot and never regresses applied_revision', () => {
+  it('locks and validates the ACK revision/digest before updating exact peer IDs', () => {
     expect(applyState).toContain('public.wg_ack_applied_snapshot(bigint, text, text[])');
-    expect(applyState).toMatch(/id\s*=\s*ANY\s*\(p_peer_ids\)/i);
-    expect(applyState).toMatch(/GREATEST\s*\(/i);
+    const ackFunction = applyState.slice(applyState.indexOf('CREATE OR REPLACE FUNCTION public.wg_ack_applied_snapshot'));
+    const lock = ackFunction.search(/SELECT\s+applied_revision\s*,\s*applied_digest[\s\S]+FOR\s+UPDATE/i);
+    const digestValidation = ackFunction.search(/p_digest\s+IS\s+DISTINCT\s+FROM\s+v_applied_digest/i);
+    const peerUpdate = ackFunction.indexOf('UPDATE public.wireguard_peers');
+    expect(lock).toBeGreaterThan(-1);
+    expect(digestValidation).toBeGreaterThan(lock);
+    expect(peerUpdate).toBeGreaterThan(digestValidation);
+    expect(ackFunction).toMatch(/p_revision\s*<\s*v_applied_revision/i);
+    expect(ackFunction).toMatch(/p_revision\s*=\s*v_applied_revision/i);
+    expect(ackFunction).toMatch(/id\s*=\s*ANY\s*\(p_peer_ids\)/i);
     expect(applyState).toContain(
       'GRANT EXECUTE ON FUNCTION public.wg_ack_applied_snapshot(bigint, text, text[]) TO service_role;',
     );

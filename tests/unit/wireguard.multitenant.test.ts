@@ -327,6 +327,53 @@ describe('WireGuard multi-tenant (flag WIREGUARD_MULTITENANT)', () => {
     expect(repo.PEERS.find((p) => p.id === 'p-sent')?.applyState).toBe('applied');
     expect(repo.PEERS.find((p) => p.id === 'p-later')?.applyState).toBe('pending_apply');
   });
+
+  it('un ACK viejo no marca applied un peer rotado en la revisión N+1', async () => {
+    const repo = new StoreWireguardRepository();
+    const now = new Date().toISOString();
+    repo.PEERS.push({
+      id: 'p-rotated', serverId: 's', name: 'rotated', publicKey: 'new-key',
+      encryptionVersion: 'v1', allocatedIp: '10.70.0.2', status: 'active',
+      applyState: 'pending_apply', createdAt: now, updatedAt: now,
+    });
+
+    await repo.ackAppliedSnapshot(11, 'digest-n-plus-1', ['p-rotated']);
+    repo.PEERS[0].applyState = 'pending_apply'; // rotación posterior del mismo peer
+
+    await repo.ackAppliedSnapshot(10, 'digest-n', ['p-rotated']);
+
+    expect(repo.PEERS[0].applyState).toBe('pending_apply');
+  });
+
+  it('rechaza misma revisión con digest distinto antes de marcar peers', async () => {
+    const repo = new StoreWireguardRepository();
+    const now = new Date().toISOString();
+    repo.PEERS.push({
+      id: 'p-digest-conflict', serverId: 's', name: 'conflict', publicKey: 'key',
+      encryptionVersion: 'v1', allocatedIp: '10.70.0.2', status: 'active',
+      applyState: 'pending_apply', createdAt: now, updatedAt: now,
+    });
+    await repo.ackAppliedSnapshot(12, 'digest-a', []);
+
+    await expect(repo.ackAppliedSnapshot(12, 'digest-b', ['p-digest-conflict']))
+      .rejects.toThrow(/digest|snapshot/i);
+    expect(repo.PEERS[0].applyState).toBe('pending_apply');
+  });
+
+  it('misma revisión y digest es idempotente y aplica los peers del ACK', async () => {
+    const repo = new StoreWireguardRepository();
+    const now = new Date().toISOString();
+    repo.PEERS.push({
+      id: 'p-idempotent', serverId: 's', name: 'idempotent', publicKey: 'key',
+      encryptionVersion: 'v1', allocatedIp: '10.70.0.2', status: 'active',
+      applyState: 'pending_apply', createdAt: now, updatedAt: now,
+    });
+    await repo.ackAppliedSnapshot(13, 'digest-same', []);
+
+    await expect(repo.ackAppliedSnapshot(13, 'digest-same', ['p-idempotent'])).resolves.toBeUndefined();
+    await expect(repo.ackAppliedSnapshot(13, 'digest-same', ['p-idempotent'])).resolves.toBeUndefined();
+    expect(repo.PEERS[0].applyState).toBe('applied');
+  });
 });
 
 describe('WireGuard multi-tenant — RBAC de mutación de servidor', () => {
@@ -368,7 +415,20 @@ describe('WireGuard multi-tenant — RBAC de mutación de servidor', () => {
     expect(res.body).toEqual({ error: "Servidor WireGuard 'missing' no encontrado." });
   });
 
-  it('rechaza nombres multi-línea antes de persistirlos', async () => {
+  it('flag apagado persiste el nombre legacy sin normalización v2', async () => {
+    delete process.env.WIREGUARD_MULTITENANT;
+    const app = createApp();
+    const server = await request(app).post('/api/wireguard/servers').set(SA)
+      .send({ name: 'VPN', endpointHost: 'vpn.local' });
+    const legacyName = ' Router\n[Peer] ';
+    const created = await request(app).post('/api/wireguard/peers').set(SA)
+      .send({ serverId: server.body.server.id, name: legacyName });
+    expect(created.status).toBe(201);
+    expect(created.body.peer.name).toBe(legacyName);
+  });
+
+  it('flag encendido rechaza nombres multi-línea antes de persistirlos', async () => {
+    process.env.WIREGUARD_MULTITENANT = 'true';
     const app = createApp();
     const server = await request(app).post('/api/wireguard/servers').set(SA)
       .send({ name: 'VPN', endpointHost: 'vpn.local' });
@@ -378,5 +438,20 @@ describe('WireGuard multi-tenant — RBAC de mutación de servidor', () => {
     expect(res.body.error).toMatch(/nombre|name|caracteres|línea/i);
     const peers = await request(app).get('/api/wireguard/peers').set(SA);
     expect(peers.body).toEqual([]);
+  });
+
+  it('crear un default desmarca el default global aunque pertenezca a otro tenant', async () => {
+    delete process.env.WIREGUARD_MULTITENANT;
+    const repo = new StoreWireguardRepository();
+    const svc = new WireguardService(repo);
+    const first = await svc.createServer({
+      name: 'VPN A', endpointHost: 'a.local', isDefault: true, tenantId: 'tenant-a',
+    });
+    const second = await svc.createServer({
+      name: 'VPN B', endpointHost: 'b.local', isDefault: true, tenantId: 'tenant-b',
+    });
+
+    expect(repo.SERVERS.find((server) => server.id === first.server.id)?.isDefault).toBe(false);
+    expect(repo.SERVERS.find((server) => server.id === second.server.id)?.isDefault).toBe(true);
   });
 });
