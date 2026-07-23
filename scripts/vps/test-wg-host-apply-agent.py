@@ -369,7 +369,10 @@ class TestFirewallHealth(unittest.TestCase):
 table inet nugacore_wg {
     chain forward {
         type filter hook forward priority filter - 10; policy accept;
+        iifname \"wg0\" oifname \"wg0\" drop
+        iifname \"wg0\" oifname != \"wg0\" ip daddr 10.0.1.0/24 ct state established,related accept
         iifname \"wg0\" oifname != \"wg0\" drop
+        oifname \"wg0\" iifname != \"wg0\" ip saddr 10.0.1.0/24 accept
     }
     chain input {
         type filter hook input priority filter - 10; policy accept;
@@ -380,6 +383,22 @@ table inet nugacore_wg {
 
     def test_accepts_real_nft_chain_hook_priority_format(self):
         self.assertTrue(agent.parse_firewall_health(self.HEALTHY_RULESET))
+
+    def test_accepts_rendered_negative_priority_format(self):
+        rendered_priority = self.HEALTHY_RULESET.replace("filter - 10", "-10")
+        self.assertTrue(agent.parse_firewall_health(rendered_priority))
+
+    def test_uses_requested_app_subnet(self):
+        custom_ruleset = self.HEALTHY_RULESET.replace(
+            "10.0.1.0/24", "10.20.30.0/24"
+        )
+        self.assertTrue(
+            agent.parse_firewall_health(
+                custom_ruleset,
+                app_subnet="10.20.30.0/24",
+            )
+        )
+        self.assertFalse(agent.parse_firewall_health(custom_ruleset))
 
     def test_negative_when_input_chain_is_missing(self):
         without_input = self.HEALTHY_RULESET.replace(
@@ -397,6 +416,27 @@ table inet nugacore_wg {
             '        iifname "wg0" drop\n', ""
         )
         self.assertFalse(agent.parse_firewall_health(input_without_drop))
+
+    def test_negative_when_wg_to_wg_drop_is_missing(self):
+        without_wg_to_wg_drop = self.HEALTHY_RULESET.replace(
+            '        iifname "wg0" oifname "wg0" drop\n', ""
+        )
+        self.assertFalse(agent.parse_firewall_health(without_wg_to_wg_drop))
+
+    def test_negative_when_established_app_return_is_missing(self):
+        without_established_return = self.HEALTHY_RULESET.replace(
+            '        iifname "wg0" oifname != "wg0" ip daddr 10.0.1.0/24 '
+            'ct state established,related accept\n',
+            "",
+        )
+        self.assertFalse(agent.parse_firewall_health(without_established_return))
+
+    def test_negative_when_app_to_peer_allow_is_missing(self):
+        without_app_to_peer_allow = self.HEALTHY_RULESET.replace(
+            '        oifname "wg0" iifname != "wg0" ip saddr 10.0.1.0/24 accept\n',
+            "",
+        )
+        self.assertFalse(agent.parse_firewall_health(without_app_to_peer_allow))
 
     def test_health_reports_effective_revision_and_digest(self):
         state = {"revision": 17, "digest": "abc123"}

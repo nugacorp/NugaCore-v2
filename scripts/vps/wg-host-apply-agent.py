@@ -606,20 +606,27 @@ def sync_peers(conf: str) -> None:
         raise RuntimeError(up.stderr.strip() or "wg-quick up falló")
 
 
-def parse_firewall_health(nft_output: str) -> bool:
-    """(Puro) True solo si el ruleset listado acredita AMBAS base chains con su
-    hook/prioridad y un drop en cada una (CR-09). Una tabla vacía o sin hooks
-    no basta: no habría aislamiento aunque exista el nombre de la tabla."""
+def parse_firewall_health(
+    nft_output: str,
+    app_subnet: str = APP_SUBNET,
+    wg_iface: str = WG_IFACE,
+) -> bool:
+    """(Puro) acredita las base chains y el ruleset mínimo de ``render_nft``.
+
+    No basta encontrar un ``drop`` genérico: el forward debe aislar wg→wg,
+    bloquear wg→otras, permitir solo el retorno established hacia la subred
+    de la app y permitir app→peer. Input debe bloquear el acceso desde wg.
+    """
     text = nft_output or ""
 
-    def healthy_chain(name: str, hook: str) -> bool:
+    def base_chain_body(name: str, hook: str) -> str | None:
         match = re.search(
             rf"\bchain\s+{re.escape(name)}\s*\{{(?P<body>.*?)\}}",
             text,
             flags=re.DOTALL,
         )
         if not match:
-            return False
+            return None
         body = match.group("body")
         # `nft list` puede imprimir -10 como `filter - 10`; ambas formas son
         # equivalentes al priority -10 que instala render_nft.
@@ -629,13 +636,40 @@ def parse_firewall_health(nft_output: str) -> bool:
             rf"priority\s+{priority}\s*;",
             body,
         )
-        return bool(base_chain and re.search(r"\bdrop\b", body))
+        return body if base_chain else None
 
-    return healthy_chain("forward", "forward") and healthy_chain("input", "input")
+    def has_rule(body: str, pattern: str) -> bool:
+        # Cada requisito debe existir en una sola regla. Evita que ``\s+``
+        # combine fragmentos de líneas diferentes y acredite un falso positivo.
+        return bool(re.search(rf"(?m)^[ \t]*{pattern}[ \t]*$", body))
+
+    forward = base_chain_body("forward", "forward")
+    input_chain = base_chain_body("input", "input")
+    if forward is None or input_chain is None:
+        return False
+
+    space = r"[ \t]+"
+    iface = rf'"{re.escape(wg_iface)}"'
+    subnet = re.escape(app_subnet)
+    forward_rules = (
+        rf"iifname{space}{iface}{space}oifname{space}{iface}{space}drop",
+        rf"iifname{space}{iface}{space}oifname{space}!={space}{iface}{space}"
+        rf"ip{space}daddr{space}{subnet}{space}ct{space}state{space}"
+        rf"established[ \t]*,[ \t]*related{space}accept",
+        rf"iifname{space}{iface}{space}oifname{space}!={space}{iface}{space}drop",
+        rf"oifname{space}{iface}{space}iifname{space}!={space}{iface}{space}"
+        rf"ip{space}saddr{space}{subnet}{space}accept",
+    )
+    input_drop = rf"iifname{space}{iface}{space}drop"
+
+    return all(has_rule(forward, rule) for rule in forward_rules) and has_rule(
+        input_chain,
+        input_drop,
+    )
 
 
 def firewall_healthy() -> bool:
-    """Lista la tabla real y verifica base chains+hook+drop (no solo presencia)."""
+    """Lista la tabla real y verifica el ruleset estructural mínimo."""
     proc = subprocess.run(
         ["nft", "list", "table", "inet", NFT_TABLE],
         capture_output=True,
@@ -644,7 +678,11 @@ def firewall_healthy() -> bool:
     )
     if proc.returncode != 0:
         return False
-    return parse_firewall_health(proc.stdout or "")
+    return parse_firewall_health(
+        proc.stdout or "",
+        app_subnet=APP_SUBNET,
+        wg_iface=WG_IFACE,
+    )
 
 
 def health_snapshot() -> dict[str, Any]:
