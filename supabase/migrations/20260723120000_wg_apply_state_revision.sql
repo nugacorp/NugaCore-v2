@@ -120,11 +120,12 @@ SECURITY DEFINER
 SET search_path = public
 AS $$
 DECLARE
+  v_desired_revision bigint;
   v_applied_revision bigint;
   v_applied_digest   text;
 BEGIN
-  SELECT applied_revision, applied_digest
-    INTO v_applied_revision, v_applied_digest
+  SELECT revision, applied_revision, applied_digest
+    INTO v_desired_revision, v_applied_revision, v_applied_digest
     FROM public.wireguard_apply_state
    WHERE id = 'global'
      FOR UPDATE;
@@ -137,11 +138,15 @@ BEGIN
     RAISE EXCEPTION 'invalid_apply_snapshot_ack';
   END IF;
 
-  IF v_applied_revision IS NOT NULL THEN
-    IF p_revision < v_applied_revision THEN
-      RETURN;
-    END IF;
+  IF p_revision < v_desired_revision THEN
+    RETURN;
+  END IF;
 
+  IF p_revision > v_desired_revision THEN
+    RAISE EXCEPTION 'apply_snapshot_future_revision';
+  END IF;
+
+  IF v_applied_revision IS NOT NULL THEN
     IF p_revision = v_applied_revision
        AND p_digest IS DISTINCT FROM v_applied_digest THEN
       RAISE EXCEPTION 'apply_snapshot_digest_mismatch';

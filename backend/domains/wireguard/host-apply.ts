@@ -271,6 +271,7 @@ let debounceTimer: ReturnType<typeof setTimeout> | null = null;
 let reconcileTimer: ReturnType<typeof setInterval> | null = null;
 let stateLoader: StateLoader | null = null;
 let onApplied: OnAppliedCallback | null = null;
+let syncQueue: Promise<void> = Promise.resolve();
 
 /**
  * Registra cómo cargar el estado deseado (peers + subredes + revisión) y un
@@ -281,7 +282,7 @@ export function configureHostApplyStateLoader(loader: StateLoader, applied?: OnA
   onApplied = applied ?? null;
 }
 
-export async function syncActivePeersToHost(): Promise<HostApplyResult> {
+async function runActivePeersSync(): Promise<HostApplyResult> {
   if (!stateLoader) {
     return { ok: false, detail: 'peer_loader_not_configured' };
   }
@@ -313,6 +314,12 @@ export async function syncActivePeersToHost(): Promise<HostApplyResult> {
     logger.error('wireguard_host_apply_sync_failed', { detail });
     return { ok: false, detail };
   }
+}
+
+export function syncActivePeersToHost(): Promise<HostApplyResult> {
+  const pending = syncQueue.then(() => runActivePeersSync());
+  syncQueue = pending.then(() => undefined, () => undefined);
+  return pending;
 }
 
 /**
@@ -379,4 +386,5 @@ export function resetHostApplyStateForTests(): void {
   reconcileTimer = null;
   stateLoader = null;
   onApplied = null;
+  syncQueue = Promise.resolve();
 }

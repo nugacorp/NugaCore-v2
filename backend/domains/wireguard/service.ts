@@ -73,6 +73,8 @@ export interface CreatePeerInput {
 }
 
 export class WireguardService {
+  private static readonly DESIRED_STATE_MAX_ATTEMPTS = 3;
+
   constructor(private readonly repo: WireguardRepository) {
     // Host-apply es PLATFORM-GLOBAL: todos los peers activos de todos los
     // tenants → un solo wg0. Nunca filtrar por tenant aquí (si no, un revoke
@@ -90,31 +92,40 @@ export class WireguardService {
    * conjunto de tenantSubnets y la revisión monotónica persistida.
    */
   private async loadDesiredState(): Promise<DesiredWgState> {
-    const peers = await this.repo.listPeers({ status: 'active' });
     if (!isWireguardMultitenantEnabled()) {
+      const peers = await this.repo.listPeers({ status: 'active' });
       return {
         peers: peers.map((p) => ({ id: p.id, publicKey: p.publicKey, allocatedIp: p.allocatedIp, name: p.name })),
         tenantSubnets: [],
         revision: 0,
       };
     }
-    const subnets = await this.repo.listSubnets();
-    const revision = await this.repo.getRevision();
-    const byTenant = new Map(subnets.map((s) => [s.tenantId, s.subnetCidr]));
-    const cidrs = new Set(subnets.map((s) => s.subnetCidr));
-    const desiredPeers = peers.map((p) => {
-      const tenantSubnet = byTenant.get(p.tenantId || DEFAULT_TENANT_ID) || subnetFromIp(p.allocatedIp);
-      cidrs.add(tenantSubnet); // garantiza que cada IP caiga en una subred declarada
-      return {
-        id: p.id,
-        publicKey: p.publicKey,
-        allocatedIp: p.allocatedIp,
-        name: p.name,
-        encryptedPresharedKey: p.encryptedPresharedKey,
-        tenantSubnet,
-      };
-    });
-    return { peers: desiredPeers, tenantSubnets: Array.from(cidrs), revision };
+
+    for (let attempt = 1; attempt <= WireguardService.DESIRED_STATE_MAX_ATTEMPTS; attempt += 1) {
+      const revisionBefore = await this.repo.getRevision();
+      const peers = await this.repo.listPeers({ status: 'active' });
+      const subnets = await this.repo.listSubnets();
+      const revisionAfter = await this.repo.getRevision();
+      if (revisionBefore !== revisionAfter) continue;
+
+      const byTenant = new Map(subnets.map((s) => [s.tenantId, s.subnetCidr]));
+      const cidrs = new Set(subnets.map((s) => s.subnetCidr));
+      const desiredPeers = peers.map((p) => {
+        const tenantSubnet = byTenant.get(p.tenantId || DEFAULT_TENANT_ID) || subnetFromIp(p.allocatedIp);
+        cidrs.add(tenantSubnet); // garantiza que cada IP caiga en una subred declarada
+        return {
+          id: p.id,
+          publicKey: p.publicKey,
+          allocatedIp: p.allocatedIp,
+          name: p.name,
+          encryptedPresharedKey: p.encryptedPresharedKey,
+          tenantSubnet,
+        };
+      });
+      return { peers: desiredPeers, tenantSubnets: Array.from(cidrs), revision: revisionAfter };
+    }
+
+    throw new Error('wireguard_desired_state_revision_not_stable');
   }
 
   /** Tras un apply v2 exitoso: ACK de estado (peers → applied + revisión). */

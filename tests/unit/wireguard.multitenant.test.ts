@@ -51,6 +51,12 @@ const installFetch = (opts: { applyOk?: boolean; healthOk?: boolean; firewallRea
 
 const newService = () => new WireguardService(new StoreWireguardRepository());
 
+const bumpRevisionTo = async (repo: StoreWireguardRepository, revision: number) => {
+  for (let current = await repo.getRevision(); current < revision; current += 1) {
+    await repo.bumpRevision();
+  }
+};
+
 describe('WireGuard multi-tenant (flag WIREGUARD_MULTITENANT)', () => {
   const originalFetch = globalThis.fetch;
 
@@ -299,6 +305,101 @@ describe('WireGuard multi-tenant (flag WIREGUARD_MULTITENANT)', () => {
     expect(ack).toEqual({ revision: 7, digest: 'digest-x', peerIds: ['p-snapshot'] });
   });
 
+  it('reintenta la carga si la revisión cambia entre peers y subredes', async () => {
+    process.env.WIREGUARD_MULTITENANT = 'true';
+    const { applyCalls } = installFetch();
+    const repo = new StoreWireguardRepository();
+    await bumpRevisionTo(repo, 2);
+    const now = new Date().toISOString();
+    repo.PEERS.push({
+      id: 'p-consistent', serverId: 's', name: 'consistent', publicKey: 'new-key',
+      encryptedPresharedKey: encryptSecret(generatePresharedKey()), encryptionVersion: 'v1',
+      allocatedIp: '10.70.0.2', status: 'active', applyState: 'pending_apply',
+      createdAt: now, updatedAt: now,
+    });
+
+    const revisions = [1, 2, 2, 2];
+    let revisionReads = 0;
+    let peerReads = 0;
+    const originalGetRevision = repo.getRevision.bind(repo);
+    const originalListPeers = repo.listPeers.bind(repo);
+    repo.getRevision = vi.fn(async () => revisions[revisionReads++] ?? originalGetRevision());
+    repo.listPeers = vi.fn(async (filter) => {
+      peerReads += 1;
+      const peers = await originalListPeers(filter);
+      return peers.map((peer) => ({
+        ...peer,
+        publicKey: peerReads === 1 ? 'old-key' : peer.publicKey,
+      }));
+    });
+
+    new WireguardService(repo);
+    const result = await syncActivePeersToHost();
+
+    expect(result.ok).toBe(true);
+    expect(revisionReads).toBe(4);
+    expect(peerReads).toBe(2);
+    expect(applyCalls).toHaveLength(1);
+    expect(applyCalls[0].revision).toBe(2);
+    expect(applyCalls[0].peers[0].publicKey).toBe('new-key');
+  });
+
+  it('abandona tras tres cargas inestables sin enviar un snapshot incoherente', async () => {
+    process.env.WIREGUARD_MULTITENANT = 'true';
+    const { applyCalls } = installFetch();
+    const repo = new StoreWireguardRepository();
+    const revisions = [1, 2, 3, 4, 5, 6];
+    let revisionReads = 0;
+    let peerReads = 0;
+    repo.getRevision = vi.fn(async () => revisions[revisionReads++] ?? 6);
+    const originalListPeers = repo.listPeers.bind(repo);
+    repo.listPeers = vi.fn(async (filter) => {
+      peerReads += 1;
+      return originalListPeers(filter);
+    });
+
+    new WireguardService(repo);
+    const result = await syncActivePeersToHost();
+
+    expect(result.ok).toBe(false);
+    expect(result.detail).toMatch(/revision|snapshot|stable/i);
+    expect(revisionReads).toBe(6);
+    expect(peerReads).toBe(3);
+    expect(applyCalls).toHaveLength(0);
+  });
+
+  it('serializa syncs concurrentes para no aplicar snapshots en paralelo', async () => {
+    installFetch();
+    let loaderCalls = 0;
+    let activeLoaders = 0;
+    let maxActiveLoaders = 0;
+    let releaseFirst!: () => void;
+    let firstEntered!: () => void;
+    const firstEnteredPromise = new Promise<void>((resolve) => { firstEntered = resolve; });
+    const firstGate = new Promise<void>((resolve) => { releaseFirst = resolve; });
+    configureHostApplyStateLoader(async () => {
+      loaderCalls += 1;
+      activeLoaders += 1;
+      maxActiveLoaders = Math.max(maxActiveLoaders, activeLoaders);
+      if (loaderCalls === 1) {
+        firstEntered();
+        await firstGate;
+      }
+      activeLoaders -= 1;
+      return { revision: 0, tenantSubnets: [], peers: [] };
+    });
+
+    const first = syncActivePeersToHost();
+    await firstEnteredPromise;
+    const second = syncActivePeersToHost();
+    await Promise.resolve();
+    releaseFirst();
+    await Promise.all([first, second]);
+
+    expect(loaderCalls).toBe(2);
+    expect(maxActiveLoaders).toBe(1);
+  });
+
   it('fallo al persistir el ACK se propaga como apply fallido', async () => {
     process.env.WIREGUARD_MULTITENANT = 'true';
     installFetch();
@@ -318,6 +419,7 @@ describe('WireGuard multi-tenant (flag WIREGUARD_MULTITENANT)', () => {
 
   it('el repositorio marca applied sólo los IDs incluidos en el ACK', async () => {
     const repo = new StoreWireguardRepository();
+    await bumpRevisionTo(repo, 9);
     const now = new Date().toISOString();
     repo.PEERS.push(
       { id: 'p-sent', serverId: 's', name: 'sent', publicKey: 'a', encryptionVersion: 'v1', allocatedIp: '10.70.0.2', status: 'active', applyState: 'pending_apply', createdAt: now, updatedAt: now },
@@ -328,8 +430,10 @@ describe('WireGuard multi-tenant (flag WIREGUARD_MULTITENANT)', () => {
     expect(repo.PEERS.find((p) => p.id === 'p-later')?.applyState).toBe('pending_apply');
   });
 
-  it('un ACK viejo no marca applied un peer rotado en la revisión N+1', async () => {
+  it('un ACK N no marca un peer si desired=N+1 y applied=N-1', async () => {
     const repo = new StoreWireguardRepository();
+    await repo.ackAppliedSnapshot(0, 'digest-n-minus-1', []);
+    await bumpRevisionTo(repo, 2);
     const now = new Date().toISOString();
     repo.PEERS.push({
       id: 'p-rotated', serverId: 's', name: 'rotated', publicKey: 'new-key',
@@ -337,16 +441,31 @@ describe('WireGuard multi-tenant (flag WIREGUARD_MULTITENANT)', () => {
       applyState: 'pending_apply', createdAt: now, updatedAt: now,
     });
 
-    await repo.ackAppliedSnapshot(11, 'digest-n-plus-1', ['p-rotated']);
-    repo.PEERS[0].applyState = 'pending_apply'; // rotación posterior del mismo peer
+    await repo.ackAppliedSnapshot(1, 'digest-n', ['p-rotated']);
+    expect(repo.PEERS[0].applyState).toBe('pending_apply');
 
-    await repo.ackAppliedSnapshot(10, 'digest-n', ['p-rotated']);
+    await repo.ackAppliedSnapshot(2, 'digest-n-plus-1', ['p-rotated']);
+    expect(repo.PEERS[0].applyState).toBe('applied');
+  });
 
+  it('rechaza un ACK de una revisión futura antes de marcar peers', async () => {
+    const repo = new StoreWireguardRepository();
+    await bumpRevisionTo(repo, 3);
+    const now = new Date().toISOString();
+    repo.PEERS.push({
+      id: 'p-future', serverId: 's', name: 'future', publicKey: 'key',
+      encryptionVersion: 'v1', allocatedIp: '10.70.0.2', status: 'active',
+      applyState: 'pending_apply', createdAt: now, updatedAt: now,
+    });
+
+    await expect(repo.ackAppliedSnapshot(4, 'digest-future', ['p-future']))
+      .rejects.toThrow(/future|revision|snapshot/i);
     expect(repo.PEERS[0].applyState).toBe('pending_apply');
   });
 
   it('rechaza misma revisión con digest distinto antes de marcar peers', async () => {
     const repo = new StoreWireguardRepository();
+    await bumpRevisionTo(repo, 12);
     const now = new Date().toISOString();
     repo.PEERS.push({
       id: 'p-digest-conflict', serverId: 's', name: 'conflict', publicKey: 'key',
@@ -362,6 +481,7 @@ describe('WireGuard multi-tenant (flag WIREGUARD_MULTITENANT)', () => {
 
   it('misma revisión y digest es idempotente y aplica los peers del ACK', async () => {
     const repo = new StoreWireguardRepository();
+    await bumpRevisionTo(repo, 13);
     const now = new Date().toISOString();
     repo.PEERS.push({
       id: 'p-idempotent', serverId: 's', name: 'idempotent', publicKey: 'key',
