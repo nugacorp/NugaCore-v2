@@ -6,6 +6,7 @@ import {
   Send,
   QrCode,
   Router,
+  Wallet,
   Save,
   Zap,
   CheckCircle2,
@@ -17,7 +18,7 @@ interface ExternalIntegrationsPanelProps {
   getAuthHeaders?: () => Promise<Record<string, string>>;
 }
 
-type ServiceKey = 'stripe' | 'whatsapp' | 'telegram' | 'codi';
+type ServiceKey = 'stripe' | 'whatsapp' | 'telegram' | 'codi' | 'openpay';
 
 const statusClass = (configured: boolean, enabled: boolean) => {
   if (enabled && configured) return 'text-emerald-400';
@@ -49,6 +50,14 @@ export default function ExternalIntegrationsPanel({ getAuthHeaders }: ExternalIn
     clabe: '',
     webhookSecret: '',
     certificateRef: '',
+  });
+  const [openpay, setOpenpay] = useState({
+    enabled: false,
+    merchantId: '',
+    publicKey: '',
+    privateKey: '',
+    webhookSecret: '',
+    sandbox: true,
   });
 
   const load = useCallback(async () => {
@@ -83,6 +92,14 @@ export default function ExternalIntegrationsPanel({ getAuthHeaders }: ExternalIn
         clabe: data.codi.clabe,
         webhookSecret: '',
         certificateRef: data.codi.certificateRef,
+      });
+      setOpenpay({
+        enabled: data.openpay.enabled,
+        merchantId: data.openpay.merchantId,
+        publicKey: data.openpay.publicKey,
+        privateKey: '',
+        webhookSecret: '',
+        sandbox: data.openpay.sandbox,
       });
     } catch (e) {
       setError(e instanceof Error ? e.message : 'No se pudo cargar integraciones');
@@ -129,6 +146,14 @@ export default function ExternalIntegrationsPanel({ getAuthHeaders }: ExternalIn
           certificateRef: codi.certificateRef,
           ...(codi.webhookSecret ? { webhookSecret: codi.webhookSecret } : {}),
         },
+        openpay: {
+          enabled: openpay.enabled,
+          merchantId: openpay.merchantId,
+          publicKey: openpay.publicKey,
+          sandbox: openpay.sandbox,
+          ...(openpay.privateKey ? { privateKey: openpay.privateKey } : {}),
+          ...(openpay.webhookSecret ? { webhookSecret: openpay.webhookSecret } : {}),
+        },
       };
       const res = await fetch('/api/integrations/settings', { method: 'PUT', headers, body: JSON.stringify(body) });
       if (!res.ok) {
@@ -141,6 +166,7 @@ export default function ExternalIntegrationsPanel({ getAuthHeaders }: ExternalIn
       setWhatsapp((w) => ({ ...w, accessToken: '', webhookVerifyToken: '' }));
       setTelegram((t) => ({ ...t, botToken: '' }));
       setCodi((c) => ({ ...c, webhookSecret: '' }));
+      setOpenpay((o) => ({ ...o, privateKey: '', webhookSecret: '' }));
     } catch (e) {
       setError(e instanceof Error ? e.message : 'Error al guardar');
     } finally {
@@ -176,6 +202,7 @@ export default function ExternalIntegrationsPanel({ getAuthHeaders }: ExternalIn
     { id: 'whatsapp', label: 'WhatsApp', icon: <MessageCircle className="w-3.5 h-3.5" /> },
     { id: 'telegram', label: 'Telegram', icon: <Send className="w-3.5 h-3.5" /> },
     { id: 'codi', label: 'CoDi', icon: <QrCode className="w-3.5 h-3.5" /> },
+    { id: 'openpay', label: 'OpenPay', icon: <Wallet className="w-3.5 h-3.5" /> },
   ];
 
   return (
@@ -195,7 +222,7 @@ export default function ExternalIntegrationsPanel({ getAuthHeaders }: ExternalIn
 
       {settings && (
         <div className="grid grid-cols-2 gap-2 text-[10px] font-mono">
-          {(['stripe', 'whatsapp', 'telegram', 'codi'] as const).map((key) => (
+          {(['stripe', 'whatsapp', 'telegram', 'codi', 'openpay'] as const).map((key) => (
             <div key={key} className="flex justify-between bg-slate-900/50 border border-slate-900 rounded-lg px-2 py-1.5">
               <span className="text-slate-400 capitalize">{key}</span>
               <span className={statusClass(settings.statuses[key].configured, settings.statuses[key].enabled)}>
@@ -279,6 +306,44 @@ export default function ExternalIntegrationsPanel({ getAuthHeaders }: ExternalIn
           <input type="password" value={codi.webhookSecret} onChange={(e) => setCodi({ ...codi, webhookSecret: e.target.value })} placeholder="Secreto webhook POST /api/payments/webhook/codi" className="w-full rounded-lg bg-slate-900 border border-slate-800 px-3 py-2 text-xs text-white" />
           <p className="text-[10px] text-slate-500 font-mono">
             Al recibir pago CoDi con referencia de factura, el sistema marca la factura pagada y reactiva al cliente automáticamente.
+            Para generar CLABE/referencia SPEI-CoDi automáticas por factura, configure también OpenPay en su pestaña.
+          </p>
+        </div>
+      )}
+
+      {active === 'openpay' && (
+        <div className="space-y-2">
+          <label className="flex items-center gap-2 text-xs text-slate-300">
+            <input type="checkbox" checked={openpay.enabled} onChange={(e) => setOpenpay({ ...openpay, enabled: e.target.checked })} />
+            Habilitar OpenPay (tarjeta + SPEI/CoDi)
+          </label>
+          <div className="flex items-center gap-2">
+            <button
+              type="button"
+              onClick={() => setOpenpay({ ...openpay, sandbox: true })}
+              className={`rounded-lg px-2.5 py-1 text-[10px] font-mono border ${
+                openpay.sandbox ? 'bg-amber-900/40 border-amber-600 text-amber-200' : 'border-slate-800 text-slate-500'
+              }`}
+            >
+              Sandbox (pruebas)
+            </button>
+            <button
+              type="button"
+              onClick={() => setOpenpay({ ...openpay, sandbox: false })}
+              className={`rounded-lg px-2.5 py-1 text-[10px] font-mono border ${
+                !openpay.sandbox ? 'bg-emerald-900/40 border-emerald-600 text-emerald-200' : 'border-slate-800 text-slate-500'
+              }`}
+            >
+              Producción
+            </button>
+          </div>
+          <input value={openpay.merchantId} onChange={(e) => setOpenpay({ ...openpay, merchantId: e.target.value })} placeholder="Merchant ID (m...)" className="w-full rounded-lg bg-slate-900 border border-slate-800 px-3 py-2 text-xs text-white" />
+          <input value={openpay.publicKey} onChange={(e) => setOpenpay({ ...openpay, publicKey: e.target.value })} placeholder="Public key (pk_...)" className="w-full rounded-lg bg-slate-900 border border-slate-800 px-3 py-2 text-xs text-white" />
+          <input type="password" value={openpay.privateKey} onChange={(e) => setOpenpay({ ...openpay, privateKey: e.target.value })} placeholder={settings?.openpay.privateKeySet ? 'Private key (vacío = sin cambio)' : 'Private key (sk_...)'} className="w-full rounded-lg bg-slate-900 border border-slate-800 px-3 py-2 text-xs text-white" />
+          <input type="password" value={openpay.webhookSecret} onChange={(e) => setOpenpay({ ...openpay, webhookSecret: e.target.value })} placeholder={settings?.openpay.webhookSecretSet ? 'Webhook secret (vacío = sin cambio)' : 'Webhook secret (X-OpenPay-Signature)'} className="w-full rounded-lg bg-slate-900 border border-slate-800 px-3 py-2 text-xs text-white" />
+          <p className="text-[10px] text-slate-500 font-mono">
+            OpenPay procesa tarjeta y SPEI/CoDi: cada factura obtiene CLABE virtual y referencia; el pago se confirma por webhook.
+            Use sandbox hasta validar el flujo end-to-end; las llaves se guardan cifradas.
           </p>
         </div>
       )}

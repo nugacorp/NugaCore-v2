@@ -19,6 +19,7 @@ router.put('/api/integrations/settings', requireRoles([...WRITE]), asyncHandler(
       whatsapp: body.whatsapp,
       telegram: body.telegram,
       codi: body.codi,
+      openpay: body.openpay,
     }),
   );
 }));
