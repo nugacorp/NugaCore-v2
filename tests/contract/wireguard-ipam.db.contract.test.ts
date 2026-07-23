@@ -23,6 +23,7 @@ const RUN = `wgipam-${Date.now()}`;
 const SERVER_ID = `${RUN}-srv`;
 const T1 = `${RUN}-t1`;
 const T2 = `${RUN}-t2`;
+const T3 = `${RUN}-t3`;
 
 if (optIn && !hasSupabase) {
   describe('WireGuard IPAM DB contract — configuración requerida', () => {
@@ -58,6 +59,7 @@ describe.skipIf(!optIn || !hasSupabase)('WireGuard IPAM DB contract (Supabase st
     await supabase.from('tenants').upsert([
       { id: T1, name: 'WG IPAM T1', slug: T1, status: 'active' },
       { id: T2, name: 'WG IPAM T2', slug: T2, status: 'active' },
+      { id: T3, name: 'WG IPAM T3', slug: T3, status: 'active' },
     ], { onConflict: 'id' });
 
     // Servidor singleton de prueba (no default, para no tocar el índice global).
@@ -76,11 +78,11 @@ describe.skipIf(!optIn || !hasSupabase)('WireGuard IPAM DB contract (Supabase st
   afterAll(async () => {
     // Limpieza en orden de FK: allocations → rotations → peers → subnets → server → tenants.
     await supabase.from('wireguard_ip_allocations').delete().eq('server_id', SERVER_ID);
-    await supabase.from('wireguard_key_rotations').delete().in('tenant_id', [T1, T2]);
+    await supabase.from('wireguard_key_rotations').delete().in('tenant_id', [T1, T2, T3]);
     await supabase.from('wireguard_peers').delete().eq('server_id', SERVER_ID);
-    await supabase.from('wireguard_tenant_subnets').delete().in('tenant_id', [T1, T2]);
+    await supabase.from('wireguard_tenant_subnets').delete().in('tenant_id', [T1, T2, T3]);
     await supabase.from('wireguard_servers').delete().eq('id', SERVER_ID);
-    await supabase.from('tenants').delete().in('id', [T1, T2]);
+    await supabase.from('tenants').delete().in('id', [T1, T2, T3]);
   }, DB_TIMEOUT_MS);
 
   it('31 altas concurrentes con cuota 30 → exactamente 30, sin IP duplicada', async () => {
@@ -104,17 +106,17 @@ describe.skipIf(!optIn || !hasSupabase)('WireGuard IPAM DB contract (Supabase st
   it('primer peer concurrente de 2 tenants → subredes con índices distintos', async () => {
     const [a, b] = await Promise.all([
       repo.allocatePeer(peerInput(T2, 0)),
-      repo.allocatePeer(peerInput(`${T2}`, 1, { tenantId: T2, peerId: `${RUN}-p-t2b`, allocId: `${RUN}-a-t2b` })),
+      repo.allocatePeer(peerInput(T3, 0)),
     ]);
-    // Ambos son del mismo tenant T2 → mismo índice, IPs distintas (serializadas).
-    expect(a.subnet.subnetIndex).toBe(b.subnet.subnetIndex);
+    // Ambos tenants arrancan sin fila de subnet: deben recibir bloques distintos.
+    expect(a.subnet.subnetIndex).not.toBe(b.subnet.subnetIndex);
     expect(a.allocation.ip).not.toBe(b.allocation.ip);
 
-    // T1 (índice 100) y T2 tienen bloques distintos.
+    // Las dos filas nuevas quedaron persistidas con índices distintos.
     const subs = await repo.listSubnets();
-    const t1 = subs.find((s) => s.tenantId === T1);
     const t2 = subs.find((s) => s.tenantId === T2);
-    expect(t1 && t2 && t1.subnetIndex !== t2.subnetIndex).toBe(true);
+    const t3 = subs.find((s) => s.tenantId === T3);
+    expect(t2 && t3 && t2.subnetIndex !== t3.subnetIndex).toBe(true);
   }, DB_TIMEOUT_MS);
 
   it('el índice único parcial impide una IP activa duplicada en el mismo servidor', async () => {

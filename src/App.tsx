@@ -47,6 +47,7 @@ import { UserSessionProfile, isSupabaseConfigured, supabase } from './lib/supaba
 import { canAccessTab, getDefaultTabByRole } from './lib/rbac';
 import { getAppScope, resolveEntryTab, isIsolatedScope, forcedTabForScope } from './lib/appScope';
 import { fetchWithRateLimitBackoff, isApiRateLimitError } from './lib/apiBackoff';
+import { WIREGUARD_MULTITENANT_UI_ENABLED } from './config/frontend-feature-flags';
 
 import { 
   Client, 
@@ -599,7 +600,7 @@ export default function App() {
           const [servers, peers, block] = await Promise.all([
             fetchJson<WireguardServerView[]>('/api/wireguard/servers'),
             fetchJson<WireguardPeerView[]>('/api/wireguard/peers'),
-            fetchJson<WireguardTenantBlock>('/api/wireguard/tenant-block').catch(() => null),
+            WIREGUARD_MULTITENANT_UI_ENABLED ? fetchJson<WireguardTenantBlock>('/api/wireguard/tenant-block').catch(() => null) : Promise.resolve(null),
           ]);
           setWgServers(servers);
           setWgPeers(peers);
@@ -882,7 +883,7 @@ export default function App() {
       const [servers, peers, block] = await Promise.all([
         fetchJson<WireguardServerView[]>('/api/wireguard/servers'),
         fetchJson<WireguardPeerView[]>('/api/wireguard/peers'),
-        fetchJson<WireguardTenantBlock>('/api/wireguard/tenant-block').catch(() => null),
+        WIREGUARD_MULTITENANT_UI_ENABLED ? fetchJson<WireguardTenantBlock>('/api/wireguard/tenant-block').catch(() => null) : Promise.resolve(null),
       ]);
       setWgServers(servers);
       setWgPeers(peers);
@@ -1663,6 +1664,7 @@ export default function App() {
                 servers={wgServers}
                 peers={wgPeers}
                 userRole={userSession.role}
+                multiTenantEnabled={WIREGUARD_MULTITENANT_UI_ENABLED}
                 tenantBlock={wgTenantBlock}
                 onRefresh={loadWireguard}
                 onCreateServer={handleCreateWgServer}

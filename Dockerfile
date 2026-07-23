@@ -21,8 +21,10 @@ COPY . .
 # Si se usa Supabase en el cliente, deben pasarse como build args (ver abajo).
 ARG VITE_SUPABASE_URL=""
 ARG VITE_SUPABASE_ANON_KEY=""
+ARG WIREGUARD_MULTITENANT="false"
 ENV VITE_SUPABASE_URL=$VITE_SUPABASE_URL
 ENV VITE_SUPABASE_ANON_KEY=$VITE_SUPABASE_ANON_KEY
+ENV WIREGUARD_MULTITENANT=$WIREGUARD_MULTITENANT
 
 # vite build (dist/ frontend) + esbuild (dist/server.cjs)
 RUN npm run build

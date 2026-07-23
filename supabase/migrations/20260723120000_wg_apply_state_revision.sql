@@ -98,3 +98,50 @@ END;
 $$;
 
 REVOKE ALL ON FUNCTION public.wg_bump_revision() FROM PUBLIC;
+REVOKE ALL ON FUNCTION public.wg_bump_revision() FROM anon;
+REVOKE ALL ON FUNCTION public.wg_bump_revision() FROM authenticated;
+GRANT EXECUTE ON FUNCTION public.wg_bump_revision() TO service_role;
+
+
+-- ====================================================================
+-- 4. RPC wg_ack_applied_snapshot — ACK atómico ligado al snapshot enviado
+--
+-- Marca applied únicamente los IDs incluidos en el POST reconocido y avanza
+-- applied_revision de forma monotónica. Un ACK concurrente/viejo nunca puede
+-- retroceder la revisión ni sobreescribir el digest de una revisión más nueva.
+-- ====================================================================
+CREATE OR REPLACE FUNCTION public.wg_ack_applied_snapshot(
+  p_revision bigint,
+  p_digest   text,
+  p_peer_ids text[]
+) RETURNS void
+LANGUAGE plpgsql
+SECURITY DEFINER
+SET search_path = public
+AS $$
+BEGIN
+  IF p_revision < 0 OR p_peer_ids IS NULL THEN
+    RAISE EXCEPTION 'invalid_apply_snapshot_ack';
+  END IF;
+
+  UPDATE public.wireguard_peers
+     SET apply_state = 'applied', updated_at = now()
+   WHERE id = ANY (p_peer_ids)
+     AND status = 'active'
+     AND apply_state <> 'applied';
+
+  UPDATE public.wireguard_apply_state
+     SET applied_digest = CASE
+           WHEN applied_revision IS NULL OR p_revision >= applied_revision THEN p_digest
+           ELSE applied_digest
+         END,
+         applied_revision = GREATEST(COALESCE(applied_revision, p_revision), p_revision),
+         updated_at = now()
+   WHERE id = 'global';
+END;
+$$;
+
+REVOKE ALL ON FUNCTION public.wg_ack_applied_snapshot(bigint, text, text[]) FROM PUBLIC;
+REVOKE ALL ON FUNCTION public.wg_ack_applied_snapshot(bigint, text, text[]) FROM anon;
+REVOKE ALL ON FUNCTION public.wg_ack_applied_snapshot(bigint, text, text[]) FROM authenticated;
+GRANT EXECUTE ON FUNCTION public.wg_ack_applied_snapshot(bigint, text, text[]) TO service_role;

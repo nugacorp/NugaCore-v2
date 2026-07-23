@@ -418,7 +418,8 @@ export interface WireguardPeerView {
   allocatedIp: string;
   allowedCidr?: string;
   status: 'active' | 'revoked';
-  applyState: WireguardApplyState;
+  /** Presente sólo cuando WireGuard multi-tenant está habilitado. */
+  applyState?: WireguardApplyState;
   hasSecrets: boolean;
   lastRotatedAt?: string;
   revokedAt?: string;

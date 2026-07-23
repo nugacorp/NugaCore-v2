@@ -87,8 +87,8 @@ export interface WireguardPeerView {
   allocatedIp: string;
   allowedCidr?: string;
   status: PeerStatus;
-  /** Estado del apply al host wg0 (contrato v2). Default 'applied'. */
-  applyState: ApplyState;
+  /** Sólo se expone con WIREGUARD_MULTITENANT encendido. */
+  applyState?: ApplyState;
   hasSecrets: boolean;
   lastRotatedAt?: string;
   revokedAt?: string;

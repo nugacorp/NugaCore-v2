@@ -11,6 +11,8 @@ import { decryptSecret } from '../../services/crypto';
 import { isWireguardMultitenantEnabled } from '../../config/feature-flags';
 
 export interface DesiredWgPeer {
+  /** ID persistido; sólo se usa para ligar el ACK al snapshot, no se envía. */
+  id?: string;
   publicKey: string;
   allocatedIp: string;
   name?: string;
@@ -163,21 +165,28 @@ function buildV2Body(state: DesiredWgState): Record<string, unknown> {
     revision: state.revision,
     tenantSubnets: state.tenantSubnets,
     peers: state.peers.map((p) => {
+      if (!p.id) {
+        throw new Error('WireGuard v2 peer is missing snapshot ID');
+      }
+      if (!p.encryptedPresharedKey) {
+        throw new Error(`WireGuard v2 peer '${p.id}' is missing encrypted PSK`);
+      }
+      if (!p.tenantSubnet) {
+        throw new Error(`WireGuard v2 peer '${p.id}' is missing tenantSubnet`);
+      }
+      let presharedKey: string;
+      try {
+        presharedKey = decryptSecret(p.encryptedPresharedKey);
+      } catch {
+        throw new Error(`WireGuard v2 peer '${p.id}' PSK decrypt failed`);
+      }
       const peer: Record<string, unknown> = {
         publicKey: p.publicKey,
         allocatedIp: p.allocatedIp.replace(/\/\d+$/, ''),
         name: p.name || '',
+        tenantSubnet: p.tenantSubnet,
+        presharedKey,
       };
-      if (p.tenantSubnet) peer.tenantSubnet = p.tenantSubnet;
-      if (p.encryptedPresharedKey) {
-        try {
-          peer.presharedKey = decryptSecret(p.encryptedPresharedKey);
-        } catch (err) {
-          logger.warn('wireguard_host_apply_psk_decrypt_failed', {
-            error: err instanceof Error ? err.message : String(err),
-          });
-        }
-      }
       return peer;
     }),
   };
@@ -248,7 +257,15 @@ export async function checkHostCapacity(): Promise<HostCapacity> {
 }
 
 type StateLoader = () => Promise<DesiredWgState>;
-type OnAppliedCallback = (result: HostApplyResult) => Promise<void> | void;
+export interface AppliedStateSnapshot {
+  revision: number;
+  digest?: string;
+  peerIds: string[];
+}
+type OnAppliedCallback = (
+  result: HostApplyResult,
+  snapshot: AppliedStateSnapshot,
+) => Promise<void> | void;
 
 let debounceTimer: ReturnType<typeof setTimeout> | null = null;
 let reconcileTimer: ReturnType<typeof setInterval> | null = null;
@@ -275,18 +292,25 @@ export async function syncActivePeersToHost(): Promise<HostApplyResult> {
     const state = await stateLoader();
     const result = await applyStateToHost(state);
     if (result.ok && !result.skipped && onApplied) {
-      try {
-        await onApplied(result);
-      } catch (err) {
-        logger.warn('wireguard_host_apply_on_applied_failed', {
-          error: err instanceof Error ? err.message : String(err),
-        });
+      if (isWireguardMultitenantEnabled()) {
+        if (result.revision !== state.revision || !result.digest) {
+          throw new Error(
+            `WireGuard host ACK mismatch: sent revision ${state.revision}, received ${String(result.revision)}`,
+          );
+        }
       }
+      await onApplied(result, {
+        revision: state.revision,
+        digest: result.digest,
+        // buildV2Body ya exige ID; flatMap mantiene compatible el callback v1
+        // para loaders legacy que nunca necesitaron IDs persistidos.
+        peerIds: state.peers.flatMap((peer) => peer.id ? [peer.id] : []),
+      });
     }
     return result;
   } catch (err) {
     const detail = err instanceof Error ? err.message : String(err);
-    logger.error('wireguard_host_apply_load_failed', { detail });
+    logger.error('wireguard_host_apply_sync_failed', { detail });
     return { ok: false, detail };
   }
 }

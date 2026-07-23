@@ -6,7 +6,7 @@
 import type { NextFunction, Request, Response } from 'express';
 import { Router } from 'express';
 import { requireRoles } from '../../common/rbac';
-import { AppError, asyncHandler } from '../../common/errors';
+import { AppError, asyncHandler, notFoundHandler } from '../../common/errors';
 import { isWireguardMultitenantEnabled } from '../../config/feature-flags';
 import { tenantIdFromRequest } from '../tenancy/tenant-scope';
 import { getWireguardService } from './service';
@@ -15,6 +15,25 @@ const router = Router();
 const WG_ROLES = ['super admin', 'administrador'] as const;
 // Técnico necesita leer servidores/peers para generar scripts .rsc; no puede crear ni revocar.
 const WG_READ_ROLES = [...WG_ROLES, 'tecnico'] as const;
+const PEER_NAME_MAX_LENGTH = 64;
+const PEER_NAME_PATTERN = /^[\p{L}\p{N} ._-]+$/u;
+
+const requireMultitenantEndpoint = (req: Request, res: Response, next: NextFunction): void => {
+  if (!isWireguardMultitenantEnabled()) {
+    notFoundHandler(req, res);
+    return;
+  }
+  next();
+};
+
+const normalizePeerName = (value: unknown): string | null => {
+  if (typeof value !== 'string' || /[\r\n]/.test(value)) return null;
+  const normalized = value.normalize('NFC').trim();
+  if (!normalized || normalized.length > PEER_NAME_MAX_LENGTH || !PEER_NAME_PATTERN.test(normalized)) {
+    return null;
+  }
+  return normalized;
+};
 
 /**
  * Mutaciones de servidor WG. En multi-tenant el servidor es un singleton GLOBAL
@@ -46,7 +65,7 @@ router.get('/api/wireguard/next-ip', requireRoles([...WG_READ_ROLES]), asyncHand
 }));
 
 // Bloque /24 del tenant + uso de cuota (multi-tenant): para el Manager y el wizard.
-router.get('/api/wireguard/tenant-block', requireRoles([...WG_READ_ROLES]), asyncHandler(async (req, res) => {
+router.get('/api/wireguard/tenant-block', requireMultitenantEndpoint, requireRoles([...WG_READ_ROLES]), asyncHandler(async (req, res) => {
   res.json(await getWireguardService().getTenantBlock(tenantIdFromRequest(req)));
 }));
 
@@ -88,9 +107,16 @@ router.post('/api/wireguard/peers', requireRoles([...WG_ROLES]), asyncHandler(as
     res.status(400).json({ error: 'Missing required fields: serverId, name' });
     return;
   }
+  const normalizedName = normalizePeerName(name);
+  if (!normalizedName) {
+    res.status(400).json({
+      error: `El nombre del peer debe ser una sola línea de hasta ${PEER_NAME_MAX_LENGTH} caracteres (letras, números, espacio, punto, guion o guion bajo).`,
+    });
+    return;
+  }
   try {
     const created = await getWireguardService().createPeer({
-      serverId: String(serverId), name: String(name),
+      serverId: String(serverId), name: normalizedName,
       routerId: routerId ? String(routerId) : undefined,
       allowedCidr: allowedCidr ? String(allowedCidr) : undefined,
       tenantId: tenantIdFromRequest(req),
@@ -100,9 +126,14 @@ router.post('/api/wireguard/peers', requireRoles([...WG_ROLES]), asyncHandler(as
       securityWarning: 'La private key y la preshared key se muestran una sola vez. Guárdalas ahora; NugaCore solo conserva las versiones cifradas.',
     });
   } catch (err) {
+    const message = err instanceof Error ? err.message : 'Could not create peer';
+    if (!isWireguardMultitenantEnabled()) {
+      res.status(400).json({ error: message });
+      return;
+    }
     const status = err instanceof AppError ? err.statusCode : 400;
     const code = err instanceof AppError ? err.code : 'WIREGUARD_PEER_CREATE_FAILED';
-    res.status(status).json({ error: err instanceof Error ? err.message : 'Could not create peer', code });
+    res.status(status).json({ error: message, code });
   }
 }));
 
@@ -123,7 +154,7 @@ router.post('/api/wireguard/peers/:id/rotate', requireRoles([...WG_ROLES]), asyn
   });
 }));
 
-router.post('/api/wireguard/peers/:id/retry-apply', requireRoles([...WG_ROLES]), asyncHandler(async (req, res) => {
+router.post('/api/wireguard/peers/:id/retry-apply', requireMultitenantEndpoint, requireRoles([...WG_ROLES]), asyncHandler(async (req, res) => {
   const peer = await getWireguardService().retryPeerApply(req.params.id, tenantIdFromRequest(req));
   if (!peer) {
     res.status(404).json({ error: 'Peer not found' });

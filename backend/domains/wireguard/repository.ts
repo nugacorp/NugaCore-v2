@@ -19,7 +19,7 @@ import {
   allocationToRow, peerToRow, rotationToRow, serverToRow,
   rowToAllocation, rowToPeer, rowToRotation, rowToServer, rowToTenantSubnet,
 } from './mappers';
-import { nextFreeIp } from './ipam';
+import { nextFreeIpInCidr } from './ipam';
 
 export interface WireguardRepository {
   listServers(tenantId?: string): Promise<WireguardServerRecord[]>;
@@ -55,10 +55,8 @@ export interface WireguardRepository {
   getRevision(): Promise<number>;
   /** Incrementa y devuelve la nueva revisión (una por MUTACIÓN). */
   bumpRevision(): Promise<number>;
-  /** Registra el último ACK del agente (observabilidad). */
-  setAppliedRevision(revision: number, digest?: string): Promise<void>;
-  /** Marca applied todos los peers vivos aún no aplicados (tras ACK de wg0). */
-  markPeersApplied(): Promise<void>;
+  /** ACK atómico de la revisión/digest y de los IDs exactos enviados al host. */
+  ackAppliedSnapshot(revision: number, digest: string | undefined, peerIds: string[]): Promise<void>;
 
   nextId(kind: 'server' | 'peer' | 'alloc' | 'rotation'): Promise<string>;
 }
@@ -188,7 +186,7 @@ export class StoreWireguardRepository implements WireguardRepository {
       const network = subnet.subnetCidr.split('/')[0];          // 10.70.X.0
       const reservedIp = network.replace(/\.0$/, '.1');         // 10.70.X.1
       const serverAllocs = this.ALLOCATIONS.filter((a) => a.serverId === input.serverId);
-      const ip = nextFreeIp(
+      const ip = nextFreeIpInCidr(
         serverAllocs.map((a) => ({ ip: a.ip, status: a.status })),
         subnet.subnetCidr,
         [reservedIp],
@@ -207,7 +205,7 @@ export class StoreWireguardRepository implements WireguardRepository {
         encryptedPresharedKey: input.encryptedPresharedKey,
         encryptionVersion: input.encryptionVersion || ENCRYPTION_VERSION,
         allocatedIp: ip, allowedCidr: input.allowedCidr, tenantId: input.tenantId, peerType,
-        status: 'active', createdBy: input.createdBy, createdAt: now, updatedAt: now,
+        status: 'active', applyState: 'pending_apply', createdBy: input.createdBy, createdAt: now, updatedAt: now,
       };
       this.PEERS.push(peer);
 
@@ -237,13 +235,14 @@ export class StoreWireguardRepository implements WireguardRepository {
 
   async getRevision() { return this.revision; }
   async bumpRevision() { this.revision += 1; return this.revision; }
-  async setAppliedRevision(revision: number, digest?: string) {
-    this.appliedRevision = revision;
-    this.appliedDigest = digest ?? null;
-  }
-  async markPeersApplied() {
+  async ackAppliedSnapshot(revision: number, digest: string | undefined, peerIds: string[]) {
+    const ids = new Set(peerIds);
     for (const p of this.PEERS) {
-      if (p.status !== 'revoked' && p.applyState !== 'applied') p.applyState = 'applied';
+      if (ids.has(p.id) && p.status === 'active') p.applyState = 'applied';
+    }
+    if (this.appliedRevision === null || revision >= this.appliedRevision) {
+      this.appliedRevision = revision;
+      this.appliedDigest = digest ?? null;
     }
   }
 
@@ -387,18 +386,13 @@ export class SupabaseWireguardRepository implements WireguardRepository {
     if (error) throw new Error(`bumpRevision: ${error.message}`);
     return Number(data);
   }
-  async setAppliedRevision(revision: number, digest?: string) {
-    const { error } = await this.client.from('wireguard_apply_state')
-      .update({ applied_revision: revision, applied_digest: digest ?? null, updated_at: new Date().toISOString() })
-      .eq('id', 'global');
-    if (error) throw new Error(`setAppliedRevision: ${error.message}`);
-  }
-  async markPeersApplied() {
-    const { error } = await this.client.from('wireguard_peers')
-      .update({ apply_state: 'applied' })
-      .neq('status', 'revoked')
-      .neq('apply_state', 'applied');
-    if (error) throw new Error(`markPeersApplied: ${error.message}`);
+  async ackAppliedSnapshot(revision: number, digest: string | undefined, peerIds: string[]) {
+    const { error } = await this.client.rpc('wg_ack_applied_snapshot', {
+      p_revision: revision,
+      p_digest: digest ?? null,
+      p_peer_ids: peerIds,
+    });
+    if (error) throw new Error(`ackAppliedSnapshot: ${error.message}`);
   }
 
   async allocatePeer(input: AllocatePeerInput): Promise<AllocatePeerResult> {
@@ -433,7 +427,7 @@ export class SupabaseWireguardRepository implements WireguardRepository {
       encryptedPresharedKey: input.encryptedPresharedKey,
       encryptionVersion: input.encryptionVersion || ENCRYPTION_VERSION,
       allocatedIp: res.allocatedIp, allowedCidr: input.allowedCidr, tenantId: input.tenantId,
-      peerType: input.peerType || 'equipment', status: 'active', createdBy: input.createdBy,
+      peerType: input.peerType || 'equipment', status: 'active', applyState: 'pending_apply', createdBy: input.createdBy,
       createdAt: now, updatedAt: now,
     };
     const allocation: WireguardIpAllocation = {

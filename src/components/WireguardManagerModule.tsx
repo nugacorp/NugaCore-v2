@@ -17,6 +17,7 @@ interface Props {
   servers: WireguardServerView[];
   peers: WireguardPeerView[];
   userRole: UserRole;
+  multiTenantEnabled: boolean;
   /** Bloque /24 + cuota del tenant (multi-tenant). Ausente ⇒ no se muestra. */
   tenantBlock?: WireguardTenantBlock | null;
   onRefresh: () => Promise<void>;
@@ -45,12 +46,12 @@ const APPLY_STATE: Record<WireguardApplyState, { label: string; cls: string }> =
   apply_failed: { label: 'falló apply', cls: 'bg-rose-500/15 text-rose-400 border-rose-500/20' },
 };
 
-export default function WireguardManagerModule({ servers, peers, userRole, tenantBlock, onRefresh, onCreateServer, onCreatePeer, onRotatePeer, onRevokePeer, onRetryPeer }: Props) {
+export default function WireguardManagerModule({ servers, peers, userRole, multiTenantEnabled, tenantBlock, onRefresh, onCreateServer, onCreatePeer, onRotatePeer, onRevokePeer, onRetryPeer }: Props) {
   // Servidor = singleton global de plataforma: sólo Super Admin lo muta cuando
   // el multi-tenant está activo. Roles no-plataforma lo ven en solo lectura.
-  const canManageServers = !tenantBlock?.multiTenant || userRole === 'Super Admin';
+  const canManageServers = !multiTenantEnabled || userRole === 'Super Admin';
   // Cuota de equipos del plan (multi-tenant): bloquea altas cuando used >= max.
-  const quotaFull = !!tenantBlock?.multiTenant && tenantBlock.used >= tenantBlock.maxPeers;
+  const quotaFull = multiTenantEnabled && !!tenantBlock?.multiTenant && tenantBlock.used >= tenantBlock.maxPeers;
   const [busy, setBusy] = useState('');
   const [toast, setToast] = useState<{ kind: 'success' | 'error'; msg: string } | null>(null);
   const [secret, setSecret] = useState<SecretModal>(null);
@@ -147,7 +148,7 @@ export default function WireguardManagerModule({ servers, peers, userRole, tenan
       </div>
 
       {/* Bloque /24 del tenant + uso de cuota (multi-tenant) */}
-      {tenantBlock?.multiTenant && (
+      {multiTenantEnabled && tenantBlock?.multiTenant && (
         <div id="wg-tenant-block" className="flex flex-col sm:flex-row sm:items-center gap-3 bg-slate-950 border border-slate-800 rounded-2xl p-4 text-[11px] font-mono">
           <div className="flex items-center gap-2 text-slate-300">
             <Network className="w-4 h-4 text-indigo-400" />
@@ -187,20 +188,20 @@ export default function WireguardManagerModule({ servers, peers, userRole, tenan
         <div className="bg-slate-950 border border-slate-800 rounded-2xl overflow-hidden">
           <table className="w-full text-left text-[11px] font-mono">
             <thead className="text-slate-500 uppercase text-[10px] border-b border-slate-900">
-              <tr><th className="p-2.5">Nombre</th><th className="p-2.5">IP</th><th className="p-2.5">Router</th><th className="p-2.5">Estado</th><th className="p-2.5">Apply wg0</th><th className="p-2.5">Creado</th><th className="p-2.5 text-right">Acciones</th></tr>
+              <tr><th className="p-2.5">Nombre</th><th className="p-2.5">IP</th><th className="p-2.5">Router</th><th className="p-2.5">Estado</th>{multiTenantEnabled && <th className="p-2.5">Apply wg0</th>}<th className="p-2.5">Creado</th><th className="p-2.5 text-right">Acciones</th></tr>
             </thead>
             <tbody className="divide-y divide-slate-900">
               {peers.length === 0 ? (
-                <tr><td colSpan={7} className="p-4 text-center text-slate-500 italic">Sin peers.</td></tr>
+                <tr><td colSpan={multiTenantEnabled ? 7 : 6} className="p-4 text-center text-slate-500 italic">Sin peers.</td></tr>
               ) : peers.map((p) => {
-                const apply = APPLY_STATE[p.applyState] ?? APPLY_STATE.applied;
+                const apply = APPLY_STATE[p.applyState ?? 'applied'];
                 return (
                 <tr key={p.id} id={`wg-peer-${p.id}`} className="hover:bg-slate-900/30">
                   <td className="p-2.5 text-slate-200">{p.name}</td>
                   <td className="p-2.5 text-indigo-300">{p.allocatedIp}</td>
                   <td className="p-2.5 text-slate-400">{p.routerId || '—'}</td>
                   <td className="p-2.5"><span className={`px-2 py-0.5 rounded text-[9px] uppercase border ${STATUS[p.status]}`}>{p.status}</span></td>
-                  <td className="p-2.5">
+                  {multiTenantEnabled && <td className="p-2.5">
                     {p.status === 'active' ? (
                       <span id={`wg-apply-${p.id}`} className={`inline-flex items-center gap-1 px-2 py-0.5 rounded text-[9px] uppercase border ${apply.cls}`}>
                         {p.applyState === 'pending_apply' && <Clock className="w-3 h-3 animate-pulse" />}
@@ -208,12 +209,12 @@ export default function WireguardManagerModule({ servers, peers, userRole, tenan
                         {apply.label}
                       </span>
                     ) : <span className="text-slate-600">—</span>}
-                  </td>
+                  </td>}
                   <td className="p-2.5 text-slate-500">{p.createdAt.substring(0, 10)}{p.lastRotatedAt ? ' · rotado' : ''}</td>
                   <td className="p-2.5 text-right space-x-1">
                     {p.status === 'active' && (
                       <>
-                        {p.applyState === 'apply_failed' && (
+                        {multiTenantEnabled && p.applyState === 'apply_failed' && (
                           <button id={`wg-retry-${p.id}`} onClick={() => retry(p.id)} className="text-indigo-300 hover:text-indigo-200 mr-1 text-[10px] font-bold uppercase border border-indigo-500/30 rounded px-1.5 py-0.5" title="Reintentar aplicar al servidor">Reintentar</button>
                         )}
                         <button onClick={() => rotate(p.id)} className="text-amber-400 hover:text-amber-300" title="Rotar claves"><RefreshCw className="w-3.5 h-3.5 inline" /></button>
@@ -266,7 +267,7 @@ export default function WireguardManagerModule({ servers, peers, userRole, tenan
             <SecretRow label="Server private key" value={secret.data.serverPrivateKey} copied={copied} onCopy={copy} />
           ) : (
             <div className="space-y-2">
-              {secret.data.peer.applyState !== 'applied' && (
+              {multiTenantEnabled && secret.data.peer.applyState !== 'applied' && (
                 <div id="wg-config-not-active" className="bg-amber-950/40 border border-amber-500/30 rounded-xl p-3 text-[11px] text-amber-200 flex items-start gap-2">
                   <AlertTriangle className="w-4 h-4 shrink-0 mt-0.5" />
                   <span>

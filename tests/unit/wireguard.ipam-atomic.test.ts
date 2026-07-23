@@ -1,5 +1,5 @@
 import { describe, it, expect } from 'vitest';
-import { nextFreeIp } from '../../backend/domains/wireguard/ipam';
+import { nextFreeIpInCidr } from '../../backend/domains/wireguard/ipam';
 import { StoreWireguardRepository } from '../../backend/domains/wireguard/repository';
 import type { AllocatePeerInput } from '../../backend/domains/wireguard/types';
 
@@ -31,7 +31,7 @@ describe('nextFreeIp acotado al CIDR (fix de fuga entre bloques)', () => {
       { ip: '10.70.2.2', status: 'allocated' as const },
     ];
     // Pidiendo el bloque 10.70.2.0/24: la liberada .1.5 no debe fugarse.
-    expect(nextFreeIp(allocs, '10.70.2.0/24', ['10.70.2.1'])).toBe('10.70.2.3');
+    expect(nextFreeIpInCidr(allocs, '10.70.2.0/24', ['10.70.2.1'])).toBe('10.70.2.3');
   });
 
   it('SÍ reutiliza la liberada más baja del bloque pedido', () => {
@@ -39,11 +39,11 @@ describe('nextFreeIp acotado al CIDR (fix de fuga entre bloques)', () => {
       { ip: '10.70.2.3', status: 'released' as const },
       { ip: '10.70.2.2', status: 'allocated' as const },
     ];
-    expect(nextFreeIp(allocs, '10.70.2.0/24', ['10.70.2.1'])).toBe('10.70.2.3');
+    expect(nextFreeIpInCidr(allocs, '10.70.2.0/24', ['10.70.2.1'])).toBe('10.70.2.3');
   });
 
   it('empieza en .2 respetando la reservada .1 del bloque', () => {
-    expect(nextFreeIp([], '10.70.7.0/24', ['10.70.7.1'])).toBe('10.70.7.2');
+    expect(nextFreeIpInCidr([], '10.70.7.0/24', ['10.70.7.1'])).toBe('10.70.7.2');
   });
 });
 

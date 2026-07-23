@@ -22,6 +22,7 @@ import {
 } from 'lucide-react';
 import { UserRole } from '../lib/supabase';
 import { canStartEnrollment, canRevokeEnrollment } from '../lib/enrollmentRbac';
+import { WIREGUARD_MULTITENANT_UI_ENABLED } from '../config/frontend-feature-flags';
 
 // ── Tipos locales ──────────────────────────────────────────────────────
 
@@ -202,7 +203,7 @@ export default function RouterEnrollmentWizard({
 
   // IP sugerida del bloque del WISP al entrar al paso "Servidor WireGuard".
   useEffect(() => {
-    if (view !== 'wizard' || step !== 2 || !form.wgServerId) { setSuggestedIp(''); return; }
+    if (!WIREGUARD_MULTITENANT_UI_ENABLED || view !== 'wizard' || step !== 2 || !form.wgServerId) { setSuggestedIp(''); return; }
     let cancelled = false;
     (async () => {
       try {
@@ -654,10 +655,12 @@ export default function RouterEnrollmentWizard({
             </div>
           ) : (
             <div className="space-y-2">
-              <p className="text-xs text-gray-500">
-                El servidor WireGuard es un recurso compartido de plataforma: tus equipos reciben una IP dentro del bloque de tu WISP.
-              </p>
-              {suggestedIp && (
+              {WIREGUARD_MULTITENANT_UI_ENABLED && (
+                <p className="text-xs text-gray-500">
+                  El servidor WireGuard es un recurso compartido de plataforma: tus equipos reciben una IP dentro del bloque de tu WISP.
+                </p>
+              )}
+              {WIREGUARD_MULTITENANT_UI_ENABLED && suggestedIp && (
                 <div id="wg-suggested-ip" className="p-3 bg-indigo-900/20 border border-indigo-700/40 rounded-lg text-indigo-200 text-sm flex items-center gap-2">
                   <Shield size={14} className="text-indigo-400" />
                   <span>IP sugerida para este equipo (bloque de tu WISP): <b className="font-mono">{suggestedIp}</b></span>

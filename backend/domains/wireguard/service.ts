@@ -16,7 +16,7 @@ import { BadRequestError, NotFoundError } from '../../common/errors';
 import { isSupabaseAdminConfigured, supabaseAdmin } from '../../services/supabase-admin';
 import { DEFAULT_TENANT_ID } from '../tenancy/types';
 import { generatePresharedKey, generateWgKeyPair } from './keys';
-import { DEFAULT_SERVER_IP, DEFAULT_WG_POOL, nextFreeIp } from './ipam';
+import { DEFAULT_SERVER_IP, DEFAULT_WG_POOL, nextFreeIp, nextFreeIpInCidr } from './ipam';
 import {
   StoreWireguardRepository,
   SupabaseWireguardRepository,
@@ -35,6 +35,7 @@ import {
 
 import { nowIso } from '../../common/time';
 import {
+  AppliedStateSnapshot,
   DesiredWgState,
   HostApplyResult,
   checkHostCapacity,
@@ -78,7 +79,7 @@ export class WireguardService {
     // de tenant A borraría peers de B en el reconcile full).
     configureHostApplyStateLoader(
       () => this.loadDesiredState(),
-      (result) => this.ackAppliedState(result),
+      (result, snapshot) => this.ackAppliedState(result, snapshot),
     );
   }
 
@@ -92,7 +93,7 @@ export class WireguardService {
     const peers = await this.repo.listPeers({ status: 'active' });
     if (!isWireguardMultitenantEnabled()) {
       return {
-        peers: peers.map((p) => ({ publicKey: p.publicKey, allocatedIp: p.allocatedIp, name: p.name })),
+        peers: peers.map((p) => ({ id: p.id, publicKey: p.publicKey, allocatedIp: p.allocatedIp, name: p.name })),
         tenantSubnets: [],
         revision: 0,
       };
@@ -105,6 +106,7 @@ export class WireguardService {
       const tenantSubnet = byTenant.get(p.tenantId || DEFAULT_TENANT_ID) || subnetFromIp(p.allocatedIp);
       cidrs.add(tenantSubnet); // garantiza que cada IP caiga en una subred declarada
       return {
+        id: p.id,
         publicKey: p.publicKey,
         allocatedIp: p.allocatedIp,
         name: p.name,
@@ -116,12 +118,12 @@ export class WireguardService {
   }
 
   /** Tras un apply v2 exitoso: ACK de estado (peers → applied + revisión). */
-  private async ackAppliedState(result: HostApplyResult): Promise<void> {
+  private async ackAppliedState(
+    _result: HostApplyResult,
+    snapshot: AppliedStateSnapshot,
+  ): Promise<void> {
     if (!isWireguardMultitenantEnabled()) return;
-    await this.repo.markPeersApplied();
-    if (typeof result.revision === 'number') {
-      await this.repo.setAppliedRevision(result.revision, result.digest);
-    }
+    await this.repo.ackAppliedSnapshot(snapshot.revision, snapshot.digest, snapshot.peerIds);
   }
 
   /**
@@ -158,7 +160,7 @@ export class WireguardService {
     return {
       id: rec.id, serverId: rec.serverId, routerId: rec.routerId, name: rec.name, publicKey: rec.publicKey,
       allocatedIp: rec.allocatedIp, allowedCidr: rec.allowedCidr, status: rec.status,
-      applyState: rec.applyState || 'applied',
+      ...(isWireguardMultitenantEnabled() ? { applyState: rec.applyState || 'applied' } : {}),
       hasSecrets: !!rec.encryptedPrivateKey, lastRotatedAt: rec.lastRotatedAt, revokedAt: rec.revokedAt,
       createdAt: rec.createdAt,
     };
@@ -223,7 +225,7 @@ export class WireguardService {
     const tid = tenantId || DEFAULT_TENANT_ID;
     const cidr = await this.tenantBlockCidr(tid);
     const reserved = cidr.split('/')[0].replace(/\.0$/, '.1');   // 10.70.X.1
-    const ip = nextFreeIp(
+    const ip = nextFreeIpInCidr(
       allocations.map((a) => ({ ip: a.ip, status: a.status })),
       cidr,
       [reserved],
@@ -438,8 +440,7 @@ export class WireguardService {
       throw err;
     }
 
-    // Nace pending_apply; pasa a applied sólo con el ACK del agente.
-    await this.repo.updatePeer(peerId, { applyState: 'pending_apply' });
+    // El RPC ya insertó pending_apply dentro de la misma transacción que IPAM.
     // Bump ANTES del flush: la mutación y el reconcile envían revisión coherente.
     await this.repo.bumpRevision();
     const result = await this.syncHostAfterMutation('createPeer');
@@ -536,7 +537,8 @@ export class WireguardService {
         actorId,
       );
     }
-    const server = await this.repo.getServer(serverId, tenantId);
+    const multi = isWireguardMultitenantEnabled();
+    const server = await this.repo.getServer(serverId, multi ? undefined : tenantId);
     if (!server) throw new NotFoundError(`Servidor WireGuard '${serverId}' no encontrado.`);
     const privateKey = existing.encryptedPrivateKey ? decryptSecret(existing.encryptedPrivateKey) : '';
     const presharedKey = existing.encryptedPresharedKey ? decryptSecret(existing.encryptedPresharedKey) : '';

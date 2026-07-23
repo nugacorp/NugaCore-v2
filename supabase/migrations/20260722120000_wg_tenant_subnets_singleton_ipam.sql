@@ -59,6 +59,56 @@ ALTER TABLE public.wireguard_peers
 COMMENT ON COLUMN public.wireguard_peers.peer_type IS
   'equipment = equipo del WISP (consume cuota max_peers); person = VPN de staff (no consume cuota).';
 
+-- Preflight wireguard_active_ip_duplicates: el schema legacy no impedía dos
+-- peers activos con la misma IP. No se elige un ganador automáticamente porque
+-- sólo el estado real del host permite decidir cuál conservar. El mensaje
+-- limita y sanea IDs para que sea operable sin volcar datos sensibles.
+DO $$
+DECLARE
+  v_duplicate_groups integer;
+  v_duplicate_peers  integer;
+  v_sample_ids       text;
+BEGIN
+  SELECT count(*)::integer, COALESCE(sum(peer_count), 0)::integer
+    INTO v_duplicate_groups, v_duplicate_peers
+  FROM (
+    SELECT count(*) AS peer_count
+    FROM public.wireguard_peers
+    WHERE status = 'active'
+    GROUP BY server_id, allocated_ip
+    HAVING count(*) > 1
+  ) duplicates;
+
+  IF v_duplicate_groups > 0 THEN
+    SELECT string_agg(left(regexp_replace(id, '[^a-zA-Z0-9._:-]', '?', 'g'), 48), ', ')
+      INTO v_sample_ids
+    FROM (
+      SELECT p.id
+      FROM public.wireguard_peers p
+      JOIN (
+        SELECT server_id, allocated_ip
+        FROM public.wireguard_peers
+        WHERE status = 'active'
+        GROUP BY server_id, allocated_ip
+        HAVING count(*) > 1
+      ) d USING (server_id, allocated_ip)
+      WHERE p.status = 'active'
+      ORDER BY p.id
+      LIMIT 10
+    ) sample;
+
+    RAISE EXCEPTION USING
+      ERRCODE = '23505',
+      MESSAGE = format(
+        'wireguard_active_ip_duplicates: %s duplicate group(s), %s active peer row(s); sample peer ids: %s',
+        v_duplicate_groups,
+        v_duplicate_peers,
+        COALESCE(v_sample_ids, '(none)')
+      ),
+      HINT = 'Inspect the listed peer IDs against the wg0 host state, remediate explicitly, then rerun the migration.';
+  END IF;
+END $$;
+
 -- Red de seguridad ante carreras del IPAM: una IP activa no puede duplicarse
 -- por servidor. Los peers revocados no cuentan (parcial WHERE status=active).
 CREATE UNIQUE INDEX IF NOT EXISTS uniq_wg_peers_active_ip
@@ -132,6 +182,7 @@ DECLARE
   v_peer_id      text := p_peer->>'id';
   v_alloc_id     text := p_peer->>'allocId';
   v_found_alloc  text;
+  v_subnet_attempt integer;
 BEGIN
   IF v_peer_id IS NULL OR v_alloc_id IS NULL THEN
     RAISE EXCEPTION 'invalid_peer_input: id y allocId son obligatorios';
@@ -147,15 +198,35 @@ BEGIN
   WHERE tenant_id = p_tenant_id;
 
   IF NOT FOUND THEN
-    SELECT COALESCE(MAX(subnet_index), -1) + 1 INTO v_subnet_index
-    FROM public.wireguard_tenant_subnets;
-    IF v_subnet_index > 254 THEN
-      RAISE EXCEPTION 'subnet_pool_exhausted';
-    END IF;
-    v_subnet    := set_masklen(('10.70.0.0'::inet + v_subnet_index * 256)::cidr, 24);
-    v_max_peers := 30;
-    INSERT INTO public.wireguard_tenant_subnets (tenant_id, subnet_cidr, subnet_index, max_peers)
-    VALUES (p_tenant_id, v_subnet, v_subnet_index, v_max_peers);
+    -- MAX(subnet_index)+1 es un recurso GLOBAL. El lock por tenant no basta
+    -- cuando dos WISPs distintos reciben su primer bloque al mismo tiempo.
+    PERFORM pg_advisory_xact_lock(hashtext('wg_allocate_peer:subnet'));
+    FOR v_subnet_attempt IN 1..3 LOOP
+      BEGIN
+        -- Otro caller pudo crear la fila mientras esperábamos el lock global.
+        SELECT subnet_cidr, subnet_index, max_peers
+          INTO v_subnet, v_subnet_index, v_max_peers
+        FROM public.wireguard_tenant_subnets
+        WHERE tenant_id = p_tenant_id;
+        EXIT WHEN FOUND;
+
+        SELECT COALESCE(MAX(subnet_index), -1) + 1 INTO v_subnet_index
+        FROM public.wireguard_tenant_subnets;
+        IF v_subnet_index > 254 THEN
+          RAISE EXCEPTION 'subnet_pool_exhausted';
+        END IF;
+        v_subnet    := set_masklen(('10.70.0.0'::inet + v_subnet_index * 256)::cidr, 24);
+        v_max_peers := 30;
+        INSERT INTO public.wireguard_tenant_subnets (tenant_id, subnet_cidr, subnet_index, max_peers)
+        VALUES (p_tenant_id, v_subnet, v_subnet_index, v_max_peers);
+        EXIT;
+      EXCEPTION
+        WHEN unique_violation THEN
+          IF v_subnet_attempt = 3 THEN
+            RAISE EXCEPTION 'subnet_allocation_conflict';
+          END IF;
+      END;
+    END LOOP;
   END IF;
 
   -- 2) Cuota (solo equipment activos consumen).
@@ -207,12 +278,12 @@ BEGIN
   INSERT INTO public.wireguard_peers (
     id, server_id, router_id, name, public_key,
     encrypted_private_key, encrypted_preshared_key, encryption_version,
-    allocated_ip, allowed_cidr, status, peer_type, tenant_id, created_by
+    allocated_ip, allowed_cidr, status, apply_state, peer_type, tenant_id, created_by
   ) VALUES (
     v_peer_id, p_server_id, p_peer->>'routerId', p_peer->>'name', p_peer->>'publicKey',
     p_peer->>'encryptedPrivateKey', p_peer->>'encryptedPresharedKey',
     COALESCE(p_peer->>'encryptionVersion', 'v1-aes-256-gcm'),
-    host(v_ip), p_peer->>'allowedCidr', 'active', v_peer_type, p_tenant_id, p_peer->>'createdBy'
+    host(v_ip), p_peer->>'allowedCidr', 'active', 'pending_apply', v_peer_type, p_tenant_id, p_peer->>'createdBy'
   );
 
   -- Reusar la fila de allocation liberada (unique server_id, ip) o crear una.
@@ -240,3 +311,6 @@ END;
 $$;
 
 REVOKE ALL ON FUNCTION public.wg_allocate_peer(text, text, jsonb) FROM PUBLIC;
+REVOKE ALL ON FUNCTION public.wg_allocate_peer(text, text, jsonb) FROM anon;
+REVOKE ALL ON FUNCTION public.wg_allocate_peer(text, text, jsonb) FROM authenticated;
+GRANT EXECUTE ON FUNCTION public.wg_allocate_peer(text, text, jsonb) TO service_role;
