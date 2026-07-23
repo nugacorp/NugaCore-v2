@@ -369,10 +369,13 @@ class TestFirewallHealth(unittest.TestCase):
 table inet nugacore_wg {
     chain forward {
         type filter hook forward priority filter - 10; policy accept;
+        iifname \"wg0\" oifname \"wg0\" ip saddr 10.70.0.0/24 ip daddr 10.70.0.0/24 accept
         iifname \"wg0\" oifname \"wg0\" drop
         iifname \"wg0\" oifname != \"wg0\" ip daddr 10.0.1.0/24 ct state established,related accept
         iifname \"wg0\" oifname != \"wg0\" drop
         oifname \"wg0\" iifname != \"wg0\" ip saddr 10.0.1.0/24 accept
+        oifname \"wg0\" iifname != \"wg0\" ct state established,related accept
+        oifname \"wg0\" iifname != \"wg0\" drop
     }
     chain input {
         type filter hook input priority filter - 10; policy accept;
@@ -437,6 +440,51 @@ table inet nugacore_wg {
             "",
         )
         self.assertFalse(agent.parse_firewall_health(without_app_to_peer_allow))
+
+    def test_negative_when_wg_to_bridge_drop_precedes_established_return(self):
+        canonical = (
+            '        iifname "wg0" oifname != "wg0" ip daddr 10.0.1.0/24 '
+            'ct state established,related accept\n'
+            '        iifname "wg0" oifname != "wg0" drop\n'
+        )
+        reordered = (
+            '        iifname "wg0" oifname != "wg0" drop\n'
+            '        iifname "wg0" oifname != "wg0" ip daddr 10.0.1.0/24 '
+            'ct state established,related accept\n'
+        )
+        self.assertFalse(
+            agent.parse_firewall_health(
+                self.HEALTHY_RULESET.replace(canonical, reordered)
+            )
+        )
+
+    def test_negative_when_final_wg_drop_precedes_app_to_peer_allow(self):
+        canonical = (
+            '        oifname "wg0" iifname != "wg0" ip saddr '
+            '10.0.1.0/24 accept\n'
+            '        oifname "wg0" iifname != "wg0" ct state '
+            'established,related accept\n'
+            '        oifname "wg0" iifname != "wg0" drop\n'
+        )
+        reordered = (
+            '        oifname "wg0" iifname != "wg0" drop\n'
+            '        oifname "wg0" iifname != "wg0" ip saddr '
+            '10.0.1.0/24 accept\n'
+            '        oifname "wg0" iifname != "wg0" ct state '
+            'established,related accept\n'
+        )
+        self.assertFalse(
+            agent.parse_firewall_health(
+                self.HEALTHY_RULESET.replace(canonical, reordered)
+            )
+        )
+
+    def test_negative_when_final_wg_drop_is_missing(self):
+        without_final_drop = self.HEALTHY_RULESET.replace(
+            '        oifname "wg0" iifname != "wg0" drop\n',
+            "",
+        )
+        self.assertFalse(agent.parse_firewall_health(without_final_drop))
 
     def test_health_reports_effective_revision_and_digest(self):
         state = {"revision": 17, "digest": "abc123"}

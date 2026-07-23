@@ -613,9 +613,11 @@ def parse_firewall_health(
 ) -> bool:
     """(Puro) acredita las base chains y el ruleset mínimo de ``render_nft``.
 
-    No basta encontrar un ``drop`` genérico: el forward debe aislar wg→wg,
-    bloquear wg→otras, permitir solo el retorno established hacia la subred
-    de la app y permitir app→peer. Input debe bloquear el acceso desde wg.
+    No basta encontrar un ``drop`` genérico: el forward debe conservar el
+    orden fail-closed de ``render_nft`` para aislar wg→wg, permitir solo el
+    retorno established hacia la subred de la app antes de bloquear wg→otras,
+    y permitir app→peer antes del drop final hacia wg. Input debe bloquear el
+    acceso desde wg.
     """
     text = nft_output or ""
 
@@ -638,10 +640,10 @@ def parse_firewall_health(
         )
         return body if base_chain else None
 
-    def has_rule(body: str, pattern: str) -> bool:
+    def find_rule(body: str, pattern: str) -> re.Match[str] | None:
         # Cada requisito debe existir en una sola regla. Evita que ``\s+``
         # combine fragmentos de líneas diferentes y acredite un falso positivo.
-        return bool(re.search(rf"(?m)^[ \t]*{pattern}[ \t]*$", body))
+        return re.search(rf"(?m)^[ \t]*{pattern}[ \t]*$", body)
 
     forward = base_chain_body("forward", "forward")
     input_chain = base_chain_body("input", "input")
@@ -659,13 +661,18 @@ def parse_firewall_health(
         rf"iifname{space}{iface}{space}oifname{space}!={space}{iface}{space}drop",
         rf"oifname{space}{iface}{space}iifname{space}!={space}{iface}{space}"
         rf"ip{space}saddr{space}{subnet}{space}accept",
+        rf"oifname{space}{iface}{space}iifname{space}!={space}{iface}{space}drop",
     )
     input_drop = rf"iifname{space}{iface}{space}drop"
 
-    return all(has_rule(forward, rule) for rule in forward_rules) and has_rule(
-        input_chain,
-        input_drop,
-    )
+    previous_position = -1
+    for rule in forward_rules:
+        match = find_rule(forward, rule)
+        if match is None or match.start() <= previous_position:
+            return False
+        previous_position = match.start()
+
+    return find_rule(input_chain, input_drop) is not None
 
 
 def firewall_healthy() -> bool:
