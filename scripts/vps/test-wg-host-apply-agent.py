@@ -12,7 +12,11 @@ render y validación puras. Los side-effects (nft/ip/wg/disco) no se tocan aquí
 import base64
 import importlib.util
 import os
+import re
+import tempfile
 import unittest
+from pathlib import Path
+from unittest import mock
 
 # El archivo del agente tiene guiones → se carga por ruta con importlib.
 _HERE = os.path.dirname(os.path.abspath(__file__))
@@ -110,6 +114,14 @@ class TestValidatePayloadV2(unittest.TestCase):
         with self.assertRaises(ValueError):
             agent.validate_payload(p)
 
+    def test_reject_missing_psk_and_tenant_subnet(self):
+        for missing_field in ("presharedKey", "tenantSubnet"):
+            with self.subTest(missing_field=missing_field):
+                p = self._valid_payload()
+                del p["peers"][0][missing_field]
+                with self.assertRaisesRegex(ValueError, missing_field):
+                    agent.validate_payload(p)
+
     def test_reject_bad_pubkey(self):
         p = self._valid_payload()
         p["peers"][0]["publicKey"] = "xxx"
@@ -155,6 +167,23 @@ class TestValidatePayloadV1(unittest.TestCase):
         with self.assertRaises(ValueError):
             agent.validate_payload(payload)
 
+    def test_name_is_single_line_allowlisted_and_bounded(self):
+        payload = {
+            "peers": [
+                {
+                    "publicKey": PUB1,
+                    "allocatedIp": "10.70.0.2",
+                    "name": "router\n[Peer]\nPublicKey = evil\t" + "x" * 100,
+                }
+            ]
+        }
+        peer = agent.validate_payload(payload).peers[0]
+        self.assertNotRegex(peer["name"], r"[\r\n\t]")
+        self.assertIsNone(re.search(agent.NAME_ALLOWED_RE, peer["name"]))
+        self.assertLessEqual(len(peer["name"]), agent.NAME_MAX_LEN)
+        conf = agent.render_wg_conf("SERVERKEY==", [peer])
+        self.assertEqual(conf.count("[Peer]"), 1)
+
 
 class TestRevisionMonotonic(unittest.TestCase):
     def test_older_is_stale(self):
@@ -169,6 +198,43 @@ class TestRevisionMonotonic(unittest.TestCase):
 
     def test_no_prior_not_stale(self):
         self.assertFalse(agent.is_stale_revision(1, None))
+
+    def test_equal_revision_with_different_digest_conflicts(self):
+        self.assertTrue(agent.revision_conflict(10, "new", 10, "old"))
+        self.assertFalse(agent.revision_conflict(10, "same", 10, "same"))
+
+    def test_equal_revision_different_digest_rejected_before_side_effects(self):
+        first = {
+            "schemaVersion": 2,
+            "revision": 10,
+            "peers": [
+                {
+                    "publicKey": PUB1,
+                    "presharedKey": PSK1,
+                    "allocatedIp": "10.70.1.2",
+                    "tenantSubnet": "10.70.1.0/24",
+                    "name": "r1",
+                }
+            ],
+            "tenantSubnets": ["10.70.1.0/24"],
+        }
+        conflicting = {
+            **first,
+            "peers": [{**first["peers"][0], "allocatedIp": "10.70.1.3"}],
+        }
+        with tempfile.TemporaryDirectory() as tmp, \
+             mock.patch.object(agent, "STATE_FILE", Path(tmp) / "state.json"), \
+             mock.patch.object(agent, "load_server_key", return_value="SERVERKEY=="), \
+             mock.patch.object(agent, "apply_nft") as apply_nft, \
+             mock.patch.object(agent, "drain_conntrack"), \
+             mock.patch.object(agent, "sync_peers") as sync_peers:
+            agent.handle_apply(first)
+            apply_nft.reset_mock()
+            sync_peers.reset_mock()
+            with self.assertRaisesRegex(ValueError, "distinto digest"):
+                agent.handle_apply(conflicting)
+            apply_nft.assert_not_called()
+            sync_peers.assert_not_called()
 
 
 class TestRenderWgConf(unittest.TestCase):
@@ -218,6 +284,16 @@ class TestRenderNft(unittest.TestCase):
         # app → peers
         self.assertIn("ip saddr 10.0.1.0/24 accept", nft)
 
+    def test_established_app_return_precedes_peer_to_non_wg_drop(self):
+        nft = agent.render_nft([])
+        established_return = (
+            'iifname "wg0" oifname != "wg0" ip daddr 10.0.1.0/24 '
+            'ct state established,related accept'
+        )
+        peer_egress_drop = 'iifname "wg0" oifname != "wg0" drop'
+        self.assertIn(established_return, nft)
+        self.assertLess(nft.index(established_return), nft.index(peer_egress_drop))
+
     def test_empty_state_still_has_infra_accept(self):
         # fail-closed conservador: sin subredes, sigue el intra bloque 0
         nft = agent.render_nft([])
@@ -243,6 +319,105 @@ class TestDigest(unittest.TestCase):
             [{"publicKey": PUB1, "allocatedIp": "10.70.1.3"}], ["10.70.1.0/24"]
         )
         self.assertNotEqual(base, changed)
+
+
+class TestApplyPersistence(unittest.TestCase):
+    def test_v2_to_v1_then_restart_preserves_preshared_key(self):
+        v2 = {
+            "schemaVersion": 2,
+            "revision": 10,
+            "peers": [
+                {
+                    "publicKey": PUB1,
+                    "presharedKey": PSK1,
+                    "allocatedIp": "10.70.1.2",
+                    "tenantSubnet": "10.70.1.0/24",
+                    "name": "r1",
+                }
+            ],
+            "tenantSubnets": ["10.70.1.0/24"],
+        }
+        v1 = {
+            "peers": [
+                {"publicKey": PUB1, "allocatedIp": "10.70.1.2", "name": "r1"}
+            ]
+        }
+        with tempfile.TemporaryDirectory() as tmp, \
+             mock.patch.object(agent, "STATE_FILE", Path(tmp) / "state.json"), \
+             mock.patch.object(agent, "load_server_key", return_value="SERVERKEY=="), \
+             mock.patch.object(agent, "apply_nft"), \
+             mock.patch.object(agent, "drain_conntrack"), \
+             mock.patch.object(agent, "ensure_sysctl"), \
+             mock.patch.object(agent, "ensure_interface"), \
+             mock.patch.object(agent, "sync_peers") as sync_peers:
+            v2_result = agent.handle_apply(v2)
+            v1_result = agent.handle_apply(v1)
+            persisted = agent.read_state()
+
+            self.assertEqual(persisted["peers"][0]["presharedKey"], PSK1)
+            self.assertEqual(v1_result["revision"], v2_result["revision"])
+            self.assertEqual(v1_result["digest"], persisted["digest"])
+
+            sync_peers.reset_mock()
+            agent.startup_reconcile()
+            restored_conf = sync_peers.call_args.args[0]
+            self.assertIn("PresharedKey = " + PSK1, restored_conf)
+
+
+class TestFirewallHealth(unittest.TestCase):
+    HEALTHY_RULESET = """
+table inet nugacore_wg {
+    chain forward {
+        type filter hook forward priority filter - 10; policy accept;
+        iifname \"wg0\" oifname != \"wg0\" drop
+    }
+    chain input {
+        type filter hook input priority filter - 10; policy accept;
+        iifname \"wg0\" drop
+    }
+}
+"""
+
+    def test_accepts_real_nft_chain_hook_priority_format(self):
+        self.assertTrue(agent.parse_firewall_health(self.HEALTHY_RULESET))
+
+    def test_negative_when_input_chain_is_missing(self):
+        without_input = self.HEALTHY_RULESET.replace(
+            """    chain input {
+        type filter hook input priority filter - 10; policy accept;
+        iifname \"wg0\" drop
+    }
+""",
+            "",
+        )
+        self.assertFalse(agent.parse_firewall_health(without_input))
+
+    def test_negative_when_drop_is_not_in_each_chain(self):
+        input_without_drop = self.HEALTHY_RULESET.replace(
+            '        iifname "wg0" drop\n', ""
+        )
+        self.assertFalse(agent.parse_firewall_health(input_without_drop))
+
+    def test_health_reports_effective_revision_and_digest(self):
+        state = {"revision": 17, "digest": "abc123"}
+        completed = mock.Mock(returncode=0, stdout="13231\n")
+        with mock.patch.object(agent, "read_state", return_value=state), \
+             mock.patch.object(agent, "interface_exists", return_value=True), \
+             mock.patch.object(agent, "firewall_healthy", return_value=True), \
+             mock.patch.object(agent.subprocess, "run", return_value=completed):
+            snap = agent.health_snapshot()
+        self.assertEqual(snap["revision"], 17)
+        self.assertEqual(snap["digest"], "abc123")
+
+
+class TestConntrackDrain(unittest.TestCase):
+    def test_missing_conntrack_warns_without_aborting(self):
+        with mock.patch.object(
+            agent.subprocess, "run", side_effect=FileNotFoundError("conntrack")
+        ), mock.patch.object(agent, "log") as log:
+            agent.drain_conntrack(["10.70.1.0/24"])
+        log.assert_called_once()
+        self.assertIn("conntrack no instalado", log.call_args.args[0])
 
 
 class TestSubnetParsing(unittest.TestCase):

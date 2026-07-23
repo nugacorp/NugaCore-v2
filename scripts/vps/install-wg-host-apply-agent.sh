@@ -15,9 +15,9 @@ AGENT_PY="${AGENT_DIR}/wg-host-apply-agent.py"
 STATE_DIR="${WG_STATE_DIR:-/var/lib/nugacore-wg}"
 UNIT_PATH="/etc/systemd/system/nugacore-wg-host-apply.service"
 LISTEN_PORT="${WG_HOST_APPLY_PORT:-18765}"
-# El agente v2 ya no escucha en 0.0.0.0: se liga a la IP del host en el bridge
-# de la app (red Coolify). T5 confirma la IP exacta del bridge en el VPS.
-LISTEN_HOST="${WG_HOST_APPLY_LISTEN:-10.0.1.1}"
+# Si no hay override, se detecta abajo la gateway real de docker0. Esa misma IP
+# se publica como WIREGUARD_HOST_APPLY_URL para los contenedores de Coolify.
+LISTEN_HOST="${WG_HOST_APPLY_LISTEN:-}"
 SERVER_KEY_FILE="${KEY_DIR}/nugacore-server.key"
 SECRETS_FILE="${SECRETS_FILE:-/root/nugacore-staging-secrets.env}"
 
@@ -30,6 +30,18 @@ command -v python3 >/dev/null 2>&1 || fail "python3 requerido"
 command -v nft >/dev/null 2>&1 || fail "nftables (nft) requerido para el firewall del agente"
 command -v ip >/dev/null 2>&1 || fail "iproute2 (ip) requerido"
 [[ -f "$SERVER_KEY_FILE" ]] || fail "falta ${SERVER_KEY_FILE}"
+
+# IP real esperada del listener: gateway docker0 del host (normalmente
+# 172.17.0.1), NO 10.0.1.1. La red 10.0.1.0/24 es WG_APP_SUBNET: origen
+# autorizado de la app para iniciar tráfico hacia peers, no dirección de bind.
+DOCKER_GW="$(ip -4 addr show docker0 2>/dev/null | awk '/inet /{print $2}' | cut -d/ -f1 || true)"
+DOCKER_GW="${DOCKER_GW:-172.17.0.1}"
+LISTEN_HOST="${LISTEN_HOST:-${DOCKER_GW}}"
+
+# El dren de conntrack es deliberadamente best-effort: su ausencia genera un
+# warning en cada cambio de subredes, pero no deja el apply a medio camino.
+command -v conntrack >/dev/null 2>&1 \
+  || log "conntrack no instalado; dren inter-subred será best-effort"
 
 mkdir -p "$KEY_DIR" "$AGENT_DIR" "$STATE_DIR"
 chmod 700 "$KEY_DIR" "$AGENT_DIR" "$STATE_DIR"
@@ -116,11 +128,7 @@ systemctl is-active --quiet nugacore-wg-host-apply.service || fail "servicio no 
 curl -fsS -m 3 "http://${LISTEN_HOST}:${LISTEN_PORT}/health" >/dev/null \
   || fail "health del agente falló en ${LISTEN_HOST}:${LISTEN_PORT}"
 
-# Gateway docker0 típico para Coolify/app containers
-DOCKER_GW="$(ip -4 addr show docker0 2>/dev/null | awk '/inet /{print $2}' | cut -d/ -f1 || true)"
-DOCKER_GW="${DOCKER_GW:-172.17.0.1}"
-
 log "agente OK en ${LISTEN_HOST}:${LISTEN_PORT}"
-log "URL sugerida para Coolify: http://${DOCKER_GW}:${LISTEN_PORT}/apply"
+log "URL para Coolify (misma IP de bind): http://${LISTEN_HOST}:${LISTEN_PORT}/apply"
 log "token file: ${TOKEN_FILE}"
-printf '%s\n' "${DOCKER_GW}"
+printf '%s\n' "${LISTEN_HOST}"

@@ -54,9 +54,11 @@ TOKEN_FILE = Path(
 STATE_FILE = Path(
     os.environ.get("WG_STATE_FILE", "/var/lib/nugacore-wg/state.json")
 )
-# El agente ya no escucha en 0.0.0.0: se liga a la IP del bridge que usa la app
-# (red Coolify). El despliegue real (T5) confirma la IP exacta del bridge.
-LISTEN_HOST = os.environ.get("WG_HOST_APPLY_LISTEN", "10.0.1.1")
+# El agente ya no escucha en 0.0.0.0: se liga a la gateway `docker0` del host,
+# la misma IP que deploy-coolify-staging publica para el contenedor. El installer
+# detecta la IP real; 172.17.0.1 es solo el fallback convencional. WG_APP_SUBNET
+# (10.0.1.0/24) es la red ORIGEN de la app y no la IP de bind.
+LISTEN_HOST = os.environ.get("WG_HOST_APPLY_LISTEN", "172.17.0.1")
 LISTEN_PORT = int(os.environ.get("WG_HOST_APPLY_PORT", "18765"))
 WG_IFACE = os.environ.get("WG_IFACE", "wg0")
 WG_PORT = os.environ.get("WG_PORT", "13231")
@@ -72,6 +74,11 @@ INFRA_SUBNET = "10.70.0.0/24"          # bloque 0: servidor .1 + lab .0.2
 NFT_TABLE = "nugacore_wg"
 
 IP_RE = re.compile(r"^(?:\d{1,3}\.){3}\d{1,3}$")
+# Allowlist para `name`: se renderiza como comentario en wg0.conf (proceso root),
+# así que se elimina cualquier carácter fuera de este set (previene inyección de
+# líneas/directivas). Cualquier otro carácter se descarta.
+NAME_ALLOWED_RE = re.compile(r"[^A-Za-z0-9 ._@:#()\-/]")
+NAME_MAX_LEN = 64
 
 # Serializa /apply: ThreadingHTTPServer permite POSTs concurrentes.
 APPLY_LOCK = threading.Lock()
@@ -99,6 +106,17 @@ def ip_to_int(value: str) -> int:
             raise ValueError(f"IP inválida: {value}")
         n = (n << 8) | octet
     return n
+
+
+def sanitize_name(raw: Any) -> str:
+    """Normaliza `name` a una sola línea segura para renderizar como comentario
+    en wg0.conf: colapsa espacios, descarta caracteres fuera de la allowlist
+    (incluye saltos de línea y control) y acota la longitud."""
+    text = str(raw or "")
+    # Colapsa cualquier whitespace (incl. \n, \r, \t) a un solo espacio.
+    text = re.sub(r"\s+", " ", text)
+    text = NAME_ALLOWED_RE.sub("", text).strip()
+    return text[:NAME_MAX_LEN]
 
 
 def is_wg_key(value: Any) -> bool:
@@ -154,7 +172,7 @@ def _validate_peers_common(peers_in: Any) -> tuple[list[dict[str, str]], set[str
             raise ValueError("cada peer debe ser un objeto")
         pub = str(p.get("publicKey") or "").strip()
         ip = str(p.get("allocatedIp") or "").strip().split("/")[0]
-        name = str(p.get("name") or "").strip() or pub[:8]
+        name = sanitize_name(p.get("name")) or pub[:8]
         if not is_wg_key(pub):
             raise ValueError(f"publicKey inválida: {pub[:16]}…")
         if not IP_RE.match(ip):
@@ -222,25 +240,33 @@ def validate_payload(payload: Any) -> DesiredState:
             raise ValueError(f"subred duplicada/solapada: {cidr}")
         subnet_bases[base] = str(cidr)
 
-    # Cada IP de peer cae en exactamente una subred declarada; además la
-    # tenantSubnet del peer debe ser una de las declaradas y contenerlo.
+    # Cada peer v2 EXIGE presharedKey y tenantSubnet (cierra B-01/CR-06: un peer
+    # sin PSK que sí la recibió en el MikroTik nunca haría handshake). La IP debe
+    # caer en exactamente una subred declarada y coincidir con su tenantSubnet.
     for peer in peers:
         ip_int = int(peer.pop("_ipInt"))
         ip_base = ip_int & 0xFFFFFF00
+        if "presharedKey" not in peer:
+            raise ValueError(
+                f"peer {peer['allocatedIp']} sin presharedKey (obligatoria en v2)"
+            )
+        declared = str(peer.get("tenantSubnet") or "").strip()
+        if not declared:
+            raise ValueError(
+                f"peer {peer['allocatedIp']} sin tenantSubnet (obligatoria en v2)"
+            )
         matches = [c for b, c in subnet_bases.items() if b == ip_base]
         if len(matches) != 1:
             raise ValueError(
                 f"allocatedIp {peer['allocatedIp']} no cae en exactamente una tenantSubnet declarada"
             )
-        declared = str(peer.get("tenantSubnet") or "").strip()
-        if declared:
-            declared_base = parse_tenant_subnet(declared)
-            if declared_base != ip_base:
-                raise ValueError(
-                    f"tenantSubnet {declared} no contiene a {peer['allocatedIp']}"
-                )
-            if declared_base not in subnet_bases:
-                raise ValueError(f"tenantSubnet {declared} no está en tenantSubnets")
+        declared_base = parse_tenant_subnet(declared)
+        if declared_base != ip_base:
+            raise ValueError(
+                f"tenantSubnet {declared} no contiene a {peer['allocatedIp']}"
+            )
+        if declared_base not in subnet_bases:
+            raise ValueError(f"tenantSubnet {declared} no está en tenantSubnets")
 
     subnets = [subnet_bases[b] for b in sorted(subnet_bases)]
     return DesiredState(schema_version=schema, revision=raw_rev, peers=peers, subnets=subnets)
@@ -300,6 +326,11 @@ def render_nft(
         )
     fwd += [
         f'\t\tiifname "{wg_iface}" oifname "{wg_iface}" drop',
+        # Retorno del tráfico que la app (bridge) inició hacia un peer: la
+        # respuesta entra por wg0 y sale al bridge. Se acepta SOLO si está
+        # established/related y va hacia APP_SUBNET; el INICIO peer→app (estado
+        # new) sigue cayendo en el drop siguiente.
+        f'\t\tiifname "{wg_iface}" oifname != "{wg_iface}" ip daddr {app_subnet} ct state established,related accept',
         f'\t\tiifname "{wg_iface}" oifname != "{wg_iface}" drop',
         f'\t\toifname "{wg_iface}" iifname != "{wg_iface}" ip saddr {app_subnet} accept',
         f'\t\toifname "{wg_iface}" iifname != "{wg_iface}" ct state established,related accept',
@@ -357,10 +388,43 @@ def compute_digest(peers: list[dict[str, str]], subnets: list[str]) -> str:
 
 def is_stale_revision(desired_rev: int | None, applied_rev: int | None) -> bool:
     """True si la revisión entrante es más vieja que la aplicada (rechazable).
-    Igual revisión se acepta (re-aplicación idempotente para corrección de drift)."""
+    Igual revisión se acepta SOLO si el digest coincide (ver revision_conflict)."""
     if desired_rev is None or applied_rev is None:
         return False
     return desired_rev < applied_rev
+
+
+def revision_conflict(
+    desired_rev: int | None,
+    desired_digest: str,
+    applied_rev: int | None,
+    applied_digest: str | None,
+) -> bool:
+    """True si la MISMA revisión trae un digest distinto al aplicado (CR-08):
+    una revisión monotónica no puede cambiar de contenido. Igual revisión con
+    igual digest se re-aplica idempotentemente (corrección de drift)."""
+    if desired_rev is None or applied_rev is None or applied_digest is None:
+        return False
+    return desired_rev == applied_rev and desired_digest != applied_digest
+
+
+def merge_psk_from_prev(
+    peers: list[dict[str, str]], prev_peers: list[dict[str, Any]]
+) -> list[dict[str, str]]:
+    """Enriquece peers (p.ej. de un payload v1 sin PSK) con la presharedKey del
+    estado previo, indexada por publicKey (CR-01: un downgrade v2→v1 no debe
+    borrar las PSK persistidas y romper el handshake de todos los peers)."""
+    prev_psk = {
+        p.get("publicKey"): p.get("presharedKey")
+        for p in prev_peers
+        if isinstance(p, dict) and p.get("publicKey") and p.get("presharedKey")
+    }
+    for peer in peers:
+        if "presharedKey" not in peer:
+            psk = prev_psk.get(peer.get("publicKey"))
+            if psk:
+                peer["presharedKey"] = psk
+    return peers
 
 
 # ==========================================================================
@@ -427,17 +491,22 @@ def apply_nft(ruleset: str) -> None:
 
 def drain_conntrack(subnets: list[str]) -> None:
     """Dren selectivo de flujos wg0→wg0 inter-subred (que un flujo establecido
-    antes del cambio de reglas no sobreviva). Best-effort."""
+    antes del cambio de reglas no sobreviva). Best-effort: si `conntrack` no
+    está instalado NO se aborta el apply (CR-12), solo se advierte una vez."""
     full = firewall_subnets(subnets)
     for a in full:
         for b in full:
             if a == b:
                 continue
-            subprocess.run(
-                ["conntrack", "-D", "-s", a, "-d", b],
-                capture_output=True,
-                check=False,
-            )
+            try:
+                subprocess.run(
+                    ["conntrack", "-D", "-s", a, "-d", b],
+                    capture_output=True,
+                    check=False,
+                )
+            except FileNotFoundError:
+                log("WARN: conntrack no instalado; se omite el dren (best-effort)")
+                return
 
 
 def ensure_sysctl() -> None:
@@ -537,15 +606,45 @@ def sync_peers(conf: str) -> None:
         raise RuntimeError(up.stderr.strip() or "wg-quick up falló")
 
 
-def nft_table_present() -> bool:
-    return (
-        subprocess.run(
-            ["nft", "list", "table", "inet", NFT_TABLE],
-            capture_output=True,
-            check=False,
-        ).returncode
-        == 0
+def parse_firewall_health(nft_output: str) -> bool:
+    """(Puro) True solo si el ruleset listado acredita AMBAS base chains con su
+    hook/prioridad y un drop en cada una (CR-09). Una tabla vacía o sin hooks
+    no basta: no habría aislamiento aunque exista el nombre de la tabla."""
+    text = nft_output or ""
+
+    def healthy_chain(name: str, hook: str) -> bool:
+        match = re.search(
+            rf"\bchain\s+{re.escape(name)}\s*\{{(?P<body>.*?)\}}",
+            text,
+            flags=re.DOTALL,
+        )
+        if not match:
+            return False
+        body = match.group("body")
+        # `nft list` puede imprimir -10 como `filter - 10`; ambas formas son
+        # equivalentes al priority -10 que instala render_nft.
+        priority = r"(?:-\s*10|filter\s*-\s*10)"
+        base_chain = re.search(
+            rf"\btype\s+filter\s+hook\s+{re.escape(hook)}\s+"
+            rf"priority\s+{priority}\s*;",
+            body,
+        )
+        return bool(base_chain and re.search(r"\bdrop\b", body))
+
+    return healthy_chain("forward", "forward") and healthy_chain("input", "input")
+
+
+def firewall_healthy() -> bool:
+    """Lista la tabla real y verifica base chains+hook+drop (no solo presencia)."""
+    proc = subprocess.run(
+        ["nft", "list", "table", "inet", NFT_TABLE],
+        capture_output=True,
+        text=True,
+        check=False,
     )
+    if proc.returncode != 0:
+        return False
+    return parse_firewall_health(proc.stdout or "")
 
 
 def health_snapshot() -> dict[str, Any]:
@@ -569,7 +668,7 @@ def health_snapshot() -> dict[str, Any]:
             check=False,
         )
         port_ok = wgshow.returncode == 0 and (wgshow.stdout or "").strip() == str(WG_PORT)
-    fw_ok = nft_table_present()
+    fw_ok = firewall_healthy()
     revision = state.get("revision")
     snap = {
         "service": "wg-host-apply",
@@ -599,9 +698,17 @@ def handle_apply(payload: Any) -> dict[str, Any]:
         prev_rev = prev.get("revision") if isinstance(prev.get("revision"), int) else None
 
         if desired.schema_version >= 2:
+            # Digest ANTES de tocar estado: la revisión monotónica no puede
+            # cambiar de contenido (CR-08) y una revisión vieja se rechaza.
+            digest = compute_digest(desired.peers, desired.subnets)
             if is_stale_revision(desired.revision, prev_rev):
                 raise ValueError(
-                    f"revisión {desired.revision} <= aplicada {prev_rev} (rechazada)"
+                    f"revisión {desired.revision} < aplicada {prev_rev} (rechazada)"
+                )
+            if revision_conflict(desired.revision, digest, prev_rev, prev.get("digest")):
+                raise ValueError(
+                    f"revisión {desired.revision} ya aplicada con distinto digest "
+                    f"(esperado {str(prev.get('digest'))[:12]}…, recibido {digest[:12]}…)"
                 )
             new_fw = firewall_subnets(desired.subnets)
             old_fw = firewall_subnets(prev.get("tenantSubnets") or [])
@@ -609,7 +716,6 @@ def handle_apply(payload: Any) -> dict[str, Any]:
             if new_fw != old_fw:
                 drain_conntrack(desired.subnets)
             sync_peers(render_wg_conf(server_key, desired.peers))
-            digest = compute_digest(desired.peers, desired.subnets)
             write_state(
                 {
                     "schemaVersion": 2,
@@ -632,15 +738,26 @@ def handle_apply(payload: Any) -> dict[str, Any]:
             }
 
         # ── v1: aplica peers, CONSERVA el firewall vigente ──
-        sync_peers(render_wg_conf(server_key, desired.peers))
+        # CR-01: un downgrade v2→v1 (rollback del flag) NO debe borrar las PSK
+        # que ya recibieron los MikroTik. Se fusiona la PSK del estado previo por
+        # publicKey antes de renderizar/persistir.
+        peers_v1 = merge_psk_from_prev(desired.peers, prev.get("peers") or [])
+        sync_peers(render_wg_conf(server_key, peers_v1))
         # Persiste peers para arranque; conserva subredes/revisión previas.
         merged = dict(prev)
-        merged["peers"] = desired.peers
+        merged["peers"] = peers_v1
         merged.setdefault("tenantSubnets", prev.get("tenantSubnets") or [])
-        merged["digest"] = compute_digest(desired.peers, merged.get("tenantSubnets") or [])
+        digest = compute_digest(peers_v1, merged.get("tenantSubnets") or [])
+        merged["digest"] = digest
         write_state(merged)
-        log(f"v1 aplicado: peers={len(desired.peers)} (firewall conservado)")
-        return {"ok": True, "schemaVersion": 1, "peers": len(desired.peers)}
+        log(f"v1 aplicado: peers={len(peers_v1)} (firewall conservado)")
+        return {
+            "ok": True,
+            "schemaVersion": 1,
+            "peers": len(peers_v1),
+            "revision": prev_rev,
+            "digest": digest,
+        }
 
 
 def startup_reconcile() -> None:
