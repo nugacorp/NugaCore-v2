@@ -399,11 +399,15 @@ export interface WireguardServerView {
   publicKey: string;
   vpnCidr: string;
   serverVpnIp: string;
+  isDefault?: boolean;
   status: 'active' | 'disabled';
   peersCount: number;
   createdAt: string;
   updatedAt: string;
 }
+
+/** Estado del apply del peer al host wg0 (contrato v2). 'applied' == activo en wg0. */
+export type WireguardApplyState = 'pending_apply' | 'applied' | 'apply_failed';
 
 export interface WireguardPeerView {
   id: string;
@@ -414,10 +418,20 @@ export interface WireguardPeerView {
   allocatedIp: string;
   allowedCidr?: string;
   status: 'active' | 'revoked';
+  applyState: WireguardApplyState;
   hasSecrets: boolean;
   lastRotatedAt?: string;
   revokedAt?: string;
   createdAt: string;
+}
+
+/** Bloque /24 del tenant en la VPN compartida + uso de cuota (multi-tenant). */
+export interface WireguardTenantBlock {
+  subnetCidr: string;
+  subnetIndex: number;
+  maxPeers: number;
+  used: number;
+  multiTenant: boolean;
 }
 
 export interface WireguardServerCreated {

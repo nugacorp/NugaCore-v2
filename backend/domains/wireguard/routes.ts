@@ -45,6 +45,11 @@ router.get('/api/wireguard/next-ip', requireRoles([...WG_READ_ROLES]), asyncHand
   res.json(await getWireguardService().previewNextIp(serverId, tenantIdFromRequest(req)));
 }));
 
+// Bloque /24 del tenant + uso de cuota (multi-tenant): para el Manager y el wizard.
+router.get('/api/wireguard/tenant-block', requireRoles([...WG_READ_ROLES]), asyncHandler(async (req, res) => {
+  res.json(await getWireguardService().getTenantBlock(tenantIdFromRequest(req)));
+}));
+
 router.post('/api/wireguard/servers', requireServerMutationRole, asyncHandler(async (req, res) => {
   const { name, endpointHost, endpointPort, listenPort, vpnCidr, serverVpnIp, isDefault } = req.body || {};
   if (!name || !endpointHost) {
@@ -116,6 +121,15 @@ router.post('/api/wireguard/peers/:id/rotate', requireRoles([...WG_ROLES]), asyn
     ...result,
     securityWarning: 'Nuevas claves: se muestran una sola vez. Reaplica el script en el router.',
   });
+}));
+
+router.post('/api/wireguard/peers/:id/retry-apply', requireRoles([...WG_ROLES]), asyncHandler(async (req, res) => {
+  const peer = await getWireguardService().retryPeerApply(req.params.id, tenantIdFromRequest(req));
+  if (!peer) {
+    res.status(404).json({ error: 'Peer not found' });
+    return;
+  }
+  res.json(peer);
 }));
 
 router.delete('/api/wireguard/peers/:id', requireRoles([...WG_ROLES]), asyncHandler(async (req, res) => {

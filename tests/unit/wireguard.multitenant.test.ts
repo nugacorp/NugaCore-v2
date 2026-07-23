@@ -181,6 +181,42 @@ describe('WireGuard multi-tenant (flag WIREGUARD_MULTITENANT)', () => {
     const preview = await svc.previewNextIp(undefined, 'wisp-2');
     expect(preview.ip).toBe('10.70.1.2'); // próximo bloque del WISP nuevo
   });
+
+  it('getTenantBlock reporta bloque + uso de cuota del tenant', async () => {
+    process.env.WIREGUARD_MULTITENANT = 'true';
+    installFetch();
+    const svc = newService();
+    const srv = await svc.createServer({ name: 'VPN', endpointHost: 'h', isDefault: true });
+    await svc.createPeer({ serverId: srv.server.id, name: 'R1', tenantId: 'wisp-2' });
+    const block = await svc.getTenantBlock('wisp-2');
+    expect(block.subnetCidr).toBe('10.70.1.0/24');
+    expect(block.maxPeers).toBe(30);
+    expect(block.used).toBe(1);
+    expect(block.multiTenant).toBe(true);
+  });
+
+  it('retryPeerApply re-aplica un peer apply_failed y lo deja applied al reintentar OK', async () => {
+    process.env.WIREGUARD_MULTITENANT = 'true';
+    let failNext = true;
+    const applyCalls: unknown[] = [];
+    globalThis.fetch = vi.fn(async (url: string, init?: RequestInit) => {
+      const method = (init?.method || 'GET').toUpperCase();
+      if (method === 'GET' || String(url).endsWith('/health')) {
+        return new Response(JSON.stringify({ ok: true, schemaVersion: 2, firewall: true }), { status: 200 });
+      }
+      applyCalls.push(1);
+      if (failNext) { failNext = false; return new Response('down', { status: 503 }); }
+      const body = JSON.parse(String(init?.body || '{}')) as { revision?: number };
+      return new Response(JSON.stringify({ ok: true, peers: 1, revision: body.revision, digest: 'd' }), { status: 200 });
+    }) as unknown as typeof fetch;
+
+    const svc = newService();
+    const srv = await svc.createServer({ name: 'VPN', endpointHost: 'h', isDefault: true });
+    const peer = await svc.createPeer({ serverId: srv.server.id, name: 'R1' }); // primer apply falla
+    expect(peer.peer.applyState).toBe('apply_failed');
+    const retried = await svc.retryPeerApply(peer.peer.id);
+    expect(retried?.applyState).toBe('applied');
+  });
 });
 
 describe('WireGuard multi-tenant — RBAC de mutación de servidor', () => {

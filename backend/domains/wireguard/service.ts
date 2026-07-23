@@ -241,6 +241,42 @@ export class WireguardService {
     return `10.70.${nextIndex}.0/24`;
   }
 
+  /**
+   * Bloque /24 del tenant + uso de cuota (para el WireGuard Manager y el wizard).
+   * `used` cuenta sólo peers equipment activos (los person no consumen cuota).
+   */
+  async getTenantBlock(tenantId?: string): Promise<{
+    subnetCidr: string; subnetIndex: number; maxPeers: number; used: number; multiTenant: boolean;
+  }> {
+    const tid = tenantId || DEFAULT_TENANT_ID;
+    const own = (await this.repo.listSubnets(tid))[0];
+    const subnetCidr = own ? own.subnetCidr : await this.tenantBlockCidr(tid);
+    const subnetIndex = own ? own.subnetIndex : Number(subnetCidr.split('.')[2]);
+    const maxPeers = own?.maxPeers ?? 30;
+    const peers = await this.repo.listPeers({ tenantId: tid, status: 'active' });
+    const used = peers.filter((p) => (p.peerType || 'equipment') === 'equipment').length;
+    return { subnetCidr, subnetIndex, maxPeers, used, multiTenant: isWireguardMultitenantEnabled() };
+  }
+
+  /**
+   * Reintenta el apply de un peer al host (para peers en apply_failed). Reenvía
+   * el estado deseado completo; el agente re-aplica idempotente (misma revisión).
+   * Devuelve la vista del peer con su apply_state actualizado, o null si no existe.
+   */
+  async retryPeerApply(peerId: string, tenantId?: string): Promise<WireguardPeerView | null> {
+    const peer = await this.repo.getPeer(peerId, tenantId);
+    if (!peer) return null;
+    if (isWireguardMultitenantEnabled() && peer.applyState !== 'applied') {
+      await this.repo.updatePeer(peerId, { applyState: 'pending_apply' });
+    }
+    const result = await this.syncHostAfterMutation('retryPeerApply');
+    if (isWireguardMultitenantEnabled() && !result.skipped && !result.ok) {
+      await this.repo.updatePeer(peerId, { applyState: 'apply_failed' });
+    }
+    const fresh = await this.repo.getPeer(peerId, tenantId);
+    return fresh ? this.toPeerView(fresh) : null;
+  }
+
   async createServer(input: CreateServerInput): Promise<ServerCreatedOnce> {
     const tenantId = input.tenantId || 'tenant-default';
     // Si este servidor es default, quitar el default anterior del mismo tenant.
