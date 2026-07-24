@@ -9,6 +9,10 @@ const applyState = readFileSync(
   'supabase/migrations/20260723120000_wg_apply_state_revision.sql',
   'utf8',
 );
+const tenantColumnsReconcile = readFileSync(
+  'supabase/migrations/20260723230000_wireguard_tenant_columns_reconcile.sql',
+  'utf8',
+);
 
 describe('WireGuard migrations — RPC security and concurrency contracts', () => {
   it('grants allocator and revision RPCs only to service_role', () => {
@@ -75,5 +79,26 @@ describe('WireGuard migrations — RPC security and concurrency contracts', () =
     expect(applyState).toContain(
       'GRANT EXECUTE ON FUNCTION public.wg_ack_applied_snapshot(bigint, text, text[]) TO service_role;',
     );
+  });
+
+  it('reconciles tenant columns for WireGuard child tables without cross-tenant fallback', () => {
+    for (const table of ['wireguard_ip_allocations', 'wireguard_key_rotations']) {
+      expect(tenantColumnsReconcile).toContain(
+        `ALTER TABLE public.${table} ADD COLUMN IF NOT EXISTS tenant_id text`,
+      );
+      expect(tenantColumnsReconcile).toContain(`idx_${table}_tenant_id`);
+      expect(tenantColumnsReconcile).toContain(
+        `ALTER TABLE public.${table} ALTER COLUMN tenant_id SET NOT NULL`,
+      );
+    }
+
+    expect(tenantColumnsReconcile).toMatch(
+      /wireguard_ip_allocations[\s\S]+wireguard_peers[\s\S]+a\.peer_id\s*=\s*p\.id/i,
+    );
+    expect(tenantColumnsReconcile).toMatch(
+      /wireguard_key_rotations[\s\S]+wireguard_peers[\s\S]+r\.peer_id\s*=\s*p\.id/i,
+    );
+    expect(tenantColumnsReconcile).toContain('wireguard_tenant_backfill_failed');
+    expect(tenantColumnsReconcile).not.toMatch(/SET\s+tenant_id\s*=\s*'tenant-default'/i);
   });
 });
