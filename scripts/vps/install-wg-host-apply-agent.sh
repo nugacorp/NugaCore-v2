@@ -28,6 +28,7 @@ fail() { printf '[wg-agent-install] ERROR: %s\n' "$1" >&2; exit 1; }
 command -v wg >/dev/null 2>&1 || fail "wireguard-tools no instalado (corre setup-wireguard-host.sh)"
 command -v python3 >/dev/null 2>&1 || fail "python3 requerido"
 command -v nft >/dev/null 2>&1 || fail "nftables (nft) requerido para el firewall del agente"
+command -v iptables >/dev/null 2>&1 || fail "iptables requerido para integrar DOCKER-USER"
 command -v ip >/dev/null 2>&1 || fail "iproute2 (ip) requerido"
 [[ -f "$SERVER_KEY_FILE" ]] || fail "falta ${SERVER_KEY_FILE}"
 
@@ -94,8 +95,9 @@ log "wg-quick@wg0 deshabilitado y enmascarado (dueño único: el agente)"
 cat >"$UNIT_PATH" <<EOF
 [Unit]
 Description=NugaCore WireGuard host-apply agent
-Wants=network-online.target
-After=network-online.target
+Wants=network-online.target docker.service
+After=network-online.target docker.service
+PartOf=docker.service
 
 [Service]
 Type=simple
@@ -109,7 +111,11 @@ Environment=WG_HOST_APPLY_PORT=${LISTEN_PORT}
 Environment=WG_PORT=13231
 Environment=WG_SERVER_IP=10.70.0.1
 Environment=WG_APP_SUBNET=${WG_APP_SUBNET:-10.0.1.0/24}
+# nft (priority -10) descarta inter-tenant primero. Este espejo acepta en la
+# chain posterior de Docker solamente el tráfico wg0→wg0 que sobrevivió.
+ExecStartPre=-/usr/sbin/iptables -D DOCKER-USER -i wg0 -o wg0 -j ACCEPT
 ExecStart=/usr/bin/python3 ${AGENT_PY}
+ExecStartPost=/usr/sbin/iptables -I DOCKER-USER 1 -i wg0 -o wg0 -j ACCEPT
 Restart=always
 RestartSec=3
 Nice=-5
