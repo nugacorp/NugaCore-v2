@@ -83,45 +83,51 @@ const parseVarbindValue = (buf: Buffer, offset: number): { value: string; next: 
 const parseGetResponse = (buf: Buffer): Map<string, string> => {
   const out = new Map<string, string>();
   try {
-    let i = 0;
-    if (buf[i++] !== 0x30) return out;
-    const seqLen = readLength(buf, i);
-    i = seqLen.next + seqLen.length;
-    // version, community, pdu — walk to varbind list
-    while (i < buf.length) {
-      const tag = buf[i];
-      const lenInfo = readLength(buf, i + 1);
-      const start = lenInfo.next;
-      const end = start + lenInfo.length;
-      if (tag === 0x30 && end <= buf.length) {
-        // possible varbind
-        let j = start;
-        if (buf[j] === 0x06) {
-          const oidLen = readLength(buf, j + 1);
+    const walk = (from: number, limit: number): void => {
+      let i = from;
+      while (i < limit) {
+        const tag = buf[i];
+        const lenInfo = readLength(buf, i + 1);
+        const start = lenInfo.next;
+        const end = start + lenInfo.length;
+        if (end > limit || end > buf.length) return;
+
+        if (tag === 0x30 && buf[start] === 0x06) {
+          const oidLen = readLength(buf, start + 1);
           const oidStart = oidLen.next;
-          const oidBytes = buf.subarray(oidStart, oidStart + oidLen.length);
+          const oidEnd = oidStart + oidLen.length;
+          if (oidEnd > end) return;
+
+          const oidBytes = buf.subarray(oidStart, oidEnd);
           const oidParts: number[] = [];
-          if (oidBytes.length >= 2) {
+          if (oidBytes.length > 0) {
             oidParts.push(Math.floor(oidBytes[0] / 40), oidBytes[0] % 40);
             let k = 1;
             while (k < oidBytes.length) {
-              let v = 0;
+              let value = 0;
               while (k < oidBytes.length) {
-                const b = oidBytes[k++];
-                v = (v << 7) + (b & 0x7f);
-                if ((b & 0x80) === 0) break;
+                const byte = oidBytes[k++];
+                value = (value << 7) + (byte & 0x7f);
+                if ((byte & 0x80) === 0) break;
               }
-              oidParts.push(v);
+              oidParts.push(value);
             }
           }
-          const oid = oidParts.join('.');
-          j = oidStart + oidLen.length;
-          const parsed = parseVarbindValue(buf, j);
-          if (oid) out.set(oid, parsed.value);
+
+          if (oidEnd < end) {
+            const parsed = parseVarbindValue(buf, oidEnd);
+            const oid = oidParts.join('.');
+            if (oid) out.set(oid, parsed.value);
+          }
+        } else if ((tag & 0x20) !== 0) {
+          walk(start, end);
         }
+
+        i = end;
       }
-      i = end;
-    }
+    };
+
+    walk(0, buf.length);
   } catch {
     return out;
   }
