@@ -481,6 +481,14 @@ const sectionWireguard = (p: TemplateLibraryParams): WgSectionResult => {
   const privateKeySet = hasValidPrivateKey
     ? `/interface wireguard set [find where name="NugaCoreWG"] private-key="${privateKey}"`
     : '';
+  const presharedKey = (p.wgPresharedKey || '').trim();
+  const hasValidPresharedKey = isWgKey(presharedKey);
+  if (presharedKey && !hasValidPresharedKey) {
+    warnings.push('wgPresharedKey con formato inválido (se omite preshared-key).');
+  }
+  const presharedPart = hasValidPresharedKey
+    ? ` preshared-key="${presharedKey}"`
+    : '';
 
   const watchdog = `# --- Watchdog WireGuard ---
 :if ([:len [/system scheduler find where name="NugaCore-WG-Watchdog"]] = 0) do={
@@ -538,7 +546,7 @@ ${privateKeySet}
   /ip address add address="${routerIp}" interface="NugaCoreWG" comment="NugaCore WG address"
 }
 :if ([:len [/interface wireguard peers find where comment~"NugaCore WG server"]] = 0) do={
-  /interface wireguard peers add interface="NugaCoreWG" public-key="${pubKey}" endpoint-address="${epHost}" endpoint-port=${epPort} allowed-address=${mgmtCidr} persistent-keepalive=${keepalive}s comment="NugaCore WG server peer"
+  /interface wireguard peers add interface="NugaCoreWG" public-key="${pubKey}"${presharedPart} endpoint-address="${epHost}" endpoint-port=${epPort} allowed-address=${mgmtCidr} persistent-keepalive=${keepalive}s comment="NugaCore WG server peer"
 }
 :if ([:len [/ip route find where dst-address="${mgmtCidr}" and comment~"NugaCore"]] = 0) do={
   /ip route add dst-address="${mgmtCidr}" gateway=NugaCoreWG comment="NugaCore management route"

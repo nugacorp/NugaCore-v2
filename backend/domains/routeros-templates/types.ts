@@ -100,6 +100,7 @@ export interface TemplateLibraryParams {
   wgVpnCidr?: string;
   wgKeepalive?: number;
   wgPrivateKey?: string;
+  wgPresharedKey?: string;
   // SSTP
   sstpHost?: string;
   sstpUser?: string;

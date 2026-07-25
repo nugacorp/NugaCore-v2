@@ -15,6 +15,7 @@ const WG_PARAMS = {
   wgRouterIp: '10.70.0.5/32',
   wgManagementCidr: '10.70.0.0/16',
   wgVpnCidr: '10.70.0.0/16',
+  wgPresharedKey: 'AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA=',
   snmpCommunity: 'nc-testcommunity',
   snmpMgmtCidr: '10.70.0.0/16',
   zoneName: 'Lab CHR',
@@ -29,6 +30,14 @@ describe('Factory onboarding generator', () => {
     expect(result.script).toContain('nc-testcommunity');
     expect(result.script).toContain('NugaCore SNMP VPN');
     expect(result.snmpCommunity).toBe('nc-testcommunity');
+  });
+
+  it('configura en RouterOS la misma PSK requerida por el peer del servidor', () => {
+    const { script } = generateFromTemplate(WG_PARAMS);
+
+    expect(script).toContain(
+      'preshared-key="AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA="',
+    );
   });
 
   it('no incluye comandos prohibidos ni políticas peligrosas', () => {
