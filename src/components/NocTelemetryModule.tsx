@@ -1,6 +1,7 @@
 import React, { useCallback, useEffect, useState } from 'react';
 import { createAuthorizedApi } from '../lib/apiClient';
 import { Activity, AlertTriangle, Cpu, Gauge, Lock, RadioTower, ShieldAlert, Wifi, WifiOff } from 'lucide-react';
+import { snmpBadge, type SnmpTelemetryResponse } from '../lib/snmpTelemetry';
 
 // ====================================================================
 // NOC Real Telemetry (Fase 4.11.3) — vista READ-ONLY.
@@ -53,53 +54,11 @@ interface NocDerivedAlert {
   observedAt?: string;
 }
 
-// Telemetría SNMP tenant-scoped: cada WISP solo ve sus propios routers.
-type SnmpSource = 'snmp-live' | 'simulated' | 'disabled' | 'pending';
-
-interface SnmpTelemetryRouterView {
-  routerId: string;
-  name: string;
-  source: SnmpSource;
-  isReachable: boolean;
-  fresh: boolean;
-  sysName?: string;
-  sysUpTime?: string;
-  latencyMs?: number;
-  sampledAt?: string;
-  note?: string;
-}
-
-interface SnmpTelemetryResponse {
-  enabled: boolean;
-  intervalMs: number;
-  generatedAt: string;
-  total: number;
-  routers: SnmpTelemetryRouterView[];
-}
-
 interface Props {
   getAuthHeaders: () => Promise<Record<string, string>>;
 }
 
 const dash = (value?: string): string => (value && value.trim() !== '' ? value : '—');
-
-const snmpBadge = (
-  router: SnmpTelemetryRouterView,
-): { label: string; className: string } => {
-  if (router.source === 'snmp-live' && router.fresh) {
-    return { label: 'En vivo', className: 'bg-emerald-500/15 text-emerald-400 border-emerald-500/20' };
-  }
-  if (router.source === 'snmp-live') {
-    return { label: 'Desactualizada', className: 'bg-amber-500/15 text-amber-400 border-amber-500/20' };
-  }
-  if (router.source === 'pending') {
-    return { label: 'Sin muestra', className: 'bg-slate-700/40 text-slate-400 border-slate-600/30' };
-  }
-  if (router.source === 'disabled') {
-    return { label: 'Poller off', className: 'bg-slate-700/40 text-slate-400 border-slate-600/30' };
-  }
-  return { label: 'Sin respuesta', className: 'bg-rose-500/15 text-rose-400 border-rose-500/20' };
-};
 
 const healthBadgeClass: Record<NocRouterView['healthStatus'], string> = {
   healthy: 'bg-emerald-500/15 text-emerald-400 border-emerald-500/20',

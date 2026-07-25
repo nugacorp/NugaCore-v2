@@ -17,6 +17,7 @@ import {
 } from 'lucide-react';
 import type { UserRole } from '../lib/supabase';
 import { canStartEnrollment, canRevokeEnrollment } from '../lib/enrollmentRbac';
+import { snmpBadge, type SnmpTelemetryRouterView, type SnmpTelemetryResponse } from '../lib/snmpTelemetry';
 import RouterOnboardingWizard from './RouterOnboardingWizard';
 
 // ====================================================================
@@ -70,30 +71,6 @@ interface EnrollmentListItem {
   status: string;
 }
 
-// Telemetría SNMP tenant-scoped: solo routers del WISP actual.
-type SnmpSource = 'snmp-live' | 'simulated' | 'disabled' | 'pending';
-
-interface SnmpTelemetryRouterView {
-  routerId: string;
-  name: string;
-  source: SnmpSource;
-  isReachable: boolean;
-  fresh: boolean;
-  sysName?: string;
-  sysUpTime?: string;
-  latencyMs?: number;
-  sampledAt?: string;
-  note?: string;
-}
-
-interface SnmpTelemetryResponse {
-  enabled: boolean;
-  intervalMs: number;
-  generatedAt: string;
-  total: number;
-  routers: SnmpTelemetryRouterView[];
-}
-
 interface Props {
   getAuthHeaders: () => Promise<Record<string, string>>;
   userRole: UserRole;
@@ -117,23 +94,6 @@ const PROV_LABEL: Record<RouterProvisioningStatus, string> = {
 };
 
 const dash = (value?: string): string => (value && value.trim() !== '' ? value : '—');
-
-const snmpBadge = (r?: SnmpTelemetryRouterView): { label: string; className: string } => {
-  if (!r) return { label: 'sin SNMP', className: 'bg-slate-800 text-slate-500 border-slate-700' };
-  if (r.source === 'snmp-live' && r.fresh) {
-    return { label: 'En vivo', className: 'bg-emerald-500/15 text-emerald-400 border-emerald-500/20' };
-  }
-  if (r.source === 'snmp-live') {
-    return { label: 'Desactualizada', className: 'bg-amber-500/15 text-amber-400 border-amber-500/20' };
-  }
-  if (r.source === 'pending') {
-    return { label: 'Sin muestra', className: 'bg-slate-700/40 text-slate-400 border-slate-600/30' };
-  }
-  if (r.source === 'disabled') {
-    return { label: 'Poller off', className: 'bg-slate-700/40 text-slate-400 border-slate-600/30' };
-  }
-  return { label: 'Sin respuesta', className: 'bg-rose-500/15 text-rose-400 border-rose-500/20' };
-};
 
 export default function InventoryRoutersModule({
   getAuthHeaders,
