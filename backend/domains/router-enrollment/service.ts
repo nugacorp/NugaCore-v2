@@ -620,7 +620,34 @@ export const enrollmentService = {
       createdAt: nowIso(),
       updatedAt: nowIso(),
     };
-    await repo.create(rec);
+    try {
+      await repo.create(rec);
+    } catch (persistErr) {
+      // La generación ya pudo crear un peer y registrar el router. Si el
+      // enrollment no se persiste, ambos recursos quedan inaccesibles desde la
+      // UI; retirarlos fail-closed antes de propagar el error original.
+      try {
+        await wgService.revokePeer(wgPeerId, tenantId);
+        logger.warn('Enrollment: peer WG revocado tras fallo de persistencia', {
+          routerId,
+          peerId: wgPeerId,
+        });
+      } catch (rollbackErr) {
+        logger.warn('Enrollment: rollback de peer WG tras persistencia falló', {
+          routerId,
+          error: String(rollbackErr),
+        });
+      }
+      try {
+        await deleteMikrotikRouter(routerId);
+      } catch (rollbackErr) {
+        logger.warn('Enrollment: rollback de router tras persistencia falló', {
+          routerId,
+          error: String(rollbackErr),
+        });
+      }
+      throw persistErr;
+    }
 
     logger.info('Enrollment iniciado', {
       enrollmentId: id,
