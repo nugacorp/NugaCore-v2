@@ -63,7 +63,8 @@ const varbind = (oid: string, value: Buffer): Buffer =>
 
 const buildResponse = (): Buffer => {
   const varbinds = tlv(0x30, Buffer.concat([
-    varbind(SNMP_OIDS.sysUpTime, tlv(0x43, Buffer.from([0, 0, 0, 42]))),
+    // BER usa longitud mínima: RouterOS puede codificar TimeTicks pequeños en 1 byte.
+    varbind(SNMP_OIDS.sysUpTime, tlv(0x43, Buffer.from([42]))),
     varbind(SNMP_OIDS.sysName, tlv(0x04, Buffer.from('router-real'))),
   ]));
   const responsePdu = tlv(0xa2, Buffer.concat([
