@@ -13,6 +13,7 @@ import {
   Trash2,
   CheckCircle,
   Wrench,
+  Download,
 } from 'lucide-react';
 import type { UserRole } from '../lib/supabase';
 import { canStartEnrollment, canRevokeEnrollment } from '../lib/enrollmentRbac';
@@ -233,6 +234,43 @@ export default function InventoryRoutersModule({
     } catch (err) {
       setInfo('');
       setError(err instanceof Error ? err.message : 'No se pudo descargar el script de reparación API.');
+    } finally {
+      setActionId('');
+      setActionLabel('');
+    }
+  };
+
+  const handleDownloadEnrollment = async (router: InventoryRouterView) => {
+    const enrollment = enrollmentByRouter[router.id];
+    if (!enrollment || enrollment.status === 'revoked') {
+      setInfo('');
+      setError('No hay alta activa vinculada a este router.');
+      return;
+    }
+    setActionId(router.id);
+    setActionLabel(`Regenerando script completo para ${router.name}…`);
+    setError('');
+    setInfo('');
+    try {
+      const api = createAuthorizedApi(getAuthHeaders);
+      const text = await api.get<string>(
+        `/api/router-enrollment/${enrollment.id}/download`,
+      );
+      const blob = new Blob([text], { type: 'text/plain' });
+      const url = URL.createObjectURL(blob);
+      const a = document.createElement('a');
+      a.href = url;
+      a.download = 'nc-wg.rsc';
+      a.click();
+      URL.revokeObjectURL(url);
+      setError('');
+      setInfo(
+        `Descargado nc-wg.rsc para ${router.name} desde su alta existente. ` +
+          'Este archivo contiene la configuración completa WireGuard/API/SNMP; descarta versiones anteriores.',
+      );
+    } catch (err) {
+      setInfo('');
+      setError(err instanceof Error ? err.message : 'No se pudo descargar el script completo.');
     } finally {
       setActionId('');
       setActionLabel('');
@@ -474,6 +512,20 @@ export default function InventoryRoutersModule({
                                 Verificar
                               </button>
                             )}
+                            {canEnroll &&
+                              !!enrollment &&
+                              enrollment.status !== 'revoked' && (
+                                <button
+                                  type="button"
+                                  disabled={busy || loading}
+                                  onClick={() => void handleDownloadEnrollment(router)}
+                                  className="inline-flex items-center gap-1 text-xs px-2 py-1 rounded bg-indigo-900/80 hover:bg-indigo-800 text-indigo-100 disabled:opacity-50"
+                                  title="Regenera el script completo del enrollment existente (WireGuard, API y SNMP)"
+                                >
+                                  <Download className="w-3 h-3" />
+                                  Descargar script
+                                </button>
+                              )}
                             {canEnroll &&
                               !!enrollment &&
                               enrollment.status !== 'revoked' &&
