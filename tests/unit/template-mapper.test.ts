@@ -111,6 +111,10 @@ describe('resolveTemplateParams — router_base_wireguard', () => {
     expect(r.params.wgPrivateKey).toBe('PRIVKEY==');
   });
 
+  it('params.wgPresharedKey viene del mismo peer registrado en el servidor', () => {
+    expect(r.params.wgPresharedKey).toBe('PSK==');
+  });
+
   it('params.wgServerPublicKey viene del peer', () => {
     expect(r.params.wgServerPublicKey).toBe('SERVERPUBKEY==');
   });

@@ -172,6 +172,7 @@ export function resolveTemplateParams(
         wgManagementCidr:  peerConfig.allowedCidr,
         wgVpnCidr:         peerConfig.allowedCidr,
         wgPrivateKey:      peerConfig.privateKey,
+        wgPresharedKey:    peerConfig.presharedKey,
         wgKeepalive:       25,
         snmpMgmtCidr:      peerConfig.allowedCidr,
         zoneName:          input.routerName,

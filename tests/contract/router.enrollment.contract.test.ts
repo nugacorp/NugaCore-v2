@@ -184,8 +184,9 @@ describe('Enrollment — flujo start → download → check-online → revoke', 
     // El preview sí debe contener los marcadores de redacción
     expect(scriptPreview).toMatch(/<(PRIVATE_KEY|PRESHARED_KEY|PASSWORD)_OMITI?D[OA]>/i);
 
-    // El script completo SÍ debe tener private-key= (RouterOS lo necesita)
+    // El script completo SÍ debe tener ambas claves (RouterOS y el host deben coincidir).
     expect(script).toMatch(/private-key=/i);
+    expect(script).toMatch(/preshared-key=/i);
 
     // El preview sí conserva contenido estructural (public-key del servidor es público)
     expect(scriptPreview).toContain('NugaCore');
