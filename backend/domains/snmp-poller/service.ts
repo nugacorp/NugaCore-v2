@@ -8,7 +8,8 @@ import { store } from '../../state/store';
 import { decryptSecret } from '../../services/crypto';
 import { getEnrollmentRepository } from '../router-enrollment/repository';
 import type { RouterEnrollmentSnmpSnapshot } from '../router-enrollment/types';
-import { filterRoutersByTenant } from '../mikrotik/tenant-filter';
+import { filterRoutersByTenant, resolveRouterTenantId } from '../mikrotik/tenant-filter';
+import { resolveRecordTenantId } from '../tenancy/tenant-scope';
 import { snmpGetV2c, SNMP_OIDS } from './client';
 import type {
   SnmpPollCycleResult,
@@ -21,7 +22,12 @@ import type {
 
 let lastCycle: SnmpPollCycleResult | null = null;
 let timer: ReturnType<typeof setInterval> | null = null;
-const latestByRouterId = new Map<string, SnmpPollResult>();
+// Clave compuesta tenantId::routerId. Los IDs de router se reciclan tras un
+// borrado (getUniqueMikrotikRouterId parte de length+1), así que indexar solo
+// por routerId filtraría telemetría de un WISP anterior bajo un ID reutilizado.
+const latestByKey = new Map<string, SnmpPollResult>();
+
+const cacheKey = (tenantId: string, routerId: string): string => `${tenantId}::${routerId}`;
 
 export const isSnmpPollerEnabled = (): boolean =>
   (process.env.SNMP_POLLER_ENABLED || 'false').trim().toLowerCase() === 'true';
@@ -66,8 +72,15 @@ export const buildSnmpTargets = async (tenantId?: string): Promise<SnmpTarget[]>
     const host = router?.vpnIp || enr.routerSnapshot?.vpnIp;
     if (!host) continue;
 
+    // Tenant efectivo: preferimos el del router; si no hay (poller global sin
+    // router hidratado) caemos al del enrollment. Nunca queda sin estampar.
+    const effectiveTenantId = router
+      ? resolveRouterTenantId(router)
+      : resolveRecordTenantId(enr.tenantId);
+
     targets.push({
       id: `snmp-${enr.routerId}`,
+      tenantId: effectiveTenantId,
       routerId: enr.routerId,
       name: router?.name || enr.routerSnapshot?.routerName || enr.routerId,
       host: host.replace(/\/\d+$/, ''),
@@ -87,6 +100,7 @@ const pollOneTarget = async (target: SnmpTarget): Promise<SnmpPollResult> => {
   if (!isSnmpPollerEnabled()) {
     return {
       targetId: target.id,
+      tenantId: target.tenantId,
       routerId: target.routerId,
       name: target.name,
       source: 'disabled',
@@ -104,6 +118,7 @@ const pollOneTarget = async (target: SnmpTarget): Promise<SnmpPollResult> => {
     const sysUpTime = read.values.get(SNMP_OIDS.sysUpTime);
     return {
       targetId: target.id,
+      tenantId: target.tenantId,
       routerId: target.routerId,
       name: target.name,
       source: 'snmp-live',
@@ -121,6 +136,7 @@ const pollOneTarget = async (target: SnmpTarget): Promise<SnmpPollResult> => {
 
   return {
     targetId: target.id,
+    tenantId: target.tenantId,
     routerId: target.routerId,
     name: target.name,
     source: 'simulated',
@@ -142,7 +158,7 @@ export async function runPollCycle(tenantId?: string): Promise<SnmpPollCycleResu
     try {
       const result = await pollOneTarget(target);
       results.push(result);
-      latestByRouterId.set(target.routerId, result);
+      latestByKey.set(cacheKey(target.tenantId, target.routerId), result);
     } catch (err) {
       logger.warn('SNMP poller: fallo en target', {
         targetId: target.id,
@@ -150,6 +166,7 @@ export async function runPollCycle(tenantId?: string): Promise<SnmpPollCycleResu
       });
       const fallback: SnmpPollResult = {
         targetId: target.id,
+        tenantId: target.tenantId,
         routerId: target.routerId,
         name: target.name,
         source: 'simulated',
@@ -159,7 +176,7 @@ export async function runPollCycle(tenantId?: string): Promise<SnmpPollCycleResu
         note: 'poll_error',
       };
       results.push(fallback);
-      latestByRouterId.set(target.routerId, fallback);
+      latestByKey.set(cacheKey(target.tenantId, target.routerId), fallback);
     }
   }
 
@@ -192,9 +209,9 @@ export const getSnmpPollerStatusForTenant = async (
 ): Promise<SnmpPollerStatus> => {
   const status = getSnmpPollerStatus();
   if (!status.lastCycle) return status;
-  const targets = await buildSnmpTargets(tenantId);
-  const ownRouterIds = new Set(targets.map((t) => t.routerId));
-  const results = status.lastCycle.results.filter((r) => ownRouterIds.has(r.routerId));
+  // El tenantId estampado en cada resultado es autoritativo (inmune a IDs de
+  // router reciclados). Filtramos por él, no por routerId.
+  const results = status.lastCycle.results.filter((r) => r.tenantId === tenantId);
   return {
     ...status,
     lastCycle: { ...status.lastCycle, results, targetsPolled: results.length },
@@ -210,7 +227,7 @@ export const getSnmpTelemetryForTenant = async (
 ): Promise<SnmpTelemetryResponse> => {
   const targets = await buildSnmpTargets(tenantId);
   const routers: SnmpTelemetryRouterView[] = targets.map((target) => {
-    const latest = latestByRouterId.get(target.routerId);
+    const latest = latestByKey.get(cacheKey(target.tenantId, target.routerId));
     if (!latest) {
       return {
         routerId: target.routerId,
@@ -222,8 +239,8 @@ export const getSnmpTelemetryForTenant = async (
       };
     }
     return {
-      routerId: latest.routerId,
-      name: latest.name,
+      routerId: target.routerId,
+      name: target.name,
       source: latest.source,
       isReachable: latest.isReachable,
       fresh: isSnmpResultFresh(latest),
@@ -244,8 +261,10 @@ export const getSnmpTelemetryForTenant = async (
   };
 };
 
-export const getLatestSnmpResultForRouter = (routerId: string): SnmpPollResult | null =>
-  latestByRouterId.get(routerId) ?? null;
+export const getLatestSnmpResultForRouter = (
+  tenantId: string,
+  routerId: string,
+): SnmpPollResult | null => latestByKey.get(cacheKey(tenantId, routerId)) ?? null;
 
 export const isSnmpResultFresh = (result: SnmpPollResult | null): boolean => {
   if (!result || result.source !== 'snmp-live' || !result.isReachable) return false;
@@ -283,5 +302,5 @@ export const _resetSnmpPollerForTests = (): void => {
   if (timer) clearInterval(timer);
   timer = null;
   lastCycle = null;
-  latestByRouterId.clear();
+  latestByKey.clear();
 };

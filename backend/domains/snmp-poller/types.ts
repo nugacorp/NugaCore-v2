@@ -6,6 +6,8 @@ export type SnmpPollSource = 'snmp-live' | 'simulated' | 'disabled';
 
 export interface SnmpTarget {
   id: string;
+  /** WISP dueño del router. Clave de aislamiento en la caché del poller. */
+  tenantId: string;
   routerId: string;
   name: string;
   host: string;
@@ -23,6 +25,8 @@ export interface OidSnapshot {
 
 export interface SnmpPollResult {
   targetId: string;
+  /** WISP dueño (aislamiento multi-tenant en caché/snapshot). */
+  tenantId: string;
   routerId: string;
   name: string;
   source: SnmpPollSource;

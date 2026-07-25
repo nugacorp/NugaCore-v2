@@ -90,7 +90,7 @@ const snmpBadge = (
     return { label: 'En vivo', className: 'bg-emerald-500/15 text-emerald-400 border-emerald-500/20' };
   }
   if (router.source === 'snmp-live') {
-    return { label: 'Reciente', className: 'bg-amber-500/15 text-amber-400 border-amber-500/20' };
+    return { label: 'Desactualizada', className: 'bg-amber-500/15 text-amber-400 border-amber-500/20' };
   }
   if (router.source === 'pending') {
     return { label: 'Sin muestra', className: 'bg-slate-700/40 text-slate-400 border-slate-600/30' };
@@ -118,31 +118,40 @@ export default function NocTelemetryModule({ getAuthHeaders }: Props) {
   const [routers, setRouters] = useState<NocRouterView[]>([]);
   const [alerts, setAlerts] = useState<NocDerivedAlert[]>([]);
   const [snmp, setSnmp] = useState<SnmpTelemetryResponse | null>(null);
+  const [snmpError, setSnmpError] = useState('');
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState('');
 
   const load = useCallback(async () => {
     setLoading(true);
     setError('');
+    setSnmpError('');
+    const api = createAuthorizedApi(getAuthHeaders);
+
     try {
-      const api = createAuthorizedApi(getAuthHeaders);
-      const [healthData, towersData, routersData, alertsData, snmpData] = await Promise.all([
+      const [healthData, towersData, routersData, alertsData] = await Promise.all([
         api.get<NocHealthSummary>('/api/noc/health'),
         api.get<NocTowerTelemetry[]>('/api/noc/towers'),
         api.get<NocRouterView[]>('/api/noc/routers'),
         api.get<NocDerivedAlert[]>('/api/noc/alerts'),
-        api.get<SnmpTelemetryResponse>('/api/snmp/telemetry'),
       ]);
 
       setHealth(healthData);
       setTowers(towersData);
       setRouters(routersData);
       setAlerts(alertsData);
-      setSnmp(snmpData);
     } catch (err) {
       setError(err instanceof Error ? err.message : 'Error desconocido cargando telemetría NOC.');
     } finally {
       setLoading(false);
+    }
+
+    // Carga aislada: un fallo de SNMP no debe vaciar la telemetría NOC.
+    try {
+      setSnmp(await api.get<SnmpTelemetryResponse>('/api/snmp/telemetry'));
+    } catch (err) {
+      setSnmp(null);
+      setSnmpError(err instanceof Error ? err.message : 'Error cargando telemetría SNMP.');
     }
   }, [getAuthHeaders]);
 
@@ -333,6 +342,8 @@ export default function NocTelemetryModule({ getAuthHeaders }: Props) {
 
         {loading ? (
           <div className="py-14 text-center text-sm text-slate-500">Cargando telemetría SNMP...</div>
+        ) : snmpError ? (
+          <div className="py-14 text-center text-sm text-rose-300">{snmpError}</div>
         ) : !snmp || snmp.routers.length === 0 ? (
           <div className="py-14 text-center text-sm text-slate-500">
             No hay routers con SNMP configurado para este WISP.

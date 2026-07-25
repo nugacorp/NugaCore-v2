@@ -15,6 +15,8 @@ import type { MikrotikRouterRegistryItem } from '../../backend/state/store';
 import {
   buildSnmpTargets,
   getSnmpTelemetryForTenant,
+  runPollCycle,
+  getSnmpPollerStatusForTenant,
   _resetSnmpPollerForTests,
 } from '../../backend/domains/snmp-poller/service';
 
@@ -97,5 +99,47 @@ describe('SNMP multi-tenant isolation', () => {
     const serialized = JSON.stringify(telemetryA);
     expect(serialized).not.toMatch(/community/i);
     expect(serialized).not.toMatch(/encryptedCommunity/);
+  });
+
+  it('un routerId reutilizado por otro tenant NO hereda la caché del anterior', async () => {
+    // WISP A tiene un router con id compartido y una muestra en caché.
+    const sharedId = 'mkt-reused';
+    store.MIKROTIK_ROUTERS.length = 0;
+    const routerA = makeRouter(sharedId, TENANT_A);
+    routerA.name = 'Router del WISP A';
+    store.MIKROTIK_ROUTERS.push(routerA);
+    enrollmentRepository._reset();
+    enrollmentRepository.create(makeEnrollment('enr-a', sharedId, TENANT_A));
+    await runPollCycle(TENANT_A); // puebla la caché tenant-a::mkt-reused
+
+    // El router se borra y el id se recicla para el WISP B (mismo id, otro dueño).
+    store.MIKROTIK_ROUTERS.length = 0;
+    const routerB = makeRouter(sharedId, TENANT_B);
+    routerB.name = 'Router del WISP B';
+    store.MIKROTIK_ROUTERS.push(routerB);
+    enrollmentRepository._reset();
+    enrollmentRepository.create(makeEnrollment('enr-b', sharedId, TENANT_B));
+
+    const telemetryB = await getSnmpTelemetryForTenant(TENANT_B);
+    expect(telemetryB.routers).toHaveLength(1);
+    // Nunca debe aparecer el nombre/muestra del WISP A bajo el id reciclado.
+    expect(telemetryB.routers[0].name).toBe('Router del WISP B');
+    expect(telemetryB.routers[0].source).toBe('pending');
+  });
+
+  it('getSnmpPollerStatusForTenant recorta lastCycle por tenant autoritativo', async () => {
+    // Un ciclo GLOBAL puebla lastCycle con un resultado del WISP A.
+    store.MIKROTIK_ROUTERS.length = 0;
+    store.MIKROTIK_ROUTERS.push(makeRouter('ra', TENANT_A));
+    enrollmentRepository._reset();
+    enrollmentRepository.create(makeEnrollment('enr-a', 'ra', TENANT_A));
+    await runPollCycle(); // sin tenant → fija lastCycle global
+
+    const statusA = await getSnmpPollerStatusForTenant(TENANT_A);
+    expect(statusA.lastCycle?.results ?? []).toHaveLength(1);
+
+    // El WISP B no debe ver el resultado del WISP A.
+    const statusB = await getSnmpPollerStatusForTenant(TENANT_B);
+    expect(statusB.lastCycle?.results ?? []).toHaveLength(0);
   });
 });
