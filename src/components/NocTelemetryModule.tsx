@@ -170,7 +170,7 @@ export default function NocTelemetryModule({ getAuthHeaders }: Props) {
     : [];
 
   return (
-    <div className="p-6 space-y-6 bg-slate-950 min-h-full text-slate-100">
+    <div className="p-6 space-y-6 bg-slate-950 text-slate-100">
       <div className="flex items-center justify-between flex-wrap gap-3">
         <div>
           <h2 className="text-2xl font-bold flex items-center space-x-2">
