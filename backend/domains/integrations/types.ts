@@ -26,6 +26,8 @@ export interface IntegrationSettingsRecord {
   openpayPrivateKey: string;
   openpayWebhookSecret: string;
   openpaySandbox: boolean;
+  /** Token opaco por WISP para la URL de webhook de OpenPay. No es secreto. */
+  openpayWebhookToken: string;
   updatedAt: string;
 }
 

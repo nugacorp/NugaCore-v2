@@ -1,3 +1,4 @@
+import { randomBytes } from 'crypto';
 import { BadRequestError, NotFoundError } from '../../common/errors';
 import { isSupabaseAdminConfigured, supabaseAdmin } from '../../services/supabase-admin';
 import { logger } from '../../common/logger';
@@ -21,23 +22,31 @@ import {
 } from './delivery';
 import type { IntegrationProviderKey, IntegrationSettingsPatch } from './types';
 
+// Token opaco (no secreto) para la URL de webhook por WISP.
+const generateWebhookToken = (): string => randomBytes(24).toString('hex');
+
 export class IntegrationsService {
   constructor(private readonly repo: IntegrationsRepository) {}
 
-  async getSettingsView() {
-    const rec = await this.repo.get();
+  async getSettingsView(tenantId?: string) {
+    const rec = await this.repo.get(tenantId);
     return buildIntegrationView(rec);
   }
 
-  async getSettingsRaw() {
-    return this.repo.get();
+  async getSettingsRaw(tenantId?: string) {
+    return this.repo.get(tenantId);
   }
 
-  async updateSettings(patch: IntegrationSettingsPatch) {
-    const current = await this.repo.get();
+  async updateSettings(patch: IntegrationSettingsPatch, tenantId?: string) {
+    const current = await this.repo.get(tenantId);
     const next = applyIntegrationPatch(current, patch);
-    const saved = await this.repo.save(next);
+    // Asigna un token de webhook estable al habilitar OpenPay (uno por WISP).
+    if (next.openpayEnabled && !next.openpayWebhookToken) {
+      next.openpayWebhookToken = generateWebhookToken();
+    }
+    const saved = await this.repo.save(next, tenantId);
     logger.info('Integrations: configuración actualizada', {
+      tenantId: tenantId ?? 'default',
       stripe: saved.stripeEnabled,
       whatsapp: saved.whatsappEnabled,
       telegram: saved.telegramEnabled,
@@ -47,8 +56,8 @@ export class IntegrationsService {
     return buildIntegrationView(saved);
   }
 
-  async testProvider(provider: IntegrationProviderKey) {
-    const settings = await this.repo.get();
+  async testProvider(provider: IntegrationProviderKey, tenantId?: string) {
+    const settings = await this.repo.get(tenantId);
     if (provider === 'stripe') return testStripeConnection(settings);
     if (provider === 'whatsapp') return testWhatsAppConnection(settings);
     if (provider === 'telegram') return testTelegramConnection(settings);
@@ -69,7 +78,7 @@ export class IntegrationsService {
     throw new BadRequestError(`Proveedor no soportado: ${provider}`);
   }
 
-  async notifyInvoice(invoiceId: string) {
+  async notifyInvoice(invoiceId: string, tenantId?: string) {
     const billing = getBillingService();
     const invoice = await billing.findInvoiceById(invoiceId);
     if (!invoice) throw new NotFoundError('Factura no encontrada');
@@ -78,7 +87,7 @@ export class IntegrationsService {
     if (!client) throw new NotFoundError('Cliente no encontrado');
 
     const channel = client.notificationChannel || 'whatsapp';
-    const settings = await this.repo.get();
+    const settings = await this.repo.get(tenantId);
     const billingCycleLabel = await this.resolveBillingCycleLabel(client.billingZoneId);
 
     const paymentReference = `${invoice.id}-${client.id}`.toUpperCase();
@@ -115,8 +124,8 @@ export class IntegrationsService {
     };
   }
 
-  async processCodiWebhook(payload: Record<string, unknown>, signature: string) {
-    const settings = await this.repo.get();
+  async processCodiWebhook(payload: Record<string, unknown>, signature: string, tenantId?: string) {
+    const settings = await this.repo.get(tenantId);
     if (!settings.codiEnabled) {
       return { accepted: false, message: 'CoDi deshabilitado' };
     }

@@ -59,6 +59,11 @@ export const buildIntegrationView = (rec: IntegrationSettingsRecord) => {
       privateKeySet: maskSecret(rec.openpayPrivateKey),
       webhookSecretSet: maskSecret(rec.openpayWebhookSecret),
       sandbox: rec.openpaySandbox,
+      // Token opaco (no secreto): el WISP arma su URL de webhook en OpenPay.
+      webhookToken: rec.openpayWebhookToken || '',
+      webhookPath: rec.openpayWebhookToken
+        ? `/api/payments/webhook/openpay/${rec.openpayWebhookToken}`
+        : '',
     },
     mikrotik: {
       note: 'Puerto API 8728 — configurar routers en Inventario / Red',

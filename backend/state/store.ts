@@ -274,6 +274,8 @@ export const store: {
   BACKUP_POLICY: BackupPolicy;
   NOTIFICATION_SETTINGS: NotificationSettings;
   INTEGRATION_SETTINGS: IntegrationSettingsRecord;
+  /** Credenciales de integración por WISP (multi-tenant). 'default' vive en INTEGRATION_SETTINGS. */
+  INTEGRATION_SETTINGS_BY_TENANT: Record<string, IntegrationSettingsRecord>;
   MONITORING_SNAPSHOTS: MonitoringSnapshot[];
   PAYMENT_ORDERS: PaymentOrderRecord[];
   PAYMENT_EVENTS: PaymentEventRecord[];
@@ -685,8 +687,10 @@ export const store: {
     openpayPrivateKey: '',
     openpayWebhookSecret: '',
     openpaySandbox: true,
+    openpayWebhookToken: '',
     updatedAt: new Date().toISOString(),
   } satisfies IntegrationSettingsRecord,
+  INTEGRATION_SETTINGS_BY_TENANT: {},
   PAYMENT_ORDERS: [],
   PAYMENT_EVENTS: [],
   MIKROTIK_ACTIONS: [],

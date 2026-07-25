@@ -1,36 +1,40 @@
 import { Router } from 'express';
 import { asyncHandler } from '../../common/errors';
 import { READ_ROLES, requireRoles } from '../../common/rbac';
+import { tenantIdFromRequest } from '../tenancy/tenant-scope';
 import { getIntegrationsService } from './service';
 import type { IntegrationProviderKey } from './types';
 
 const router = Router();
 const WRITE = ['super admin', 'administrador'] as const;
 
-router.get('/api/integrations/settings', requireRoles(READ_ROLES), asyncHandler(async (_req, res) => {
-  res.json(await getIntegrationsService().getSettingsView());
+router.get('/api/integrations/settings', requireRoles(READ_ROLES), asyncHandler(async (req, res) => {
+  res.json(await getIntegrationsService().getSettingsView(tenantIdFromRequest(req)));
 }));
 
 router.put('/api/integrations/settings', requireRoles([...WRITE]), asyncHandler(async (req, res) => {
   const body = req.body || {};
   res.json(
-    await getIntegrationsService().updateSettings({
-      stripe: body.stripe,
-      whatsapp: body.whatsapp,
-      telegram: body.telegram,
-      codi: body.codi,
-      openpay: body.openpay,
-    }),
+    await getIntegrationsService().updateSettings(
+      {
+        stripe: body.stripe,
+        whatsapp: body.whatsapp,
+        telegram: body.telegram,
+        codi: body.codi,
+        openpay: body.openpay,
+      },
+      tenantIdFromRequest(req),
+    ),
   );
 }));
 
 router.post('/api/integrations/test/:provider', requireRoles([...WRITE]), asyncHandler(async (req, res) => {
   const provider = String(req.params.provider).toLowerCase() as IntegrationProviderKey;
-  res.json(await getIntegrationsService().testProvider(provider));
+  res.json(await getIntegrationsService().testProvider(provider, tenantIdFromRequest(req)));
 }));
 
 router.post('/api/billing/invoices/:id/notify', requireRoles([...WRITE, 'cobranza']), asyncHandler(async (req, res) => {
-  res.json(await getIntegrationsService().notifyInvoice(req.params.id));
+  res.json(await getIntegrationsService().notifyInvoice(req.params.id, tenantIdFromRequest(req)));
 }));
 
 router.post('/api/payments/webhook/codi', asyncHandler(async (req, res) => {
