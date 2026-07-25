@@ -16,13 +16,13 @@ import {
 } from 'lucide-react';
 import type { UserRole } from '../lib/supabase';
 import { canStartEnrollment, canRevokeEnrollment } from '../lib/enrollmentRbac';
-import RouterEnrollmentWizard from './RouterEnrollmentWizard';
+import RouterOnboardingWizard from './RouterOnboardingWizard';
 
 // ====================================================================
 // Inventario de routers MikroTik + alta embebida.
 //
 // Vista del inventario (`mikrotik_routers`) y botón "Dar de alta" que abre
-// el flujo existente de enrollment (RouterEnrollmentWizard), sin sección
+// el flujo completo de onboarding (RouterOnboardingWizard), sin sección
 // separada en el sidebar. Acciones: verificar online / eliminar (limpia
 // enrollment + peer WG + fila de inventario).
 // ====================================================================
@@ -264,16 +264,10 @@ export default function InventoryRoutersModule({
     }
   };
 
-  if (showEnrollment) {
-    return (
-      <RouterEnrollmentWizard
-        userRole={userRole}
-        getAuthHeaders={getAuthHeaders}
-        startInWizard
-        onBack={() => onPanelChange('inventory')}
-      />
-    );
-  }
+  const handleOnboardingCompleted = () => {
+    onPanelChange('inventory');
+    void load({ clearMessages: true });
+  };
 
   const summaryCards: { label: string; value: number; icon: React.ElementType }[] = summary
     ? [
@@ -290,6 +284,14 @@ export default function InventoryRoutersModule({
 
   return (
     <div className="p-6 space-y-6 bg-slate-950 min-h-full text-slate-100">
+      <RouterOnboardingWizard
+        isOpen={showEnrollment}
+        onClose={() => onPanelChange('inventory')}
+        onCompleted={handleOnboardingCompleted}
+        userRole={userRole}
+        getAuthHeaders={getAuthHeaders}
+      />
+
       {/* Header */}
       <div className="flex items-center justify-between flex-wrap gap-3">
         <div>

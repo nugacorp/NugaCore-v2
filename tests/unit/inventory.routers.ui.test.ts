@@ -61,9 +61,12 @@ describe('InventoryRoutersModule — inventario + acciones', () => {
     expect(module).toContain('No hay routers en el inventario');
   });
 
-  it('embebidos el alta con Dar de alta', () => {
+  it('abre el onboarding completo desde Dar de alta sin exponer MikroTik Core', () => {
     expect(module).toContain('Dar de alta');
-    expect(module).toContain('RouterEnrollmentWizard');
+    expect(module).toContain('RouterOnboardingWizard');
+    expect(module).toContain('isOpen={showEnrollment}');
+    expect(module).toContain('onCompleted={handleOnboardingCompleted}');
+    expect(module).not.toContain('RouterEnrollmentWizard');
   });
 });
 
