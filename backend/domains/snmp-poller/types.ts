@@ -6,6 +6,8 @@ export type SnmpPollSource = 'snmp-live' | 'simulated' | 'disabled';
 
 export interface SnmpTarget {
   id: string;
+  /** WISP dueño del router. Clave de aislamiento en la caché del poller. */
+  tenantId: string;
   routerId: string;
   name: string;
   host: string;
@@ -23,6 +25,8 @@ export interface OidSnapshot {
 
 export interface SnmpPollResult {
   targetId: string;
+  /** WISP dueño (aislamiento multi-tenant en caché/snapshot). */
+  tenantId: string;
   routerId: string;
   name: string;
   source: SnmpPollSource;
@@ -48,4 +52,28 @@ export interface SnmpPollerStatus {
   enabled: boolean;
   intervalMs: number;
   lastCycle: SnmpPollCycleResult | null;
+}
+
+/** Vista saneada por router para la UI operativa del WISP (sin community). */
+export interface SnmpTelemetryRouterView {
+  routerId: string;
+  name: string;
+  source: SnmpPollSource | 'pending';
+  isReachable: boolean;
+  /** true si la última muestra es live y suficientemente reciente. */
+  fresh: boolean;
+  sysName?: string;
+  sysUpTime?: string;
+  latencyMs?: number;
+  sampledAt?: string;
+  note?: string;
+}
+
+/** Respuesta tenant-scoped de telemetría SNMP para la operación del WISP. */
+export interface SnmpTelemetryResponse {
+  enabled: boolean;
+  intervalMs: number;
+  generatedAt: string;
+  total: number;
+  routers: SnmpTelemetryRouterView[];
 }

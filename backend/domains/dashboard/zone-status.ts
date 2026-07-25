@@ -12,6 +12,7 @@ import { getNetworkService } from '../network/service';
 import { nocReadOnlyRepository } from '../noc/repository';
 import { resolveHealthStatus, resolveReferenceTimestampMs } from '../noc/mappers';
 import { getLatestSnmpResultForRouter, isSnmpResultFresh } from '../snmp-poller/service';
+import { resolveRouterTenantId } from '../mikrotik/tenant-filter';
 
 export type EquipmentRole = 'router' | 'switch' | 'radio' | 'gps' | 'other';
 export type EquipmentStatus = 'online' | 'warning' | 'critical' | 'offline';
@@ -114,7 +115,7 @@ const resolveRouterStatus = (
   router: MikrotikRouterRegistryItem,
   referenceTimestampMs: number | null,
 ): { status: EquipmentStatus; source: ZoneEquipmentRow['source']; detail?: string } => {
-  const snmp = getLatestSnmpResultForRouter(router.id);
+  const snmp = getLatestSnmpResultForRouter(resolveRouterTenantId(router), router.id);
   if (isSnmpResultFresh(snmp)) {
     return {
       status: 'online',

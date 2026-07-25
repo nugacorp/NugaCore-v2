@@ -1,13 +1,18 @@
 // ====================================================================
-// SNMP Poller routes — health, targets y ciclo manual.
+// SNMP Poller routes — health, targets, telemetría y ciclo manual.
+//
+// Todos los endpoints quedan segmentados por tenant (aislamiento multi-WISP):
+// cada WISP solo ve la telemetría de sus propios routers, nunca mezclada.
 // ====================================================================
 
 import { Router } from 'express';
 import { asyncHandler } from '../../common/errors';
 import { AppRole, requireRoles } from '../../common/rbac';
+import { tenantIdFromRequest } from '../tenancy/tenant-scope';
 import {
   buildSnmpTargets,
-  getSnmpPollerStatus,
+  getSnmpPollerStatusForTenant,
+  getSnmpTelemetryForTenant,
   runPollCycle,
 } from './service';
 
@@ -24,16 +29,16 @@ const router = Router();
 router.get(
   '/api/snmp/health',
   requireRoles(SNMP_READ_ROLES),
-  asyncHandler(async (_req, res) => {
-    res.json(getSnmpPollerStatus());
+  asyncHandler(async (req, res) => {
+    res.json(await getSnmpPollerStatusForTenant(tenantIdFromRequest(req)));
   }),
 );
 
 router.get(
   '/api/snmp/targets',
   requireRoles(SNMP_READ_ROLES),
-  asyncHandler(async (_req, res) => {
-    const targets = await buildSnmpTargets();
+  asyncHandler(async (req, res) => {
+    const targets = await buildSnmpTargets(tenantIdFromRequest(req));
     res.json({
       total: targets.length,
       targets: targets.map((t) => ({
@@ -50,10 +55,18 @@ router.get(
 );
 
 router.get(
+  '/api/snmp/telemetry',
+  requireRoles(SNMP_READ_ROLES),
+  asyncHandler(async (req, res) => {
+    res.json(await getSnmpTelemetryForTenant(tenantIdFromRequest(req)));
+  }),
+);
+
+router.get(
   '/api/snmp/run',
   requireRoles(['super admin', 'administrador', 'tecnico']),
-  asyncHandler(async (_req, res) => {
-    res.json(await runPollCycle());
+  asyncHandler(async (req, res) => {
+    res.json(await runPollCycle(tenantIdFromRequest(req)));
   }),
 );
 

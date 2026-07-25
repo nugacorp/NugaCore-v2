@@ -8,17 +8,26 @@ import { store } from '../../state/store';
 import { decryptSecret } from '../../services/crypto';
 import { getEnrollmentRepository } from '../router-enrollment/repository';
 import type { RouterEnrollmentSnmpSnapshot } from '../router-enrollment/types';
+import { filterRoutersByTenant, resolveRouterTenantId } from '../mikrotik/tenant-filter';
+import { resolveRecordTenantId } from '../tenancy/tenant-scope';
 import { snmpGetV2c, SNMP_OIDS } from './client';
 import type {
   SnmpPollCycleResult,
   SnmpPollerStatus,
   SnmpPollResult,
   SnmpTarget,
+  SnmpTelemetryResponse,
+  SnmpTelemetryRouterView,
 } from './types';
 
 let lastCycle: SnmpPollCycleResult | null = null;
 let timer: ReturnType<typeof setInterval> | null = null;
-const latestByRouterId = new Map<string, SnmpPollResult>();
+// Clave compuesta tenantId::routerId. Los IDs de router se reciclan tras un
+// borrado (getUniqueMikrotikRouterId parte de length+1), así que indexar solo
+// por routerId filtraría telemetría de un WISP anterior bajo un ID reutilizado.
+const latestByKey = new Map<string, SnmpPollResult>();
+
+const cacheKey = (tenantId: string, routerId: string): string => `${tenantId}::${routerId}`;
 
 export const isSnmpPollerEnabled = (): boolean =>
   (process.env.SNMP_POLLER_ENABLED || 'false').trim().toLowerCase() === 'true';
@@ -37,9 +46,19 @@ const decryptCommunity = (snap?: RouterEnrollmentSnmpSnapshot): string | null =>
   }
 };
 
-export const buildSnmpTargets = async (): Promise<SnmpTarget[]> => {
+/**
+ * Construye los targets SNMP. Con `tenantId` queda estrictamente segmentado
+ * al WISP: solo enrollments de ese tenant Y cuyo router pertenece al mismo
+ * tenant (guard cruzado defensivo). Sin `tenantId` recorre todo (uso interno
+ * del poller de infraestructura).
+ */
+export const buildSnmpTargets = async (tenantId?: string): Promise<SnmpTarget[]> => {
   const repo = getEnrollmentRepository();
-  const enrollments = await repo.list();
+  const enrollments = await repo.list(tenantId);
+  const scopedRouters = tenantId
+    ? filterRoutersByTenant(store.MIKROTIK_ROUTERS, tenantId)
+    : store.MIKROTIK_ROUTERS;
+  const routerById = new Map(scopedRouters.map((r) => [r.id, r]));
   const targets: SnmpTarget[] = [];
 
   for (const enr of enrollments) {
@@ -47,12 +66,21 @@ export const buildSnmpTargets = async (): Promise<SnmpTarget[]> => {
     const community = decryptCommunity(enr.snmpSnapshot);
     if (!community) continue;
 
-    const router = store.MIKROTIK_ROUTERS.find((r) => r.id === enr.routerId);
+    const router = routerById.get(enr.routerId);
+    // Aislamiento: con tenant, el router debe pertenecer al mismo WISP.
+    if (tenantId && !router) continue;
     const host = router?.vpnIp || enr.routerSnapshot?.vpnIp;
     if (!host) continue;
 
+    // Tenant efectivo: preferimos el del router; si no hay (poller global sin
+    // router hidratado) caemos al del enrollment. Nunca queda sin estampar.
+    const effectiveTenantId = router
+      ? resolveRouterTenantId(router)
+      : resolveRecordTenantId(enr.tenantId);
+
     targets.push({
       id: `snmp-${enr.routerId}`,
+      tenantId: effectiveTenantId,
       routerId: enr.routerId,
       name: router?.name || enr.routerSnapshot?.routerName || enr.routerId,
       host: host.replace(/\/\d+$/, ''),
@@ -72,6 +100,7 @@ const pollOneTarget = async (target: SnmpTarget): Promise<SnmpPollResult> => {
   if (!isSnmpPollerEnabled()) {
     return {
       targetId: target.id,
+      tenantId: target.tenantId,
       routerId: target.routerId,
       name: target.name,
       source: 'disabled',
@@ -89,6 +118,7 @@ const pollOneTarget = async (target: SnmpTarget): Promise<SnmpPollResult> => {
     const sysUpTime = read.values.get(SNMP_OIDS.sysUpTime);
     return {
       targetId: target.id,
+      tenantId: target.tenantId,
       routerId: target.routerId,
       name: target.name,
       source: 'snmp-live',
@@ -106,6 +136,7 @@ const pollOneTarget = async (target: SnmpTarget): Promise<SnmpPollResult> => {
 
   return {
     targetId: target.id,
+    tenantId: target.tenantId,
     routerId: target.routerId,
     name: target.name,
     source: 'simulated',
@@ -117,17 +148,17 @@ const pollOneTarget = async (target: SnmpTarget): Promise<SnmpPollResult> => {
   };
 };
 
-export async function runPollCycle(): Promise<SnmpPollCycleResult> {
+export async function runPollCycle(tenantId?: string): Promise<SnmpPollCycleResult> {
   const startedAt = nowIso();
   const cycleId = `snmp-poll-${Date.now()}`;
-  const targets = await buildSnmpTargets();
+  const targets = await buildSnmpTargets(tenantId);
   const results: SnmpPollResult[] = [];
 
   for (const target of targets) {
     try {
       const result = await pollOneTarget(target);
       results.push(result);
-      latestByRouterId.set(target.routerId, result);
+      latestByKey.set(cacheKey(target.tenantId, target.routerId), result);
     } catch (err) {
       logger.warn('SNMP poller: fallo en target', {
         targetId: target.id,
@@ -135,6 +166,7 @@ export async function runPollCycle(): Promise<SnmpPollCycleResult> {
       });
       const fallback: SnmpPollResult = {
         targetId: target.id,
+        tenantId: target.tenantId,
         routerId: target.routerId,
         name: target.name,
         source: 'simulated',
@@ -144,7 +176,7 @@ export async function runPollCycle(): Promise<SnmpPollCycleResult> {
         note: 'poll_error',
       };
       results.push(fallback);
-      latestByRouterId.set(target.routerId, fallback);
+      latestByKey.set(cacheKey(target.tenantId, target.routerId), fallback);
     }
   }
 
@@ -156,7 +188,9 @@ export async function runPollCycle(): Promise<SnmpPollCycleResult> {
     targetsPolled: results.length,
     results,
   };
-  lastCycle = finished;
+  // Solo el ciclo global (poller de infraestructura) actualiza el snapshot
+  // compartido. Una corrida por tenant no debe pisar el estado de otros WISP.
+  if (!tenantId) lastCycle = finished;
   return finished;
 }
 
@@ -166,8 +200,71 @@ export const getSnmpPollerStatus = (): SnmpPollerStatus => ({
   lastCycle,
 });
 
-export const getLatestSnmpResultForRouter = (routerId: string): SnmpPollResult | null =>
-  latestByRouterId.get(routerId) ?? null;
+/**
+ * Estado del poller filtrado al WISP: el `lastCycle` global se recorta a los
+ * routers del tenant para no filtrar resultados de otros WISP.
+ */
+export const getSnmpPollerStatusForTenant = async (
+  tenantId: string,
+): Promise<SnmpPollerStatus> => {
+  const status = getSnmpPollerStatus();
+  if (!status.lastCycle) return status;
+  // El tenantId estampado en cada resultado es autoritativo (inmune a IDs de
+  // router reciclados). Filtramos por él, no por routerId.
+  const results = status.lastCycle.results.filter((r) => r.tenantId === tenantId);
+  return {
+    ...status,
+    lastCycle: { ...status.lastCycle, results, targetsPolled: results.length },
+  };
+};
+
+/**
+ * Telemetría SNMP tenant-scoped para la vista operativa del WISP. Devuelve una
+ * vista saneada por router (sin community) derivada de la última muestra.
+ */
+export const getSnmpTelemetryForTenant = async (
+  tenantId: string,
+): Promise<SnmpTelemetryResponse> => {
+  const targets = await buildSnmpTargets(tenantId);
+  const routers: SnmpTelemetryRouterView[] = targets.map((target) => {
+    const latest = latestByKey.get(cacheKey(target.tenantId, target.routerId));
+    if (!latest) {
+      return {
+        routerId: target.routerId,
+        name: target.name,
+        source: 'pending',
+        isReachable: false,
+        fresh: false,
+        note: 'sin_muestra',
+      };
+    }
+    return {
+      routerId: target.routerId,
+      name: target.name,
+      source: latest.source,
+      isReachable: latest.isReachable,
+      fresh: isSnmpResultFresh(latest),
+      sysName: latest.sysName,
+      sysUpTime: latest.sysUpTime,
+      latencyMs: latest.latencyMs,
+      sampledAt: latest.sampledAt,
+      note: latest.note,
+    };
+  });
+
+  return {
+    enabled: isSnmpPollerEnabled(),
+    intervalMs: snmpPollerIntervalMs(),
+    generatedAt: nowIso(),
+    total: routers.length,
+    routers,
+  };
+};
+
+export const getLatestSnmpResultForRouter = (
+  tenantId: string,
+  routerId: string,
+): SnmpPollResult | null => latestByKey.get(cacheKey(tenantId, routerId)) ?? null;
 
 export const isSnmpResultFresh = (result: SnmpPollResult | null): boolean => {
   if (!result || result.source !== 'snmp-live' || !result.isReachable) return false;
@@ -205,5 +302,5 @@ export const _resetSnmpPollerForTests = (): void => {
   if (timer) clearInterval(timer);
   timer = null;
   lastCycle = null;
-  latestByRouterId.clear();
+  latestByKey.clear();
 };
