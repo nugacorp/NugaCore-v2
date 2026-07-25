@@ -49,3 +49,27 @@ export interface SnmpPollerStatus {
   intervalMs: number;
   lastCycle: SnmpPollCycleResult | null;
 }
+
+/** Vista saneada por router para la UI operativa del WISP (sin community). */
+export interface SnmpTelemetryRouterView {
+  routerId: string;
+  name: string;
+  source: SnmpPollSource | 'pending';
+  isReachable: boolean;
+  /** true si la última muestra es live y suficientemente reciente. */
+  fresh: boolean;
+  sysName?: string;
+  sysUpTime?: string;
+  latencyMs?: number;
+  sampledAt?: string;
+  note?: string;
+}
+
+/** Respuesta tenant-scoped de telemetría SNMP para la operación del WISP. */
+export interface SnmpTelemetryResponse {
+  enabled: boolean;
+  intervalMs: number;
+  generatedAt: string;
+  total: number;
+  routers: SnmpTelemetryRouterView[];
+}

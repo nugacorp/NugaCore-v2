@@ -1,6 +1,6 @@
 import React, { useCallback, useEffect, useState } from 'react';
 import { createAuthorizedApi } from '../lib/apiClient';
-import { Activity, AlertTriangle, Cpu, Lock, RadioTower, ShieldAlert, Wifi, WifiOff } from 'lucide-react';
+import { Activity, AlertTriangle, Cpu, Gauge, Lock, RadioTower, ShieldAlert, Wifi, WifiOff } from 'lucide-react';
 
 // ====================================================================
 // NOC Real Telemetry (Fase 4.11.3) — vista READ-ONLY.
@@ -53,11 +53,53 @@ interface NocDerivedAlert {
   observedAt?: string;
 }
 
+// Telemetría SNMP tenant-scoped: cada WISP solo ve sus propios routers.
+type SnmpSource = 'snmp-live' | 'simulated' | 'disabled' | 'pending';
+
+interface SnmpTelemetryRouterView {
+  routerId: string;
+  name: string;
+  source: SnmpSource;
+  isReachable: boolean;
+  fresh: boolean;
+  sysName?: string;
+  sysUpTime?: string;
+  latencyMs?: number;
+  sampledAt?: string;
+  note?: string;
+}
+
+interface SnmpTelemetryResponse {
+  enabled: boolean;
+  intervalMs: number;
+  generatedAt: string;
+  total: number;
+  routers: SnmpTelemetryRouterView[];
+}
+
 interface Props {
   getAuthHeaders: () => Promise<Record<string, string>>;
 }
 
 const dash = (value?: string): string => (value && value.trim() !== '' ? value : '—');
+
+const snmpBadge = (
+  router: SnmpTelemetryRouterView,
+): { label: string; className: string } => {
+  if (router.source === 'snmp-live' && router.fresh) {
+    return { label: 'En vivo', className: 'bg-emerald-500/15 text-emerald-400 border-emerald-500/20' };
+  }
+  if (router.source === 'snmp-live') {
+    return { label: 'Reciente', className: 'bg-amber-500/15 text-amber-400 border-amber-500/20' };
+  }
+  if (router.source === 'pending') {
+    return { label: 'Sin muestra', className: 'bg-slate-700/40 text-slate-400 border-slate-600/30' };
+  }
+  if (router.source === 'disabled') {
+    return { label: 'Poller off', className: 'bg-slate-700/40 text-slate-400 border-slate-600/30' };
+  }
+  return { label: 'Sin respuesta', className: 'bg-rose-500/15 text-rose-400 border-rose-500/20' };
+};
 
 const healthBadgeClass: Record<NocRouterView['healthStatus'], string> = {
   healthy: 'bg-emerald-500/15 text-emerald-400 border-emerald-500/20',
@@ -75,6 +117,7 @@ export default function NocTelemetryModule({ getAuthHeaders }: Props) {
   const [towers, setTowers] = useState<NocTowerTelemetry[]>([]);
   const [routers, setRouters] = useState<NocRouterView[]>([]);
   const [alerts, setAlerts] = useState<NocDerivedAlert[]>([]);
+  const [snmp, setSnmp] = useState<SnmpTelemetryResponse | null>(null);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState('');
 
@@ -83,17 +126,19 @@ export default function NocTelemetryModule({ getAuthHeaders }: Props) {
     setError('');
     try {
       const api = createAuthorizedApi(getAuthHeaders);
-      const [healthData, towersData, routersData, alertsData] = await Promise.all([
+      const [healthData, towersData, routersData, alertsData, snmpData] = await Promise.all([
         api.get<NocHealthSummary>('/api/noc/health'),
         api.get<NocTowerTelemetry[]>('/api/noc/towers'),
         api.get<NocRouterView[]>('/api/noc/routers'),
         api.get<NocDerivedAlert[]>('/api/noc/alerts'),
+        api.get<SnmpTelemetryResponse>('/api/snmp/telemetry'),
       ]);
 
       setHealth(healthData);
       setTowers(towersData);
       setRouters(routersData);
       setAlerts(alertsData);
+      setSnmp(snmpData);
     } catch (err) {
       setError(err instanceof Error ? err.message : 'Error desconocido cargando telemetría NOC.');
     } finally {
@@ -271,6 +316,65 @@ export default function NocTelemetryModule({ getAuthHeaders }: Props) {
           </div>
         </div>
       )}
+
+      <div
+        data-testid="snmp-telemetry-section"
+        className="bg-slate-900/70 border border-slate-800 rounded-xl overflow-hidden"
+      >
+        <div className="px-4 py-3 border-b border-slate-800 flex items-center justify-between gap-2">
+          <div className="flex items-center gap-2 text-sm text-slate-300 font-medium">
+            <Gauge className="w-4 h-4 text-indigo-400" />
+            <span>Telemetría SNMP</span>
+          </div>
+          <span className="text-[11px] text-slate-500 font-mono">
+            {snmp?.enabled ? `poller cada ${Math.round((snmp.intervalMs ?? 0) / 1000)}s` : 'poller deshabilitado'}
+          </span>
+        </div>
+
+        {loading ? (
+          <div className="py-14 text-center text-sm text-slate-500">Cargando telemetría SNMP...</div>
+        ) : !snmp || snmp.routers.length === 0 ? (
+          <div className="py-14 text-center text-sm text-slate-500">
+            No hay routers con SNMP configurado para este WISP.
+          </div>
+        ) : (
+          <div className="overflow-x-auto">
+            <table className="w-full text-sm">
+              <thead className="bg-slate-950/60 text-slate-400 text-xs uppercase">
+                <tr>
+                  <th className="text-left px-4 py-3 font-medium">Router</th>
+                  <th className="text-left px-4 py-3 font-medium">sysName</th>
+                  <th className="text-left px-4 py-3 font-medium">sysUpTime</th>
+                  <th className="text-left px-4 py-3 font-medium">Latencia</th>
+                  <th className="text-left px-4 py-3 font-medium">Estado</th>
+                  <th className="text-left px-4 py-3 font-medium">Última muestra</th>
+                </tr>
+              </thead>
+              <tbody className="divide-y divide-slate-800">
+                {snmp.routers.map((router) => {
+                  const badge = snmpBadge(router);
+                  return (
+                    <tr key={router.routerId} data-testid={`snmp-tel-${router.routerId}`} className="hover:bg-slate-850/40">
+                      <td className="px-4 py-3 font-medium text-slate-200">{router.name}</td>
+                      <td className="px-4 py-3 text-slate-300">{dash(router.sysName)}</td>
+                      <td className="px-4 py-3 font-mono text-xs text-slate-300">{dash(router.sysUpTime)}</td>
+                      <td className="px-4 py-3 text-slate-300">
+                        {typeof router.latencyMs === 'number' ? `${router.latencyMs} ms` : '—'}
+                      </td>
+                      <td className="px-4 py-3">
+                        <span className={`px-2 py-0.5 rounded text-[10px] border uppercase ${badge.className}`}>
+                          {badge.label}
+                        </span>
+                      </td>
+                      <td className="px-4 py-3 font-mono text-xs text-slate-300">{dash(router.sampledAt)}</td>
+                    </tr>
+                  );
+                })}
+              </tbody>
+            </table>
+          </div>
+        )}
+      </div>
 
       <p className="text-xs text-slate-500 flex items-center gap-2">
         <Cpu className="w-3.5 h-3.5" />
