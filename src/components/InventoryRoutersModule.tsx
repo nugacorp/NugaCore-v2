@@ -17,6 +17,7 @@ import {
 } from 'lucide-react';
 import type { UserRole } from '../lib/supabase';
 import { canStartEnrollment, canRevokeEnrollment } from '../lib/enrollmentRbac';
+import { snmpBadge, type SnmpTelemetryRouterView, type SnmpTelemetryResponse } from '../lib/snmpTelemetry';
 import RouterOnboardingWizard from './RouterOnboardingWizard';
 
 // ====================================================================
@@ -103,6 +104,7 @@ export default function InventoryRoutersModule({
   const [routers, setRouters] = useState<InventoryRouterView[]>([]);
   const [summary, setSummary] = useState<InventorySummary | null>(null);
   const [enrollmentByRouter, setEnrollmentByRouter] = useState<Record<string, EnrollmentListItem>>({});
+  const [snmpByRouter, setSnmpByRouter] = useState<Record<string, SnmpTelemetryRouterView>>({});
   const [loading, setLoading] = useState(true);
   const [actionId, setActionId] = useState<string>('');
   const [actionLabel, setActionLabel] = useState<string>('');
@@ -146,6 +148,17 @@ export default function InventoryRoutersModule({
         }
       } else {
         setEnrollmentByRouter({});
+      }
+
+      // Telemetría SNMP tenant-scoped: aislada para que un fallo del poller
+      // no rompa el inventario. Mapea por routerId.
+      try {
+        const snmp = await api.get<SnmpTelemetryResponse>('/api/snmp/telemetry');
+        const smap: Record<string, SnmpTelemetryRouterView> = {};
+        for (const r of snmp.routers) smap[r.routerId] = r;
+        setSnmpByRouter(smap);
+      } catch {
+        setSnmpByRouter({});
       }
     } catch (err) {
       setError(err instanceof Error ? err.message : 'Error desconocido al cargar el inventario.');
@@ -449,6 +462,7 @@ export default function InventoryRoutersModule({
                   <th className="text-left px-4 py-3 font-medium">IP VPN</th>
                   <th className="text-left px-4 py-3 font-medium">API</th>
                   <th className="text-left px-4 py-3 font-medium">RouterOS</th>
+                  <th className="text-left px-4 py-3 font-medium">SNMP</th>
                   <th className="text-left px-4 py-3 font-medium">Last seen</th>
                   {(canEnroll || canDelete) && (
                     <th className="text-right px-4 py-3 font-medium sticky right-0 bg-slate-950/90">
@@ -496,6 +510,28 @@ export default function InventoryRoutersModule({
                       <td className="px-4 py-3 font-mono text-xs text-slate-300">{dash(router.vpnIp)}</td>
                       <td className="px-4 py-3 font-mono text-xs text-slate-400">{router.apiPort}</td>
                       <td className="px-4 py-3 text-slate-300">{dash(router.routerOsVersion)}</td>
+                      <td className="px-4 py-3" data-testid={`snmp-inv-${router.id}`}>
+                        {(() => {
+                          const tel = snmpByRouter[router.id];
+                          const badge = snmpBadge(tel);
+                          return (
+                            <div className="flex flex-col gap-0.5">
+                              <span
+                                className={`inline-flex w-fit px-2 py-0.5 rounded text-[10px] border uppercase ${badge.className}`}
+                                title="Telemetría SNMP del router (solo tu WISP)"
+                              >
+                                {badge.label}
+                              </span>
+                              {tel && (tel.sysName || typeof tel.latencyMs === 'number') && (
+                                <span className="text-[11px] text-slate-500 font-mono">
+                                  {dash(tel.sysName)}
+                                  {typeof tel.latencyMs === 'number' ? ` · ${tel.latencyMs}ms` : ''}
+                                </span>
+                              )}
+                            </div>
+                          );
+                        })()}
+                      </td>
                       <td className="px-4 py-3 font-mono text-xs text-slate-400">{dash(router.lastSeenAt)}</td>
                       {(canEnroll || canDelete) && (
                         <td className="px-4 py-3 sticky right-0 bg-slate-900/95">

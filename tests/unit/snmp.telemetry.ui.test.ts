@@ -18,7 +18,11 @@ describe('SNMP telemetry UI contract (tenant-scoped)', () => {
     expect(moduleSource).toContain('sysName');
     expect(moduleSource).toContain('sysUpTime');
     expect(moduleSource).toContain('latencyMs');
-    expect(moduleSource).toMatch(/fresh|frescura|En vivo|Reciente/);
+  });
+
+  it('usa el badge SNMP compartido (sin duplicar la lógica de estado)', () => {
+    expect(moduleSource).toContain("from '../lib/snmpTelemetry'");
+    expect(moduleSource).toContain('snmpBadge(');
   });
 
   it('no ejecuta operaciones de escritura', () => {
