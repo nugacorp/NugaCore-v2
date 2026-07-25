@@ -10,12 +10,15 @@
 //   - backward compat: sin templateId usa router_base_wireguard
 // ====================================================================
 
-import { describe, it, expect, beforeAll } from 'vitest';
+import { describe, it, expect, beforeAll, vi } from 'vitest';
 import request from 'supertest';
 import type { Express } from 'express';
 import { createApp } from '../../backend/app';
-import { enrollmentRepository } from '../../backend/domains/router-enrollment/repository';
-import { resetWireguardService } from '../../backend/domains/wireguard/service';
+import {
+  enrollmentRepository,
+  StoreRouterEnrollmentRepository,
+} from '../../backend/domains/router-enrollment/repository';
+import { getWireguardService, resetWireguardService } from '../../backend/domains/wireguard/service';
 import { ENROLLMENT_SUPPORTED_TEMPLATES } from '../../backend/domains/router-enrollment/template-mapper';
 import { store } from '../../backend/state/store';
 
@@ -604,5 +607,23 @@ describe('Factory onboarding — nugacore_factory_onboarding', () => {
     expect(res.body.snmpCommunity).toMatch(/^nc-/);
     expect(res.body.enrollment.snmpSnapshot?.hasEncryptedSecrets).toBe(true);
     expect(res.body.enrollment.snmpSnapshot?.encryptedCommunity).toBeUndefined();
+  });
+
+  it('revoca peer y elimina router si falla la persistencia del enrollment', async () => {
+    const wgService = getWireguardService();
+    const activeBefore = (await wgService.listPeers({ serverId, status: 'active' })).length;
+    const routersBefore = store.MIKROTIK_ROUTERS.length;
+    const createSpy = vi
+      .spyOn(StoreRouterEnrollmentRepository.prototype, 'create')
+      .mockRejectedValueOnce(new Error('forced enrollment persistence failure'));
+
+    try {
+      const res = await startEnrollment(app, serverId, 'nugacore_factory_onboarding');
+      expect(res.status).toBe(500);
+      expect((await wgService.listPeers({ serverId, status: 'active' })).length).toBe(activeBefore);
+      expect(store.MIKROTIK_ROUTERS).toHaveLength(routersBefore);
+    } finally {
+      createSpy.mockRestore();
+    }
   });
 });
