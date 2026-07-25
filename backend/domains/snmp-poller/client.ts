@@ -33,10 +33,12 @@ const encodeString = (value: string): Buffer => {
   return Buffer.from([0x04, bytes.length, ...bytes]);
 };
 
-const encodeSequence = (items: Buffer[]): Buffer => {
+const encodeConstructed = (tag: number, items: Buffer[]): Buffer => {
   const body = Buffer.concat(items);
-  return Buffer.from([0x30, body.length, ...body]);
+  return Buffer.from([tag, body.length, ...body]);
 };
+
+const encodeSequence = (items: Buffer[]): Buffer => encodeConstructed(0x30, items);
 
 const buildGetRequest = (community: string, oids: string[], requestId: number): Buffer => {
   const id = Buffer.from([0x02, 0x01, requestId & 0xff]);
@@ -47,8 +49,7 @@ const buildGetRequest = (community: string, oids: string[], requestId: number): 
     pduChildren.push(encodeSequence([encodeOid(oid), Buffer.from([0x05, 0x00])])); // null value
   }
   const varbindList = encodeSequence(pduChildren);
-  const pdu = encodeSequence([
-    Buffer.from([0x02, 0x01, 0xa0]), // GET request
+  const pdu = encodeConstructed(0xa0, [
     id,
     Buffer.from([0x02, 0x01, 0x00]), // error-status
     Buffer.from([0x02, 0x01, 0x00]), // error-index

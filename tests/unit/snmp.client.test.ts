@@ -18,6 +18,29 @@ const encodeLength = (length: number): Buffer => {
 const tlv = (tag: number, body: Buffer): Buffer =>
   Buffer.concat([Buffer.from([tag]), encodeLength(body.length), body]);
 
+const readTlv = (packet: Buffer, offset: number): { tag: number; bodyStart: number; end: number } => {
+  const tag = packet[offset];
+  const firstLength = packet[offset + 1];
+  if (firstLength < 0x80) {
+    const bodyStart = offset + 2;
+    return { tag, bodyStart, end: bodyStart + firstLength };
+  }
+  const lengthBytes = firstLength & 0x7f;
+  let length = 0;
+  for (let i = 0; i < lengthBytes; i += 1) {
+    length = (length << 8) + packet[offset + 2 + i];
+  }
+  const bodyStart = offset + 2 + lengthBytes;
+  return { tag, bodyStart, end: bodyStart + length };
+};
+
+const readRequestPduTag = (packet: Buffer): number => {
+  const message = readTlv(packet, 0);
+  const version = readTlv(packet, message.bodyStart);
+  const community = readTlv(packet, version.end);
+  return readTlv(packet, community.end).tag;
+};
+
 const integer = (value: number): Buffer => tlv(0x02, Buffer.from([value]));
 
 const oidBody = (oid: string): Buffer => {
@@ -61,6 +84,31 @@ afterEach(() => {
 });
 
 describe('SNMPv2c client', () => {
+  it('codifica el GetRequest como PDU BER con tag 0xA0', async () => {
+    const server = dgram.createSocket('udp4');
+    sockets.push(server);
+    await new Promise<void>((resolve) => server.bind(0, '127.0.0.1', resolve));
+    const address = server.address();
+    if (typeof address === 'string') throw new Error('Se esperaba una dirección UDP IPv4.');
+
+    let requestPduTag = -1;
+    const response = buildResponse();
+    server.on('message', (message, remote) => {
+      requestPduTag = readRequestPduTag(message);
+      server.send(response, remote.port, remote.address);
+    });
+
+    await snmpGetV2c(
+      '127.0.0.1',
+      'test-community',
+      [SNMP_OIDS.sysUpTime, SNMP_OIDS.sysName],
+      1_000,
+      address.port,
+    );
+
+    expect(requestPduTag).toBe(0xa0);
+  });
+
   it('decodifica sysUpTime y sysName de una respuesta GetResponse válida', async () => {
     const server = dgram.createSocket('udp4');
     sockets.push(server);
