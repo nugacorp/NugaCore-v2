@@ -71,13 +71,16 @@ const parseVarbindValue = (buf: Buffer, offset: number): { value: string; next: 
   const tag = buf[offset];
   const { length, next } = readLength(buf, offset + 1);
   const data = buf.subarray(next, next + length);
+  const readUnsigned = (): number => {
+    let value = 0;
+    for (const byte of data) value = value * 256 + byte;
+    return value;
+  };
   if (tag === 0x04 || tag === 0x41) return { value: data.toString('utf8'), next: next + length };
   if (tag === 0x02) {
-    let n = 0;
-    for (const b of data) n = (n << 8) + b;
-    return { value: String(n), next: next + length };
+    return { value: String(readUnsigned()), next: next + length };
   }
-  if (tag === 0x43) return { value: String(data.readUInt32BE(0)), next: next + length };
+  if (tag === 0x43) return { value: String(readUnsigned()), next: next + length };
   return { value: data.toString('hex'), next: next + length };
 };
 
