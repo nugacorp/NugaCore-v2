@@ -25,7 +25,7 @@ import { getSuspensionService } from '../suspension/service';
 import { inventoryRoutersRepository } from '../inventory/routers/repository';
 import { store } from '../../state/store';
 import { buildPaymentDataProvider } from './data-provider';
-import { getProvider } from './providers/index';
+import { resolveProvider } from './providers/index';
 import {
   StorePaymentRepository,
   SupabasePaymentRepository,
@@ -100,7 +100,8 @@ export class PaymentService {
       );
     }
 
-    const providerImpl = getProvider(provider);
+    // Credenciales del WISP dueño de la order (OpenPay/SPEI); sin ellas, simulado.
+    const providerImpl = await resolveProvider(provider, tenantId);
 
     const id = await this.repo.nextOrderId();
     const now = nowIso();
