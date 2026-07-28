@@ -7,7 +7,7 @@ import { PaymentProvider } from '../types';
 import { ManualProvider } from './manual.provider';
 import { MercadoPagoProvider } from './mercadopago.provider';
 import { OpenPayProvider } from './openpay.provider';
-import { resolveOpenPayConfig } from './openpay-config';
+import { resolveOpenPayConfig, type OpenPayResolvedConfig } from './openpay-config';
 import { CodiProvider } from './codi.provider';
 
 // ── Interfaz desacoplada ──────────────────────────────────────────────
@@ -67,6 +67,13 @@ export const getProvider = (name: PaymentProvider): IPaymentProvider => {
   return p;
 };
 
+/** Instancia OpenPay con una config ya resuelta (evita releer la fila del WISP). */
+export const buildOpenPayProvider = (
+  config: OpenPayResolvedConfig,
+  name: PaymentProvider = 'openpay',
+): IPaymentProvider =>
+  new OpenPayProvider(name, name === 'spei' ? 'bank_account' : 'card', config);
+
 /**
  * Provider del WISP activo. OpenPay (tarjeta y SPEI) se construye por petición
  * con las credenciales de la fila de integraciones del tenant; el resto de
@@ -77,8 +84,7 @@ export const resolveProvider = async (
   tenantId?: string,
 ): Promise<IPaymentProvider> => {
   if (name === 'openpay' || name === 'spei') {
-    const config = await resolveOpenPayConfig(tenantId);
-    return new OpenPayProvider(name, name === 'spei' ? 'bank_account' : 'card', config);
+    return buildOpenPayProvider(await resolveOpenPayConfig(tenantId), name);
   }
   return getProvider(name);
 };

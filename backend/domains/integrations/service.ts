@@ -9,6 +9,7 @@ import { getPaymentService } from '../payments/service';
 import {
   applyIntegrationPatch,
   IntegrationsRepository,
+  OpenPayWebhookOwner,
   StoreIntegrationsRepository,
   SupabaseIntegrationsRepository,
 } from './repository';
@@ -35,6 +36,22 @@ export class IntegrationsService {
 
   async getSettingsRaw(tenantId?: string) {
     return this.repo.get(tenantId);
+  }
+
+  /**
+   * WISP dueño del token de webhook OpenPay. La resolución es exacta: un token
+   * desconocido devuelve null, nunca la fila 'default' ni otro tenant.
+   */
+  async resolveOpenPayWebhookTenant(token: string): Promise<OpenPayWebhookOwner | null> {
+    try {
+      return await this.repo.findByOpenPayWebhookToken(token);
+    } catch (error) {
+      // Fail-closed: sin lookup fiable no se acepta el webhook. Nunca el token.
+      logger.warn('Integrations: no se pudo resolver el WISP del webhook OpenPay', {
+        reason: error instanceof Error ? error.message : 'error desconocido',
+      });
+      return null;
+    }
   }
 
   async updateSettings(patch: IntegrationSettingsPatch, tenantId?: string) {
@@ -146,6 +163,8 @@ export class IntegrationsService {
       providerEventId: eventId,
       eventType,
       payload: { ...payload, amount, reference, status: 'paid' },
+      // Idempotencia y búsqueda de order acotadas al WISP que recibe el evento.
+      tenantId,
     });
 
     return { accepted: true, ...result };
