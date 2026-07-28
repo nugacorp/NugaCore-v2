@@ -1,11 +1,16 @@
 import type { SupabaseClient } from '@supabase/supabase-js';
 import { store } from '../../state/store';
 import type { IntegrationSettingsPatch, IntegrationSettingsRecord } from './types';
+import { logger } from '../../common/logger';
 import { nowIso } from '../../common/time';
 import { encryptSecret, decryptSecret } from '../../services/crypto';
 import { DEFAULT_TENANT_ID } from '../tenancy/types';
 
 const DEFAULT_ID = 'default';
+
+/** Inverso de `resolveSettingsId`: la fila legacy 'default' es el tenant por defecto. */
+const tenantIdForSettingsId = (id: string): string =>
+  id === DEFAULT_ID ? DEFAULT_TENANT_ID : id;
 
 /**
  * Fila de settings del WISP. tenant-default (o ausencia de tenant) mapea a la
@@ -128,9 +133,20 @@ const recordToRow = (rec: IntegrationSettingsRecord) => ({
   updated_at: rec.updatedAt,
 });
 
+/** WISP dueño de un token de webhook, con su fila de settings. */
+export interface OpenPayWebhookOwner {
+  tenantId: string;
+  settings: IntegrationSettingsRecord;
+}
+
 export interface IntegrationsRepository {
   get(tenantId?: string): Promise<IntegrationSettingsRecord>;
   save(rec: IntegrationSettingsRecord, tenantId?: string): Promise<IntegrationSettingsRecord>;
+  /**
+   * Resuelve el WISP dueño de un token de webhook OpenPay. Devuelve null si el
+   * token no existe: nunca cae a otro tenant ni a la fila 'default'.
+   */
+  findByOpenPayWebhookToken(token: string): Promise<OpenPayWebhookOwner | null>;
 }
 
 export class StoreIntegrationsRepository implements IntegrationsRepository {
@@ -138,6 +154,17 @@ export class StoreIntegrationsRepository implements IntegrationsRepository {
     const id = resolveSettingsId(tenantId);
     if (id === DEFAULT_ID) return store.INTEGRATION_SETTINGS ?? emptyIntegrationSettings();
     return store.INTEGRATION_SETTINGS_BY_TENANT[id] ?? { ...emptyIntegrationSettings(), id };
+  }
+
+  async findByOpenPayWebhookToken(token: string): Promise<OpenPayWebhookOwner | null> {
+    const needle = String(token ?? '').trim();
+    if (!needle) return null;
+    const rows: IntegrationSettingsRecord[] = [
+      store.INTEGRATION_SETTINGS ?? emptyIntegrationSettings(),
+      ...Object.values(store.INTEGRATION_SETTINGS_BY_TENANT),
+    ];
+    const match = rows.find((rec) => Boolean(rec.openpayWebhookToken) && rec.openpayWebhookToken === needle);
+    return match ? { tenantId: tenantIdForSettingsId(match.id), settings: match } : null;
   }
 
   async save(rec: IntegrationSettingsRecord, tenantId?: string): Promise<IntegrationSettingsRecord> {
@@ -169,6 +196,28 @@ export class SupabaseIntegrationsRepository implements IntegrationsRepository {
       throw error;
     }
     return data ? rowToRecord(data as Record<string, unknown>) : { ...emptyIntegrationSettings(), id };
+  }
+
+  async findByOpenPayWebhookToken(token: string): Promise<OpenPayWebhookOwner | null> {
+    const needle = String(token ?? '').trim();
+    if (!needle) return null;
+    // `limit(2)`: si por alguna razón dos WISPs comparten token, no se elige uno
+    // arbitrariamente — se rechaza (fail-closed). El índice único lo previene.
+    const { data, error } = await this.admin
+      .from('wisp_integration_settings')
+      .select('*')
+      .eq('openpay_webhook_token', needle)
+      .limit(2);
+    if (error) {
+      // Jamás se registra el token; solo el motivo.
+      logger.warn('Integrations: lookup de token de webhook OpenPay falló', {
+        reason: String(error.message || error.code || 'error desconocido'),
+      });
+      return null;
+    }
+    if (!data || data.length !== 1) return null;
+    const rec = rowToRecord(data[0] as Record<string, unknown>);
+    return { tenantId: tenantIdForSettingsId(rec.id), settings: rec };
   }
 
   async save(rec: IntegrationSettingsRecord, tenantId?: string): Promise<IntegrationSettingsRecord> {

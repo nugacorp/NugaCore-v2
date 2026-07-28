@@ -137,11 +137,15 @@ export class PaymentService {
 
   async processWebhook(input: ProcessWebhookInput): Promise<WebhookProcessResult> {
     const { provider, providerEventId, eventType, payload } = input;
+    // WISP dueño del evento: acota idempotencia y búsqueda de order. Sin él,
+    // el evento pertenece al WISP por defecto (single-WISP / legacy).
+    const tenantId = input.tenantId || 'tenant-default';
 
-    // Idempotencia: si ya existe el evento, responder OK sin duplicar
-    const existing = await this.repo.findEventByProviderId(provider, providerEventId);
+    // Idempotencia POR TENANT: dos merchants pueden reutilizar el mismo
+    // provider_event_id; solo colisiona dentro del mismo WISP.
+    const existing = await this.repo.findEventByProviderId(provider, providerEventId, tenantId);
     if (existing) {
-      logger.info('PaymentEngine: webhook ya procesado (idempotente)', { provider, providerEventId });
+      logger.info('PaymentEngine: webhook ya procesado (idempotente)', { provider, providerEventId, tenantId });
       return {
         eventId: existing.id,
         idempotent: true,
@@ -155,6 +159,7 @@ export class PaymentService {
     const eventId = await this.repo.nextEventId();
     const eventRec: PaymentEventRecord = {
       id: eventId,
+      tenantId,
       provider,
       providerEventId,
       eventType,
@@ -168,17 +173,18 @@ export class PaymentService {
     const isApproved = this.isApprovedEvent(eventType, payload);
     if (!isApproved) {
       await this.repo.markEventProcessed(eventId);
-      logger.info('PaymentEngine: webhook recibido (no aprobado, no acción)', { provider, eventType });
+      logger.info('PaymentEngine: webhook recibido (no aprobado, no acción)', { provider, eventType, tenantId });
       return {
         eventId, idempotent: false, invoiceUpdated: false,
         reactivationTriggered: false, message: 'Evento recibido, sin acción (no es aprobación de pago).',
       };
     }
 
-    // Buscar payment_order por providerOrderId
+    // Buscar payment_order por providerOrderId DENTRO del WISP del evento: un
+    // provider_order_id de otro merchant nunca puede completar esta order.
     const providerOrderId = this.extractProviderOrderId(provider, payload);
     const order = providerOrderId
-      ? await this.repo.findOrderByProviderOrderId(provider, providerOrderId)
+      ? await this.repo.findOrderByProviderOrderId(provider, providerOrderId, tenantId)
       : null;
 
     let invoiceUpdated = false;
@@ -212,7 +218,7 @@ export class PaymentService {
       const reference = String(payload.reference ?? payload.referencia ?? '').toUpperCase();
       if (reference) {
         const invoiceId = reference.split('-')[0];
-        const orders = await this.repo.listOrders({ invoiceId });
+        const orders = await this.repo.listOrders({ invoiceId, tenantId });
         const order = orders.find((o) => o.provider === 'codi') ?? orders[0];
         if (order) {
           const orderTenantId = order.tenantId || 'tenant-default';
@@ -236,9 +242,9 @@ export class PaymentService {
             message: 'Pago CoDi confirmado y cliente reactivado.',
           };
         }
-        // Sin order previa: intentar factura directa por referencia
+        // Sin order previa: intentar factura directa por referencia (del WISP).
         const billing = getBillingService();
-        const invoice = await billing.findInvoiceById(invoiceId);
+        const invoice = await billing.findInvoiceById(invoiceId, tenantId);
         if (invoice && invoice.status !== 'paid') {
           const invoiceTenantId = invoice.tenantId || 'tenant-default';
           const amount = Number(payload.amount ?? payload.monto ?? invoice.pendingAmount ?? invoice.amount);
@@ -269,7 +275,7 @@ export class PaymentService {
     } else {
       // Webhook de proveedor sin order registrada — guardar y continuar
       await this.repo.markEventProcessed(eventId);
-      logger.warn('PaymentEngine: webhook sin payment_order asociada', { provider, providerOrderId });
+      logger.warn('PaymentEngine: webhook sin payment_order asociada', { provider, providerOrderId, tenantId });
     }
 
     return {

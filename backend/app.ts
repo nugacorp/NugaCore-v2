@@ -2,6 +2,7 @@ import express from 'express';
 import { attachAuthContext } from './common/auth-context';
 import { errorHandler, notFoundHandler } from './common/errors';
 import { applyHttpSecurity } from './common/http-security';
+import { redactSensitivePath } from './common/log-redaction';
 import { logger } from './common/logger';
 import { enforceWispOnboarding } from './common/require-onboarding';
 import { attachRequestId } from './common/request-context';
@@ -20,7 +21,7 @@ export function createApp() {
 
   app.use(express.json({ limit: process.env.JSON_BODY_LIMIT || '100kb' }));
   app.use((req, _res, next) => {
-    (req.log ?? logger).info(`${req.method} ${req.path}`);
+    (req.log ?? logger).info(`${req.method} ${redactSensitivePath(req.path)}`);
     next();
   });
   app.use(attachAuthContext);

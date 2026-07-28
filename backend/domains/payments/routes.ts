@@ -11,15 +11,20 @@
 // Webhooks (sin auth — validar firma del proveedor):
 //   POST /api/payments/webhook/manual
 //   POST /api/payments/webhook/mercadopago
-//   POST /api/payments/webhook/openpay
+//   POST /api/payments/webhook/openpay          (legacy single-WISP)
+//   POST /api/payments/webhook/openpay/:token   (por WISP, T3)
 // ====================================================================
 
+import type { Request, Response } from 'express';
 import { Router } from 'express';
 import { AppRole, READ_ROLES, requireRoles } from '../../common/rbac';
 import { BadRequestError, NotFoundError, asyncHandler } from '../../common/errors';
 import { logger } from '../../common/logger';
+import { getIntegrationsService } from '../integrations/service';
+import { DEFAULT_TENANT_ID } from '../tenancy/types';
 import { tenantIdFromRequest } from '../tenancy/tenant-scope';
-import { getProvider } from './providers/index';
+import { isUsableOpenPayConfig, resolveOpenPayConfig } from './providers/openpay-config';
+import { buildOpenPayProvider, getProvider } from './providers/index';
 import { getPaymentService } from './service';
 import { PaymentProvider } from './types';
 
@@ -132,13 +137,34 @@ router.post(
 
 // ── Webhooks ──────────────────────────────────────────────────────────
 
+const rawBodyOf = (req: Request): string | Buffer =>
+  (req as unknown as { rawBody?: Buffer }).rawBody ?? JSON.stringify(req.body ?? {});
+
+const signatureOf = (req: Request): string =>
+  (req.headers['x-signature'] as string) ||
+  (req.headers['x-mp-signature'] as string) ||
+  (req.headers['x-openpay-signature'] as string) || '';
+
+/** Identidad del evento tal como la publica el proveedor. */
+const webhookEventOf = (req: Request, provider: PaymentProvider) => {
+  const body = (req.body || {}) as Record<string, unknown>;
+  return {
+    payload: body,
+    eventType:
+      (body.type as string) || (body.action as string) || (body.event_type as string) || 'payment.update',
+    providerEventId: String(
+      (body.id as string) ||
+        (body.event_id as string) ||
+        ((body.transaction as { id?: string } | undefined)?.id) ||
+        `${provider}-${Date.now()}`,
+    ),
+  };
+};
+
 const handleWebhook = (provider: PaymentProvider) =>
   asyncHandler(async (req, res) => {
-    const rawBody: string | Buffer =
-      (req as unknown as { rawBody?: Buffer }).rawBody ?? JSON.stringify(req.body ?? {});
-    const signature = (req.headers['x-signature'] as string) ||
-      (req.headers['x-mp-signature'] as string) ||
-      (req.headers['x-openpay-signature'] as string) || '';
+    const rawBody = rawBodyOf(req);
+    const signature = signatureOf(req);
     const secret = process.env[`WEBHOOK_SECRET_${provider.toUpperCase()}`] || '';
 
     // Fail-closed (C-01): en un despliegue publico (produccion o
@@ -162,19 +188,12 @@ const handleWebhook = (provider: PaymentProvider) =>
       return;
     }
 
-    const body = req.body || {};
-    const eventType = (body.type as string) || (body.action as string) || (body.event_type as string) || 'payment.update';
-    const providerEventId =
-      (body.id as string) ||
-      (body.event_id as string) ||
-      (body.transaction?.id as string) ||
-      `${provider}-${Date.now()}`;
-
     const result = await getPaymentService().processWebhook({
       provider,
-      providerEventId: String(providerEventId),
-      eventType,
-      payload: body as Record<string, unknown>,
+      ...webhookEventOf(req, provider),
+      // Ruta legacy sin token: pertenece SIEMPRE al WISP por defecto. Nunca
+      // puede alcanzar a otro tenant (no abre multi-tenant).
+      tenantId: DEFAULT_TENANT_ID,
     });
 
     res.json(result);
@@ -183,5 +202,76 @@ const handleWebhook = (provider: PaymentProvider) =>
 router.post('/api/payments/webhook/manual', handleWebhook('manual'));
 router.post('/api/payments/webhook/mercadopago', handleWebhook('mercado_pago'));
 router.post('/api/payments/webhook/openpay', handleWebhook('openpay'));
+
+// ── Webhook OpenPay por WISP (T3) ─────────────────────────────────────
+//
+// El token opaco de la URL resuelve el tenant; la firma se verifica con el
+// webhook secret DE ESE WISP. Todo rechazo devuelve la misma respuesta: la
+// ruta no revela si el token existe, si el WISP tiene OpenPay habilitado ni
+// si su firma fue la que falló. El motivo real queda solo en el log del
+// servidor, nunca con el token ni el secreto.
+
+const WEBHOOK_REJECTED = { error: 'Webhook no disponible.', code: 'WEBHOOK_REJECTED' } as const;
+
+const rejectWebhook = (res: Response, reason: string, meta: Record<string, unknown> = {}): void => {
+  logger.warn('PaymentEngine: webhook OpenPay rechazado', { reason, ...meta });
+  res.status(404).json(WEBHOOK_REJECTED);
+};
+
+router.post(
+  '/api/payments/webhook/openpay/:token',
+  asyncHandler(async (req, res) => {
+    const token = String(req.params.token ?? '').trim();
+    const owner = token
+      ? await getIntegrationsService().resolveOpenPayWebhookTenant(token)
+      : null;
+    if (!owner) {
+      rejectWebhook(res, 'unknown_token');
+      return;
+    }
+
+    const { tenantId, settings } = owner;
+    if (!settings.openpayEnabled) {
+      rejectWebhook(res, 'openpay_disabled', { tenantId });
+      return;
+    }
+
+    // Credenciales del WISP. `env` solo cubre al tenant por defecto: un WISP
+    // sin credenciales propias NO hereda las de otro ni las globales.
+    const config = await resolveOpenPayConfig(tenantId);
+    if (!isUsableOpenPayConfig(config)) {
+      // Config vacía ⇒ el provider entraría en modo simulado, y el simulado
+      // acepta cualquier firma. En esta ruta pública eso jamás puede pasar.
+      rejectWebhook(res, 'no_usable_credentials', { tenantId });
+      return;
+    }
+
+    const secret = (config.webhookSecret ?? '').trim();
+    if (!secret) {
+      rejectWebhook(res, 'missing_webhook_secret', { tenantId });
+      return;
+    }
+
+    const signature = signatureOf(req);
+    if (!signature) {
+      rejectWebhook(res, 'missing_signature', { tenantId });
+      return;
+    }
+
+    const verify = buildOpenPayProvider(config).verifyWebhook(rawBodyOf(req), signature, secret);
+    if (!verify.valid) {
+      rejectWebhook(res, verify.reason ?? 'invalid_signature', { tenantId });
+      return;
+    }
+
+    const result = await getPaymentService().processWebhook({
+      provider: 'openpay',
+      ...webhookEventOf(req, 'openpay'),
+      tenantId,
+    });
+
+    res.json(result);
+  }),
+);
 
 export default router;

@@ -39,8 +39,9 @@ export interface PaymentRepository {
   createOrder(rec: PaymentOrderRecord): Promise<PaymentOrderRecord>;
   updateOrderStatus(id: string, status: PaymentOrderStatus, patch?: Partial<PaymentOrderRecord>, tenantId?: string): Promise<PaymentOrderRecord | null>;
 
-  // Payment Events (idempotencia por provider_event_id)
-  findEventByProviderId(provider: PaymentProvider, providerEventId: string): Promise<PaymentEventRecord | null>;
+  // Payment Events (idempotencia por tenant + provider_event_id: dos merchants
+  // distintos pueden reutilizar el mismo id de evento sin pisarse).
+  findEventByProviderId(provider: PaymentProvider, providerEventId: string, tenantId?: string): Promise<PaymentEventRecord | null>;
   createEvent(rec: PaymentEventRecord): Promise<PaymentEventRecord>;
   markEventProcessed(id: string): Promise<void>;
 
@@ -99,11 +100,12 @@ export class StorePaymentRepository implements PaymentRepository {
     return order;
   }
 
-  async findEventByProviderId(provider: PaymentProvider, providerEventId: string) {
+  async findEventByProviderId(provider: PaymentProvider, providerEventId: string, tenantId?: string) {
     return (
-      (store.PAYMENT_EVENTS as PaymentEventRecord[]).find(
-        (e) => e.provider === provider && e.providerEventId === providerEventId,
-      ) ?? null
+      (store.PAYMENT_EVENTS as PaymentEventRecord[]).find((e) => {
+        if (e.provider !== provider || e.providerEventId !== providerEventId) return false;
+        return !tenantId || matchesTenant(e.tenantId, tenantId);
+      }) ?? null
     );
   }
 
@@ -201,10 +203,12 @@ export class SupabasePaymentRepository implements PaymentRepository {
     return this.findOrderById(id, tenantId);
   }
 
-  async findEventByProviderId(provider: PaymentProvider, providerEventId: string) {
-    const { data } = await this.client
+  async findEventByProviderId(provider: PaymentProvider, providerEventId: string, tenantId?: string) {
+    let q = this.client
       .from('payment_events').select('*')
-      .eq('provider', provider).eq('provider_event_id', providerEventId).maybeSingle();
+      .eq('provider', provider).eq('provider_event_id', providerEventId);
+    if (tenantId) q = q.eq('tenant_id', tenantId);
+    const { data } = await q.maybeSingle();
     return data ? rowToPaymentEvent(data as PaymentEventRow) : null;
   }
 

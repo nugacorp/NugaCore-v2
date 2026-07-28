@@ -164,4 +164,10 @@ export interface ProcessWebhookInput {
   providerEventId: string;
   eventType: string;
   payload: Record<string, unknown>;
+  /**
+   * WISP dueño del evento. Acota la idempotencia y la búsqueda de order: dos
+   * merchants distintos pueden reutilizar el mismo provider_event_id, y el
+   * evento de un WISP nunca debe tocar la order de otro.
+   */
+  tenantId?: string;
 }
