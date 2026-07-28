@@ -1,4 +1,4 @@
-import React, { useCallback, useEffect, useState } from 'react';
+import React, { useCallback, useEffect, useMemo, useState } from 'react';
 import {
   Key,
   CreditCard,
@@ -11,8 +11,11 @@ import {
   Zap,
   CheckCircle2,
   AlertTriangle,
+  Copy,
+  Webhook,
 } from 'lucide-react';
 import type { WispIntegrationsSettings } from '../../types';
+import { openpayWebhookView } from '../../lib/integrationsView';
 
 interface ExternalIntegrationsPanelProps {
   getAuthHeaders?: () => Promise<Record<string, string>>;
@@ -33,6 +36,7 @@ export default function ExternalIntegrationsPanel({ getAuthHeaders }: ExternalIn
   const [error, setError] = useState<string | null>(null);
   const [testResult, setTestResult] = useState<string | null>(null);
   const [active, setActive] = useState<ServiceKey>('stripe');
+  const [webhookCopied, setWebhookCopied] = useState(false);
 
   const [stripe, setStripe] = useState({ enabled: false, publishableKey: '', secretKey: '', webhookSecret: '' });
   const [whatsapp, setWhatsapp] = useState({
@@ -197,6 +201,29 @@ export default function ExternalIntegrationsPanel({ getAuthHeaders }: ExternalIn
     }
   };
 
+  // La URL de webhook SIEMPRE se deriva del `webhookPath` que entrega el
+  // backend (token opaco del WISP): aquí no se fabrica ninguna ruta ni token.
+  const webhook = useMemo(
+    () =>
+      openpayWebhookView({
+        origin: typeof window === 'undefined' ? '' : window.location.origin,
+        webhookPath: settings?.openpay.webhookPath ?? '',
+        enabled: settings?.openpay.enabled ?? false,
+      }),
+    [settings?.openpay.webhookPath, settings?.openpay.enabled],
+  );
+
+  const copyWebhookUrl = async () => {
+    if (!webhook.available) return;
+    try {
+      await navigator.clipboard.writeText(webhook.url);
+      setWebhookCopied(true);
+      window.setTimeout(() => setWebhookCopied(false), 2000);
+    } catch {
+      window.prompt('Copia la URL del webhook de OpenPay:', webhook.url);
+    }
+  };
+
   const tabs: Array<{ id: ServiceKey; label: string; icon: React.ReactNode }> = [
     { id: 'stripe', label: 'Stripe', icon: <CreditCard className="w-3.5 h-3.5" /> },
     { id: 'whatsapp', label: 'WhatsApp', icon: <MessageCircle className="w-3.5 h-3.5" /> },
@@ -341,6 +368,39 @@ export default function ExternalIntegrationsPanel({ getAuthHeaders }: ExternalIn
           <input value={openpay.publicKey} onChange={(e) => setOpenpay({ ...openpay, publicKey: e.target.value })} placeholder="Public key (pk_...)" className="w-full rounded-lg bg-slate-900 border border-slate-800 px-3 py-2 text-xs text-white" />
           <input type="password" value={openpay.privateKey} onChange={(e) => setOpenpay({ ...openpay, privateKey: e.target.value })} placeholder={settings?.openpay.privateKeySet ? 'Private key (vacío = sin cambio)' : 'Private key (sk_...)'} className="w-full rounded-lg bg-slate-900 border border-slate-800 px-3 py-2 text-xs text-white" />
           <input type="password" value={openpay.webhookSecret} onChange={(e) => setOpenpay({ ...openpay, webhookSecret: e.target.value })} placeholder={settings?.openpay.webhookSecretSet ? 'Webhook secret (vacío = sin cambio)' : 'Webhook secret (X-OpenPay-Signature)'} className="w-full rounded-lg bg-slate-900 border border-slate-800 px-3 py-2 text-xs text-white" />
+          <div className="rounded-xl border border-slate-800 bg-slate-900/40 p-3 space-y-2">
+            <div className="flex items-center gap-1.5">
+              <Webhook className="w-3.5 h-3.5 text-indigo-400 shrink-0" />
+              <h4 className="text-[10px] font-mono font-bold uppercase tracking-wider text-indigo-300">
+                URL de webhook de este WISP
+              </h4>
+            </div>
+            <p className="text-[10px] text-slate-400 font-mono leading-snug">{webhook.hint}</p>
+            {webhook.available && (
+              <div className="flex flex-col sm:flex-row gap-2">
+                <input
+                  id="openpay-webhook-url"
+                  readOnly
+                  value={webhook.url}
+                  aria-label="URL de webhook de OpenPay de este WISP"
+                  onFocus={(e) => e.currentTarget.select()}
+                  className="flex-1 truncate rounded-lg bg-slate-950 border border-slate-800 px-3 py-2 text-[11px] font-mono text-slate-300"
+                />
+                <button
+                  id="copy-openpay-webhook"
+                  type="button"
+                  onClick={() => void copyWebhookUrl()}
+                  className="inline-flex items-center justify-center gap-1.5 rounded-lg border border-slate-700 px-3 py-2 text-xs text-slate-200 hover:bg-slate-800 shrink-0"
+                >
+                  {webhookCopied ? <CheckCircle2 className="w-3.5 h-3.5" /> : <Copy className="w-3.5 h-3.5" />}
+                  {webhookCopied ? 'Copiada' : 'Copiar URL'}
+                </button>
+              </div>
+            )}
+            <p role="status" aria-live="polite" className="text-[10px] font-mono text-emerald-400 min-h-[13px]">
+              {webhookCopied ? 'URL de webhook copiada al portapapeles.' : ''}
+            </p>
+          </div>
           <p className="text-[10px] text-slate-500 font-mono">
             OpenPay procesa tarjeta y SPEI/CoDi: cada factura obtiene CLABE virtual y referencia; el pago se confirma por webhook.
             Use sandbox hasta validar el flujo end-to-end; las llaves se guardan cifradas.
