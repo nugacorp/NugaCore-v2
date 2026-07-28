@@ -36,6 +36,10 @@ const REJECTED = { error: 'Webhook no disponible.', code: 'WEBHOOK_REJECTED' };
 const sign = (secret: string, body: unknown): string =>
   crypto.createHmac('sha256', secret).update(JSON.stringify(body)).digest('hex');
 
+/** Firma sobre bytes literales (lo que realmente viaja en el request). */
+const signRaw = (secret: string, raw: string): string =>
+  crypto.createHmac('sha256', secret).update(raw).digest('hex');
+
 interface OpenPaySeed {
   merchantId?: string;
   privateKey?: string;
@@ -158,6 +162,87 @@ describe('Webhook OpenPay por token — WISP correcto', () => {
 
     expect(res.status).toBe(200);
     expect(events()[0].tenantId).toBe('tenant-default');
+  });
+});
+
+// ── Firma sobre los bytes exactos recibidos ───────────────────────────
+//
+// OpenPay firma el cuerpo que envía, no una reserialización nuestra. Si el
+// HMAC se calculara sobre `JSON.stringify(req.body)`, cualquier diferencia de
+// formato (espacios, saltos de línea, orden) invalidaría firmas legítimas.
+
+describe('Webhook OpenPay por token — HMAC sobre los bytes exactos', () => {
+  // JSON válido pero NO canónico: espacios y saltos que JSON.stringify elimina.
+  const RAW_JSON = '{\n  "event_type" : "charge.succeeded",\n  "id":   "op-evt-raw",\n  "status":  "completed"\n}';
+
+  it('acepta la firma calculada sobre el cuerpo literal recibido', async () => {
+    const token = await seedOpenPay(TENANT_A, { webhookSecret: 'whsec_a' });
+
+    const res = await request(app)
+      .post(`/api/payments/webhook/openpay/${token}`)
+      .set('Content-Type', 'application/json')
+      .set('x-openpay-signature', signRaw('whsec_a', RAW_JSON))
+      .send(RAW_JSON);
+
+    expect(res.status).toBe(200);
+    expect(events()).toHaveLength(1);
+    expect(events()[0].providerEventId).toBe('op-evt-raw');
+    expect(events()[0].tenantId).toBe(TENANT_A);
+  });
+
+  it('la firma del cuerpo reserializado es distinta y NO se acepta', async () => {
+    const token = await seedOpenPay(TENANT_A, { webhookSecret: 'whsec_a' });
+    const canonical = JSON.stringify(JSON.parse(RAW_JSON));
+    // Precondición del test: ambos cuerpos difieren byte a byte.
+    expect(canonical).not.toBe(RAW_JSON);
+    expect(signRaw('whsec_a', canonical)).not.toBe(signRaw('whsec_a', RAW_JSON));
+
+    const res = await request(app)
+      .post(`/api/payments/webhook/openpay/${token}`)
+      .set('Content-Type', 'application/json')
+      .set('x-openpay-signature', signRaw('whsec_a', canonical))
+      .send(RAW_JSON);
+
+    expect(res.status).toBe(404);
+    expect(res.body).toEqual(REJECTED);
+    expect(events()).toHaveLength(0);
+  });
+
+  it('firma incorrecta sobre esos mismos bytes → rechazada', async () => {
+    const token = await seedOpenPay(TENANT_A, { webhookSecret: 'whsec_a' });
+
+    const res = await request(app)
+      .post(`/api/payments/webhook/openpay/${token}`)
+      .set('Content-Type', 'application/json')
+      .set('x-openpay-signature', signRaw('whsec_otro', RAW_JSON))
+      .send(RAW_JSON);
+
+    expect(res.status).toBe(404);
+    expect(res.body).toEqual(REJECTED);
+    expect(events()).toHaveLength(0);
+  });
+
+  it('el cuerpo del webhook no aparece en los logs', async () => {
+    const lines: string[] = [];
+    const capture = (...args: unknown[]) => { lines.push(args.map(String).join(' ')); };
+    vi.spyOn(console, 'log').mockImplementation(capture);
+    vi.spyOn(console, 'warn').mockImplementation(capture);
+    vi.spyOn(console, 'error').mockImplementation(capture);
+
+    const token = await seedOpenPay(TENANT_A, { webhookSecret: 'whsec_a' });
+    const payload = {
+      id: 'op-evt-body',
+      event_type: 'charge.succeeded',
+      status: 'completed',
+      customer_email: 'marcador-pii-no-loguear@ejemplo.mx',
+    };
+
+    await request(app)
+      .post(`/api/payments/webhook/openpay/${token}`)
+      .set('x-openpay-signature', sign('whsec_a', payload))
+      .send(payload);
+
+    expect(lines.join('\n')).not.toContain('marcador-pii-no-loguear@ejemplo.mx');
   });
 });
 

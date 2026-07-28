@@ -136,10 +136,7 @@ export class PaymentService {
   // ── Webhook processing ────────────────────────────────────────────
 
   async processWebhook(input: ProcessWebhookInput): Promise<WebhookProcessResult> {
-    const { provider, providerEventId, eventType, payload } = input;
-    // WISP dueño del evento: acota idempotencia y búsqueda de order. Sin él,
-    // el evento pertenece al WISP por defecto (single-WISP / legacy).
-    const tenantId = input.tenantId || 'tenant-default';
+    const { provider, providerEventId, eventType, payload, tenantId } = input;
 
     // Idempotencia POR TENANT: dos merchants pueden reutilizar el mismo
     // provider_event_id; solo colisiona dentro del mismo WISP.

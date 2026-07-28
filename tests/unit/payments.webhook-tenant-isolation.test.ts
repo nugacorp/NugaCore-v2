@@ -70,6 +70,9 @@ describe('Resolución del token de webhook OpenPay → WISP', () => {
   });
 });
 
+// `tenantId` es obligatorio en el lookup: bajo la unicidad
+// (tenant_id, provider, provider_event_id) una consulta global podría devolver
+// varias filas, y en Supabase `maybeSingle()` fallaría.
 describe('Idempotencia de payment_events acotada al WISP', () => {
   const repo = new StorePaymentRepository();
 
@@ -90,11 +93,6 @@ describe('Idempotencia de payment_events acotada al WISP', () => {
 
     expect(await repo.findEventByProviderId('openpay', 'evt-1', TENANT_A)).not.toBeNull();
     expect(await repo.findEventByProviderId('openpay', 'evt-1', TENANT_B)).toBeNull();
-  });
-
-  it('sin tenant (compatibilidad) el lookup sigue siendo global', async () => {
-    await seedEvent(TENANT_A, 'evt-2');
-    expect(await repo.findEventByProviderId('openpay', 'evt-2')).not.toBeNull();
   });
 
   it('los eventos legacy sin stamp cuentan como del tenant por defecto', async () => {

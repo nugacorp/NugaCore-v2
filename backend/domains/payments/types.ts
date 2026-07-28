@@ -165,9 +165,10 @@ export interface ProcessWebhookInput {
   eventType: string;
   payload: Record<string, unknown>;
   /**
-   * WISP dueño del evento. Acota la idempotencia y la búsqueda de order: dos
-   * merchants distintos pueden reutilizar el mismo provider_event_id, y el
-   * evento de un WISP nunca debe tocar la order de otro.
+   * WISP dueño del evento. OBLIGATORIO: acota la idempotencia y la búsqueda de
+   * order. Dos merchants distintos pueden reutilizar el mismo
+   * provider_event_id, y el evento de un WISP nunca debe tocar la order de
+   * otro. La ruta legacy single-WISP pasa `DEFAULT_TENANT_ID` explícitamente.
    */
-  tenantId?: string;
+  tenantId: string;
 }

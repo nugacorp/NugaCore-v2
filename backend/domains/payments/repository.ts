@@ -39,9 +39,11 @@ export interface PaymentRepository {
   createOrder(rec: PaymentOrderRecord): Promise<PaymentOrderRecord>;
   updateOrderStatus(id: string, status: PaymentOrderStatus, patch?: Partial<PaymentOrderRecord>, tenantId?: string): Promise<PaymentOrderRecord | null>;
 
-  // Payment Events (idempotencia por tenant + provider_event_id: dos merchants
-  // distintos pueden reutilizar el mismo id de evento sin pisarse).
-  findEventByProviderId(provider: PaymentProvider, providerEventId: string, tenantId?: string): Promise<PaymentEventRecord | null>;
+  // Payment Events. La idempotencia es por (tenant, provider, provider_event_id):
+  // dos merchants distintos pueden reutilizar el mismo id de evento sin pisarse.
+  // `tenantId` es OBLIGATORIO — una consulta global puede devolver varias filas
+  // bajo la nueva unicidad, y en Supabase `maybeSingle()` fallaría.
+  findEventByProviderId(provider: PaymentProvider, providerEventId: string, tenantId: string): Promise<PaymentEventRecord | null>;
   createEvent(rec: PaymentEventRecord): Promise<PaymentEventRecord>;
   markEventProcessed(id: string): Promise<void>;
 
@@ -100,12 +102,14 @@ export class StorePaymentRepository implements PaymentRepository {
     return order;
   }
 
-  async findEventByProviderId(provider: PaymentProvider, providerEventId: string, tenantId?: string) {
+  async findEventByProviderId(provider: PaymentProvider, providerEventId: string, tenantId: string) {
     return (
-      (store.PAYMENT_EVENTS as PaymentEventRecord[]).find((e) => {
-        if (e.provider !== provider || e.providerEventId !== providerEventId) return false;
-        return !tenantId || matchesTenant(e.tenantId, tenantId);
-      }) ?? null
+      (store.PAYMENT_EVENTS as PaymentEventRecord[]).find(
+        (e) =>
+          e.provider === provider &&
+          e.providerEventId === providerEventId &&
+          matchesTenant(e.tenantId, tenantId),
+      ) ?? null
     );
   }
 
@@ -203,12 +207,15 @@ export class SupabasePaymentRepository implements PaymentRepository {
     return this.findOrderById(id, tenantId);
   }
 
-  async findEventByProviderId(provider: PaymentProvider, providerEventId: string, tenantId?: string) {
-    let q = this.client
+  async findEventByProviderId(provider: PaymentProvider, providerEventId: string, tenantId: string) {
+    // El filtro por tenant es lo que garantiza como mucho una fila: es
+    // exactamente la clave del índice único uq_payment_events_tenant_provider_event.
+    const { data } = await this.client
       .from('payment_events').select('*')
-      .eq('provider', provider).eq('provider_event_id', providerEventId);
-    if (tenantId) q = q.eq('tenant_id', tenantId);
-    const { data } = await q.maybeSingle();
+      .eq('provider', provider)
+      .eq('provider_event_id', providerEventId)
+      .eq('tenant_id', tenantId)
+      .maybeSingle();
     return data ? rowToPaymentEvent(data as PaymentEventRow) : null;
   }
 

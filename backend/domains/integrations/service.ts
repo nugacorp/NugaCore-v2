@@ -6,6 +6,7 @@ import { getBillingService } from '../billing/service';
 import { getCustomersService } from '../customers/service';
 import { getNetworkService } from '../network/service';
 import { getPaymentService } from '../payments/service';
+import { DEFAULT_TENANT_ID } from '../tenancy/types';
 import {
   applyIntegrationPatch,
   IntegrationsRepository,
@@ -142,7 +143,9 @@ export class IntegrationsService {
   }
 
   async processCodiWebhook(payload: Record<string, unknown>, signature: string, tenantId?: string) {
-    const settings = await this.repo.get(tenantId);
+    // El WISP queda explícito: sin tenant, el evento es del WISP por defecto.
+    const effectiveTenantId = tenantId || DEFAULT_TENANT_ID;
+    const settings = await this.repo.get(effectiveTenantId);
     if (!settings.codiEnabled) {
       return { accepted: false, message: 'CoDi deshabilitado' };
     }
@@ -164,7 +167,7 @@ export class IntegrationsService {
       eventType,
       payload: { ...payload, amount, reference, status: 'paid' },
       // Idempotencia y búsqueda de order acotadas al WISP que recibe el evento.
-      tenantId,
+      tenantId: effectiveTenantId,
     });
 
     return { accepted: true, ...result };
