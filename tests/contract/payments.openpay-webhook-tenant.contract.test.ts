@@ -86,6 +86,28 @@ const seedOrder = (tenantId: string, providerOrderId: string): PaymentOrderRecor
   return rec;
 };
 
+/** Cliente suspendido propiedad de un WISP concreto (para el flujo completo). */
+const seedCustomer = (tenantId: string): string => {
+  const id = `c-${tenantId}`;
+  store.CLIENTS.push({
+    id,
+    tenantId,
+    name: `Cliente ${tenantId}`,
+    type: 'residential',
+    status: 'suspended',
+    email: `cliente@${tenantId}.mx`,
+    phone: '5500000000',
+    address: 'Calle 1',
+    city: 'CDMX',
+    lat: 19.4,
+    lng: -99.1,
+    planId: 'plan-basic',
+    ip: '10.100.0.1',
+    connectionType: 'WISP',
+  } as (typeof store.CLIENTS)[number]);
+  return id;
+};
+
 let app: Express;
 
 const reset = () => {
@@ -94,6 +116,7 @@ const reset = () => {
   store.PAYMENT_ORDERS.length = 0;
   store.PAYMENT_EVENTS.length = 0;
   store.MIKROTIK_ACTIONS.length = 0;
+  store.CLIENTS = store.CLIENTS.filter((c) => !c.id.startsWith('c-tenant-'));
   resetIntegrationsService();
   resetPaymentService();
   vi.unstubAllEnvs();
@@ -431,6 +454,30 @@ describe('Webhook OpenPay — aislamiento de orders e idempotencia por tenant', 
     expect(orders().find((o) => o.id === orderB.id)?.status).toBe('pending');
   });
 
+  it('B completa SU order aunque la de A comparta providerOrderId y esté primero', async () => {
+    // El bug: el lookup en memoria buscaba global y filtraba el tenant DESPUÉS,
+    // así que la order de A (primera en el store) tapaba la de B → null.
+    const tokenB = await seedOpenPay(TENANT_B, { webhookSecret: 'whsec_b' });
+    seedCustomer(TENANT_B);
+    const orderA = seedOrder(TENANT_A, 'chg-colision');
+    const orderB = seedOrder(TENANT_B, 'chg-colision');
+    const payload = {
+      id: 'op-evt-colision',
+      event_type: 'charge.succeeded',
+      status: 'completed',
+      order_id: 'chg-colision',
+    };
+
+    const res = await request(app)
+      .post(`/api/payments/webhook/openpay/${tokenB}`)
+      .set('x-openpay-signature', sign('whsec_b', payload))
+      .send(payload);
+
+    expect(res.status).toBe(200);
+    expect(orders().find((o) => o.id === orderB.id)?.status).toBe('completed');
+    expect(orders().find((o) => o.id === orderA.id)?.status).toBe('pending');
+  });
+
   it('el mismo providerEventId en A y B se procesa de forma independiente', async () => {
     const tokenA = await seedOpenPay(TENANT_A, { webhookSecret: 'whsec_a' });
     const tokenB = await seedOpenPay(TENANT_B, { webhookSecret: 'whsec_b' });
@@ -486,5 +533,41 @@ describe('Webhook OpenPay legacy (sin token) — compatibilidad single-WISP', ()
 
     expect(res.status).toBe(503);
     expect(res.body.code).toBe('WEBHOOK_NOT_CONFIGURED');
+  });
+
+  // Fail-open: con secreto configurado pero SIN credenciales de cobro el
+  // provider queda en modo simulado, y el simulado aceptaba cualquier firma.
+  // En un despliegue público eso aprobaba pagos sin verificar nada.
+  it('con secreto configurado verifica la firma aunque el provider esté simulado', async () => {
+    vi.stubEnv('PUBLIC_DEPLOYMENT', 'true');
+    vi.stubEnv('WEBHOOK_SECRET_OPENPAY', 'whsec_legacy');
+    vi.stubEnv('OPENPAY_MERCHANT_ID', '');
+    vi.stubEnv('OPENPAY_PRIVATE_KEY', '');
+
+    const res = await request(app)
+      .post('/api/payments/webhook/openpay')
+      .set('x-openpay-signature', 'firma-arbitraria')
+      .send({ id: 'op-legacy-forged', event_type: 'charge.succeeded', status: 'completed' });
+
+    expect(res.status).toBe(400);
+    expect(res.body.code).toBe('INVALID_SIGNATURE');
+    expect(events()).toHaveLength(0);
+  });
+
+  it('con secreto configurado, la firma HMAC válida sí se procesa', async () => {
+    vi.stubEnv('PUBLIC_DEPLOYMENT', 'true');
+    vi.stubEnv('WEBHOOK_SECRET_OPENPAY', 'whsec_legacy');
+    vi.stubEnv('OPENPAY_MERCHANT_ID', '');
+    vi.stubEnv('OPENPAY_PRIVATE_KEY', '');
+    const payload = { id: 'op-legacy-ok', event_type: 'charge.succeeded', status: 'completed' };
+
+    const res = await request(app)
+      .post('/api/payments/webhook/openpay')
+      .set('x-openpay-signature', sign('whsec_legacy', payload))
+      .send(payload);
+
+    expect(res.status).toBe(200);
+    expect(events()).toHaveLength(1);
+    expect(events()[0].tenantId).toBe('tenant-default');
   });
 });

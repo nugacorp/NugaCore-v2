@@ -114,20 +114,31 @@ describe('Idempotencia de payment_events acotada al WISP', () => {
 describe('Búsqueda de order por providerOrderId acotada al WISP', () => {
   const repo = new StorePaymentRepository();
 
+  const base: Omit<PaymentOrderRecord, 'id' | 'tenantId'> = {
+    customerId: 'c-1',
+    invoiceId: 'fac-1',
+    provider: 'openpay',
+    providerOrderId: 'chg-shared',
+    amountCents: 1000,
+    status: 'pending',
+    createdAt: new Date().toISOString(),
+    updatedAt: new Date().toISOString(),
+  };
+
   it('el providerOrderId de un WISP no alcanza la order de otro', async () => {
-    const base: Omit<PaymentOrderRecord, 'id' | 'tenantId'> = {
-      customerId: 'c-1',
-      invoiceId: 'fac-1',
-      provider: 'openpay',
-      providerOrderId: 'chg-shared',
-      amountCents: 1000,
-      status: 'pending',
-      createdAt: new Date().toISOString(),
-      updatedAt: new Date().toISOString(),
-    };
     await repo.createOrder({ ...base, id: 'po-b', tenantId: TENANT_B });
 
     expect(await repo.findOrderByProviderOrderId('openpay', 'chg-shared', TENANT_B)).not.toBeNull();
     expect(await repo.findOrderByProviderOrderId('openpay', 'chg-shared', TENANT_A)).toBeNull();
+  });
+
+  it('con dos WISPs compartiendo providerOrderId, cada uno encuentra la suya', async () => {
+    // El filtro de tenant debe ir DENTRO del predicado de búsqueda: si se aplica
+    // después, la primera coincidencia global tapa a la del tenant buscado.
+    await repo.createOrder({ ...base, id: 'po-a', tenantId: TENANT_A });
+    await repo.createOrder({ ...base, id: 'po-b', tenantId: TENANT_B });
+
+    expect((await repo.findOrderByProviderOrderId('openpay', 'chg-shared', TENANT_A))?.id).toBe('po-a');
+    expect((await repo.findOrderByProviderOrderId('openpay', 'chg-shared', TENANT_B))?.id).toBe('po-b');
   });
 });
