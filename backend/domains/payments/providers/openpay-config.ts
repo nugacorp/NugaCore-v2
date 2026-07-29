@@ -49,34 +49,35 @@ export const isUsableOpenPayConfig = (config: OpenPayResolvedConfig): boolean =>
 export const resolveOpenPayConfig = async (
   tenantId?: string,
 ): Promise<OpenPayResolvedConfig> => {
-  let fromTenantRow: OpenPayResolvedConfig | null = null;
   try {
     // Import dinámico: integrations/service importa payments/service, y este
     // módulo cuelga de payments. Cargarlo aquí evita el ciclo en tiempo de carga.
     const { getIntegrationsService } = await import('../../integrations/service');
-    const settings = await getIntegrationsService().getSettingsRaw(tenantId);
-    if (settings.openpayEnabled) {
-      fromTenantRow = {
+    const settings = await getIntegrationsService().getPersistedSettingsRaw(tenantId);
+    if (settings) {
+      if (!settings.openpayEnabled) return simulatedConfig();
+      const fromTenantRow: OpenPayResolvedConfig = {
         merchantId: settings.openpayMerchantId.trim(),
         privateKey: settings.openpayPrivateKey.trim(),
         sandbox: settings.openpaySandbox,
         webhookSecret: settings.openpayWebhookSecret || undefined,
       };
+      return isUsableOpenPayConfig(fromTenantRow) ? fromTenantRow : simulatedConfig();
+    }
+
+    // Compatibilidad single-WISP: env solo representa una instalación legacy
+    // que nunca guardó la fila default. Una fila persistida siempre manda.
+    if (isDefaultTenant(tenantId)) {
+      const fromEnv = openPayConfigFromEnv();
+      if (isUsableOpenPayConfig(fromEnv)) return fromEnv;
     }
   } catch (error) {
-    // Sin settings legibles no se aprueba nada: se degrada a simulado (o a env
-    // para el tenant por defecto). Se registra el motivo, jamás la credencial.
+    // Un error de lectura no equivale a "fila ausente": queda fail-closed.
+    // Se registra el motivo, jamás la credencial.
     logger.warn('OpenPay: no se pudieron leer las credenciales del WISP', {
       tenantId: tenantId ?? DEFAULT_TENANT_ID,
       reason: error instanceof Error ? error.message : 'error desconocido',
     });
-  }
-
-  if (fromTenantRow && isUsableOpenPayConfig(fromTenantRow)) return fromTenantRow;
-
-  if (isDefaultTenant(tenantId)) {
-    const fromEnv = openPayConfigFromEnv();
-    if (isUsableOpenPayConfig(fromEnv)) return fromEnv;
   }
 
   return simulatedConfig();

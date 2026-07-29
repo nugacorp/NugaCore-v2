@@ -8,7 +8,6 @@
 import { afterEach, beforeEach, describe, expect, it } from 'vitest';
 import {
   StoreIntegrationsRepository,
-  emptyIntegrationSettings,
 } from '../../backend/domains/integrations/repository';
 import { IntegrationsService } from '../../backend/domains/integrations/service';
 import { StorePaymentRepository } from '../../backend/domains/payments/repository';
@@ -19,7 +18,7 @@ const TENANT_A = 'tenant-a';
 const TENANT_B = 'tenant-b';
 
 const reset = () => {
-  store.INTEGRATION_SETTINGS = emptyIntegrationSettings();
+  store.INTEGRATION_SETTINGS = null;
   store.INTEGRATION_SETTINGS_BY_TENANT = {};
   store.PAYMENT_EVENTS.length = 0;
   store.PAYMENT_ORDERS.length = 0;

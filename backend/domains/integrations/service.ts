@@ -39,6 +39,11 @@ export class IntegrationsService {
     return this.repo.get(tenantId);
   }
 
+  /** No sintetiza defaults: permite decidir si existe una fila persistida. */
+  async getPersistedSettingsRaw(tenantId?: string) {
+    return this.repo.getPersisted(tenantId);
+  }
+
   /**
    * WISP dueño del token de webhook OpenPay. La resolución es exacta: un token
    * desconocido devuelve null, nunca la fila 'default' ni otro tenant.

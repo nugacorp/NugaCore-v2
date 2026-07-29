@@ -11,12 +11,14 @@
 
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { store } from '../../backend/state/store';
-import { emptyIntegrationSettings } from '../../backend/domains/integrations/repository';
 import {
   getIntegrationsService,
   resetIntegrationsService,
 } from '../../backend/domains/integrations/service';
-import { resolveOpenPayConfig } from '../../backend/domains/payments/providers/openpay-config';
+import {
+  isUsableOpenPayConfig,
+  resolveOpenPayConfig,
+} from '../../backend/domains/payments/providers/openpay-config';
 import { OpenPayProvider } from '../../backend/domains/payments/providers/openpay.provider';
 import { resolveProvider } from '../../backend/domains/payments/providers/index';
 import { getPaymentService, resetPaymentService } from '../../backend/domains/payments/service';
@@ -56,7 +58,7 @@ const seedOpenPay = async (
 
 describe('OpenPay — resolución de configuración por tenant', () => {
   beforeEach(() => {
-    store.INTEGRATION_SETTINGS = emptyIntegrationSettings();
+    store.INTEGRATION_SETTINGS = null;
     store.INTEGRATION_SETTINGS_BY_TENANT = {};
     resetIntegrationsService();
     resetPaymentService();
@@ -65,7 +67,7 @@ describe('OpenPay — resolución de configuración por tenant', () => {
   });
 
   afterEach(() => {
-    store.INTEGRATION_SETTINGS = emptyIntegrationSettings();
+    store.INTEGRATION_SETTINGS = null;
     store.INTEGRATION_SETTINGS_BY_TENANT = {};
     resetIntegrationsService();
     resetPaymentService();
@@ -123,6 +125,54 @@ describe('OpenPay — resolución de configuración por tenant', () => {
     const cfg = await resolveOpenPayConfig(TENANT_A);
     expect(cfg.merchantId).toBe('');
     expect(cfg.privateKey).toBe('');
+  });
+
+  // El toggle de la UI manda sobre el entorno. `env` es la compatibilidad de
+  // una instalación legacy que nunca guardó settings; en cuanto el WISP tiene
+  // fila propia, apagar OpenPay en la UI tiene que apagarlo de verdad.
+  it('tenant-default con fila guardada y OpenPay apagado ignora env', async () => {
+    vi.stubEnv('OPENPAY_MERCHANT_ID', 'ENV_MERCHANT');
+    vi.stubEnv('OPENPAY_PRIVATE_KEY', 'sk_env');
+    await seedOpenPay('tenant-default', {
+      merchantId: 'ROW_MERCHANT',
+      privateKey: 'sk_row',
+      enabled: false,
+    });
+
+    const cfg = await resolveOpenPayConfig('tenant-default');
+    expect(cfg.merchantId).toBe('');
+    expect(cfg.privateKey).toBe('');
+    expect(isUsableOpenPayConfig(cfg)).toBe(false);
+  });
+
+  it('tenant-default con fila guardada sin credenciales tampoco cae a env', async () => {
+    vi.stubEnv('OPENPAY_MERCHANT_ID', 'ENV_MERCHANT');
+    vi.stubEnv('OPENPAY_PRIVATE_KEY', 'sk_env');
+    // Fila persistida y habilitada, pero incompleta: la decisión ya es del WISP.
+    await seedOpenPay('tenant-default', { merchantId: '', privateKey: '' });
+
+    const cfg = await resolveOpenPayConfig('tenant-default');
+    expect(cfg.merchantId).toBe('');
+    expect(isUsableOpenPayConfig(cfg)).toBe(false);
+  });
+
+  it('sin fila persistida, el tenant por defecto sí usa env (instalación legacy)', async () => {
+    vi.stubEnv('OPENPAY_MERCHANT_ID', 'ENV_MERCHANT');
+    vi.stubEnv('OPENPAY_PRIVATE_KEY', 'sk_env');
+
+    const cfg = await resolveOpenPayConfig('tenant-default');
+    expect(cfg.merchantId).toBe('ENV_MERCHANT');
+    expect(isUsableOpenPayConfig(cfg)).toBe(true);
+  });
+
+  it('la fila habilitada y utilizable gana sobre env', async () => {
+    vi.stubEnv('OPENPAY_MERCHANT_ID', 'ENV_MERCHANT');
+    vi.stubEnv('OPENPAY_PRIVATE_KEY', 'sk_env');
+    await seedOpenPay('tenant-default', { merchantId: 'ROW_MERCHANT', privateKey: 'sk_row' });
+
+    const cfg = await resolveOpenPayConfig('tenant-default');
+    expect(cfg.merchantId).toBe('ROW_MERCHANT');
+    expect(cfg.privateKey).toBe('sk_row');
   });
 
   it('expone el webhook secret del WISP (para verificación por tenant)', async () => {
@@ -211,7 +261,7 @@ describe('OpenPayProvider con configuración inyectada', () => {
 
 describe('Factoría de providers por tenant', () => {
   beforeEach(() => {
-    store.INTEGRATION_SETTINGS = emptyIntegrationSettings();
+    store.INTEGRATION_SETTINGS = null;
     store.INTEGRATION_SETTINGS_BY_TENANT = {};
     resetIntegrationsService();
     resetPaymentService();
@@ -220,7 +270,7 @@ describe('Factoría de providers por tenant', () => {
   });
 
   afterEach(() => {
-    store.INTEGRATION_SETTINGS = emptyIntegrationSettings();
+    store.INTEGRATION_SETTINGS = null;
     store.INTEGRATION_SETTINGS_BY_TENANT = {};
     resetIntegrationsService();
     resetPaymentService();
@@ -270,7 +320,7 @@ describe('Factoría de providers por tenant', () => {
 
 describe('PaymentService.createOrder propaga el tenant al provider', () => {
   beforeEach(() => {
-    store.INTEGRATION_SETTINGS = emptyIntegrationSettings();
+    store.INTEGRATION_SETTINGS = null;
     store.INTEGRATION_SETTINGS_BY_TENANT = {};
     store.PAYMENT_ORDERS.length = 0;
     resetIntegrationsService();
@@ -280,7 +330,7 @@ describe('PaymentService.createOrder propaga el tenant al provider', () => {
   });
 
   afterEach(() => {
-    store.INTEGRATION_SETTINGS = emptyIntegrationSettings();
+    store.INTEGRATION_SETTINGS = null;
     store.INTEGRATION_SETTINGS_BY_TENANT = {};
     store.PAYMENT_ORDERS.length = 0;
     resetIntegrationsService();

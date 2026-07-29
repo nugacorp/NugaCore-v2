@@ -16,12 +16,14 @@ describe('Integraciones multi-tenant (aislamiento de credenciales)', () => {
   let svc: IntegrationsService;
 
   beforeEach(() => {
+    store.INTEGRATION_SETTINGS = null;
     store.INTEGRATION_SETTINGS_BY_TENANT = {};
     repo = new StoreIntegrationsRepository();
     svc = new IntegrationsService(repo);
   });
 
   afterEach(() => {
+    store.INTEGRATION_SETTINGS = null;
     store.INTEGRATION_SETTINGS_BY_TENANT = {};
   });
 
@@ -58,5 +60,15 @@ describe('Integraciones multi-tenant (aislamiento de credenciales)', () => {
     const legacy = await svc.getSettingsRaw();
     expect(legacy.openpayMerchantId).toBe('LEGACY');
     expect(legacy.id).toBe('default');
+  });
+
+  it('distingue una fila default ausente de una fila persistida vacía', async () => {
+    expect(await repo.getPersisted('tenant-default')).toBeNull();
+
+    await repo.save({ ...await repo.get(), openpayEnabled: false }, 'tenant-default');
+
+    const persisted = await repo.getPersisted('tenant-default');
+    expect(persisted).not.toBeNull();
+    expect(persisted?.openpayEnabled).toBe(false);
   });
 });
