@@ -2,9 +2,15 @@
 // SupportService — tickets + work orders (USE_DB_SUPPORT).
 // ====================================================================
 
-import { TaskOrder, Ticket } from '../../../src/types';
+import { FtthWorkOrderFields, TaskOrder, Ticket } from '../../../src/types';
 import { BadRequestError, NotFoundError } from '../../common/errors';
 import { getCustomersService } from '../customers/service';
+import {
+  FtthChecklistError,
+  parseFtthFields,
+  parseWorkOrderTechnology,
+  validateFtthCompletion,
+} from './ftth-checklist';
 import { getSupportRepository } from './repository';
 import type { SupportFilters, TicketCreateInput, TicketUpdateInput, WorkOrderCreateInput } from './types';
 
@@ -256,8 +262,15 @@ export class SupportService {
           done: !!(item as { done: unknown }).done,
         }))
         : [],
+      technology: parseWorkOrderTechnology(body.technology) ?? undefined,
+      ftth: parseFtthFields(body.ftth),
       tenantId,
     };
+    // Crear una orden ya cerrada también pasa por el gate de entrega FTTH.
+    if (input.status === 'completed') {
+      const result = validateFtthCompletion({ technology: input.technology, ftth: input.ftth });
+      if (!result.ok) throw new FtthChecklistError(result);
+    }
     return this.repo.createWorkOrder(input);
   }
 
@@ -273,6 +286,19 @@ export class SupportService {
       if (!s) throw new BadRequestError('Invalid work order status', 'INVALID_ENUM');
       patch.status = s;
     }
+    if (body.technology !== undefined) {
+      const tech = parseWorkOrderTechnology(body.technology);
+      if (!tech) throw new BadRequestError('Invalid work order technology', 'INVALID_ENUM');
+      patch.technology = tech;
+    }
+    if (body.ftth !== undefined) patch.ftth = parseFtthFields(body.ftth);
+
+    if (patch.status === 'completed') {
+      const current = await this.repo.getWorkOrder(id, tenantId);
+      if (!current) throw new NotFoundError('Work order not found', 'NOT_FOUND');
+      this.assertFtthCompletionAllowed(current, patch);
+    }
+
     const updated = await this.repo.updateWorkOrder(id, patch as import('./types').WorkOrderUpdateInput, tenantId);
     if (!updated) throw new NotFoundError('Work order not found', 'NOT_FOUND');
     return updated;
@@ -291,9 +317,37 @@ export class SupportService {
   async updateWorkOrderStatus(id: string, body: Record<string, unknown>, tenantId?: string) {
     const status = parseWorkOrderStatus(body.status);
     if (!status) throw new BadRequestError('Invalid status', 'INVALID_ENUM');
+
+    if (status === 'completed') {
+      const current = await this.repo.getWorkOrder(id, tenantId);
+      if (!current) throw new NotFoundError('Work order not found', 'NOT_FOUND');
+      // El técnico puede mandar la captura FTTH en el mismo cierre.
+      const ftth = body.ftth !== undefined ? parseFtthFields(body.ftth) : undefined;
+      if (ftth) {
+        await this.repo.updateWorkOrder(id, { ftth }, tenantId);
+      }
+      this.assertFtthCompletionAllowed(current, { ftth });
+    }
+
     const updated = await this.repo.updateWorkOrderStatus(id, status, tenantId);
     if (!updated) throw new NotFoundError('Work order not found', 'NOT_FOUND');
     return updated;
+  }
+
+  /**
+   * Gate de cierre FTTH: una orden de fibra no se completa sin serie de ONU,
+   * puerto de CTO y potencia óptica dentro de rango. Las órdenes de radio pasan
+   * sin condiciones.
+   */
+  private assertFtthCompletionAllowed(
+    current: TaskOrder,
+    patch: { technology?: unknown; ftth?: FtthWorkOrderFields },
+  ): void {
+    const technology = (patch.technology as TaskOrder['technology']) ?? current.technology;
+    const ftth = { ...(current.ftth ?? {}), ...(patch.ftth ?? {}) };
+    const result = validateFtthCompletion({ technology, ftth });
+    if (result.ok) return;
+    throw new FtthChecklistError(result);
   }
 
   async addWorkOrderEvidence(id: string, body: Record<string, unknown>, tenantId?: string) {

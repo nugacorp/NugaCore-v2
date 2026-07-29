@@ -1,4 +1,5 @@
 import { TaskOrder, Ticket } from '../../../src/types';
+import { parseFtthFields } from './ftth-checklist';
 
 export interface TicketRow {
   id: string;
@@ -64,6 +65,10 @@ export interface WorkOrderRow {
   signature: string | null;
   photos: unknown;
   tenant_id?: string | null;
+  /** 'radio' | 'fiber'; ausente ⇒ radio (órdenes previas al módulo FTTH). */
+  technology?: string | null;
+  /** Captura de campo FTTH (serie ONU, NAP/puerto, potencias). */
+  ftth_data?: unknown;
   created_at: string;
 }
 
@@ -152,6 +157,8 @@ export const rowToWorkOrder = (row: WorkOrderRow): TaskOrder => ({
     : [],
   signature: row.signature ?? undefined,
   photos: Array.isArray(row.photos) ? (row.photos as string[]) : [],
+  technology: row.technology === 'fiber' ? 'fiber' : row.technology === 'radio' ? 'radio' : undefined,
+  ftth: parseFtthFields(row.ftth_data),
   evidences: [],
   history: [],
 });
@@ -175,5 +182,7 @@ export const workOrderToRow = (order: TaskOrder): WorkOrderRow => ({
   signature: order.signature ?? null,
   photos: order.photos ?? [],
   tenant_id: order.tenantId || 'tenant-default',
+  technology: order.technology ?? null,
+  ftth_data: order.ftth ?? null,
   created_at: new Date().toISOString(),
 });

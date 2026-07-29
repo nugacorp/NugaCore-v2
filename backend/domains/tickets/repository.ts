@@ -334,6 +334,8 @@ export class StoreSupportRepository implements SupportRepository {
       technicianName: input.technicianName ?? 'Tecnico por asignar',
       status: input.status,
       checklist: input.checklist ?? [],
+      technology: input.technology,
+      ftth: input.ftth,
       photos: [],
       evidences: [],
       history: [],
@@ -356,6 +358,10 @@ export class StoreSupportRepository implements SupportRepository {
     if (patch.scheduledEnd !== undefined) order.scheduledEnd = patch.scheduledEnd;
     if (patch.assignedTechnicianId !== undefined) order.assignedTechnicianId = patch.assignedTechnicianId;
     if (patch.technicianName !== undefined) order.technicianName = patch.technicianName;
+    if (patch.technology !== undefined) order.technology = patch.technology;
+    // La captura FTTH se mezcla: el técnico puede enviar la potencia después
+    // de haber registrado la serie de la ONU, sin reenviar todo el bloque.
+    if (patch.ftth !== undefined) order.ftth = { ...(order.ftth ?? {}), ...patch.ftth };
     if (patch.status !== undefined) {
       order.status = patch.status;
       if (patch.status === 'completed') updateRelatedClientOnCompletedOrder(order);
@@ -710,6 +716,8 @@ export class SupabaseSupportRepository implements SupportRepository {
       technicianName: input.technicianName ?? 'Tecnico por asignar',
       status: input.status,
       checklist: input.checklist ?? [],
+      technology: input.technology,
+      ftth: input.ftth,
       photos: [],
       evidences: [],
       history: [],
@@ -736,6 +744,10 @@ export class SupabaseSupportRepository implements SupportRepository {
     if (patch.type !== undefined) dbPatch.type = patch.type;
     if (patch.status !== undefined) dbPatch.status = patch.status;
     if (patch.checklist !== undefined) dbPatch.checklist = patch.checklist;
+    if (patch.technology !== undefined) dbPatch.technology = patch.technology;
+    // Mezcla con lo ya capturado: el técnico envía la potencia en un segundo
+    // request sin reenviar la serie de la ONU.
+    if (patch.ftth !== undefined) dbPatch.ftth_data = { ...(existing.ftth ?? {}), ...patch.ftth };
 
     const useTenantEq = this.shouldEqTenant(WORK_ORDERS_TABLE, tenantId);
     let query = this.db.from(WORK_ORDERS_TABLE).update(dbPatch).eq('id', id);

@@ -4,6 +4,7 @@ import { store } from '../../../backend/state/store';
 import { asyncHandler } from '../../common/errors';
 import { READ_ROLES, requireRoles } from '../../common/rbac';
 import { getCustomersService } from '../customers/service';
+import { getOltActionsService, OltNotFoundError } from '../olt/actions/service';
 import { tenantIdFromRequest } from '../tenancy/tenant-scope';
 import { getFtthService } from './ftth-service';
 import { getNetworkService } from './service';
@@ -394,7 +395,7 @@ router.post('/api/ftth/import', requireRoles(['super admin', 'administrador', 't
 }));
 
 router.post('/api/onu/provision', requireRoles(['super admin', 'administrador', 'tecnico']), asyncHandler(async (req, res) => {
-  const { clientId, oltId, port, mac, brand, model, napId, napPort } = req.body;
+  const { clientId, oltId, port, mac, brand, model, napId, napPort, serial, ponPort, onuIndex, vlan } = req.body;
   const client = clientId ? await getCustomersService().getById(String(clientId)) : null;
   if (!client) {
     return res.status(400).json({ error: 'Invalid client' });
@@ -407,11 +408,14 @@ router.post('/api/onu/provision', requireRoles(['super admin', 'administrador', 
     clientName: client.name,
     oltId: oltId || 'olt-1',
     port: Number(port) || 1,
-    mac: mac || 'HWTC:DE:AD:BE:EF',
-    signalDb: -21.8,
+    mac: mac || '',
+    // 0 dBm = "sin lectura": imposible en una ONU real (rango operativo -8..-30),
+    // así que no se confunde con una medición. La potencia real llega cuando el
+    // técnico la captura en la orden de trabajo o cuando el poller lea la OLT.
+    signalDb: 0,
     status: 'online',
-    brand: brand || 'Huawei',
-    model: model || 'ONU Dual-Band',
+    brand: brand || '',
+    model: model || '',
     napId,
     napPort: napPort ? Number(napPort) : undefined,
   };
@@ -431,7 +435,46 @@ router.post('/api/onu/provision', requireRoles(['super admin', 'administrador', 
     }
   }
 
-  res.json(newOnu);
+  // Encola la autorización en la OLT. Dry-run: registra el plan de comandos
+  // para revisión, nadie lo ejecuta todavía (OLT_EXECUTION_ENABLED = false).
+  // Best-effort: si la OLT no está dada de alta como equipo gestionado, la ONU
+  // igual queda registrada en el inventario FTTH.
+  const provisioning: {
+    queuedActionId: string | null;
+    dryRun: boolean;
+    warnings: string[];
+  } = { queuedActionId: null, dryRun: true, warnings: [] };
+
+  try {
+    const action = await getOltActionsService().enqueue(tenantIdFromRequest(req), {
+      oltId: newOnu.oltId,
+      actionType: 'provision_onu',
+      customerId: String(clientId),
+      onuId: newOnuId,
+      triggeredBy: req.authContext?.userId,
+      payload: {
+        serial: serial ? String(serial) : undefined,
+        ponPort: ponPort ? String(ponPort) : undefined,
+        onuIndex: onuIndex != null ? Number(onuIndex) : undefined,
+        vlan: vlan != null ? Number(vlan) : undefined,
+        onuType: model ? String(model) : undefined,
+        description: client.name,
+      },
+    });
+    provisioning.queuedActionId = action.id;
+    provisioning.dryRun = action.dryRun;
+    provisioning.warnings = action.warnings;
+  } catch (error) {
+    if (error instanceof OltNotFoundError) {
+      provisioning.warnings = [
+        `OLT ${newOnu.oltId} no está registrada como equipo gestionado: no se encoló la autorización.`,
+      ];
+    } else {
+      throw error;
+    }
+  }
+
+  res.json({ ...newOnu, provisioning });
 }));
 
 export default router;
