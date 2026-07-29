@@ -76,6 +76,12 @@ describe('Clasificación de un claim existente', () => {
 });
 
 describe('Claim atómico en memoria', () => {
+  it('reserva IDs distintos antes de insertar eventos concurrentes distintos', async () => {
+    const ids = await Promise.all(Array.from({ length: 20 }, () => repo.nextEventId()));
+
+    expect(new Set(ids).size).toBe(ids.length);
+  });
+
   it('dos entregas simultáneas del mismo evento: solo una gana', async () => {
     const [first, second] = await Promise.all([
       repo.claimEvent(candidate('pe-1', 'evt-dup')),

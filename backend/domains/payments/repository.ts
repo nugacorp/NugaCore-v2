@@ -231,7 +231,7 @@ export class StorePaymentRepository implements PaymentRepository {
   }
 
   async nextOrderId() { return store.getUniquePaymentOrderId(); }
-  async nextEventId() { return store.getUniquePaymentEventId(); }
+  async nextEventId() { return 'pe-' + crypto.randomUUID(); }
   async nextActionId() { return store.getUniqueMikrotikActionId(); }
 }
 

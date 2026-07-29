@@ -23,10 +23,15 @@ import { logger } from '../../common/logger';
 import { getIntegrationsService } from '../integrations/service';
 import { DEFAULT_TENANT_ID } from '../tenancy/types';
 import { tenantIdFromRequest } from '../tenancy/tenant-scope';
-import { isUsableOpenPayConfig, resolveOpenPayConfig } from './providers/openpay-config';
+import {
+  isUsableOpenPayConfig,
+  openPayConfigFromEnv,
+  resolveOpenPayConfig,
+  type OpenPayResolvedConfig,
+} from './providers/openpay-config';
 import { buildOpenPayProvider, getProvider } from './providers/index';
 import { getPaymentService } from './service';
-import { PaymentProvider } from './types';
+import { PaymentProvider, type WebhookProcessResult } from './types';
 
 const router = Router();
 
@@ -148,24 +153,62 @@ const signatureOf = (req: Request): string =>
 /** Identidad del evento tal como la publica el proveedor. */
 const webhookEventOf = (req: Request, provider: PaymentProvider) => {
   const body = (req.body || {}) as Record<string, unknown>;
+  const eventType =
+    (body.type as string) || (body.action as string) || (body.event_type as string) || 'payment.update';
+  const explicitEventId = (body.id as string) || (body.event_id as string);
+  const transactionId = (body.transaction as { id?: string } | undefined)?.id;
   return {
     payload: body,
-    eventType:
-      (body.type as string) || (body.action as string) || (body.event_type as string) || 'payment.update',
+    eventType,
     providerEventId: String(
-      (body.id as string) ||
-        (body.event_id as string) ||
-        ((body.transaction as { id?: string } | undefined)?.id) ||
-        `${provider}-${Date.now()}`,
+      explicitEventId ||
+        (transactionId ? `${eventType}:${transactionId}` : `${eventType}:${provider}-${Date.now()}`),
     ),
   };
+};
+
+const openPayConfigFromPersisted = (settings: Awaited<ReturnType<
+  ReturnType<typeof getIntegrationsService>['getPersistedSettingsRaw']
+>>): OpenPayResolvedConfig | null => {
+  if (!settings) return null;
+  return {
+    merchantId: settings.openpayMerchantId.trim(),
+    privateKey: settings.openpayPrivateKey.trim(),
+    sandbox: settings.openpaySandbox,
+    webhookSecret: settings.openpayWebhookSecret || undefined,
+  };
+};
+
+const sendWebhookResult = (res: Response, result: WebhookProcessResult): void => {
+  if (result.idempotentReason === 'in_progress') {
+    // OpenPay reintenta cuando no recibe 200. Un claim vivo no es éxito:
+    // responder 503 evita que una entrega concurrente se pierda para siempre.
+    res.set('Retry-After', '5').status(503).json(result);
+    return;
+  }
+  res.json(result);
 };
 
 const handleWebhook = (provider: PaymentProvider) =>
   asyncHandler(async (req, res) => {
     const rawBody = rawBodyOf(req);
     const signature = signatureOf(req);
-    const secret = process.env[`WEBHOOK_SECRET_${provider.toUpperCase()}`] || '';
+    let secret = process.env[`WEBHOOK_SECRET_${provider.toUpperCase()}`] || '';
+    let providerImpl = getProvider(provider);
+
+    if (provider === 'openpay') {
+      const persisted = await getIntegrationsService().getPersistedSettingsRaw(DEFAULT_TENANT_ID);
+      // La fila default es autoritativa: disabled corta incluso si env conserva
+      // un secreto anterior. Env solo representa una instalación sin fila.
+      if (persisted && !persisted.openpayEnabled) {
+        logger.warn('PaymentEngine: webhook OpenPay legacy deshabilitado en la fila default');
+        res.status(503).json({ error: 'Webhook no configurado.', code: 'WEBHOOK_NOT_CONFIGURED' });
+        return;
+      }
+      const config = openPayConfigFromPersisted(persisted) ?? openPayConfigFromEnv();
+      secret = config.webhookSecret || '';
+      providerImpl = buildOpenPayProvider(config);
+    }
 
     // Fail-closed (C-01): en un despliegue publico (produccion o
     // PUBLIC_DEPLOYMENT) un webhook SIN secreto configurado se rechaza, para que
@@ -179,7 +222,6 @@ const handleWebhook = (provider: PaymentProvider) =>
       return;
     }
 
-    const providerImpl = getProvider(provider);
     const verify = providerImpl.verifyWebhook(rawBody, signature, secret);
 
     if (!verify.valid) {
@@ -196,7 +238,7 @@ const handleWebhook = (provider: PaymentProvider) =>
       tenantId: DEFAULT_TENANT_ID,
     });
 
-    res.json(result);
+    sendWebhookResult(res, result);
   });
 
 router.post('/api/payments/webhook/manual', handleWebhook('manual'));
@@ -270,7 +312,7 @@ router.post(
       tenantId,
     });
 
-    res.json(result);
+    sendWebhookResult(res, result);
   }),
 );
 
