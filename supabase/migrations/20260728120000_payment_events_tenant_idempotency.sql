@@ -58,13 +58,12 @@ END $$;
 
 -- ── FK de tenant_id → tenants(id), idempotente ────────────────────────
 --
--- La SSOT multi-tenant ya la crea con nombre autogenerado. Solo se añade si
--- NO existe ninguna FK sobre payment_events.tenant_id, para no duplicarla ni
--- pisar la existente. Si `tenants` no existe todavía, se deja constancia y se
--- sigue: la SSOT la creará cuando corra.
+-- La SSOT multi-tenant ya la crea con nombre autogenerado. Si esa FK correcta
+-- existe se conserva y valida. Solo se omite cuando `public.tenants` todavía
+-- no existe; cualquier error real al crear o validar aborta la migración.
 DO $$
 DECLARE
-  has_fk BOOLEAN;
+  existing_fk_name TEXT;
 BEGIN
   IF NOT EXISTS (
     SELECT 1 FROM information_schema.tables
@@ -73,28 +72,45 @@ BEGIN
     RETURN;
   END IF;
 
-  SELECT EXISTS (
-    SELECT 1
-    FROM pg_constraint c
-    JOIN pg_attribute a
-      ON a.attrelid = c.conrelid AND a.attnum = ANY (c.conkey)
-    WHERE c.conrelid = 'public.payment_events'::regclass
-      AND c.contype = 'f'
-      AND a.attname = 'tenant_id'
-  ) INTO has_fk;
-
-  IF has_fk THEN
-    RAISE NOTICE 'payment_events.tenant_id ya tiene FK; se respeta la existente';
+  IF NOT EXISTS (
+    SELECT 1 FROM information_schema.tables
+    WHERE table_schema = 'public' AND table_name = 'tenants'
+  ) THEN
+    RAISE NOTICE 'public.tenants no existe; FK payment_events.tenant_id pendiente';
     RETURN;
   END IF;
 
-  BEGIN
-    ALTER TABLE public.payment_events
-      ADD CONSTRAINT payment_events_tenant_id_fkey
-      FOREIGN KEY (tenant_id) REFERENCES public.tenants(id) ON DELETE RESTRICT;
-  EXCEPTION WHEN others THEN
-    RAISE NOTICE 'No se pudo crear la FK payment_events.tenant_id: %', SQLERRM;
-  END;
+  SELECT c.conname
+    INTO existing_fk_name
+    FROM pg_constraint c
+    JOIN pg_attribute a
+      ON a.attrelid = c.conrelid AND a.attnum = ANY (c.conkey)
+    JOIN pg_attribute referenced_a
+      ON referenced_a.attrelid = c.confrelid
+      AND referenced_a.attnum = ANY (c.confkey)
+    WHERE c.conrelid = 'public.payment_events'::regclass
+      AND c.contype = 'f'
+      AND a.attname = 'tenant_id'
+      AND c.confrelid = 'public.tenants'::regclass
+      AND referenced_a.attname = 'id'
+      AND c.confdeltype = 'r'
+    LIMIT 1;
+
+  IF existing_fk_name IS NOT NULL THEN
+    EXECUTE format(
+      'ALTER TABLE public.payment_events VALIDATE CONSTRAINT %I',
+      existing_fk_name
+    );
+    RETURN;
+  END IF;
+
+  ALTER TABLE public.payment_events
+    ADD CONSTRAINT payment_events_tenant_id_fkey
+    FOREIGN KEY (tenant_id) REFERENCES public.tenants(id) ON DELETE RESTRICT
+    NOT VALID;
+
+  ALTER TABLE public.payment_events
+    VALIDATE CONSTRAINT payment_events_tenant_id_fkey;
 END $$;
 
 -- ── Token de webhook OpenPay: uno por WISP, nunca compartido ──────────
