@@ -103,6 +103,14 @@ describe('SupabaseIntegrationsRepository — cifrado en reposo de credenciales',
     await expect(repo.getPersisted('tenant-default')).rejects.toMatchObject({ code: '42703' });
   });
 
+  it('propaga 42P01: tabla ausente no equivale a fila ausente ni habilita fallback env', async () => {
+    const { admin, captured } = makeFakeAdmin();
+    const repo = new SupabaseIntegrationsRepository(admin);
+    captured.readError = { code: '42P01', message: 'relation wisp_integration_settings does not exist' };
+
+    await expect(repo.getPersisted('tenant-default')).rejects.toMatchObject({ code: '42P01' });
+  });
+
   it('tolera valores legacy en texto plano (sin romper)', async () => {
     const { admin, captured } = makeFakeAdmin();
     const repo = new SupabaseIntegrationsRepository(admin);

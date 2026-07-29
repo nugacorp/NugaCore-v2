@@ -202,9 +202,6 @@ export class SupabaseIntegrationsRepository implements IntegrationsRepository {
       .eq('id', id)
       .maybeSingle();
     if (error) {
-      if (String(error.code) === '42P01') {
-        return null;
-      }
       throw error;
     }
     return data ? rowToRecord(data as Record<string, unknown>) : null;

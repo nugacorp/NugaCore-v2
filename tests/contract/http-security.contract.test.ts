@@ -1,4 +1,4 @@
-import { describe, it, expect, afterEach } from 'vitest';
+import { describe, it, expect, afterEach, vi } from 'vitest';
 import request from 'supertest';
 import { createApp } from '../../backend/app';
 
@@ -21,6 +21,7 @@ describe('Hardening HTTP (helmet / CORS / rate-limit)', () => {
   const saved: Record<string, string | undefined> = {};
 
   afterEach(() => {
+    vi.restoreAllMocks();
     // Restaura el entorno modificado por cada test.
     for (const k of ENV_KEYS) {
       if (k in saved) {
@@ -99,5 +100,40 @@ describe('Hardening HTTP (helmet / CORS / rate-limit)', () => {
       const res = await request(app).get('/api/health');
       expect(res.status).toBe(200);
     }
+  });
+
+  it('rate-limit redacta el token opaco del path al registrar un 429', async () => {
+    stash('RATE_LIMIT_ENABLED');
+    stash('RATE_LIMIT_MAX');
+    stash('RATE_LIMIT_WINDOW_MS');
+    process.env.RATE_LIMIT_ENABLED = 'true';
+    process.env.RATE_LIMIT_MAX = '1';
+    process.env.RATE_LIMIT_WINDOW_MS = '60000';
+    const token = 'token-super-secreto-para-rate-limit';
+    const warnings: string[] = [];
+    vi.spyOn(console, 'warn').mockImplementation((line) => warnings.push(String(line)));
+    const app = createApp();
+
+    await request(app).post(`/api/payments/webhook/openpay/${token}`).send({});
+    const limited = await request(app).post(`/api/payments/webhook/openpay/${token}`).send({});
+
+    expect(limited.status).toBe(429);
+    expect(warnings.join('\n')).not.toContain(token);
+    expect(warnings.join('\n')).toContain('/api/payments/webhook/openpay/***');
+  });
+
+  it('el error de JSON malformado redacta el token opaco del path', async () => {
+    const token = 'token-super-secreto-para-parser';
+    const errors: string[] = [];
+    vi.spyOn(console, 'error').mockImplementation((line) => errors.push(String(line)));
+
+    const res = await request(createApp())
+      .post(`/api/payments/webhook/openpay/${token}`)
+      .set('Content-Type', 'application/json')
+      .send('{"incompleto":');
+
+    expect(res.status).toBeGreaterThanOrEqual(400);
+    expect(errors.join('\n')).not.toContain(token);
+    expect(errors.join('\n')).toContain('/api/payments/webhook/openpay/***');
   });
 });
