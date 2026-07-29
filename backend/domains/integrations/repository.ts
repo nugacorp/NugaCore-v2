@@ -141,6 +141,8 @@ export interface OpenPayWebhookOwner {
 
 export interface IntegrationsRepository {
   get(tenantId?: string): Promise<IntegrationSettingsRecord>;
+  /** Fila realmente persistida; null no se confunde con el record vacío de lectura/UI. */
+  getPersisted(tenantId?: string): Promise<IntegrationSettingsRecord | null>;
   save(rec: IntegrationSettingsRecord, tenantId?: string): Promise<IntegrationSettingsRecord>;
   /**
    * Resuelve el WISP dueño de un token de webhook OpenPay. Devuelve null si el
@@ -152,15 +154,20 @@ export interface IntegrationsRepository {
 export class StoreIntegrationsRepository implements IntegrationsRepository {
   async get(tenantId?: string): Promise<IntegrationSettingsRecord> {
     const id = resolveSettingsId(tenantId);
-    if (id === DEFAULT_ID) return store.INTEGRATION_SETTINGS ?? emptyIntegrationSettings();
-    return store.INTEGRATION_SETTINGS_BY_TENANT[id] ?? { ...emptyIntegrationSettings(), id };
+    return (await this.getPersisted(tenantId)) ?? { ...emptyIntegrationSettings(), id };
+  }
+
+  async getPersisted(tenantId?: string): Promise<IntegrationSettingsRecord | null> {
+    const id = resolveSettingsId(tenantId);
+    if (id === DEFAULT_ID) return store.INTEGRATION_SETTINGS;
+    return store.INTEGRATION_SETTINGS_BY_TENANT[id] ?? null;
   }
 
   async findByOpenPayWebhookToken(token: string): Promise<OpenPayWebhookOwner | null> {
     const needle = String(token ?? '').trim();
     if (!needle) return null;
     const rows: IntegrationSettingsRecord[] = [
-      store.INTEGRATION_SETTINGS ?? emptyIntegrationSettings(),
+      ...(store.INTEGRATION_SETTINGS ? [store.INTEGRATION_SETTINGS] : []),
       ...Object.values(store.INTEGRATION_SETTINGS_BY_TENANT),
     ];
     const match = rows.find((rec) => Boolean(rec.openpayWebhookToken) && rec.openpayWebhookToken === needle);
@@ -184,18 +191,23 @@ export class SupabaseIntegrationsRepository implements IntegrationsRepository {
 
   async get(tenantId?: string): Promise<IntegrationSettingsRecord> {
     const id = resolveSettingsId(tenantId);
+    return (await this.getPersisted(tenantId)) ?? { ...emptyIntegrationSettings(), id };
+  }
+
+  async getPersisted(tenantId?: string): Promise<IntegrationSettingsRecord | null> {
+    const id = resolveSettingsId(tenantId);
     const { data, error } = await this.admin
       .from('wisp_integration_settings')
       .select('*')
       .eq('id', id)
       .maybeSingle();
     if (error) {
-      if (String(error.code) === '42P01' || String(error.message).includes('does not exist')) {
-        return { ...emptyIntegrationSettings(), id };
+      if (String(error.code) === '42P01') {
+        return null;
       }
       throw error;
     }
-    return data ? rowToRecord(data as Record<string, unknown>) : { ...emptyIntegrationSettings(), id };
+    return data ? rowToRecord(data as Record<string, unknown>) : null;
   }
 
   async findByOpenPayWebhookToken(token: string): Promise<OpenPayWebhookOwner | null> {

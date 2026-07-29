@@ -18,7 +18,6 @@ import type { Express } from 'express';
 import request from 'supertest';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { createApp } from '../../backend/app';
-import { emptyIntegrationSettings } from '../../backend/domains/integrations/repository';
 import {
   getIntegrationsService,
   resetIntegrationsService,
@@ -112,7 +111,7 @@ const seedCustomer = (tenantId: string): string => {
 let app: Express;
 
 const reset = () => {
-  store.INTEGRATION_SETTINGS = emptyIntegrationSettings();
+  store.INTEGRATION_SETTINGS = null;
   store.INTEGRATION_SETTINGS_BY_TENANT = {};
   store.PAYMENT_ORDERS.length = 0;
   store.PAYMENT_EVENTS.length = 0;
@@ -171,7 +170,7 @@ describe('Webhook OpenPay por token — WISP correcto', () => {
     expect(events()).toHaveLength(1);
   });
 
-  it('el tenant por defecto puede usar el secreto de env (compatibilidad single-WISP)', async () => {
+  it('una fila default persistida e incompleta no cae a env', async () => {
     vi.stubEnv('OPENPAY_MERCHANT_ID', 'ENV_MERCHANT');
     vi.stubEnv('OPENPAY_PRIVATE_KEY', 'sk_env');
     vi.stubEnv('WEBHOOK_SECRET_OPENPAY', 'whsec_env');
@@ -184,8 +183,8 @@ describe('Webhook OpenPay por token — WISP correcto', () => {
       .set('x-openpay-signature', sign('whsec_env', payload))
       .send(payload);
 
-    expect(res.status).toBe(200);
-    expect(events()[0].tenantId).toBe('tenant-default');
+    expect(res.status).toBe(404);
+    expect(events()).toHaveLength(0);
   });
 });
 
@@ -337,6 +336,9 @@ describe('Webhook OpenPay por token — rechazos fail-closed', () => {
   });
 
   it('OpenPay deshabilitado en el WISP → el token deja de resolver', async () => {
+    vi.stubEnv('OPENPAY_MERCHANT_ID', 'ENV_MERCHANT');
+    vi.stubEnv('OPENPAY_PRIVATE_KEY', 'sk_env');
+    vi.stubEnv('WEBHOOK_SECRET_OPENPAY', 'whsec_env');
     const token = await seedOpenPay(TENANT_A, { webhookSecret: 'whsec_a' });
     await getIntegrationsService().updateSettings({ openpay: { enabled: false } }, TENANT_A);
     const payload = { id: 'op-evt-off', event_type: 'charge.succeeded', status: 'completed' };
