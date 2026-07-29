@@ -24,6 +24,7 @@ import helmet from 'helmet';
 import cors from 'cors';
 import rateLimit from 'express-rate-limit';
 import { logger } from './logger';
+import { redactSensitivePath } from './log-redaction';
 
 const isTrue = (value: string | undefined, fallback: boolean): boolean =>
   value === undefined || value === '' ? fallback : value.toLowerCase() === 'true';
@@ -139,7 +140,7 @@ export function applyHttpSecurity(app: Express): void {
   const authMax = parsePositive(process.env.AUTH_RATE_LIMIT_MAX, 20);
 
   const limitHandler = (message: string) => (req: Request, res: Response) => {
-    logger.warn(`Rate limit alcanzado: ${req.method} ${req.path}`);
+    logger.warn(`Rate limit alcanzado: ${req.method} ${redactSensitivePath(req.originalUrl || req.path)}`);
     res.status(429).json({ error: message, code: 'RATE_LIMITED' });
   };
 

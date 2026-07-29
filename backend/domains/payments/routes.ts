@@ -30,6 +30,7 @@ import {
   type OpenPayResolvedConfig,
 } from './providers/openpay-config';
 import { buildOpenPayProvider, getProvider } from './providers/index';
+import { EVENT_CLAIM_LEASE_MS } from './repository';
 import { getPaymentService } from './service';
 import { PaymentProvider, type WebhookProcessResult } from './types';
 
@@ -142,8 +143,11 @@ router.post(
 
 // ── Webhooks ──────────────────────────────────────────────────────────
 
-const rawBodyOf = (req: Request): string | Buffer =>
-  (req as unknown as { rawBody?: Buffer }).rawBody ?? JSON.stringify(req.body ?? {});
+const rawBodyOf = (req: Request): Buffer | null => {
+  const jsonMediaType = Boolean(req.is('application/json') || req.is('application/*+json'));
+  const rawBody = (req as unknown as { rawBody?: unknown }).rawBody;
+  return jsonMediaType && Buffer.isBuffer(rawBody) && rawBody.length > 0 ? rawBody : null;
+};
 
 const signatureOf = (req: Request): string =>
   (req.headers['x-signature'] as string) ||
@@ -183,7 +187,10 @@ const sendWebhookResult = (res: Response, result: WebhookProcessResult): void =>
   if (result.idempotentReason === 'in_progress') {
     // OpenPay reintenta cuando no recibe 200. Un claim vivo no es éxito:
     // responder 503 evita que una entrega concurrente se pierda para siempre.
-    res.set('Retry-After', '5').status(503).json(result);
+    res
+      .set('Retry-After', String(Math.ceil(EVENT_CLAIM_LEASE_MS / 1_000)))
+      .status(503)
+      .json(result);
     return;
   }
   res.json(result);
@@ -192,6 +199,13 @@ const sendWebhookResult = (res: Response, result: WebhookProcessResult): void =>
 const handleWebhook = (provider: PaymentProvider) =>
   asyncHandler(async (req, res) => {
     const rawBody = rawBodyOf(req);
+    if (!rawBody) {
+      res.status(415).json({
+        error: 'El webhook requiere un cuerpo JSON verificable.',
+        code: 'INVALID_WEBHOOK_BODY',
+      });
+      return;
+    }
     const signature = signatureOf(req);
     let secret = process.env[`WEBHOOK_SECRET_${provider.toUpperCase()}`] || '';
     let providerImpl = getProvider(provider);
@@ -263,6 +277,12 @@ const rejectWebhook = (res: Response, reason: string, meta: Record<string, unkno
 router.post(
   '/api/payments/webhook/openpay/:token',
   asyncHandler(async (req, res) => {
+    const rawBody = rawBodyOf(req);
+    if (!rawBody) {
+      // La ruta tokenizada no revela si el token o el tenant existen.
+      rejectWebhook(res, 'invalid_webhook_body');
+      return;
+    }
     const token = String(req.params.token ?? '').trim();
     const owner = token
       ? await getIntegrationsService().resolveOpenPayWebhookTenant(token)
@@ -300,7 +320,7 @@ router.post(
       return;
     }
 
-    const verify = buildOpenPayProvider(config).verifyWebhook(rawBodyOf(req), signature, secret);
+    const verify = buildOpenPayProvider(config).verifyWebhook(rawBody, signature, secret);
     if (!verify.valid) {
       rejectWebhook(res, verify.reason ?? 'invalid_signature', { tenantId });
       return;

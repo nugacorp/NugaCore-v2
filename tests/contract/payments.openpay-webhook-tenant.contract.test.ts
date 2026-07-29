@@ -262,6 +262,21 @@ describe('Webhook OpenPay por token — HMAC sobre los bytes exactos', () => {
     expect(events()).toHaveLength(0);
   });
 
+  it('rechaza text/plain aunque la firma coincida con el fallback reserializado {}', async () => {
+    const token = await seedOpenPay(TENANT_A, { webhookSecret: 'whsec_a' });
+    const raw = 'cuerpo-no-json-que-no-debe-ser-ignorado';
+
+    const res = await request(app)
+      .post(`/api/payments/webhook/openpay/${token}`)
+      .set('Content-Type', 'text/plain')
+      .set('x-openpay-signature', signRaw('whsec_a', '{}'))
+      .send(raw);
+
+    expect(res.status).toBe(404);
+    expect(res.body).toEqual(REJECTED);
+    expect(events()).toHaveLength(0);
+  });
+
   it('el cuerpo del webhook no aparece en los logs', async () => {
     const lines: string[] = [];
     const capture = (...args: unknown[]) => { lines.push(args.map(String).join(' ')); };
@@ -648,6 +663,7 @@ describe('Webhook OpenPay — entregas simultáneas del mismo evento', () => {
 
     const inFlight = await post();
     expect(inFlight.status).toBe(503);
+    expect(inFlight.headers['retry-after']).toBe(String(Math.ceil(EVENT_CLAIM_LEASE_MS / 1_000)));
     expect(inFlight.body.idempotent).toBe(true);
     expect(inFlight.body.idempotentReason).toBe('in_progress');
     expect(events()).toHaveLength(1);
@@ -799,6 +815,21 @@ describe('Webhook OpenPay legacy (sin token) — compatibilidad single-WISP', ()
     expect(rowSecret.status).toBe(200);
     expect(events()).toHaveLength(1);
     expect(events()[0].tenantId).toBe('tenant-default');
+  });
+
+  it('no acepta text/plain firmado para {} en la ruta legacy', async () => {
+    vi.stubEnv('PUBLIC_DEPLOYMENT', 'true');
+    vi.stubEnv('WEBHOOK_SECRET_OPENPAY', 'whsec_legacy');
+
+    const res = await request(app)
+      .post('/api/payments/webhook/openpay')
+      .set('Content-Type', 'text/plain')
+      .set('x-openpay-signature', signRaw('whsec_legacy', '{}'))
+      .send('bytes-no-json');
+
+    expect(res.status).toBe(415);
+    expect(res.body.code).toBe('INVALID_WEBHOOK_BODY');
+    expect(events()).toHaveLength(0);
   });
 
   it('la ruta legacy también responde 503 al claim vivo y procesa cuando queda stale', async () => {
