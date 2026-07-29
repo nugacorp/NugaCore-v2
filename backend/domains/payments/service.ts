@@ -60,10 +60,34 @@ const assertValidProvider = (p: unknown): PaymentProvider => {
   return p as PaymentProvider;
 };
 
+class ClaimOwnershipLostError extends Error {
+  constructor() {
+    super('Webhook claim ownership lost');
+    this.name = 'ClaimOwnershipLostError';
+  }
+}
+
 // ── Servicio ──────────────────────────────────────────────────────────
 
 export class PaymentService {
   constructor(private readonly repo: PaymentRepository) {}
+
+  /**
+   * Barrera de fencing compartida por todos los efectos del webhook. Renueva
+   * el lease y aborta inmediatamente si otro procesador ya rotó el epoch.
+   */
+  private async renewOrThrow(eventId: string, claimToken: string | undefined): Promise<void> {
+    if (!claimToken || !await this.repo.renewEventClaim(eventId, claimToken)) {
+      throw new ClaimOwnershipLostError();
+    }
+  }
+
+  /** El cierre sigue siendo un CAS condicionado por el mismo epoch. */
+  private async closeOrThrow(eventId: string, claimToken: string | undefined): Promise<void> {
+    if (!claimToken || !await this.repo.markEventProcessed(eventId, claimToken)) {
+      throw new ClaimOwnershipLostError();
+    }
+  }
 
   // ── Payment Orders ────────────────────────────────────────────────
 
@@ -188,142 +212,143 @@ export class PaymentService {
       reactivationTriggered: false,
       message: 'El claim cambió de dueño; esta entrega debe reintentarse.',
     });
-    const renewOwnership = async (): Promise<boolean> =>
-      Boolean(claimToken && await this.repo.renewEventClaim(eventId, claimToken));
-    const closeOwnedEvent = async (): Promise<boolean> =>
-      Boolean(claimToken && await this.repo.markEventProcessed(eventId, claimToken));
+    try {
+      // Fencing temprano: un procesador que despertó después de que otro
+      // reclamara el lease no llega siquiera a las lecturas que preceden efectos.
+      await this.renewOrThrow(eventId, claimToken);
 
-    // Fencing temprano: un procesador que despertó después de que otro
-    // reclamara el lease no llega siquiera a las lecturas que preceden efectos.
-    if (!await renewOwnership()) {
-      logger.warn('PaymentEngine: ownership del claim perdido antes de procesar', {
+      // Solo eventos de pago aprobado disparan el flujo completo
+      const isApproved = this.isApprovedEvent(provider, claimedEventType, claimedPayload);
+      if (!isApproved) {
+        await this.closeOrThrow(eventId, claimToken);
+        logger.info('PaymentEngine: webhook recibido (no aprobado, no acción)', {
+          provider, eventType: claimedEventType, tenantId,
+        });
+        return {
+          eventId, idempotent: false, invoiceUpdated: false,
+          reactivationTriggered: false, message: 'Evento recibido, sin acción (no es aprobación de pago).',
+        };
+      }
+
+      // Buscar payment_order por providerOrderId DENTRO del WISP del evento: un
+      // provider_order_id de otro merchant nunca puede completar esta order.
+      const providerOrderId = this.extractProviderOrderId(provider, claimedPayload);
+      const order = providerOrderId
+        ? await this.repo.findOrderByProviderOrderId(provider, providerOrderId, tenantId)
+        : null;
+
+      let invoiceUpdated = false;
+      let reactivationTriggered = false;
+      let mikrotikActionId: string | undefined;
+
+      if (order) {
+        const orderTenantId = order.tenantId || 'tenant-default';
+        // Cada llamada mutante tiene su propia barrera: perder ownership dentro
+        // de un efecto impide alcanzar el siguiente.
+        await this.renewOrThrow(eventId, claimToken);
+        await this.repo.updateOrderStatus(order.id, 'completed', undefined, orderTenantId);
+
+        await this.renewOrThrow(eventId, claimToken);
+        const invoiceResult = await this.confirmPaymentOnInvoice(order, orderTenantId);
+        invoiceUpdated = invoiceResult.updated;
+
+        await this.renewOrThrow(eventId, claimToken);
+        const reactivation = await this.reactivateCustomerService(order.customerId, {
+          triggeredBy: `webhook:${provider}:${providerEventId}`,
+          invoiceId: order.invoiceId,
+          tenantId: orderTenantId,
+        });
+        reactivationTriggered = !reactivation.alreadyActive;
+        mikrotikActionId = reactivation.mikrotikAction?.id;
+
+        await this.closeOrThrow(eventId, claimToken);
+        logger.info('PaymentEngine: pago confirmado', {
+          orderId: order.id, invoiceId: order.invoiceId, customerId: order.customerId, tenantId: orderTenantId,
+        });
+      } else if (provider === 'codi') {
+        const reference = String(claimedPayload.reference ?? claimedPayload.referencia ?? '').toUpperCase();
+        if (reference) {
+          const invoiceId = reference.split('-')[0];
+          const orders = await this.repo.listOrders({ invoiceId, tenantId });
+          const order = orders.find((o) => o.provider === 'codi') ?? orders[0];
+          if (order) {
+            const orderTenantId = order.tenantId || 'tenant-default';
+            await this.renewOrThrow(eventId, claimToken);
+            await this.repo.updateOrderStatus(order.id, 'completed', undefined, orderTenantId);
+            await this.renewOrThrow(eventId, claimToken);
+            const invoiceResult = await this.confirmPaymentOnInvoice(order, orderTenantId);
+            invoiceUpdated = invoiceResult.updated;
+            await this.renewOrThrow(eventId, claimToken);
+            const reactivation = await this.reactivateCustomerService(order.customerId, {
+              triggeredBy: `webhook:codi:${providerEventId}`,
+              invoiceId: order.invoiceId,
+              tenantId: orderTenantId,
+            });
+            reactivationTriggered = !reactivation.alreadyActive;
+            mikrotikActionId = reactivation.mikrotikAction?.id;
+            await this.closeOrThrow(eventId, claimToken);
+            return {
+              eventId,
+              idempotent: false,
+              invoiceUpdated,
+              reactivationTriggered,
+              mikrotikActionId,
+              message: 'Pago CoDi confirmado y cliente reactivado.',
+            };
+          }
+          // Sin order previa: intentar factura directa por referencia (del WISP).
+          const billing = getBillingService();
+          const invoice = await billing.findInvoiceById(invoiceId, tenantId);
+          if (invoice && invoice.status !== 'paid') {
+            const invoiceTenantId = invoice.tenantId || 'tenant-default';
+            await this.renewOrThrow(eventId, claimToken);
+            const amount = Number(
+              claimedPayload.amount ?? claimedPayload.monto ?? invoice.pendingAmount ?? invoice.amount,
+            );
+            await billing.recordPayment(invoice.id, {
+              amount,
+              method: 'Transferencia',
+              transactionId: providerEventId,
+            }, invoiceTenantId);
+            invoiceUpdated = true;
+            await this.renewOrThrow(eventId, claimToken);
+            const reactivation = await this.reactivateCustomerService(invoice.clientId, {
+              triggeredBy: `webhook:codi:${providerEventId}`,
+              invoiceId: invoice.id,
+              tenantId: invoiceTenantId,
+            });
+            reactivationTriggered = !reactivation.alreadyActive;
+            mikrotikActionId = reactivation.mikrotikAction?.id;
+          }
+        }
+        await this.closeOrThrow(eventId, claimToken);
+        return {
+          eventId,
+          idempotent: false,
+          invoiceUpdated,
+          reactivationTriggered,
+          mikrotikActionId,
+          message: invoiceUpdated ? 'Pago CoDi aplicado a factura.' : 'Evento CoDi sin factura asociada.',
+        };
+      } else {
+        // Webhook de proveedor sin order registrada — guardar y continuar
+        await this.closeOrThrow(eventId, claimToken);
+        logger.warn('PaymentEngine: webhook sin payment_order asociada', { provider, providerOrderId, tenantId });
+      }
+
+      return {
+        eventId, idempotent: false, invoiceUpdated, reactivationTriggered, mikrotikActionId,
+        message: invoiceUpdated
+          ? 'Pago confirmado, factura actualizada y reactivación programada.'
+          : 'Evento procesado (sin order asociada o factura ya pagada).',
+      };
+    } catch (error) {
+      if (!(error instanceof ClaimOwnershipLostError)) throw error;
+      logger.warn('PaymentEngine: ownership del claim perdido; efectos posteriores abortados', {
         eventId, provider, providerEventId, tenantId,
       });
       return lostOwnershipResult();
     }
-
-    // Solo eventos de pago aprobado disparan el flujo completo
-    const isApproved = this.isApprovedEvent(provider, claimedEventType, claimedPayload);
-    if (!isApproved) {
-      if (!await closeOwnedEvent()) return lostOwnershipResult();
-      logger.info('PaymentEngine: webhook recibido (no aprobado, no acción)', {
-        provider, eventType: claimedEventType, tenantId,
-      });
-      return {
-        eventId, idempotent: false, invoiceUpdated: false,
-        reactivationTriggered: false, message: 'Evento recibido, sin acción (no es aprobación de pago).',
-      };
-    }
-
-    // Buscar payment_order por providerOrderId DENTRO del WISP del evento: un
-    // provider_order_id de otro merchant nunca puede completar esta order.
-    const providerOrderId = this.extractProviderOrderId(provider, claimedPayload);
-    const order = providerOrderId
-      ? await this.repo.findOrderByProviderOrderId(provider, providerOrderId, tenantId)
-      : null;
-
-    let invoiceUpdated = false;
-    let reactivationTriggered = false;
-    let mikrotikActionId: string | undefined;
-
-    if (order) {
-      const orderTenantId = order.tenantId || 'tenant-default';
-      if (!await renewOwnership()) return lostOwnershipResult();
-      // Marcar order como completada
-      await this.repo.updateOrderStatus(order.id, 'completed', undefined, orderTenantId);
-
-      // Integrar con Billing (idempotente: si la factura ya está paid, no duplica)
-      const invoiceResult = await this.confirmPaymentOnInvoice(order, orderTenantId);
-      invoiceUpdated = invoiceResult.updated;
-
-      // Reactivación lógica del cliente (tenant de la order)
-      const reactivation = await this.reactivateCustomerService(order.customerId, {
-        triggeredBy: `webhook:${provider}:${providerEventId}`,
-        invoiceId: order.invoiceId,
-        tenantId: orderTenantId,
-      });
-      reactivationTriggered = !reactivation.alreadyActive;
-      mikrotikActionId = reactivation.mikrotikAction?.id;
-
-      // Vincular evento a la order
-      if (!await closeOwnedEvent()) return lostOwnershipResult();
-      logger.info('PaymentEngine: pago confirmado', {
-        orderId: order.id, invoiceId: order.invoiceId, customerId: order.customerId, tenantId: orderTenantId,
-      });
-    } else if (provider === 'codi') {
-      const reference = String(claimedPayload.reference ?? claimedPayload.referencia ?? '').toUpperCase();
-      if (reference) {
-        const invoiceId = reference.split('-')[0];
-        const orders = await this.repo.listOrders({ invoiceId, tenantId });
-        const order = orders.find((o) => o.provider === 'codi') ?? orders[0];
-        if (order) {
-          const orderTenantId = order.tenantId || 'tenant-default';
-          if (!await renewOwnership()) return lostOwnershipResult();
-          await this.repo.updateOrderStatus(order.id, 'completed', undefined, orderTenantId);
-          const invoiceResult = await this.confirmPaymentOnInvoice(order, orderTenantId);
-          invoiceUpdated = invoiceResult.updated;
-          const reactivation = await this.reactivateCustomerService(order.customerId, {
-            triggeredBy: `webhook:codi:${providerEventId}`,
-            invoiceId: order.invoiceId,
-            tenantId: orderTenantId,
-          });
-          reactivationTriggered = !reactivation.alreadyActive;
-          mikrotikActionId = reactivation.mikrotikAction?.id;
-          if (!await closeOwnedEvent()) return lostOwnershipResult();
-          return {
-            eventId,
-            idempotent: false,
-            invoiceUpdated,
-            reactivationTriggered,
-            mikrotikActionId,
-            message: 'Pago CoDi confirmado y cliente reactivado.',
-          };
-        }
-        // Sin order previa: intentar factura directa por referencia (del WISP).
-        const billing = getBillingService();
-        const invoice = await billing.findInvoiceById(invoiceId, tenantId);
-        if (invoice && invoice.status !== 'paid') {
-          const invoiceTenantId = invoice.tenantId || 'tenant-default';
-          if (!await renewOwnership()) return lostOwnershipResult();
-          const amount = Number(
-            claimedPayload.amount ?? claimedPayload.monto ?? invoice.pendingAmount ?? invoice.amount,
-          );
-          await billing.recordPayment(invoice.id, {
-            amount,
-            method: 'Transferencia',
-            transactionId: providerEventId,
-          }, invoiceTenantId);
-          invoiceUpdated = true;
-          const reactivation = await this.reactivateCustomerService(invoice.clientId, {
-            triggeredBy: `webhook:codi:${providerEventId}`,
-            invoiceId: invoice.id,
-            tenantId: invoiceTenantId,
-          });
-          reactivationTriggered = !reactivation.alreadyActive;
-          mikrotikActionId = reactivation.mikrotikAction?.id;
-        }
-      }
-      if (!await closeOwnedEvent()) return lostOwnershipResult();
-      return {
-        eventId,
-        idempotent: false,
-        invoiceUpdated,
-        reactivationTriggered,
-        mikrotikActionId,
-        message: invoiceUpdated ? 'Pago CoDi aplicado a factura.' : 'Evento CoDi sin factura asociada.',
-      };
-    } else {
-      // Webhook de proveedor sin order registrada — guardar y continuar
-      if (!await closeOwnedEvent()) return lostOwnershipResult();
-      logger.warn('PaymentEngine: webhook sin payment_order asociada', { provider, providerOrderId, tenantId });
-    }
-
-    return {
-      eventId, idempotent: false, invoiceUpdated, reactivationTriggered, mikrotikActionId,
-      message: invoiceUpdated
-        ? 'Pago confirmado, factura actualizada y reactivación programada.'
-        : 'Evento procesado (sin order asociada o factura ya pagada).',
-    };
   }
 
   // ── Billing integration ───────────────────────────────────────────
