@@ -8,6 +8,8 @@
 --    segundo WISP se descartaba como "ya procesado".
 -- 2. Unicidad del token de webhook de OpenPay: dos WISPs nunca pueden
 --    compartir token (la resolución token → tenant debe ser inequívoca).
+-- 3. `claimed_at`: marca del claim atómico con el que una sola entrega del
+--    webhook se reserva el evento. Ver payments/repository.ts.
 --
 -- Aditiva/idempotente y reconciliatoria: tolera entornos donde la migración
 -- multi-tenant SSOT aún no añadió tenant_id. La nueva unicidad es MÁS LAXA
@@ -22,11 +24,19 @@ BEGIN
     WHERE table_schema = 'public' AND table_name = 'payment_events'
   ) THEN
     -- Reconciliación: si el entorno no pasó por la SSOT multi-tenant, la
-    -- columna no existe todavía. Se crea sin FK para no fallar aquí; la SSOT
-    -- la endurece cuando corra.
+    -- columna no existe todavía. Se crea sin FK aquí; la FK se concilia abajo.
     ALTER TABLE public.payment_events ADD COLUMN IF NOT EXISTS tenant_id TEXT;
     ALTER TABLE public.payment_events ALTER COLUMN tenant_id SET DEFAULT 'tenant-default';
     UPDATE public.payment_events SET tenant_id = 'tenant-default' WHERE tenant_id IS NULL;
+
+    -- Tras el backfill no puede quedar ningún NULL: sin NOT NULL, el índice
+    -- único de abajo trataría cada NULL como distinto y la idempotencia se
+    -- perdería justo para las filas sin tenant.
+    ALTER TABLE public.payment_events ALTER COLUMN tenant_id SET NOT NULL;
+
+    -- Marca del claim (lease). Nullable a propósito: las filas anteriores a
+    -- este cambio no tienen claim y se consideran recuperables.
+    ALTER TABLE public.payment_events ADD COLUMN IF NOT EXISTS claimed_at TIMESTAMPTZ;
 
     -- La unicidad global se reemplaza por la acotada al WISP.
     ALTER TABLE public.payment_events DROP CONSTRAINT IF EXISTS uq_provider_event;
@@ -38,7 +48,53 @@ BEGIN
     -- único; este acelera la búsqueda de order por tenant.
     CREATE INDEX IF NOT EXISTS idx_pe_tenant
       ON public.payment_events (tenant_id);
+
+    -- Reclaim de claims vencidos: filas abiertas ordenadas por antigüedad.
+    CREATE INDEX IF NOT EXISTS idx_pe_claimed
+      ON public.payment_events (claimed_at)
+      WHERE processed = false;
   END IF;
+END $$;
+
+-- ── FK de tenant_id → tenants(id), idempotente ────────────────────────
+--
+-- La SSOT multi-tenant ya la crea con nombre autogenerado. Solo se añade si
+-- NO existe ninguna FK sobre payment_events.tenant_id, para no duplicarla ni
+-- pisar la existente. Si `tenants` no existe todavía, se deja constancia y se
+-- sigue: la SSOT la creará cuando corra.
+DO $$
+DECLARE
+  has_fk BOOLEAN;
+BEGIN
+  IF NOT EXISTS (
+    SELECT 1 FROM information_schema.tables
+    WHERE table_schema = 'public' AND table_name = 'payment_events'
+  ) THEN
+    RETURN;
+  END IF;
+
+  SELECT EXISTS (
+    SELECT 1
+    FROM pg_constraint c
+    JOIN pg_attribute a
+      ON a.attrelid = c.conrelid AND a.attnum = ANY (c.conkey)
+    WHERE c.conrelid = 'public.payment_events'::regclass
+      AND c.contype = 'f'
+      AND a.attname = 'tenant_id'
+  ) INTO has_fk;
+
+  IF has_fk THEN
+    RAISE NOTICE 'payment_events.tenant_id ya tiene FK; se respeta la existente';
+    RETURN;
+  END IF;
+
+  BEGIN
+    ALTER TABLE public.payment_events
+      ADD CONSTRAINT payment_events_tenant_id_fkey
+      FOREIGN KEY (tenant_id) REFERENCES public.tenants(id) ON DELETE RESTRICT;
+  EXCEPTION WHEN others THEN
+    RAISE NOTICE 'No se pudo crear la FK payment_events.tenant_id: %', SQLERRM;
+  END;
 END $$;
 
 -- ── Token de webhook OpenPay: uno por WISP, nunca compartido ──────────
