@@ -54,8 +54,12 @@ export class MercadoPagoProvider implements IPaymentProvider {
   }
 
   verifyWebhook(rawBody: string | Buffer, signature: string, secret: string): WebhookVerifyResult {
-    if (SIMULATED) return { valid: true };
-    if (!secret || !signature) return { valid: false, reason: 'missing_secret_or_signature' };
+    // Igual que OpenPay: con secreto configurado la firma se verifica siempre,
+    // aunque falte el access token y el provider esté en modo simulado.
+    if (!secret) {
+      return SIMULATED ? { valid: true } : { valid: false, reason: 'missing_secret_or_signature' };
+    }
+    if (!signature) return { valid: false, reason: 'missing_secret_or_signature' };
     const expected = crypto.createHmac('sha256', secret).update(rawBody).digest('hex');
     // timingSafeEqual lanza si los buffers difieren en longitud: comparar
     // longitud primero evita un 500 ante una firma malformada (queda 400 limpio).

@@ -159,10 +159,21 @@ export class OpenPayProvider implements IPaymentProvider {
   }
 
   verifyWebhook(rawBody: string | Buffer, signature: string, secret: string): WebhookVerifyResult {
-    if (this.simulated) return { valid: true };
     // El secreto de la ruta manda; si no lo aporta, se usa el del WISP.
     const effectiveSecret = secret || this.config.webhookSecret || '';
-    if (!effectiveSecret || !signature) return { valid: false, reason: 'missing_secret_or_signature' };
+    // HAY secreto ⇒ se verifica SIEMPRE, aunque el provider esté en modo
+    // simulado. El simulado describe que no llamamos a la API de OpenPay por
+    // falta de credenciales de COBRO; nunca que un endpoint público acepte
+    // cualquier firma. Sin esto, un despliegue con WEBHOOK_SECRET_OPENPAY pero
+    // sin merchant/private key aprobaba pagos con una firma arbitraria.
+    if (!effectiveSecret) {
+      // Sin secreto configurado: solo el modo simulado (dev sin credenciales)
+      // sigue aceptando, que es el comportamiento hermético de siempre.
+      return this.simulated
+        ? { valid: true }
+        : { valid: false, reason: 'missing_secret_or_signature' };
+    }
+    if (!signature) return { valid: false, reason: 'missing_secret_or_signature' };
     const expected = crypto.createHmac('sha256', effectiveSecret).update(rawBody).digest('hex');
     // timingSafeEqual lanza si los buffers difieren en longitud: comparar
     // longitud primero evita un 500 ante una firma malformada (queda 400 limpio).

@@ -77,12 +77,17 @@ export class StorePaymentRepository implements PaymentRepository {
   }
 
   async findOrderByProviderOrderId(provider: PaymentProvider, providerOrderId: string, tenantId?: string) {
-    const order =
+    // El tenant va DENTRO del predicado: filtrarlo después dejaría que la
+    // primera coincidencia global (la de otro WISP con el mismo
+    // providerOrderId) tapara la del WISP buscado y devolviera null.
+    return (
       (store.PAYMENT_ORDERS as PaymentOrderRecord[]).find(
-        (o) => o.provider === provider && o.providerOrderId === providerOrderId,
-      ) ?? null;
-    if (!order || !tenantId) return order;
-    return matchesTenant(order.tenantId, tenantId) ? order : null;
+        (o) =>
+          o.provider === provider &&
+          o.providerOrderId === providerOrderId &&
+          (!tenantId || matchesTenant(o.tenantId, tenantId)),
+      ) ?? null
+    );
   }
 
   async createOrder(rec: PaymentOrderRecord) {
