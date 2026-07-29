@@ -85,6 +85,11 @@ export interface PaymentEventRecord {
   payload: Record<string, unknown>;
   receivedAt: string;
   processedAt?: string;
+  /**
+   * Instante en que una entrega reservó el evento. Junto a `processed` define
+   * el lease: mientras esté vigente, ninguna otra entrega puede procesarlo.
+   */
+  claimedAt?: string;
 }
 
 export interface PaymentEventView {
@@ -134,6 +139,11 @@ export interface MikrotikActionView {
 export interface WebhookProcessResult {
   eventId: string;
   idempotent: boolean;
+  /**
+   * Por qué no se reprocesó: ya estaba procesado, o hay otra entrega del mismo
+   * evento en curso (claim vivo). Solo presente cuando `idempotent` es true.
+   */
+  idempotentReason?: 'already_processed' | 'in_progress';
   invoiceUpdated: boolean;
   reactivationTriggered: boolean;
   mikrotikActionId?: string;
