@@ -57,8 +57,12 @@ describe('Migración de idempotencia por tenant — invariantes estáticas', () 
       /ALTER TABLE public\.payment_events\s+VALIDATE CONSTRAINT payment_events_tenant_id_fkey/,
     );
     // Solo la ausencia comprobada de `public.tenants` permite omitir la FK.
-    // Cualquier error real de ADD/VALIDATE debe abortar la migración.
-    expect(sql).not.toMatch(/EXCEPTION WHEN others THEN/i);
+    // Cualquier error real de ADD/VALIDATE debe abortar la migración: un
+    // handler que capture y siga con NOTICE dejaría la tabla sin FK ocultando
+    // datos inválidos o permisos insuficientes, justo lo contrario de
+    // "asegura FK". Se prohíbe cualquier handler, no solo `WHEN others`.
+    expect(sql, 'la migración no puede tragarse errores con un handler')
+      .not.toMatch(/\bEXCEPTION\b\s+WHEN\b/i);
   });
 
   it('añade claimed_at de forma aditiva y nullable', () => {
