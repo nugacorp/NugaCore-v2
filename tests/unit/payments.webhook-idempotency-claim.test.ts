@@ -558,8 +558,10 @@ describe('PaymentService — ownership antes de efectos', () => {
     expect(closes).toBe(0);
   });
 
-  it('CoDi factura directa: reclaim durante recordPayment aborta antes de reactivación', async () => {
+  it('CoDi factura directa: B reanuda la reactivación tras reclaim durante recordPayment', async () => {
     let currentOwner = 'owner-a';
+    let claimCount = 0;
+    let closes = 0;
     const counters = { billing: 0, reactivation: 0 };
     const event = {
       ...candidate('pe-codi-direct', 'evt-codi-direct-fenced'),
@@ -570,20 +572,78 @@ describe('PaymentService — ownership antes de efectos', () => {
     };
     const fakeRepo = {
       nextEventId: async () => 'pe-codi-direct-candidate',
-      claimEvent: async () => ({ outcome: 'claimed' as const, event }),
+      claimEvent: async () => {
+        claimCount += 1;
+        const claimToken = claimCount === 1 ? 'owner-a' : 'owner-b';
+        currentOwner = claimToken;
+        return { outcome: 'claimed' as const, event: { ...event, claimToken } };
+      },
       renewEventClaim: async (_id: string, token: string) => token === currentOwner,
       findOrderByProviderOrderId: async () => null,
       listOrders: async () => [],
-      markEventProcessed: async (_id: string, token: string) => token === currentOwner,
+      markEventProcessed: async (_id: string, token: string) => {
+        if (token !== currentOwner) return false;
+        closes += 1;
+        return true;
+      },
+    } as unknown as PaymentRepository;
+    const billing = getBillingService();
+    const invoice = {
+      id: 'INV', tenantId: TENANT_A, clientId: 'customer-1', status: 'pending',
+      amount: 100, pendingAmount: 100, payments: [],
+    };
+    vi.spyOn(billing, 'findInvoiceById').mockImplementation(async () => invoice as never);
+    vi.spyOn(billing, 'recordPayment').mockImplementation(async () => {
+      counters.billing += 1;
+      invoice.status = 'paid';
+      invoice.pendingAmount = 0;
+      invoice.payments.push({ transactionId: event.providerEventId } as never);
+      currentOwner = 'owner-b';
+      return invoice as never;
+    });
+    const service = new PaymentService(fakeRepo);
+    stubServiceEffects(service, counters);
+
+    const first = await service.processWebhook({
+      provider: 'codi', providerEventId: event.providerEventId, eventType: event.eventType,
+      payload: event.payload, tenantId: TENANT_A,
+    });
+    const second = await service.processWebhook({
+      provider: 'codi', providerEventId: event.providerEventId, eventType: event.eventType,
+      payload: event.payload, tenantId: TENANT_A,
+    });
+
+    expect(first.idempotentReason).toBe('in_progress');
+    expect(second.idempotent).toBe(false);
+    expect(counters).toEqual({ billing: 1, reactivation: 1 });
+    expect(closes).toBe(1);
+  });
+
+  it('CoDi factura directa: una factura pagada por otro origen no se reactiva', async () => {
+    let closes = 0;
+    const counters = { billing: 0, reactivation: 0 };
+    const event = {
+      ...candidate('pe-codi-other-payment', 'evt-codi-other-payment'),
+      provider: 'codi' as const,
+      eventType: 'payment.completed',
+      claimToken: 'owner-a',
+      payload: { status: 'paid', reference: 'INV-1', amount: 100 },
+    };
+    const fakeRepo = {
+      nextEventId: async () => 'pe-codi-other-payment-candidate',
+      claimEvent: async () => ({ outcome: 'claimed' as const, event }),
+      renewEventClaim: async () => true,
+      findOrderByProviderOrderId: async () => null,
+      listOrders: async () => [],
+      markEventProcessed: async () => { closes += 1; return true; },
     } as unknown as PaymentRepository;
     const billing = getBillingService();
     vi.spyOn(billing, 'findInvoiceById').mockResolvedValue({
-      id: 'INV', tenantId: TENANT_A, clientId: 'customer-1', status: 'pending',
-      amount: 100, pendingAmount: 100,
+      id: 'INV', tenantId: TENANT_A, clientId: 'customer-1', status: 'paid',
+      amount: 100, pendingAmount: 0, payments: [{ transactionId: 'manual-payment' }],
     } as never);
     vi.spyOn(billing, 'recordPayment').mockImplementation(async () => {
       counters.billing += 1;
-      currentOwner = 'owner-b';
       return {} as never;
     });
     const service = new PaymentService(fakeRepo);
@@ -594,7 +654,8 @@ describe('PaymentService — ownership antes de efectos', () => {
       payload: event.payload, tenantId: TENANT_A,
     });
 
-    expect(result.idempotentReason).toBe('in_progress');
-    expect(counters).toEqual({ billing: 1, reactivation: 0 });
+    expect(result.idempotent).toBe(false);
+    expect(counters).toEqual({ billing: 0, reactivation: 0 });
+    expect(closes).toBe(1);
   });
 });

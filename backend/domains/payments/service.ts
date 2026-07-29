@@ -299,26 +299,37 @@ export class PaymentService {
           // Sin order previa: intentar factura directa por referencia (del WISP).
           const billing = getBillingService();
           const invoice = await billing.findInvoiceById(invoiceId, tenantId);
-          if (invoice && invoice.status !== 'paid') {
+          if (invoice) {
             const invoiceTenantId = invoice.tenantId || 'tenant-default';
-            await this.renewOrThrow(eventId, claimToken);
-            const amount = Number(
-              claimedPayload.amount ?? claimedPayload.monto ?? invoice.pendingAmount ?? invoice.amount,
+            const paymentAlreadyAppliedByEvent = invoice.payments.some(
+              (payment) => payment.transactionId === providerEventId,
             );
-            await billing.recordPayment(invoice.id, {
-              amount,
-              method: 'Transferencia',
-              transactionId: providerEventId,
-            }, invoiceTenantId);
-            invoiceUpdated = true;
-            await this.renewOrThrow(eventId, claimToken);
-            const reactivation = await this.reactivateCustomerService(invoice.clientId, {
-              triggeredBy: `webhook:codi:${providerEventId}`,
-              invoiceId: invoice.id,
-              tenantId: invoiceTenantId,
-            });
-            reactivationTriggered = !reactivation.alreadyActive;
-            mikrotikActionId = reactivation.mikrotikAction?.id;
+            let shouldReactivate = paymentAlreadyAppliedByEvent;
+
+            if (invoice.status !== 'paid' && !paymentAlreadyAppliedByEvent) {
+              await this.renewOrThrow(eventId, claimToken);
+              const amount = Number(
+                claimedPayload.amount ?? claimedPayload.monto ?? invoice.pendingAmount ?? invoice.amount,
+              );
+              await billing.recordPayment(invoice.id, {
+                amount,
+                method: 'Transferencia',
+                transactionId: providerEventId,
+              }, invoiceTenantId);
+              shouldReactivate = true;
+            }
+
+            if (shouldReactivate) {
+              invoiceUpdated = true;
+              await this.renewOrThrow(eventId, claimToken);
+              const reactivation = await this.reactivateCustomerService(invoice.clientId, {
+                triggeredBy: `webhook:codi:${providerEventId}`,
+                invoiceId: invoice.id,
+                tenantId: invoiceTenantId,
+              });
+              reactivationTriggered = !reactivation.alreadyActive;
+              mikrotikActionId = reactivation.mikrotikAction?.id;
+            }
           }
         }
         await this.closeOrThrow(eventId, claimToken);
