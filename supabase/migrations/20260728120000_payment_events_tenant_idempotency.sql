@@ -8,8 +8,8 @@
 --    segundo WISP se descartaba como "ya procesado".
 -- 2. Unicidad del token de webhook de OpenPay: dos WISPs nunca pueden
 --    compartir token (la resolución token → tenant debe ser inequívoca).
--- 3. `claimed_at`: marca del claim atómico con el que una sola entrega del
---    webhook se reserva el evento. Ver payments/repository.ts.
+-- 3. `claimed_at` + `claim_token`: lease y epoch del claim atómico. Un
+--    reclamador nuevo invalida el token anterior y cerca al dueño vencido.
 --
 -- Aditiva/idempotente y reconciliatoria: tolera entornos donde la migración
 -- multi-tenant SSOT aún no añadió tenant_id. La nueva unicidad es MÁS LAXA
@@ -37,6 +37,7 @@ BEGIN
     -- Marca del claim (lease). Nullable a propósito: las filas anteriores a
     -- este cambio no tienen claim y se consideran recuperables.
     ALTER TABLE public.payment_events ADD COLUMN IF NOT EXISTS claimed_at TIMESTAMPTZ;
+    ALTER TABLE public.payment_events ADD COLUMN IF NOT EXISTS claim_token TEXT;
 
     -- La unicidad global se reemplaza por la acotada al WISP.
     ALTER TABLE public.payment_events DROP CONSTRAINT IF EXISTS uq_provider_event;

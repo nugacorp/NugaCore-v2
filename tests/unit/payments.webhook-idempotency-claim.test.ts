@@ -19,6 +19,8 @@ import {
   SupabasePaymentRepository,
   classifyExistingClaim,
 } from '../../backend/domains/payments/repository';
+import type { PaymentRepository } from '../../backend/domains/payments/repository';
+import { PaymentService } from '../../backend/domains/payments/service';
 import type { PaymentEventRecord } from '../../backend/domains/payments/types';
 import { store } from '../../backend/state/store';
 
@@ -115,7 +117,7 @@ describe('Claim atómico en memoria', () => {
 
   it('tras procesarlo, una reentrega responde already_processed', async () => {
     const first = await repo.claimEvent(candidate('pe-1', 'evt-ok'));
-    await repo.markEventProcessed(first.event.id);
+    await repo.markEventProcessed(first.event.id, first.event.claimToken!);
 
     const second = await repo.claimEvent(candidate('pe-2', 'evt-ok'));
     expect(second.outcome).toBe('already_processed');
@@ -149,6 +151,23 @@ describe('Claim atómico en memoria', () => {
     expect(results.filter((r) => r.outcome === 'claimed')).toHaveLength(1);
     expect(results.filter((r) => r.outcome === 'in_progress')).toHaveLength(1);
     expect(events()).toHaveLength(1);
+  });
+
+  it('el reclaim invalida el token de A: A no renueva ni cierra y B sí', async () => {
+    const a = await repo.claimEvent(candidate('pe-a', 'evt-fenced-store'));
+    expect(a.event.claimToken).toBeTruthy();
+    events()[0].claimedAt = new Date(Date.now() - EVENT_CLAIM_LEASE_MS - 60_000).toISOString();
+
+    const b = await repo.claimEvent(candidate('pe-b', 'evt-fenced-store'));
+    expect(b.outcome).toBe('claimed');
+    expect(b.event.claimToken).toBeTruthy();
+    expect(b.event.claimToken).not.toBe(a.event.claimToken);
+
+    expect(await repo.renewEventClaim(a.event.id, a.event.claimToken!)).toBe(false);
+    expect(await repo.markEventProcessed(a.event.id, a.event.claimToken!)).toBe(false);
+    expect(await repo.renewEventClaim(b.event.id, b.event.claimToken!)).toBe(true);
+    expect(await repo.markEventProcessed(b.event.id, b.event.claimToken!)).toBe(true);
+    expect(events()[0].processed).toBe(true);
   });
 });
 
@@ -240,7 +259,7 @@ describe('Claim atómico en Postgres', () => {
     const rows: Row[] = [];
     const pg = new SupabasePaymentRepository(fakeSupabase(rows));
     const first = await pg.claimEvent(candidate('pe-1', 'evt-pg'));
-    await pg.markEventProcessed(first.event.id);
+    await pg.markEventProcessed(first.event.id, first.event.claimToken!);
 
     const second = await pg.claimEvent(candidate('pe-2', 'evt-pg'));
     expect(second.outcome).toBe('already_processed');
@@ -286,5 +305,59 @@ describe('Claim atómico en Postgres', () => {
     expect(results.filter((r) => r.outcome === 'claimed')).toHaveLength(1);
     expect(results.filter((r) => r.outcome === 'in_progress')).toHaveLength(1);
     expect(rows).toHaveLength(1);
+  });
+
+  it('el doble PostgREST cerca al dueño stale después del reclaim', async () => {
+    const rows: Row[] = [];
+    const pg = new SupabasePaymentRepository(fakeSupabase(rows));
+    const a = await pg.claimEvent(candidate('pe-a', 'evt-fenced-pg'));
+    rows[0].claimed_at = oldClaim();
+
+    const b = await pg.claimEvent(candidate('pe-b', 'evt-fenced-pg'));
+    expect(b.outcome).toBe('claimed');
+    expect(b.event.claimToken).not.toBe(a.event.claimToken);
+
+    expect(await pg.renewEventClaim(a.event.id, a.event.claimToken!)).toBe(false);
+    expect(await pg.markEventProcessed(a.event.id, a.event.claimToken!)).toBe(false);
+    expect(await pg.renewEventClaim(b.event.id, b.event.claimToken!)).toBe(true);
+    expect(await pg.markEventProcessed(b.event.id, b.event.claimToken!)).toBe(true);
+    expect(rows[0].processed).toBe(true);
+  });
+});
+
+describe('PaymentService — ownership antes de efectos', () => {
+  it('si perdió el token antes del bloque de efectos aborta como in_progress', async () => {
+    const event = {
+      ...candidate('pe-stale', 'evt-stale-service'),
+      claimToken: 'owner-a',
+      payload: {
+        type: 'charge.succeeded',
+        transaction: { id: 'tx-stale', order_id: 'order-stale', status: 'completed' },
+      },
+    };
+    const findOrderByProviderOrderId = async () => {
+      throw new Error('no debe buscar ni ejecutar efectos sin ownership');
+    };
+    const fakeRepo = {
+      nextEventId: async () => 'pe-candidate',
+      claimEvent: async () => ({ outcome: 'claimed' as const, event }),
+      renewEventClaim: async () => false,
+      findOrderByProviderOrderId,
+    } as unknown as PaymentRepository;
+    const service = new PaymentService(fakeRepo);
+
+    const result = await service.processWebhook({
+      provider: 'openpay',
+      providerEventId: event.providerEventId,
+      eventType: 'charge.succeeded',
+      payload: {
+        type: 'charge.succeeded',
+        transaction: { id: 'tx-stale', order_id: 'order-stale', status: 'completed' },
+      },
+      tenantId: TENANT_A,
+    });
+
+    expect(result.idempotent).toBe(true);
+    expect(result.idempotentReason).toBe('in_progress');
   });
 });

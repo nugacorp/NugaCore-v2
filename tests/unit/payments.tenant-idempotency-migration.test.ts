@@ -76,6 +76,11 @@ describe('Migración de idempotencia por tenant — invariantes estáticas', () 
     expect(sql).not.toMatch(/claimed_at TIMESTAMPTZ NOT NULL/);
   });
 
+  it('añade claim_token de forma aditiva para cercar dueños vencidos', () => {
+    expect(sql).toMatch(/ADD COLUMN IF NOT EXISTS claim_token TEXT/);
+    expect(sql).not.toMatch(/claim_token TEXT NOT NULL/);
+  });
+
   it('es reejecutable: nada crea objetos sin guarda', () => {
     // Ni tablas nuevas ni índices/columnas sin IF [NOT] EXISTS.
     expect(sql).not.toMatch(/CREATE TABLE/i);

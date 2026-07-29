@@ -179,11 +179,33 @@ export class PaymentService {
     // se aprueba ni qué order se busca sin actualizar atómicamente esa fila.
     const claimedEventType = claim.event.eventType;
     const claimedPayload = claim.event.payload;
+    const claimToken = claim.event.claimToken;
+    const lostOwnershipResult = (): WebhookProcessResult => ({
+      eventId,
+      idempotent: true,
+      idempotentReason: 'in_progress',
+      invoiceUpdated: false,
+      reactivationTriggered: false,
+      message: 'El claim cambió de dueño; esta entrega debe reintentarse.',
+    });
+    const renewOwnership = async (): Promise<boolean> =>
+      Boolean(claimToken && await this.repo.renewEventClaim(eventId, claimToken));
+    const closeOwnedEvent = async (): Promise<boolean> =>
+      Boolean(claimToken && await this.repo.markEventProcessed(eventId, claimToken));
+
+    // Fencing temprano: un procesador que despertó después de que otro
+    // reclamara el lease no llega siquiera a las lecturas que preceden efectos.
+    if (!await renewOwnership()) {
+      logger.warn('PaymentEngine: ownership del claim perdido antes de procesar', {
+        eventId, provider, providerEventId, tenantId,
+      });
+      return lostOwnershipResult();
+    }
 
     // Solo eventos de pago aprobado disparan el flujo completo
     const isApproved = this.isApprovedEvent(provider, claimedEventType, claimedPayload);
     if (!isApproved) {
-      await this.repo.markEventProcessed(eventId);
+      if (!await closeOwnedEvent()) return lostOwnershipResult();
       logger.info('PaymentEngine: webhook recibido (no aprobado, no acción)', {
         provider, eventType: claimedEventType, tenantId,
       });
@@ -206,6 +228,7 @@ export class PaymentService {
 
     if (order) {
       const orderTenantId = order.tenantId || 'tenant-default';
+      if (!await renewOwnership()) return lostOwnershipResult();
       // Marcar order como completada
       await this.repo.updateOrderStatus(order.id, 'completed', undefined, orderTenantId);
 
@@ -223,7 +246,7 @@ export class PaymentService {
       mikrotikActionId = reactivation.mikrotikAction?.id;
 
       // Vincular evento a la order
-      await this.repo.markEventProcessed(eventId);
+      if (!await closeOwnedEvent()) return lostOwnershipResult();
       logger.info('PaymentEngine: pago confirmado', {
         orderId: order.id, invoiceId: order.invoiceId, customerId: order.customerId, tenantId: orderTenantId,
       });
@@ -235,6 +258,7 @@ export class PaymentService {
         const order = orders.find((o) => o.provider === 'codi') ?? orders[0];
         if (order) {
           const orderTenantId = order.tenantId || 'tenant-default';
+          if (!await renewOwnership()) return lostOwnershipResult();
           await this.repo.updateOrderStatus(order.id, 'completed', undefined, orderTenantId);
           const invoiceResult = await this.confirmPaymentOnInvoice(order, orderTenantId);
           invoiceUpdated = invoiceResult.updated;
@@ -245,7 +269,7 @@ export class PaymentService {
           });
           reactivationTriggered = !reactivation.alreadyActive;
           mikrotikActionId = reactivation.mikrotikAction?.id;
-          await this.repo.markEventProcessed(eventId);
+          if (!await closeOwnedEvent()) return lostOwnershipResult();
           return {
             eventId,
             idempotent: false,
@@ -260,6 +284,7 @@ export class PaymentService {
         const invoice = await billing.findInvoiceById(invoiceId, tenantId);
         if (invoice && invoice.status !== 'paid') {
           const invoiceTenantId = invoice.tenantId || 'tenant-default';
+          if (!await renewOwnership()) return lostOwnershipResult();
           const amount = Number(
             claimedPayload.amount ?? claimedPayload.monto ?? invoice.pendingAmount ?? invoice.amount,
           );
@@ -278,7 +303,7 @@ export class PaymentService {
           mikrotikActionId = reactivation.mikrotikAction?.id;
         }
       }
-      await this.repo.markEventProcessed(eventId);
+      if (!await closeOwnedEvent()) return lostOwnershipResult();
       return {
         eventId,
         idempotent: false,
@@ -289,7 +314,7 @@ export class PaymentService {
       };
     } else {
       // Webhook de proveedor sin order registrada — guardar y continuar
-      await this.repo.markEventProcessed(eventId);
+      if (!await closeOwnedEvent()) return lostOwnershipResult();
       logger.warn('PaymentEngine: webhook sin payment_order asociada', { provider, providerOrderId, tenantId });
     }
 

@@ -91,8 +91,11 @@ export interface PaymentRepository {
    * procesarlo; el resto de entregas simultáneas reciben el evento existente.
    */
   claimEvent(rec: PaymentEventRecord): Promise<EventClaimResult>;
+  /** Renueva el lease solo si el llamador conserva el epoch del claim. */
+  renewEventClaim(id: string, claimToken: string): Promise<boolean>;
   createEvent(rec: PaymentEventRecord): Promise<PaymentEventRecord>;
-  markEventProcessed(id: string): Promise<void>;
+  /** Cierra el evento solo si el llamador conserva el epoch del claim. */
+  markEventProcessed(id: string, claimToken: string): Promise<boolean>;
 
   // Mikrotik Actions
   listActions(filter?: { customerId?: string; status?: string; tenantId?: string }): Promise<MikrotikActionRecord[]>;
@@ -170,6 +173,7 @@ export class StorePaymentRepository implements PaymentRepository {
     // `await`, así que el bucle de eventos no puede intercalar otra entrega.
     const now = Date.now();
     const nowIso = new Date(now).toISOString();
+    const claimToken = crypto.randomUUID();
     const tenantId = rec.tenantId || 'tenant-default';
     const events = store.PAYMENT_EVENTS as PaymentEventRecord[];
     const existing = events.find(
@@ -181,14 +185,24 @@ export class StorePaymentRepository implements PaymentRepository {
 
     if (existing) {
       const kind = classifyExistingClaim(existing, now);
-      if (kind !== 'reclaimable') return { outcome: kind, event: existing };
+      if (kind !== 'reclaimable') return { outcome: kind, event: { ...existing } };
       existing.claimedAt = nowIso; // renovar el lease: el reclamador es el dueño
-      return { outcome: 'claimed', event: existing };
+      existing.claimToken = claimToken;
+      return { outcome: 'claimed', event: { ...existing } };
     }
 
-    const stamped = { ...rec, tenantId, claimedAt: nowIso };
+    const stamped = { ...rec, tenantId, claimedAt: nowIso, claimToken };
     events.push(stamped);
-    return { outcome: 'claimed', event: stamped };
+    return { outcome: 'claimed', event: { ...stamped } };
+  }
+
+  async renewEventClaim(id: string, claimToken: string): Promise<boolean> {
+    const event = (store.PAYMENT_EVENTS as PaymentEventRecord[]).find(
+      (candidate) => candidate.id === id && !candidate.processed && candidate.claimToken === claimToken,
+    );
+    if (!event) return false;
+    event.claimedAt = new Date().toISOString();
+    return true;
   }
 
   async createEvent(rec: PaymentEventRecord) {
@@ -197,12 +211,14 @@ export class StorePaymentRepository implements PaymentRepository {
     return stamped;
   }
 
-  async markEventProcessed(id: string) {
-    const event = (store.PAYMENT_EVENTS as PaymentEventRecord[]).find((e) => e.id === id);
-    if (event) {
-      event.processed = true;
-      event.processedAt = new Date().toISOString();
-    }
+  async markEventProcessed(id: string, claimToken: string): Promise<boolean> {
+    const event = (store.PAYMENT_EVENTS as PaymentEventRecord[]).find(
+      (candidate) => candidate.id === id && !candidate.processed && candidate.claimToken === claimToken,
+    );
+    if (!event) return false;
+    event.processed = true;
+    event.processedAt = new Date().toISOString();
+    return true;
   }
 
   async listActions(filter?: { customerId?: string; status?: string; tenantId?: string }) {
@@ -304,13 +320,15 @@ export class SupabasePaymentRepository implements PaymentRepository {
       payment_order_id: rec.paymentOrderId ?? null,
       payload: rec.payload, received_at: rec.receivedAt,
       claimed_at: rec.claimedAt ?? null,
+      claim_token: rec.claimToken ?? null,
     };
   }
 
   async claimEvent(rec: PaymentEventRecord): Promise<EventClaimResult> {
     const tenantId = rec.tenantId || 'tenant-default';
     const claimedAt = new Date().toISOString();
-    const stamped = { ...rec, tenantId, claimedAt };
+    const claimToken = crypto.randomUUID();
+    const stamped = { ...rec, tenantId, claimedAt, claimToken };
 
     // El INSERT es el claim: el índice único (tenant_id, provider,
     // provider_event_id) deja pasar exactamente a una entrega.
@@ -330,14 +348,27 @@ export class SupabasePaymentRepository implements PaymentRepository {
     // vean el mismo claim vencido, solo una consigue actualizarlo.
     let q = this.client
       .from('payment_events')
-      .update({ claimed_at: claimedAt })
+      .update({ claimed_at: claimedAt, claim_token: claimToken })
       .eq('id', existing.id)
       .eq('processed', false);
     q = existing.claimedAt ? q.eq('claimed_at', existing.claimedAt) : q.is('claimed_at', null);
+    q = existing.claimToken ? q.eq('claim_token', existing.claimToken) : q.is('claim_token', null);
     const { data, error: reclaimError } = await q.select('id');
     if (reclaimError) throw new Error(`claimEvent(reclaim): ${reclaimError.message}`);
     if ((data ?? []).length !== 1) return { outcome: 'in_progress', event: existing };
-    return { outcome: 'claimed', event: { ...existing, claimedAt } };
+    return { outcome: 'claimed', event: { ...existing, claimedAt, claimToken } };
+  }
+
+  async renewEventClaim(id: string, claimToken: string): Promise<boolean> {
+    const { data, error } = await this.client
+      .from('payment_events')
+      .update({ claimed_at: new Date().toISOString() })
+      .eq('id', id)
+      .eq('processed', false)
+      .eq('claim_token', claimToken)
+      .select('id');
+    if (error) throw new Error(`renewEventClaim: ${error.message}`);
+    return (data ?? []).length === 1;
   }
 
   async createEvent(rec: PaymentEventRecord) {
@@ -347,12 +378,16 @@ export class SupabasePaymentRepository implements PaymentRepository {
     return stamped;
   }
 
-  async markEventProcessed(id: string) {
-    const { error } = await this.client
+  async markEventProcessed(id: string, claimToken: string): Promise<boolean> {
+    const { data, error } = await this.client
       .from('payment_events')
       .update({ processed: true, processed_at: new Date().toISOString() })
-      .eq('id', id);
+      .eq('id', id)
+      .eq('processed', false)
+      .eq('claim_token', claimToken)
+      .select('id');
     if (error) throw new Error(`markEventProcessed: ${error.message}`);
+    return (data ?? []).length === 1;
   }
 
   async listActions(filter?: { customerId?: string; status?: string; tenantId?: string }) {

@@ -90,6 +90,11 @@ export interface PaymentEventRecord {
    * el lease: mientras esté vigente, ninguna otra entrega puede procesarlo.
    */
   claimedAt?: string;
+  /**
+   * Epoch opaco del dueño actual. Cada claim/reclaim genera uno nuevo; un
+   * procesador con un token anterior ya no puede renovar ni cerrar la fila.
+   */
+  claimToken?: string;
 }
 
 export interface PaymentEventView {
