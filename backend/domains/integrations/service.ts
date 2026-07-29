@@ -175,7 +175,10 @@ export class IntegrationsService {
       tenantId: effectiveTenantId,
     });
 
-    return { accepted: true, ...result };
+    return {
+      accepted: result.idempotentReason !== 'in_progress',
+      ...result,
+    };
   }
 
   private async resolveBillingCycleLabel(zoneId?: string): Promise<string | undefined> {
