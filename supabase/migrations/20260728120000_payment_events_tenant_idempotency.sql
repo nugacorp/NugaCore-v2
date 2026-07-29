@@ -90,6 +90,8 @@ BEGIN
       AND referenced_a.attnum = ANY (c.confkey)
     WHERE c.conrelid = 'public.payment_events'::regclass
       AND c.contype = 'f'
+      AND cardinality(c.conkey) = 1
+      AND cardinality(c.confkey) = 1
       AND a.attname = 'tenant_id'
       AND c.confrelid = 'public.tenants'::regclass
       AND referenced_a.attname = 'id'

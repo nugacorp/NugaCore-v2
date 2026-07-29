@@ -50,6 +50,11 @@ describe('Migración de idempotencia por tenant — invariantes estáticas', () 
     // Solo la crea si no hay ya una FK correcta sobre tenant_id; la de SSOT
     // se reconoce por tabla/columna destino y ON DELETE RESTRICT.
     expect(sql).toMatch(/contype = 'f'/);
+    // `ANY(conkey)` por sí solo también aceptaría una FK compuesta que
+    // incluyera tenant_id/id. La migración solo puede reutilizar una FK simple
+    // exactamente equivalente a tenant_id -> tenants(id).
+    expect(sql).toMatch(/cardinality\(c\.conkey\)\s*=\s*1/);
+    expect(sql).toMatch(/cardinality\(c\.confkey\)\s*=\s*1/);
     expect(sql).toMatch(/confrelid = 'public\.tenants'::regclass/);
     expect(sql).toMatch(/confdeltype = 'r'/);
     expect(sql).toMatch(/IF existing_fk_name IS NOT NULL THEN[\s\S]*?RETURN;/);
