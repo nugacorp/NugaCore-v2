@@ -138,24 +138,12 @@ export class PaymentService {
   async processWebhook(input: ProcessWebhookInput): Promise<WebhookProcessResult> {
     const { provider, providerEventId, eventType, payload, tenantId } = input;
 
-    // Idempotencia POR TENANT: dos merchants pueden reutilizar el mismo
-    // provider_event_id; solo colisiona dentro del mismo WISP.
-    const existing = await this.repo.findEventByProviderId(provider, providerEventId, tenantId);
-    if (existing) {
-      logger.info('PaymentEngine: webhook ya procesado (idempotente)', { provider, providerEventId, tenantId });
-      return {
-        eventId: existing.id,
-        idempotent: true,
-        invoiceUpdated: false,
-        reactivationTriggered: false,
-        message: 'Evento ya procesado anteriormente.',
-      };
-    }
-
-    // Guardar el evento
-    const eventId = await this.repo.nextEventId();
+    // Idempotencia POR TENANT mediante CLAIM atómico: dos merchants pueden
+    // reutilizar el mismo provider_event_id (solo colisiona dentro del mismo
+    // WISP), y dos entregas simultáneas del mismo evento no pueden procesarse
+    // las dos — solo la que se lleva el claim continúa.
     const eventRec: PaymentEventRecord = {
-      id: eventId,
+      id: await this.repo.nextEventId(),
       tenantId,
       provider,
       providerEventId,
@@ -164,7 +152,28 @@ export class PaymentService {
       payload,
       receivedAt: nowIso(),
     };
-    await this.repo.createEvent(eventRec);
+    const claim = await this.repo.claimEvent(eventRec);
+
+    if (claim.outcome !== 'claimed') {
+      const alreadyProcessed = claim.outcome === 'already_processed';
+      logger.info('PaymentEngine: webhook no reprocesado (idempotente)', {
+        provider, providerEventId, tenantId, reason: claim.outcome,
+      });
+      return {
+        eventId: claim.event.id,
+        idempotent: true,
+        idempotentReason: claim.outcome,
+        invoiceUpdated: false,
+        reactivationTriggered: false,
+        message: alreadyProcessed
+          ? 'Evento ya procesado anteriormente.'
+          : 'Evento en proceso por otra entrega del mismo webhook.',
+      };
+    }
+
+    // Id real del evento reservado: al recuperar un claim abandonado se
+    // continúa sobre la fila existente, no sobre la candidata.
+    const eventId = claim.event.id;
 
     // Solo eventos de pago aprobado disparan el flujo completo
     const isApproved = this.isApprovedEvent(eventType, payload);
