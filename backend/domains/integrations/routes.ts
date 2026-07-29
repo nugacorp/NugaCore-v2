@@ -2,6 +2,7 @@ import { Router } from 'express';
 import { asyncHandler } from '../../common/errors';
 import { READ_ROLES, requireRoles } from '../../common/rbac';
 import { tenantIdFromRequest } from '../tenancy/tenant-scope';
+import { EVENT_CLAIM_LEASE_MS } from '../payments/repository';
 import { getIntegrationsService } from './service';
 import type { IntegrationProviderKey } from './types';
 
@@ -43,6 +44,12 @@ router.post('/api/payments/webhook/codi', asyncHandler(async (req, res) => {
     (req.body || {}) as Record<string, unknown>,
     signature,
   );
+  if ('idempotentReason' in result && result.idempotentReason === 'in_progress') {
+    return res
+      .set('Retry-After', String(Math.ceil(EVENT_CLAIM_LEASE_MS / 1_000)))
+      .status(503)
+      .json(result);
+  }
   if (!result.accepted) {
     return res.status(400).json(result);
   }
