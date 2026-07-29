@@ -42,13 +42,23 @@ describe('Migración de idempotencia por tenant — invariantes estáticas', () 
 
   it('asegura la FK a tenants con ON DELETE RESTRICT sin duplicar la de la SSOT', () => {
     expect(sql).toMatch(
-      /FOREIGN KEY \(tenant_id\) REFERENCES public\.tenants\(id\) ON DELETE RESTRICT/,
+      /information_schema\.tables[\s\S]*?table_schema = 'public'[\s\S]*?table_name = 'tenants'/,
     );
-    // Solo la crea si no hay ya una FK sobre tenant_id.
+    expect(sql).toMatch(
+      /FOREIGN KEY \(tenant_id\) REFERENCES public\.tenants\(id\) ON DELETE RESTRICT\s+NOT VALID/,
+    );
+    // Solo la crea si no hay ya una FK correcta sobre tenant_id; la de SSOT
+    // se reconoce por tabla/columna destino y ON DELETE RESTRICT.
     expect(sql).toMatch(/contype = 'f'/);
-    expect(sql).toMatch(/IF has_fk THEN[\s\S]*?RETURN;/);
-    // Y no revienta la migración si `tenants` aún no existe.
-    expect(sql).toMatch(/EXCEPTION WHEN others THEN/);
+    expect(sql).toMatch(/confrelid = 'public\.tenants'::regclass/);
+    expect(sql).toMatch(/confdeltype = 'r'/);
+    expect(sql).toMatch(/IF existing_fk_name IS NOT NULL THEN[\s\S]*?RETURN;/);
+    expect(sql).toMatch(
+      /ALTER TABLE public\.payment_events\s+VALIDATE CONSTRAINT payment_events_tenant_id_fkey/,
+    );
+    // Solo la ausencia comprobada de `public.tenants` permite omitir la FK.
+    // Cualquier error real de ADD/VALIDATE debe abortar la migración.
+    expect(sql).not.toMatch(/EXCEPTION WHEN others THEN/i);
   });
 
   it('añade claimed_at de forma aditiva y nullable', () => {
