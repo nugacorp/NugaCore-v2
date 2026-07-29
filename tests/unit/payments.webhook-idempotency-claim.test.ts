@@ -12,7 +12,7 @@
 // ====================================================================
 
 import type { SupabaseClient } from '@supabase/supabase-js';
-import { afterEach, beforeEach, describe, expect, it } from 'vitest';
+import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import {
   EVENT_CLAIM_LEASE_MS,
   StorePaymentRepository,
@@ -22,6 +22,7 @@ import {
 import type { PaymentRepository } from '../../backend/domains/payments/repository';
 import { PaymentService } from '../../backend/domains/payments/service';
 import type { PaymentEventRecord } from '../../backend/domains/payments/types';
+import { getBillingService } from '../../backend/domains/billing/service';
 import { store } from '../../backend/state/store';
 
 const TENANT_A = 'tenant-a';
@@ -47,7 +48,10 @@ const candidate = (
 const events = () => store.PAYMENT_EVENTS as PaymentEventRecord[];
 
 beforeEach(() => { store.PAYMENT_EVENTS.length = 0; });
-afterEach(() => { store.PAYMENT_EVENTS.length = 0; });
+afterEach(() => {
+  store.PAYMENT_EVENTS.length = 0;
+  vi.restoreAllMocks();
+});
 
 describe('Clasificación de un claim existente', () => {
   const now = Date.now();
@@ -359,5 +363,238 @@ describe('PaymentService — ownership antes de efectos', () => {
 
     expect(result.idempotent).toBe(true);
     expect(result.idempotentReason).toBe('in_progress');
+  });
+
+  const stubServiceEffects = (
+    service: PaymentService,
+    counters: { billing: number; reactivation: number },
+    hooks: { afterBilling?: () => void; afterReactivation?: () => void } = {},
+  ): void => {
+    const effects = service as unknown as {
+      confirmPaymentOnInvoice: () => Promise<{ updated: boolean }>;
+      reactivateCustomerService: () => Promise<{
+        customerId: string;
+        alreadyActive: boolean;
+        mikrotikAction: null;
+        message: string;
+      }>;
+    };
+    effects.confirmPaymentOnInvoice = async () => {
+      counters.billing += 1;
+      hooks.afterBilling?.();
+      return { updated: true };
+    };
+    effects.reactivateCustomerService = async () => {
+      counters.reactivation += 1;
+      hooks.afterReactivation?.();
+      return { customerId: 'customer-1', alreadyActive: false, mikrotikAction: null, message: 'ok' };
+    };
+  };
+
+  it('ruta normal: reclaim durante updateOrderStatus aborta antes de Billing/reactivación y B continúa', async () => {
+    let currentOwner = 'owner-a';
+    let claimCount = 0;
+    let updates = 0;
+    const counters = { billing: 0, reactivation: 0 };
+    const order = {
+      id: 'po-fenced', tenantId: TENANT_A, customerId: 'customer-1', invoiceId: 'invoice-1',
+      provider: 'openpay' as const, providerOrderId: 'order-fenced', amountCents: 100,
+      status: 'pending' as const, createdAt: new Date().toISOString(), updatedAt: new Date().toISOString(),
+    };
+    const persisted = {
+      ...candidate('pe-fenced', 'evt-fenced-service'),
+      payload: {
+        type: 'charge.succeeded',
+        transaction: { id: 'tx-fenced', order_id: 'order-fenced', status: 'completed' },
+      },
+    };
+    const fakeRepo = {
+      nextEventId: async () => `pe-candidate-${claimCount}`,
+      claimEvent: async () => ({
+        outcome: 'claimed' as const,
+        event: { ...persisted, claimToken: claimCount++ === 0 ? 'owner-a' : 'owner-b' },
+      }),
+      renewEventClaim: async (_id: string, token: string) => token === currentOwner,
+      findOrderByProviderOrderId: async () => order,
+      updateOrderStatus: async () => {
+        updates += 1;
+        if (updates === 1) currentOwner = 'owner-b';
+        return order;
+      },
+      markEventProcessed: async (_id: string, token: string) => token === currentOwner,
+    } as unknown as PaymentRepository;
+    const input = {
+      provider: 'openpay' as const,
+      providerEventId: persisted.providerEventId,
+      eventType: persisted.eventType,
+      payload: persisted.payload,
+      tenantId: TENANT_A,
+    };
+
+    const ownerA = new PaymentService(fakeRepo);
+    stubServiceEffects(ownerA, counters);
+    const stale = await ownerA.processWebhook(input);
+    expect(stale.idempotentReason).toBe('in_progress');
+    expect(counters).toEqual({ billing: 0, reactivation: 0 });
+
+    const ownerB = new PaymentService(fakeRepo);
+    stubServiceEffects(ownerB, counters);
+    const completed = await ownerB.processWebhook(input);
+    expect(completed.idempotent).toBe(false);
+    expect(counters).toEqual({ billing: 1, reactivation: 1 });
+  });
+
+  it('ruta normal: reclaim durante Billing aborta antes de reactivación y cierre', async () => {
+    let currentOwner = 'owner-a';
+    let closes = 0;
+    const counters = { billing: 0, reactivation: 0 };
+    const order = {
+      id: 'po-billing-fenced', tenantId: TENANT_A, customerId: 'customer-1', invoiceId: 'invoice-1',
+      provider: 'openpay' as const, providerOrderId: 'order-billing-fenced', amountCents: 100,
+      status: 'pending' as const, createdAt: new Date().toISOString(), updatedAt: new Date().toISOString(),
+    };
+    const persisted = {
+      ...candidate('pe-billing-fenced', 'evt-billing-fenced'),
+      payload: {
+        type: 'charge.succeeded',
+        transaction: { id: 'tx-billing-fenced', order_id: 'order-billing-fenced', status: 'completed' },
+      },
+    };
+    const fakeRepo = {
+      nextEventId: async () => 'pe-billing-candidate',
+      claimEvent: async () => ({
+        outcome: 'claimed' as const,
+        event: { ...persisted, claimToken: 'owner-a' },
+      }),
+      renewEventClaim: async (_id: string, token: string) => token === currentOwner,
+      findOrderByProviderOrderId: async () => order,
+      updateOrderStatus: async () => order,
+      markEventProcessed: async () => { closes += 1; return true; },
+    } as unknown as PaymentRepository;
+    const service = new PaymentService(fakeRepo);
+    stubServiceEffects(service, counters, { afterBilling: () => { currentOwner = 'owner-b'; } });
+
+    const result = await service.processWebhook({
+      provider: 'openpay', providerEventId: persisted.providerEventId, eventType: persisted.eventType,
+      payload: persisted.payload, tenantId: TENANT_A,
+    });
+
+    expect(result.idempotentReason).toBe('in_progress');
+    expect(counters).toEqual({ billing: 1, reactivation: 0 });
+    expect(closes).toBe(0);
+  });
+
+  it('CoDi con order: reclaim durante updateOrderStatus aborta antes de Billing/reactivación', async () => {
+    let currentOwner = 'owner-a';
+    const counters = { billing: 0, reactivation: 0 };
+    const order = {
+      id: 'po-codi', tenantId: TENANT_A, customerId: 'customer-1', invoiceId: 'INV',
+      provider: 'codi' as const, providerOrderId: 'different-reference', amountCents: 100,
+      status: 'pending' as const, createdAt: new Date().toISOString(), updatedAt: new Date().toISOString(),
+    };
+    const event = {
+      ...candidate('pe-codi', 'evt-codi-fenced'),
+      provider: 'codi' as const,
+      eventType: 'payment.completed',
+      claimToken: 'owner-a',
+      payload: { status: 'paid', reference: 'INV-1', amount: 100 },
+    };
+    const fakeRepo = {
+      nextEventId: async () => 'pe-codi-candidate',
+      claimEvent: async () => ({ outcome: 'claimed' as const, event }),
+      renewEventClaim: async (_id: string, token: string) => token === currentOwner,
+      findOrderByProviderOrderId: async () => null,
+      listOrders: async () => [order],
+      updateOrderStatus: async () => { currentOwner = 'owner-b'; return order; },
+      markEventProcessed: async (_id: string, token: string) => token === currentOwner,
+    } as unknown as PaymentRepository;
+    const service = new PaymentService(fakeRepo);
+    stubServiceEffects(service, counters);
+
+    const result = await service.processWebhook({
+      provider: 'codi', providerEventId: event.providerEventId, eventType: event.eventType,
+      payload: event.payload, tenantId: TENANT_A,
+    });
+
+    expect(result.idempotentReason).toBe('in_progress');
+    expect(counters).toEqual({ billing: 0, reactivation: 0 });
+  });
+
+  it('CoDi con order: reclaim durante Billing aborta antes de reactivación y cierre', async () => {
+    let currentOwner = 'owner-a';
+    let closes = 0;
+    const counters = { billing: 0, reactivation: 0 };
+    const order = {
+      id: 'po-codi-billing', tenantId: TENANT_A, customerId: 'customer-1', invoiceId: 'INV',
+      provider: 'codi' as const, providerOrderId: 'different-reference', amountCents: 100,
+      status: 'pending' as const, createdAt: new Date().toISOString(), updatedAt: new Date().toISOString(),
+    };
+    const event = {
+      ...candidate('pe-codi-billing', 'evt-codi-billing-fenced'),
+      provider: 'codi' as const,
+      eventType: 'payment.completed',
+      claimToken: 'owner-a',
+      payload: { status: 'paid', reference: 'INV-1', amount: 100 },
+    };
+    const fakeRepo = {
+      nextEventId: async () => 'pe-codi-billing-candidate',
+      claimEvent: async () => ({ outcome: 'claimed' as const, event }),
+      renewEventClaim: async (_id: string, token: string) => token === currentOwner,
+      findOrderByProviderOrderId: async () => null,
+      listOrders: async () => [order],
+      updateOrderStatus: async () => order,
+      markEventProcessed: async () => { closes += 1; return true; },
+    } as unknown as PaymentRepository;
+    const service = new PaymentService(fakeRepo);
+    stubServiceEffects(service, counters, { afterBilling: () => { currentOwner = 'owner-b'; } });
+
+    const result = await service.processWebhook({
+      provider: 'codi', providerEventId: event.providerEventId, eventType: event.eventType,
+      payload: event.payload, tenantId: TENANT_A,
+    });
+
+    expect(result.idempotentReason).toBe('in_progress');
+    expect(counters).toEqual({ billing: 1, reactivation: 0 });
+    expect(closes).toBe(0);
+  });
+
+  it('CoDi factura directa: reclaim durante recordPayment aborta antes de reactivación', async () => {
+    let currentOwner = 'owner-a';
+    const counters = { billing: 0, reactivation: 0 };
+    const event = {
+      ...candidate('pe-codi-direct', 'evt-codi-direct-fenced'),
+      provider: 'codi' as const,
+      eventType: 'payment.completed',
+      claimToken: 'owner-a',
+      payload: { status: 'paid', reference: 'INV-1', amount: 100 },
+    };
+    const fakeRepo = {
+      nextEventId: async () => 'pe-codi-direct-candidate',
+      claimEvent: async () => ({ outcome: 'claimed' as const, event }),
+      renewEventClaim: async (_id: string, token: string) => token === currentOwner,
+      findOrderByProviderOrderId: async () => null,
+      listOrders: async () => [],
+      markEventProcessed: async (_id: string, token: string) => token === currentOwner,
+    } as unknown as PaymentRepository;
+    const billing = getBillingService();
+    vi.spyOn(billing, 'findInvoiceById').mockResolvedValue({
+      id: 'INV', tenantId: TENANT_A, clientId: 'customer-1', status: 'pending',
+      amount: 100, pendingAmount: 100,
+    } as never);
+    vi.spyOn(billing, 'recordPayment').mockImplementation(async () => {
+      counters.billing += 1;
+      currentOwner = 'owner-b';
+      return {} as never;
+    });
+    const service = new PaymentService(fakeRepo);
+    stubServiceEffects(service, counters);
+
+    const result = await service.processWebhook({
+      provider: 'codi', providerEventId: event.providerEventId, eventType: event.eventType,
+      payload: event.payload, tenantId: TENANT_A,
+    });
+
+    expect(result.idempotentReason).toBe('in_progress');
+    expect(counters).toEqual({ billing: 1, reactivation: 0 });
   });
 });

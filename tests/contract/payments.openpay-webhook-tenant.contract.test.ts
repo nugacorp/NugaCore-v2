@@ -22,7 +22,10 @@ import {
   getIntegrationsService,
   resetIntegrationsService,
 } from '../../backend/domains/integrations/service';
-import { EVENT_CLAIM_LEASE_MS } from '../../backend/domains/payments/repository';
+import {
+  EVENT_CLAIM_LEASE_MS,
+  StorePaymentRepository,
+} from '../../backend/domains/payments/repository';
 import { resetPaymentService } from '../../backend/domains/payments/service';
 import type { PaymentEventRecord, PaymentOrderRecord } from '../../backend/domains/payments/types';
 import { store } from '../../backend/state/store';
@@ -735,6 +738,49 @@ describe('Webhook OpenPay — entregas simultáneas del mismo evento', () => {
     expect(events()[0].payload).toEqual(persistedPayload);
     expect(events()[0].processed).toBe(true);
     expect(store.MIKROTIK_ACTIONS).toHaveLength(0);
+  });
+
+  it('si B reclama durante updateOrderStatus, A responde 503 sin Billing/reactivación y B continúa', async () => {
+    const token = await seedOpenPay(TENANT_A, { webhookSecret: 'whsec_a' });
+    const customerId = seedCustomer(TENANT_A);
+    seedOrder(TENANT_A, 'chg-reclaim-entre-efectos');
+    const payload = {
+      id: 'op-evt-reclaim-entre-efectos',
+      ...officialChargePayload('charge.succeeded', 'tx-reclaim', 'chg-reclaim-entre-efectos'),
+    };
+    let reclaimed = false;
+    vi.spyOn(StorePaymentRepository.prototype, 'updateOrderStatus').mockImplementation(
+      async (id, status, patch, tenantId) => {
+        const order = orders().find(
+          (candidate) => candidate.id === id && (!tenantId || candidate.tenantId === tenantId),
+        ) ?? null;
+        if (order) Object.assign(order, { status, ...patch, updatedAt: new Date().toISOString() });
+        if (!reclaimed) {
+          reclaimed = true;
+          const event = events()[0];
+          event.claimToken = 'owner-b-durante-update';
+          event.claimedAt = new Date().toISOString();
+        }
+        return order;
+      },
+    );
+
+    const post = () => request(app)
+      .post(`/api/payments/webhook/openpay/${token}`)
+      .set('x-openpay-signature', sign('whsec_a', payload))
+      .send(payload);
+
+    const staleA = await post();
+    expect(staleA.status).toBe(503);
+    expect(staleA.body.idempotentReason).toBe('in_progress');
+    expect(store.MIKROTIK_ACTIONS).toHaveLength(0);
+    expect(store.CLIENTS.find((client) => client.id === customerId)?.status).toBe('suspended');
+
+    events()[0].claimedAt = new Date(Date.now() - 3 * EVENT_CLAIM_LEASE_MS).toISOString();
+    const ownerB = await post();
+    expect(ownerB.status).toBe(200);
+    expect(ownerB.body.idempotent).toBe(false);
+    expect(store.MIKROTIK_ACTIONS).toHaveLength(1);
   });
 
   it('un claim abandonado se recupera al reintentar pasado el lease', async () => {
