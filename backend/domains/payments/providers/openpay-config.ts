@@ -62,7 +62,10 @@ export const resolveOpenPayConfig = async (
         sandbox: settings.openpaySandbox,
         webhookSecret: settings.openpayWebhookSecret || undefined,
       };
-      return isUsableOpenPayConfig(fromTenantRow) ? fromTenantRow : simulatedConfig();
+      // El provider de cobro puede quedar simulado por merchant/private key
+      // incompletos, pero el secreto de webhook sigue siendo autoritativo y
+      // debe conservarse para verificar HMAC en la ruta legacy.
+      return fromTenantRow;
     }
 
     // Compatibilidad single-WISP: env solo representa una instalación legacy

@@ -174,12 +174,19 @@ export class PaymentService {
     // Id real del evento reservado: al recuperar un claim abandonado se
     // continúa sobre la fila existente, no sobre la candidata.
     const eventId = claim.event.id;
+    // En un reclaim la fila persistida es la fuente de auditoría. Una
+    // reentrega divergente con la misma identidad no puede cambiar qué evento
+    // se aprueba ni qué order se busca sin actualizar atómicamente esa fila.
+    const claimedEventType = claim.event.eventType;
+    const claimedPayload = claim.event.payload;
 
     // Solo eventos de pago aprobado disparan el flujo completo
-    const isApproved = this.isApprovedEvent(eventType, payload);
+    const isApproved = this.isApprovedEvent(provider, claimedEventType, claimedPayload);
     if (!isApproved) {
       await this.repo.markEventProcessed(eventId);
-      logger.info('PaymentEngine: webhook recibido (no aprobado, no acción)', { provider, eventType, tenantId });
+      logger.info('PaymentEngine: webhook recibido (no aprobado, no acción)', {
+        provider, eventType: claimedEventType, tenantId,
+      });
       return {
         eventId, idempotent: false, invoiceUpdated: false,
         reactivationTriggered: false, message: 'Evento recibido, sin acción (no es aprobación de pago).',
@@ -188,7 +195,7 @@ export class PaymentService {
 
     // Buscar payment_order por providerOrderId DENTRO del WISP del evento: un
     // provider_order_id de otro merchant nunca puede completar esta order.
-    const providerOrderId = this.extractProviderOrderId(provider, payload);
+    const providerOrderId = this.extractProviderOrderId(provider, claimedPayload);
     const order = providerOrderId
       ? await this.repo.findOrderByProviderOrderId(provider, providerOrderId, tenantId)
       : null;
@@ -221,7 +228,7 @@ export class PaymentService {
         orderId: order.id, invoiceId: order.invoiceId, customerId: order.customerId, tenantId: orderTenantId,
       });
     } else if (provider === 'codi') {
-      const reference = String(payload.reference ?? payload.referencia ?? '').toUpperCase();
+      const reference = String(claimedPayload.reference ?? claimedPayload.referencia ?? '').toUpperCase();
       if (reference) {
         const invoiceId = reference.split('-')[0];
         const orders = await this.repo.listOrders({ invoiceId, tenantId });
@@ -253,7 +260,9 @@ export class PaymentService {
         const invoice = await billing.findInvoiceById(invoiceId, tenantId);
         if (invoice && invoice.status !== 'paid') {
           const invoiceTenantId = invoice.tenantId || 'tenant-default';
-          const amount = Number(payload.amount ?? payload.monto ?? invoice.pendingAmount ?? invoice.amount);
+          const amount = Number(
+            claimedPayload.amount ?? claimedPayload.monto ?? invoice.pendingAmount ?? invoice.amount,
+          );
           await billing.recordPayment(invoice.id, {
             amount,
             method: 'Transferencia',
@@ -436,8 +445,21 @@ export class PaymentService {
 
   // ── Helpers privados ──────────────────────────────────────────────
 
-  private isApprovedEvent(eventType: string, payload: Record<string, unknown>): boolean {
+  private isApprovedEvent(
+    provider: PaymentProvider,
+    eventType: string,
+    payload: Record<string, unknown>,
+  ): boolean {
     const t = eventType.toLowerCase();
+    if (provider === 'openpay') {
+      const transactionStatus = String(
+        (payload.transaction as { status?: unknown } | undefined)?.status ?? '',
+      ).toLowerCase();
+      // OpenPay publica el cargo completado como charge.succeeded y coloca el
+      // estado dentro de transaction. No inferir aprobación de otros
+      // `*.succeeded` (payout/transfer/fee son eventos financieros distintos).
+      return t === 'charge.succeeded' && transactionStatus === 'completed';
+    }
     if (t.includes('approved') || t.includes('completed') || t.includes('paid') || t.includes('success')) return true;
     const status = (payload.status as string ?? '').toLowerCase();
     return status === 'approved' || status === 'completed' || status === 'paid';

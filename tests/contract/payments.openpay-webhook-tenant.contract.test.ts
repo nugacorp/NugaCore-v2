@@ -40,6 +40,23 @@ const sign = (secret: string, body: unknown): string =>
 const signRaw = (secret: string, raw: string): string =>
   crypto.createHmac('sha256', secret).update(raw).digest('hex');
 
+/** Forma publicada por OpenPay: estado e id del cargo viven en transaction. */
+const officialChargePayload = (
+  type: string,
+  transactionId: string,
+  orderId: string = transactionId,
+  status: string = type === 'charge.succeeded' ? 'completed' : 'in_progress',
+) => ({
+  type,
+  event_date: '2013-11-22T15:09:38-06:00',
+  transaction: {
+    id: transactionId,
+    order_id: orderId,
+    status,
+    transaction_type: 'charge',
+  },
+});
+
 interface OpenPaySeed {
   merchantId?: string;
   privateKey?: string;
@@ -437,6 +454,82 @@ describe('Webhook OpenPay por token — no filtra información', () => {
 // ── Aislamiento de orders e idempotencia por tenant ───────────────────
 
 describe('Webhook OpenPay — aislamiento de orders e idempotencia por tenant', () => {
+  it('charge.succeeded oficial lee transaction.status=completed y completa la order', async () => {
+    const token = await seedOpenPay(TENANT_A, { webhookSecret: 'whsec_a' });
+    seedCustomer(TENANT_A);
+    const order = seedOrder(TENANT_A, 'tx-real');
+    const payload = officialChargePayload('charge.succeeded', 'tx-real');
+
+    const res = await request(app)
+      .post(`/api/payments/webhook/openpay/${token}`)
+      .set('x-openpay-signature', sign('whsec_a', payload))
+      .send(payload);
+
+    expect(res.status).toBe(200);
+    expect(orders().find((o) => o.id === order.id)?.status).toBe('completed');
+    expect(events()[0].providerEventId).toBe('charge.succeeded:tx-real');
+  });
+
+  it('no trata cualquier evento financiero *.succeeded como un cargo aprobado', async () => {
+    const token = await seedOpenPay(TENANT_A, { webhookSecret: 'whsec_a' });
+    const order = seedOrder(TENANT_A, 'tx-payout');
+    const payload = officialChargePayload('payout.succeeded', 'tx-payout', 'tx-payout', 'completed');
+
+    const res = await request(app)
+      .post(`/api/payments/webhook/openpay/${token}`)
+      .set('x-openpay-signature', sign('whsec_a', payload))
+      .send(payload);
+
+    expect(res.status).toBe(200);
+    expect(orders().find((o) => o.id === order.id)?.status).toBe('pending');
+  });
+
+  it('charge.created y charge.succeeded de la misma transacción son notificaciones distintas', async () => {
+    const token = await seedOpenPay(TENANT_A, { webhookSecret: 'whsec_a' });
+    seedCustomer(TENANT_A);
+    const order = seedOrder(TENANT_A, 'tx-shared');
+    const created = officialChargePayload('charge.created', 'tx-shared');
+    const succeeded = officialChargePayload('charge.succeeded', 'tx-shared');
+
+    const first = await request(app)
+      .post(`/api/payments/webhook/openpay/${token}`)
+      .set('x-openpay-signature', sign('whsec_a', created))
+      .send(created);
+    const second = await request(app)
+      .post(`/api/payments/webhook/openpay/${token}`)
+      .set('x-openpay-signature', sign('whsec_a', succeeded))
+      .send(succeeded);
+
+    expect(first.status).toBe(200);
+    expect(second.status).toBe(200);
+    expect(second.body.idempotent).toBe(false);
+    expect(events().map((event) => event.providerEventId)).toEqual([
+      'charge.created:tx-shared',
+      'charge.succeeded:tx-shared',
+    ]);
+    expect(orders().find((o) => o.id === order.id)?.status).toBe('completed');
+  });
+
+  it('una redelivery exacta sin root event id colapsa por tipo + transaction.id', async () => {
+    const token = await seedOpenPay(TENANT_A, { webhookSecret: 'whsec_a' });
+    const payload = officialChargePayload('charge.created', 'tx-redelivery');
+    const signature = sign('whsec_a', payload);
+
+    const first = await request(app)
+      .post(`/api/payments/webhook/openpay/${token}`)
+      .set('x-openpay-signature', signature)
+      .send(payload);
+    const second = await request(app)
+      .post(`/api/payments/webhook/openpay/${token}`)
+      .set('x-openpay-signature', signature)
+      .send(payload);
+
+    expect(first.status).toBe(200);
+    expect(second.status).toBe(200);
+    expect(second.body.idempotentReason).toBe('already_processed');
+    expect(events()).toHaveLength(1);
+    expect(events()[0].providerEventId).toBe('charge.created:tx-redelivery');
+  });
   it('el webhook de A no puede completar una order de B con el mismo providerOrderId', async () => {
     const tokenA = await seedOpenPay(TENANT_A, { webhookSecret: 'whsec_a' });
     const orderB = seedOrder(TENANT_B, 'chg-shared-1');
@@ -466,9 +559,7 @@ describe('Webhook OpenPay — aislamiento de orders e idempotencia por tenant', 
     const orderB = seedOrder(TENANT_B, 'chg-colision');
     const payload = {
       id: 'op-evt-colision',
-      event_type: 'charge.succeeded',
-      status: 'completed',
-      order_id: 'chg-colision',
+      ...officialChargePayload('charge.succeeded', 'tx-colision', 'chg-colision'),
     };
 
     const res = await request(app)
@@ -512,9 +603,7 @@ describe('Webhook OpenPay — entregas simultáneas del mismo evento', () => {
     seedOrder(TENANT_A, 'chg-concurrente');
     const payload = {
       id: 'op-evt-concurrente',
-      event_type: 'charge.succeeded',
-      status: 'completed',
-      order_id: 'chg-concurrente',
+      ...officialChargePayload('charge.succeeded', 'tx-concurrente', 'chg-concurrente'),
     };
     const signature = sign('whsec_a', payload);
 
@@ -526,25 +615,28 @@ describe('Webhook OpenPay — entregas simultáneas del mismo evento', () => {
     const [a, b] = await Promise.all([post(), post()]);
 
     // Ninguna revienta y solo una hace el trabajo.
-    expect([a.status, b.status]).toEqual([200, 200]);
-    expect([a.body.idempotent, b.body.idempotent].sort()).toEqual([false, true]);
+    const winner = [a, b].find((res) => res.body.idempotent === false);
+    const loser = [a, b].find((res) => res.body.idempotent === true);
+    expect(winner?.status).toBe(200);
+    expect(loser?.status).toBe(loser?.body.idempotentReason === 'in_progress' ? 503 : 200);
+    expect(loser?.body.idempotentReason).toMatch(/^(in_progress|already_processed)$/);
     expect(events()).toHaveLength(1);
     // Un solo efecto: una única acción de reactivación encolada.
     expect(store.MIKROTIK_ACTIONS).toHaveLength(1);
   });
 
-  it('distingue un evento en curso de uno ya cerrado', async () => {
+  it('responde 503 mientras el claim vive, recupera el stale y conserva 200 para el cerrado', async () => {
     const token = await seedOpenPay(TENANT_A, { webhookSecret: 'whsec_a' });
-    const payload = { id: 'op-evt-inflight', event_type: 'charge.succeeded', status: 'completed' };
+    const payload = { id: 'op-evt-inflight', event_type: 'charge.pending' };
     // Otra entrega tiene el claim vivo y aún no ha terminado.
     store.PAYMENT_EVENTS.push({
       id: 'pe-en-curso',
       tenantId: TENANT_A,
       provider: 'openpay',
       providerEventId: 'op-evt-inflight',
-      eventType: 'charge.succeeded',
+      eventType: 'charge.pending',
       processed: false,
-      payload: {},
+      payload,
       receivedAt: new Date().toISOString(),
       claimedAt: new Date().toISOString(),
     } as PaymentEventRecord);
@@ -555,15 +647,78 @@ describe('Webhook OpenPay — entregas simultáneas del mismo evento', () => {
       .send(payload);
 
     const inFlight = await post();
-    expect(inFlight.status).toBe(200);
+    expect(inFlight.status).toBe(503);
     expect(inFlight.body.idempotent).toBe(true);
     expect(inFlight.body.idempotentReason).toBe('in_progress');
     expect(events()).toHaveLength(1);
+    expect(events()[0].processed).toBe(false);
+
+    events()[0].claimedAt = new Date(Date.now() - 3 * EVENT_CLAIM_LEASE_MS).toISOString();
+    const recovered = await post();
+    expect(recovered.status).toBe(200);
+    expect(recovered.body.idempotent).toBe(false);
+    expect(events()[0].processed).toBe(true);
 
     // Cerrado el evento, la misma reentrega se distingue del caso anterior.
-    events()[0].processed = true;
     const closed = await post();
+    expect(closed.status).toBe(200);
     expect(closed.body.idempotentReason).toBe('already_processed');
+  });
+
+  it('reserva IDs distintos para eventos distintos que llegan en paralelo', async () => {
+    const token = await seedOpenPay(TENANT_A, { webhookSecret: 'whsec_a' });
+    const payloadA = { id: 'op-evt-distinto-a', event_type: 'charge.pending' };
+    const payloadB = { id: 'op-evt-distinto-b', event_type: 'charge.pending' };
+
+    const post = (payload: Record<string, unknown>) => request(app)
+      .post(`/api/payments/webhook/openpay/${token}`)
+      .set('x-openpay-signature', sign('whsec_a', payload))
+      .send(payload);
+
+    const [a, b] = await Promise.all([post(payloadA), post(payloadB)]);
+
+    expect([a.status, b.status]).toEqual([200, 200]);
+    expect(a.body.eventId).not.toBe(b.body.eventId);
+    expect(events()).toHaveLength(2);
+    expect(new Set(events().map((event) => event.id)).size).toBe(2);
+    expect(events().every((event) => event.processed)).toBe(true);
+  });
+
+  it('al recuperar un stale procesa el tipo y payload persistidos, no los del retry divergente', async () => {
+    const token = await seedOpenPay(TENANT_A, { webhookSecret: 'whsec_a' });
+    seedCustomer(TENANT_A);
+    const retryOrder = seedOrder(TENANT_A, 'order-del-retry');
+    const persistedPayload = {
+      id: 'op-evt-stale-divergente',
+      ...officialChargePayload('charge.created', 'tx-stale', 'order-original'),
+    };
+    store.PAYMENT_EVENTS.push({
+      id: 'pe-stale-divergente',
+      tenantId: TENANT_A,
+      provider: 'openpay',
+      providerEventId: 'op-evt-stale-divergente',
+      eventType: 'charge.created',
+      processed: false,
+      payload: persistedPayload,
+      receivedAt: new Date(Date.now() - 3 * EVENT_CLAIM_LEASE_MS).toISOString(),
+      claimedAt: new Date(Date.now() - 3 * EVENT_CLAIM_LEASE_MS).toISOString(),
+    } as PaymentEventRecord);
+    const retryPayload = {
+      id: 'op-evt-stale-divergente',
+      ...officialChargePayload('charge.succeeded', 'tx-stale', 'order-del-retry'),
+    };
+
+    const res = await request(app)
+      .post(`/api/payments/webhook/openpay/${token}`)
+      .set('x-openpay-signature', sign('whsec_a', retryPayload))
+      .send(retryPayload);
+
+    expect(res.status).toBe(200);
+    expect(retryOrder.status).toBe('pending');
+    expect(events()[0].eventType).toBe('charge.created');
+    expect(events()[0].payload).toEqual(persistedPayload);
+    expect(events()[0].processed).toBe(true);
+    expect(store.MIKROTIK_ACTIONS).toHaveLength(0);
   });
 
   it('un claim abandonado se recupera al reintentar pasado el lease', async () => {
@@ -599,6 +754,88 @@ describe('Webhook OpenPay — entregas simultáneas del mismo evento', () => {
 // ── Endpoint legacy (single-WISP) ─────────────────────────────────────
 
 describe('Webhook OpenPay legacy (sin token) — compatibilidad single-WISP', () => {
+  it('fila default persistida disabled bloquea aunque la firma de env sea válida', async () => {
+    vi.stubEnv('PUBLIC_DEPLOYMENT', 'true');
+    vi.stubEnv('WEBHOOK_SECRET_OPENPAY', 'whsec_env_viejo');
+    await seedOpenPay('tenant-default', {
+      enabled: false,
+      webhookSecret: 'whsec_fila',
+      merchantId: '',
+      privateKey: '',
+    });
+    const payload = officialChargePayload('charge.succeeded', 'tx-disabled');
+
+    const res = await request(app)
+      .post('/api/payments/webhook/openpay')
+      .set('x-openpay-signature', sign('whsec_env_viejo', payload))
+      .send(payload);
+
+    expect(res.status).toBe(503);
+    expect(res.body.code).toBe('WEBHOOK_NOT_CONFIGURED');
+    expect(events()).toHaveLength(0);
+  });
+
+  it('fila default enabled usa SU secreto aunque falten credenciales de cobro', async () => {
+    vi.stubEnv('PUBLIC_DEPLOYMENT', 'true');
+    vi.stubEnv('WEBHOOK_SECRET_OPENPAY', 'whsec_env_viejo');
+    await seedOpenPay('tenant-default', {
+      enabled: true,
+      webhookSecret: 'whsec_fila_nuevo',
+      merchantId: '',
+      privateKey: '',
+    });
+    const payload = officialChargePayload('charge.succeeded', 'tx-rotado');
+
+    const oldSecret = await request(app)
+      .post('/api/payments/webhook/openpay')
+      .set('x-openpay-signature', sign('whsec_env_viejo', payload))
+      .send(payload);
+    const rowSecret = await request(app)
+      .post('/api/payments/webhook/openpay')
+      .set('x-openpay-signature', sign('whsec_fila_nuevo', payload))
+      .send(payload);
+
+    expect(oldSecret.status).toBe(400);
+    expect(rowSecret.status).toBe(200);
+    expect(events()).toHaveLength(1);
+    expect(events()[0].tenantId).toBe('tenant-default');
+  });
+
+  it('la ruta legacy también responde 503 al claim vivo y procesa cuando queda stale', async () => {
+    vi.stubEnv('WEBHOOK_SECRET_OPENPAY', 'whsec_legacy_claim');
+    const payload = {
+      id: 'op-legacy-inflight',
+      ...officialChargePayload('charge.created', 'tx-legacy-inflight'),
+    };
+    store.PAYMENT_EVENTS.push({
+      id: 'pe-legacy-en-curso',
+      tenantId: 'tenant-default',
+      provider: 'openpay',
+      providerEventId: 'op-legacy-inflight',
+      eventType: 'charge.created',
+      processed: false,
+      payload,
+      receivedAt: new Date().toISOString(),
+      claimedAt: new Date().toISOString(),
+    } as PaymentEventRecord);
+
+    const post = () => request(app)
+      .post('/api/payments/webhook/openpay')
+      .set('x-openpay-signature', sign('whsec_legacy_claim', payload))
+      .send(payload);
+
+    const inFlight = await post();
+    expect(inFlight.status).toBe(503);
+    expect(inFlight.body.idempotentReason).toBe('in_progress');
+    expect(events()[0].processed).toBe(false);
+
+    events()[0].claimedAt = new Date(Date.now() - 3 * EVENT_CLAIM_LEASE_MS).toISOString();
+    const recovered = await post();
+    expect(recovered.status).toBe(200);
+    expect(recovered.body.idempotent).toBe(false);
+    expect(events()[0].processed).toBe(true);
+  });
+
   it('sigue respondiendo 200 en modo simulado y stampa el tenant por defecto', async () => {
     const res = await request(app)
       .post('/api/payments/webhook/openpay')
