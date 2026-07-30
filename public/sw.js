@@ -24,6 +24,10 @@ self.addEventListener('fetch', (event) => {
   if (event.request.method !== 'GET') return;
 
   const url = new URL(event.request.url);
+  // Cross-origin (tiles de mapa CartoDB, CDNs): no interceptar. Un <img> lo
+  // rige img-src del CSP, pero si el SW lo reemite con fetch() pasa a regirlo
+  // connect-src y el navegador lo bloquea. Que los haga el navegador directo.
+  if (url.origin !== self.location.origin) return;
   if (url.pathname.startsWith('/api/')) return;
 
   // Chunks Vite: siempre red. Nunca cachear — un 404 real es mejor que HTML.
