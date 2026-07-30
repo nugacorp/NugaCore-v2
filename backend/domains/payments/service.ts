@@ -33,13 +33,14 @@ import {
 } from './repository';
 import {
   CreatePaymentOrderInput,
-  MikrotikActionRecord,
   MikrotikActionView,
   PaymentEventRecord,
   PaymentOrderRecord,
   PaymentProvider,
   ProcessWebhookInput,
+  ReactivationContext,
   ReactivationResult,
+  WebhookMutationFence,
   WebhookProcessResult,
 } from './types';
 import {
@@ -249,7 +250,10 @@ export class PaymentService {
         await this.repo.updateOrderStatus(order.id, 'completed', undefined, orderTenantId);
 
         await this.renewOrThrow(eventId, claimToken);
-        const invoiceResult = await this.confirmPaymentOnInvoice(order, orderTenantId);
+        const webhookFence: WebhookMutationFence = {
+          beforeMutation: () => this.renewOrThrow(eventId, claimToken),
+        };
+        const invoiceResult = await this.confirmPaymentOnInvoice(order, orderTenantId, webhookFence);
         invoiceUpdated = invoiceResult.updated;
 
         await this.renewOrThrow(eventId, claimToken);
@@ -257,6 +261,7 @@ export class PaymentService {
           triggeredBy: `webhook:${provider}:${providerEventId}`,
           invoiceId: order.invoiceId,
           tenantId: orderTenantId,
+          webhookFence,
         });
         reactivationTriggered = !reactivation.alreadyActive;
         mikrotikActionId = reactivation.mikrotikAction?.id;
@@ -276,13 +281,17 @@ export class PaymentService {
             await this.renewOrThrow(eventId, claimToken);
             await this.repo.updateOrderStatus(order.id, 'completed', undefined, orderTenantId);
             await this.renewOrThrow(eventId, claimToken);
-            const invoiceResult = await this.confirmPaymentOnInvoice(order, orderTenantId);
+            const webhookFence: WebhookMutationFence = {
+              beforeMutation: () => this.renewOrThrow(eventId, claimToken),
+            };
+            const invoiceResult = await this.confirmPaymentOnInvoice(order, orderTenantId, webhookFence);
             invoiceUpdated = invoiceResult.updated;
             await this.renewOrThrow(eventId, claimToken);
             const reactivation = await this.reactivateCustomerService(order.customerId, {
               triggeredBy: `webhook:codi:${providerEventId}`,
               invoiceId: order.invoiceId,
               tenantId: orderTenantId,
+              webhookFence,
             });
             reactivationTriggered = !reactivation.alreadyActive;
             mikrotikActionId = reactivation.mikrotikAction?.id;
@@ -326,6 +335,9 @@ export class PaymentService {
                 triggeredBy: `webhook:codi:${providerEventId}`,
                 invoiceId: invoice.id,
                 tenantId: invoiceTenantId,
+                webhookFence: {
+                  beforeMutation: () => this.renewOrThrow(eventId, claimToken),
+                },
               });
               reactivationTriggered = !reactivation.alreadyActive;
               mikrotikActionId = reactivation.mikrotikAction?.id;
@@ -367,6 +379,7 @@ export class PaymentService {
   private async confirmPaymentOnInvoice(
     order: PaymentOrderRecord,
     tenantId?: string,
+    webhookFence?: WebhookMutationFence,
   ): Promise<{ updated: boolean }> {
     const billing = getBillingService();
     const effectiveTenantId = tenantId || order.tenantId || 'tenant-default';
@@ -376,16 +389,26 @@ export class PaymentService {
       return { updated: false };
     }
 
+    const transactionId = order.providerOrderId ?? order.id;
+    if (invoice.payments.some((payment) => payment.transactionId === transactionId)) {
+      logger.info('PaymentEngine: pago ya aplicado por esta transacción (idempotente)', {
+        invoiceId: order.invoiceId,
+        transactionId,
+      });
+      return { updated: true };
+    }
+
     // Idempotencia: si ya está pagada no duplicar
     if (invoice.status === 'paid' || invoice.pendingAmount <= 0) {
       logger.info('PaymentEngine: factura ya estaba pagada (idempotente)', { invoiceId: order.invoiceId });
       return { updated: false };
     }
 
+    await webhookFence?.beforeMutation();
     await billing.recordPayment(order.invoiceId, {
       amount: order.amountCents / 100,
       method: order.provider,
-      transactionId: order.providerOrderId ?? order.id,
+      transactionId,
     }, effectiveTenantId);
 
     logger.info('PaymentEngine: factura marcada pagada', { invoiceId: order.invoiceId, tenantId: effectiveTenantId });
@@ -396,17 +419,29 @@ export class PaymentService {
 
   async reactivateCustomerService(
     customerId: string,
-    context?: { triggeredBy?: string; invoiceId?: string; tenantId?: string },
+    context?: ReactivationContext,
   ): Promise<ReactivationResult> {
     if (!customerId?.trim()) throw new BadRequestError('customerId es obligatorio.');
     const tenantId = context?.tenantId || 'tenant-default';
+    const triggeredBy = context?.triggeredBy ?? 'payment-engine';
+    const webhookFence = context?.webhookFence;
 
     const dataProvider = buildPaymentDataProvider();
     const client = await dataProvider.getCustomer(customerId, tenantId);
     if (!client) throw new NotFoundError(`Cliente '${customerId}' no encontrado.`);
 
-    // Idempotente: si ya está activo, no crear acción redundante
-    if (client.status === 'active') {
+    // La identidad durable del webhook permite reusar la acción ya creada. La
+    // lectura es intencionalmente exclusiva de esta ruta: una llamada manual
+    // conserva la semántica histórica de "activo => no-op".
+    const existingAction = webhookFence
+      ? (await this.repo.listActions({ customerId, tenantId })).find(
+        (action) => action.actionType === 'reactivate' && action.triggeredBy === triggeredBy,
+      )
+      : undefined;
+
+    // Un cliente inicialmente activo no necesita reactivación. En webhook solo
+    // se reanuda si ya existe la acción durable de este mismo evento.
+    if (client.status === 'active' && (!webhookFence || !existingAction)) {
       logger.info('PaymentEngine: cliente ya activo, reactivación omitida', { customerId, tenantId });
       return { customerId, alreadyActive: true, mikrotikAction: null, message: 'Cliente ya activo.' };
     }
@@ -414,61 +449,78 @@ export class PaymentService {
     const routerLive = productionGates.paymentsRouterLive();
     const dryRun = !routerLive;
 
-    // Cambio de estado lógico
-    const prevStatus = client.status;
-    await dataProvider.reactivateCustomer(customerId, tenantId);
+    // La acción es el marcador durable de intención y se crea antes del cambio
+    // lógico. Así B distingue una reanudación de un cliente que ya era activo.
+    const durablePreviousStatus = existingAction?.payload?.previousStatus;
+    const prevStatus = typeof durablePreviousStatus === 'string'
+      ? durablePreviousStatus
+      : client.status === 'active' ? undefined : client.status;
+    const routers = inventoryRoutersRepository.list();
+    const router = routers.find((r) => r.encryptedPassword || r.hasCredentials) ?? routers[0];
+    let actionRec = existingAction;
+    if (!actionRec) {
+      const actionId = await this.repo.nextActionId();
+      actionRec = {
+        id: actionId,
+        tenantId,
+        customerId,
+        routerId: router?.id,
+        actionType: 'reactivate',
+        status: 'pending',
+        dryRun,
+        payload: {
+          previousStatus: prevStatus,
+          invoiceId: context?.invoiceId,
+          pppoeUser: client.pppoeUser,
+          reason: 'payment_confirmed',
+        },
+        triggeredBy,
+        createdAt: nowIso(),
+        updatedAt: nowIso(),
+      };
+      await webhookFence?.beforeMutation();
+      await this.repo.createAction(actionRec);
+    }
 
+    if (client.status !== 'active') {
+      await webhookFence?.beforeMutation();
+      await dataProvider.reactivateCustomer(customerId, tenantId);
+    }
+
+    await webhookFence?.beforeMutation();
     await getCustomersService().addTimelineEvent({
       clientId: customerId,
       eventType: 'status_change',
-      summary: `Cambio de estado ${prevStatus} → active`,
+      summary: prevStatus
+        ? `Cambio de estado ${prevStatus} → active`
+        : 'Reactivación reanudada para cliente activo',
       details: `Reactivación por pago confirmado. ${context?.invoiceId ? `Factura: ${context.invoiceId}.` : ''}${dryRun ? ' Pendiente ejecución en router (dry_run).' : ' Orden de reactivación encolada.'}`,
-      createdBy: context?.triggeredBy ?? 'payment-engine',
+      createdBy: triggeredBy,
     });
 
-    const actionId = await this.repo.nextActionId();
-    const routers = inventoryRoutersRepository.list();
-    const router = routers.find((r) => r.encryptedPassword || r.hasCredentials) ?? routers[0];
-    const actionRec: MikrotikActionRecord = {
-      id: actionId,
-      tenantId,
-      customerId,
-      routerId: router?.id,
-      actionType: 'reactivate',
-      status: 'pending',
-      dryRun,
-      payload: {
-        previousStatus: prevStatus,
-        invoiceId: context?.invoiceId,
-        pppoeUser: client.pppoeUser,
-        reason: 'payment_confirmed',
-      },
-      triggeredBy: context?.triggeredBy ?? 'payment-engine',
-      createdAt: nowIso(),
-      updatedAt: nowIso(),
-    };
-    await this.repo.createAction(actionRec);
-
     if (routerLive) {
+      await webhookFence?.beforeMutation();
       await dispatchNetworkOrder({
         customerId,
         orderType: 'reactivation',
         source: 'payment-engine',
         reason: `Pago confirmado. Factura: ${context?.invoiceId ?? 'N/A'}`,
-        actor: context?.triggeredBy ?? 'payment-engine',
+        actor: triggeredBy,
       });
     }
 
+    await webhookFence?.beforeMutation();
     await getSuspensionService().repo.recordEvent({
       customerId,
       eventType: 'reactivation_order_created',
       reason: `Pago confirmado vía Payment Engine. Factura: ${context?.invoiceId ?? 'N/A'}.`,
       automatic: true,
-      actorId: context?.triggeredBy ?? 'payment-engine',
+      actorId: triggeredBy,
       metadata: { dryRun, routerLive },
     });
 
     if (!isDomainOnDb('customers')) {
+      await webhookFence?.beforeMutation();
       store.createAlert(
         'client',
         'info',
@@ -478,7 +530,7 @@ export class PaymentService {
     }
 
     logger.info('PaymentEngine: reactivación completada', {
-      customerId, actionId, dryRun,
+      customerId, actionId: actionRec.id, dryRun,
     });
 
     return {

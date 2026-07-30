@@ -164,6 +164,21 @@ export interface ReactivationResult {
   message: string;
 }
 
+/**
+ * Barrera que autoriza cada efecto mutante de una reactivación iniciada por
+ * webhook. La ruta manual omite este campo y conserva su contrato sin claim.
+ */
+export interface WebhookMutationFence {
+  beforeMutation(): Promise<void>;
+}
+
+export interface ReactivationContext {
+  triggeredBy?: string;
+  invoiceId?: string;
+  tenantId?: string;
+  webhookFence?: WebhookMutationFence;
+}
+
 // ── Input types ───────────────────────────────────────────────────────
 
 export interface CreatePaymentOrderInput {

@@ -21,12 +21,21 @@ import {
 } from '../../backend/domains/payments/repository';
 import type { PaymentRepository } from '../../backend/domains/payments/repository';
 import { PaymentService } from '../../backend/domains/payments/service';
-import type { PaymentEventRecord } from '../../backend/domains/payments/types';
+import { StorePaymentDataProvider } from '../../backend/domains/payments/data-provider';
+import type {
+  MikrotikActionRecord,
+  PaymentEventRecord,
+  PaymentOrderRecord,
+  PaymentProvider,
+} from '../../backend/domains/payments/types';
 import { getBillingService } from '../../backend/domains/billing/service';
+import { engineStore } from '../../backend/domains/suspension/engine-store';
 import { store } from '../../backend/state/store';
+import type { Client } from '../../src/types';
 
 const TENANT_A = 'tenant-a';
 const TENANT_B = 'tenant-b';
+const INTERNAL_FENCING_CUSTOMER_PREFIX = 'customer-internal-fencing-';
 
 const repo = new StorePaymentRepository();
 
@@ -50,6 +59,16 @@ const events = () => store.PAYMENT_EVENTS as PaymentEventRecord[];
 beforeEach(() => { store.PAYMENT_EVENTS.length = 0; });
 afterEach(() => {
   store.PAYMENT_EVENTS.length = 0;
+  store.CLIENTS = store.CLIENTS.filter((client) => !client.id.startsWith(INTERNAL_FENCING_CUSTOMER_PREFIX));
+  store.CLIENT_TIMELINE = store.CLIENT_TIMELINE.filter(
+    (event) => !event.clientId.startsWith(INTERNAL_FENCING_CUSTOMER_PREFIX),
+  );
+  store.MIKROTIK_ACTIONS = store.MIKROTIK_ACTIONS.filter(
+    (action) => !action.customerId.startsWith(INTERNAL_FENCING_CUSTOMER_PREFIX),
+  );
+  engineStore.EVENTS = engineStore.EVENTS.filter(
+    (event) => !event.customerId.startsWith(INTERNAL_FENCING_CUSTOMER_PREFIX),
+  );
   vi.restoreAllMocks();
 });
 
@@ -556,6 +575,270 @@ describe('PaymentService — ownership antes de efectos', () => {
     expect(result.idempotentReason).toBe('in_progress');
     expect(counters).toEqual({ billing: 1, reactivation: 0 });
     expect(closes).toBe(0);
+  });
+
+  const orderWebhookCases: Array<{
+    label: string;
+    provider: PaymentProvider;
+    eventType: string;
+    payload: Record<string, unknown>;
+  }> = [
+    {
+      label: 'OpenPay normal',
+      provider: 'openpay',
+      eventType: 'charge.succeeded',
+      payload: {
+        type: 'charge.succeeded',
+        transaction: { id: 'tx-internal-fence', order_id: 'provider-order-internal-fence', status: 'completed' },
+      },
+    },
+    {
+      label: 'CoDi con order',
+      provider: 'codi',
+      eventType: 'payment.completed',
+      payload: { status: 'paid', reference: 'INV-INTERNAL-FENCE-1', amount: 100 },
+    },
+  ];
+
+  it.each(orderWebhookCases)(
+    '$label: reclaim dentro de findInvoiceById cerca a A y B aplica una sola vez',
+    async ({ provider, eventType, payload }) => {
+      let currentOwner = 'owner-a';
+      let claimCount = 0;
+      let findInvoiceCalls = 0;
+      let paymentCalls = 0;
+      let closes = 0;
+      const transactionId = 'provider-order-internal-fence';
+      const order: PaymentOrderRecord = {
+        id: 'po-internal-fence',
+        tenantId: TENANT_A,
+        customerId: `${INTERNAL_FENCING_CUSTOMER_PREFIX}billing`,
+        invoiceId: 'INV-INTERNAL-FENCE',
+        provider,
+        providerOrderId: transactionId,
+        amountCents: 10_000,
+        status: 'pending',
+        createdAt: new Date().toISOString(),
+        updatedAt: new Date().toISOString(),
+      };
+      const persisted = {
+        ...candidate('pe-internal-fence', 'evt-internal-fence'),
+        provider,
+        eventType,
+        payload,
+      };
+      const fakeRepo = {
+        nextEventId: async () => `pe-candidate-${claimCount}`,
+        claimEvent: async () => {
+          const claimToken = claimCount++ === 0 ? 'owner-a' : 'owner-b';
+          currentOwner = claimToken;
+          return { outcome: 'claimed' as const, event: { ...persisted, claimToken } };
+        },
+        renewEventClaim: async (_id: string, token: string) => token === currentOwner,
+        findOrderByProviderOrderId: async () => provider === 'openpay' ? order : null,
+        listOrders: async () => provider === 'codi' ? [order] : [],
+        updateOrderStatus: async () => order,
+        markEventProcessed: async (_id: string, token: string) => {
+          if (token !== currentOwner) return false;
+          closes += 1;
+          return true;
+        },
+      } as unknown as PaymentRepository;
+      const invoice = {
+        id: order.invoiceId,
+        tenantId: TENANT_A,
+        clientId: order.customerId,
+        status: 'pending',
+        amount: 200,
+        pendingAmount: 200,
+        payments: [] as Array<{ transactionId: string }>,
+      };
+      const billing = getBillingService();
+      vi.spyOn(billing, 'findInvoiceById').mockImplementation(async () => {
+        findInvoiceCalls += 1;
+        if (findInvoiceCalls === 1) currentOwner = 'owner-b';
+        return invoice as never;
+      });
+      vi.spyOn(billing, 'recordPayment').mockImplementation(async (_invoiceId, payment) => {
+        paymentCalls += 1;
+        invoice.pendingAmount -= payment.amount;
+        invoice.payments.push({ transactionId: payment.transactionId ?? '' });
+        return invoice as never;
+      });
+      vi.spyOn(PaymentService.prototype, 'reactivateCustomerService').mockResolvedValue({
+        customerId: order.customerId,
+        alreadyActive: false,
+        mikrotikAction: null,
+        message: 'ok',
+      });
+      const input = {
+        provider,
+        providerEventId: persisted.providerEventId,
+        eventType,
+        payload,
+        tenantId: TENANT_A,
+      };
+
+      const first = await new PaymentService(fakeRepo).processWebhook(input);
+      expect(first.idempotentReason).toBe('in_progress');
+      expect(paymentCalls).toBe(0);
+
+      const second = await new PaymentService(fakeRepo).processWebhook(input);
+      expect(second.idempotent).toBe(false);
+      expect(paymentCalls).toBe(1);
+      expect(invoice.payments).toEqual([{ transactionId }]);
+      expect(closes).toBe(1);
+    },
+  );
+
+  it.each(orderWebhookCases)(
+    '$label: reclaim dentro de la reactivación cerca a A y B crea la acción pendiente',
+    async ({ provider, eventType, payload }) => {
+      let currentOwner = 'owner-a';
+      let claimCount = 0;
+      let closes = 0;
+      let reactivationWrites = 0;
+      const customerId = `${INTERNAL_FENCING_CUSTOMER_PREFIX}${provider}`;
+      const triggeredBy = `webhook:${provider}:evt-reactivation-fence`;
+      const order: PaymentOrderRecord = {
+        id: `po-reactivation-fence-${provider}`,
+        tenantId: TENANT_A,
+        customerId,
+        invoiceId: 'INV-REACTIVATION-FENCE',
+        provider,
+        providerOrderId: 'provider-order-internal-fence',
+        amountCents: 10_000,
+        status: 'pending',
+        createdAt: new Date().toISOString(),
+        updatedAt: new Date().toISOString(),
+      };
+      const persisted = {
+        ...candidate(`pe-reactivation-fence-${provider}`, 'evt-reactivation-fence'),
+        provider,
+        eventType,
+        payload,
+      };
+      const customer: Client = {
+        id: customerId,
+        tenantId: TENANT_A,
+        name: `Cliente fencing ${provider}`,
+        type: 'residential',
+        status: 'suspended',
+        email: 'fencing@example.test',
+        phone: '0000000000',
+        address: 'Test',
+        city: 'Test',
+        lat: 0,
+        lng: 0,
+        planId: 'plan-test',
+        ip: '192.0.2.1',
+        pppoeUser: `pppoe-${provider}`,
+      };
+      store.CLIENTS.push(customer);
+      const actions: MikrotikActionRecord[] = [];
+      const fakeRepo = {
+        nextEventId: async () => `pe-reactivation-candidate-${claimCount}`,
+        claimEvent: async () => {
+          const claimToken = claimCount++ === 0 ? 'owner-a' : 'owner-b';
+          currentOwner = claimToken;
+          return { outcome: 'claimed' as const, event: { ...persisted, claimToken } };
+        },
+        renewEventClaim: async (_id: string, token: string) => token === currentOwner,
+        findOrderByProviderOrderId: async () => provider === 'openpay' ? order : null,
+        listOrders: async () => provider === 'codi' ? [order] : [],
+        updateOrderStatus: async () => order,
+        listActions: async (filter?: { customerId?: string; tenantId?: string }) => actions.filter(
+          (action) => (!filter?.customerId || action.customerId === filter.customerId)
+            && (!filter?.tenantId || action.tenantId === filter.tenantId),
+        ),
+        nextActionId: async () => `ma-reactivation-fence-${actions.length + 1}`,
+        createAction: async (action: MikrotikActionRecord) => {
+          actions.push(action);
+          return action;
+        },
+        markEventProcessed: async (_id: string, token: string) => {
+          if (token !== currentOwner) return false;
+          closes += 1;
+          return true;
+        },
+      } as unknown as PaymentRepository;
+      const billing = getBillingService();
+      vi.spyOn(billing, 'findInvoiceById').mockResolvedValue({
+        id: order.invoiceId,
+        tenantId: TENANT_A,
+        clientId: customerId,
+        status: 'paid',
+        amount: 100,
+        pendingAmount: 0,
+        payments: [{ transactionId: order.providerOrderId }],
+      } as never);
+      vi.spyOn(billing, 'recordPayment').mockRejectedValue(new Error('no debe duplicar Billing'));
+      const originalReactivate = StorePaymentDataProvider.prototype.reactivateCustomer;
+      vi.spyOn(StorePaymentDataProvider.prototype, 'reactivateCustomer').mockImplementation(async function (
+        this: StorePaymentDataProvider,
+        id,
+        tenantId,
+      ) {
+        await originalReactivate.call(this, id, tenantId);
+        reactivationWrites += 1;
+        if (reactivationWrites === 1) currentOwner = 'owner-b';
+      });
+      const input = {
+        provider,
+        providerEventId: persisted.providerEventId,
+        eventType,
+        payload,
+        tenantId: TENANT_A,
+      };
+
+      const first = await new PaymentService(fakeRepo).processWebhook(input);
+      expect(first.idempotentReason).toBe('in_progress');
+      expect(customer.status).toBe('active');
+      expect(actions).toHaveLength(1);
+      expect(actions[0].triggeredBy).toBe(triggeredBy);
+      expect(store.CLIENT_TIMELINE.filter((event) => event.clientId === customerId)).toHaveLength(0);
+      expect(engineStore.EVENTS.filter((event) => event.customerId === customerId)).toHaveLength(0);
+
+      const second = await new PaymentService(fakeRepo).processWebhook(input);
+      expect(second.idempotent).toBe(false);
+      expect(actions).toHaveLength(1);
+      expect(actions[0].triggeredBy).toBe(triggeredBy);
+      expect(closes).toBe(1);
+    },
+  );
+
+  it('la reactivación manual sin claim conserva el comportamiento existente', async () => {
+    const customerId = `${INTERNAL_FENCING_CUSTOMER_PREFIX}manual`;
+    store.CLIENTS.push({
+      id: customerId,
+      name: 'Cliente manual',
+      type: 'residential',
+      status: 'suspended',
+      email: 'manual@example.test',
+      phone: '0000000000',
+      address: 'Test',
+      city: 'Test',
+      lat: 0,
+      lng: 0,
+      planId: 'plan-test',
+      ip: '192.0.2.2',
+    });
+    const actions: MikrotikActionRecord[] = [];
+    const manualRepo = {
+      nextActionId: async () => 'ma-manual-no-claim',
+      createAction: async (action: MikrotikActionRecord) => {
+        actions.push(action);
+        return action;
+      },
+    } as unknown as PaymentRepository;
+
+    const result = await new PaymentService(manualRepo).reactivateCustomerService(customerId, {
+      triggeredBy: 'manual:test',
+    });
+
+    expect(result.alreadyActive).toBe(false);
+    expect(actions).toHaveLength(1);
+    expect(store.CLIENTS.find((client) => client.id === customerId)?.status).toBe('active');
   });
 
   it('CoDi factura directa: B reanuda la reactivación tras reclaim durante recordPayment', async () => {
