@@ -81,7 +81,7 @@ body parser → auth → rutas → 404 JSON solo para `/api` → error handler.
 | Migraciones SQL | 53 |
 | Tablas expuestas en `public` (staging) | 92 |
 
-## 3. Estado de la persistencia
+<h2>3. Estado de la persistencia</h2>
 
 **Corrección respecto a versiones anteriores de este documento:** la persistencia
 ya *no* es el bloqueo principal, y la afirmación de que `USE_DB_INVENTORY` está
@@ -106,7 +106,7 @@ separación.
 `false` significa que el inventario de routers y la topología se pierden al
 reiniciar el proceso. Para un piloto real eso es un bloqueo; para staging no.
 
-## 4. Estado verificado de la base de datos
+<h2>4. Estado verificado de la base de datos</h2>
 
 Comprobado el 2026-07-30 contra staging.
 
@@ -117,7 +117,7 @@ Comprobado el 2026-07-30 contra staging.
   todas `NOT NULL` y con backfill cerrado. Antes del 2026-07-30 faltaba en 39.
 - **Ninguna tabla de `public` sin RLS.**
 
-### Drift resuelto ese día
+<h3>Drift resuelto ese día</h3>
 
 Dos archivos de migración compartían el prefijo `20260717050000`. El historial
 solo admite una fila por versión, así que registró `olt_devices` y
@@ -136,7 +136,7 @@ archivos. Detalle completo en
 > `ls supabase/migrations | sed -E 's/_.*//' | sort | uniq -d` debe salir vacío.
 > Sigue **sin estar en CI**; es la tarea P1 más barata de todas.
 
-## 5. Filosofía operativa y production gates
+<h2>5. Filosofía operativa y production gates</h2>
 
 **Read-only → Dry-run → Confirmación manual → Live.** Ninguna funcionalidad que
 toque infraestructura real se activa por defecto.
@@ -155,7 +155,7 @@ Piezas relacionadas:
 - **Manual Safe Mode** — permite operar CRM/billing con datos reales sin riesgo
   para la red.
 
-## 6. Estado de los módulos
+<h2>6. Estado de los módulos</h2>
 
 | Módulo | Funcional | Producción | Notas |
 | --- | --- | --- | --- |
@@ -172,11 +172,11 @@ Piezas relacionadas:
 | WireGuard | ✅ | 🟢 con gate | Host-apply, IPAM, base multi-tenant tras `WIREGUARD_MULTITENANT` |
 | FTTH / GIS | 🟡 | 🔴 | Importador CSV/GeoJSON y NAP integrados; factibilidad y worker OLT fuera de `main` |
 
-## 7. Servicios de Supabase: qué usamos y qué no
+<h2>7. Servicios de Supabase: qué usamos y qué no</h2>
 
 Pregunta recurrente del equipo. La respuesta depende de la decisión de §2.
 
-### Storage — implementado el 2026-07-30
+<h3>Storage — implementado el 2026-07-30</h3>
 
 Antes existía el hueco: `client_documents.storage_path` se validaba y
 persistía, `invoices.pdf_url` y `router_config_backups` lo presuponían, pero
@@ -213,7 +213,7 @@ bytes intactos, y acceso sin firma rechazado con `HTTP 400`. Cobertura en
 > firmada. Ahora se rechaza `..` y se exige que la ruta empiece por el prefijo
 > del tenant.
 
-### Edge Functions — no se usan, y no hacen falta
+<h3>Edge Functions — no se usan, y no hacen falta</h3>
 
 `supabase/functions` no existe. Y no debería: hay un backend Express con 284
 rutas que ya cubre lo que harían, webhooks de pago incluidos. Añadirlas
@@ -224,7 +224,7 @@ mejora.
 El único argumento real sería querer que los webhooks sobrevivan a una caída del
 backend. Eso se resuelve con disponibilidad del backend, no partiendo la lógica.
 
-### Realtime — decisión: no usar Supabase Realtime; SSE desde Express cuando haga falta
+<h3>Realtime — decisión: no usar Supabase Realtime; SSE desde Express cuando haga falta</h3>
 
 Hoy no se usa: el frontend hace polling con `setInterval` y backoff ante 429
 ([`src/App.tsx:650`](../src/App.tsx#L650), [`:717`](../src/App.tsx#L717)). No hay SSE ni
@@ -232,7 +232,7 @@ WebSockets en el repo.
 
 **Por qué no Supabase Realtime.** Realtime entrega los cambios *al navegador*
 aplicando RLS con el JWT del usuario. Nuestras tablas solo tienen políticas
-`service_role`, así que Realtime no entregaría nada. Habilitarlo exigiría crear
+`service_role`, así que Realtime no entregaría nada. Habilitarlo exigirá crear
 políticas `authenticated` sobre las tablas de negocio — exactamente el agujero
 que se cerró a propósito y que la migración del 2026-07-30 reafirmó en 42
 tablas. **El coste no es técnico, es de modelo de seguridad**, y no compensa.
@@ -251,9 +251,9 @@ multi-tenant sería ampliar superficie sobre una base con fugas conocidas.
 Reconsiderar cuando NOC pase a monitoreo activo, que es donde el polling
 empezará a doler de verdad.
 
-## 8. Qué falta
+<h2>8. Qué falta</h2>
 
-### P0 — bloquean cualquier despliegue
+<h3>P0 — bloquean cualquier despliegue</h3>
 
 1. ~~Aplicar `20260725210000` y `20260728120000` en staging.~~ **Hecho el 2026-07-30.**
 2. ~~Reparar el drift del SSOT multi-tenant.~~ **Hecho el 2026-07-30** (`20260730120000`).
@@ -263,7 +263,7 @@ empezará a doler de verdad.
    la última revisión; hay que recuperarlo, revisarlo en frío y fusionarlo antes
    de desbloquear pagos.
 
-### Los seis hallazgos multi-tenant
+<h3>Los seis hallazgos multi-tenant</h3>
 
 | ID | Severidad | Hallazgo | Estado |
 | --- | --- | --- | --- |
@@ -274,7 +274,7 @@ empezará a doler de verdad.
 | MT-05 | Alto | Las FKs validan el ID del recurso, no que ambos registros compartan tenant. Faltan uniques `(tenant_id, id)` y FKs compuestas | Abierto |
 | MT-06 | Medio | El webhook CoDi público no resuelve WISP y cae a `tenant-default` | Abierto |
 
-### P1 — antes de ampliar operación
+<h3>P1 — antes de ampliar operación</h3>
 
 1. Cerrar MT-03 a MT-06.
 2. **Validación en CI que rechace versiones de migración duplicadas.** Barata y
@@ -286,7 +286,7 @@ empezará a doler de verdad.
    [`deployment/PRODUCTION_READINESS_CHECKLIST.md`](deployment/PRODUCTION_READINESS_CHECKLIST.md):
    persistencia tras reinicio, backups/restore, RBAC por rol.
 
-### P2 — deuda
+<h3>P2 — deuda</h3>
 
 - Activar protección contra contraseñas filtradas en Supabase (solo Dashboard).
 - Migrar a Supabase los dominios que siguen en memoria (`MIKROTIK`, `NETWORK`,
@@ -294,7 +294,7 @@ empezará a doler de verdad.
 - Resolver el baseline de warnings de lint de forma incremental.
 - Limpiar ramas remotas de PRs ya cerrados.
 
-### Camino a la ejecución real contra routers
+<h3>Camino a la ejecución real contra routers</h3>
 
 Secuencia obligatoria, sin saltos:
 
@@ -302,7 +302,7 @@ Secuencia obligatoria, sin saltos:
 2. **PROD-6** — primer comando real, mínimo y reversible, con aprobación manual.
 3. **PROD-7** — piloto en un router de producción no crítico.
 
-## 9. Cómo empezar
+<h2>9. Cómo empezar</h2>
 
 ```bash
 npm install
