@@ -67,6 +67,8 @@ class ClaimOwnershipLostError extends Error {
   }
 }
 
+type OwnershipFence = () => Promise<void>;
+
 // ── Servicio ──────────────────────────────────────────────────────────
 
 export class PaymentService {
@@ -249,7 +251,11 @@ export class PaymentService {
         await this.repo.updateOrderStatus(order.id, 'completed', undefined, orderTenantId);
 
         await this.renewOrThrow(eventId, claimToken);
-        const invoiceResult = await this.confirmPaymentOnInvoice(order, orderTenantId);
+        const invoiceResult = await this.confirmPaymentOnInvoice(
+          order,
+          orderTenantId,
+          () => this.renewOrThrow(eventId, claimToken),
+        );
         invoiceUpdated = invoiceResult.updated;
 
         await this.renewOrThrow(eventId, claimToken);
@@ -257,7 +263,7 @@ export class PaymentService {
           triggeredBy: `webhook:${provider}:${providerEventId}`,
           invoiceId: order.invoiceId,
           tenantId: orderTenantId,
-        });
+        }, () => this.renewOrThrow(eventId, claimToken));
         reactivationTriggered = !reactivation.alreadyActive;
         mikrotikActionId = reactivation.mikrotikAction?.id;
 
@@ -276,14 +282,18 @@ export class PaymentService {
             await this.renewOrThrow(eventId, claimToken);
             await this.repo.updateOrderStatus(order.id, 'completed', undefined, orderTenantId);
             await this.renewOrThrow(eventId, claimToken);
-            const invoiceResult = await this.confirmPaymentOnInvoice(order, orderTenantId);
+            const invoiceResult = await this.confirmPaymentOnInvoice(
+              order,
+              orderTenantId,
+              () => this.renewOrThrow(eventId, claimToken),
+            );
             invoiceUpdated = invoiceResult.updated;
             await this.renewOrThrow(eventId, claimToken);
             const reactivation = await this.reactivateCustomerService(order.customerId, {
               triggeredBy: `webhook:codi:${providerEventId}`,
               invoiceId: order.invoiceId,
               tenantId: orderTenantId,
-            });
+            }, () => this.renewOrThrow(eventId, claimToken));
             reactivationTriggered = !reactivation.alreadyActive;
             mikrotikActionId = reactivation.mikrotikAction?.id;
             await this.closeOrThrow(eventId, claimToken);
@@ -316,7 +326,7 @@ export class PaymentService {
               triggeredBy: `webhook:codi:${providerEventId}`,
               invoiceId: invoice.id,
               tenantId: invoiceTenantId,
-            });
+            }, () => this.renewOrThrow(eventId, claimToken));
             reactivationTriggered = !reactivation.alreadyActive;
             mikrotikActionId = reactivation.mikrotikAction?.id;
           }
@@ -356,6 +366,7 @@ export class PaymentService {
   private async confirmPaymentOnInvoice(
     order: PaymentOrderRecord,
     tenantId?: string,
+    fence?: OwnershipFence,
   ): Promise<{ updated: boolean }> {
     const billing = getBillingService();
     const effectiveTenantId = tenantId || order.tenantId || 'tenant-default';
@@ -371,6 +382,7 @@ export class PaymentService {
       return { updated: false };
     }
 
+    await fence?.();
     await billing.recordPayment(order.invoiceId, {
       amount: order.amountCents / 100,
       method: order.provider,
@@ -386,6 +398,7 @@ export class PaymentService {
   async reactivateCustomerService(
     customerId: string,
     context?: { triggeredBy?: string; invoiceId?: string; tenantId?: string },
+    fence?: OwnershipFence,
   ): Promise<ReactivationResult> {
     if (!customerId?.trim()) throw new BadRequestError('customerId es obligatorio.');
     const tenantId = context?.tenantId || 'tenant-default';
@@ -405,8 +418,10 @@ export class PaymentService {
 
     // Cambio de estado lógico
     const prevStatus = client.status;
+    await fence?.();
     await dataProvider.reactivateCustomer(customerId, tenantId);
 
+    await fence?.();
     await getCustomersService().addTimelineEvent({
       clientId: customerId,
       eventType: 'status_change',
@@ -436,9 +451,11 @@ export class PaymentService {
       createdAt: nowIso(),
       updatedAt: nowIso(),
     };
+    await fence?.();
     await this.repo.createAction(actionRec);
 
     if (routerLive) {
+      await fence?.();
       await dispatchNetworkOrder({
         customerId,
         orderType: 'reactivation',
@@ -448,6 +465,7 @@ export class PaymentService {
       });
     }
 
+    await fence?.();
     await getSuspensionService().repo.recordEvent({
       customerId,
       eventType: 'reactivation_order_created',
@@ -458,6 +476,7 @@ export class PaymentService {
     });
 
     if (!isDomainOnDb('customers')) {
+      await fence?.();
       store.createAlert(
         'client',
         'info',

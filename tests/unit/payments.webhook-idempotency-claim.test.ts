@@ -23,6 +23,9 @@ import type { PaymentRepository } from '../../backend/domains/payments/repositor
 import { PaymentService } from '../../backend/domains/payments/service';
 import type { PaymentEventRecord } from '../../backend/domains/payments/types';
 import { getBillingService } from '../../backend/domains/billing/service';
+import { getCustomersService } from '../../backend/domains/customers/service';
+import { StorePaymentDataProvider } from '../../backend/domains/payments/data-provider';
+import { getSuspensionService } from '../../backend/domains/suspension/service';
 import { store } from '../../backend/state/store';
 
 const TENANT_A = 'tenant-a';
@@ -444,6 +447,114 @@ describe('PaymentService — ownership antes de efectos', () => {
     expect(counters).toEqual({ billing: 1, reactivation: 1 });
   });
 
+  it('ruta normal: reclaim durante findInvoiceById impide escribir el pago con owner stale', async () => {
+    let currentOwner = 'owner-a';
+    let payments = 0;
+    let reactivations = 0;
+    let closes = 0;
+    const order = {
+      id: 'po-billing-read-race', tenantId: TENANT_A, customerId: 'customer-1', invoiceId: 'invoice-1',
+      provider: 'openpay' as const, providerOrderId: 'order-billing-read-race', amountCents: 100,
+      status: 'pending' as const, createdAt: new Date().toISOString(), updatedAt: new Date().toISOString(),
+    };
+    const persisted = {
+      ...candidate('pe-billing-read-race', 'evt-billing-read-race'),
+      claimToken: 'owner-a',
+      payload: {
+        type: 'charge.succeeded',
+        transaction: { id: 'tx-billing-read-race', order_id: 'order-billing-read-race', status: 'completed' },
+      },
+    };
+    const fakeRepo = {
+      nextEventId: async () => 'pe-billing-read-race-candidate',
+      claimEvent: async () => ({ outcome: 'claimed' as const, event: persisted }),
+      renewEventClaim: async (_id: string, token: string) => token === currentOwner,
+      findOrderByProviderOrderId: async () => order,
+      updateOrderStatus: async () => order,
+      markEventProcessed: async () => { closes += 1; return true; },
+    } as unknown as PaymentRepository;
+    const billing = getBillingService();
+    vi.spyOn(billing, 'findInvoiceById').mockImplementation(async () => {
+      currentOwner = 'owner-b';
+      return {
+        id: order.invoiceId, tenantId: TENANT_A, clientId: order.customerId,
+        status: 'pending', amount: 100, pendingAmount: 100,
+      } as never;
+    });
+    vi.spyOn(billing, 'recordPayment').mockImplementation(async () => {
+      payments += 1;
+      return {} as never;
+    });
+    const service = new PaymentService(fakeRepo);
+    (service as unknown as { reactivateCustomerService: () => Promise<never> }).reactivateCustomerService = async () => {
+      reactivations += 1;
+      return {} as never;
+    };
+
+    const result = await service.processWebhook({
+      provider: 'openpay', providerEventId: persisted.providerEventId, eventType: persisted.eventType,
+      payload: persisted.payload, tenantId: TENANT_A,
+    });
+
+    expect(result.idempotentReason).toBe('in_progress');
+    expect(payments).toBe(0);
+    expect(reactivations).toBe(0);
+    expect(closes).toBe(0);
+  });
+
+  it('CoDi con order: reclaim durante findInvoiceById impide escribir el pago con owner stale', async () => {
+    let currentOwner = 'owner-a';
+    let payments = 0;
+    let reactivations = 0;
+    const order = {
+      id: 'po-codi-read-race', tenantId: TENANT_A, customerId: 'customer-1', invoiceId: 'INV',
+      provider: 'codi' as const, providerOrderId: 'different-reference', amountCents: 100,
+      status: 'pending' as const, createdAt: new Date().toISOString(), updatedAt: new Date().toISOString(),
+    };
+    const event = {
+      ...candidate('pe-codi-read-race', 'evt-codi-read-race'),
+      provider: 'codi' as const,
+      eventType: 'payment.completed',
+      claimToken: 'owner-a',
+      payload: { status: 'paid', reference: 'INV-1', amount: 100 },
+    };
+    const fakeRepo = {
+      nextEventId: async () => 'pe-codi-read-race-candidate',
+      claimEvent: async () => ({ outcome: 'claimed' as const, event }),
+      renewEventClaim: async (_id: string, token: string) => token === currentOwner,
+      findOrderByProviderOrderId: async () => null,
+      listOrders: async () => [order],
+      updateOrderStatus: async () => order,
+      markEventProcessed: async () => true,
+    } as unknown as PaymentRepository;
+    const billing = getBillingService();
+    vi.spyOn(billing, 'findInvoiceById').mockImplementation(async () => {
+      currentOwner = 'owner-b';
+      return {
+        id: order.invoiceId, tenantId: TENANT_A, clientId: order.customerId,
+        status: 'pending', amount: 100, pendingAmount: 100,
+      } as never;
+    });
+    vi.spyOn(billing, 'recordPayment').mockImplementation(async () => {
+      payments += 1;
+      return {} as never;
+    });
+    const service = new PaymentService(fakeRepo);
+    (service as unknown as { reactivateCustomerService: () => Promise<never> }).reactivateCustomerService = async () => {
+      reactivations += 1;
+      return {} as never;
+    };
+
+    const result = await service.processWebhook({
+      provider: 'codi', providerEventId: event.providerEventId, eventType: event.eventType,
+      payload: event.payload, tenantId: TENANT_A,
+    });
+
+    expect(result.idempotentReason).toBe('in_progress');
+    expect(payments).toBe(0);
+    expect(reactivations).toBe(0);
+  });
+
   it('ruta normal: reclaim durante Billing aborta antes de reactivación y cierre', async () => {
     let currentOwner = 'owner-a';
     let closes = 0;
@@ -596,5 +707,85 @@ describe('PaymentService — ownership antes de efectos', () => {
 
     expect(result.idempotentReason).toBe('in_progress');
     expect(counters).toEqual({ billing: 1, reactivation: 0 });
+  });
+
+  it('reclaim dentro de reactivación aborta timeline, acción MikroTik, evento, alerta y cierre', async () => {
+    let currentOwner = 'owner-a';
+    let timelines = 0;
+    let actions = 0;
+    let suspensionEvents = 0;
+    let alerts = 0;
+    let closes = 0;
+    const customerId = 'customer-reactivation-race';
+    const originalClients = store.CLIENTS;
+    store.CLIENTS = [
+      ...originalClients,
+      {
+        id: customerId, tenantId: TENANT_A, name: 'Cliente race', status: 'suspended',
+        pppoeUser: 'race-user',
+      } as never,
+    ];
+    const order = {
+      id: 'po-reactivation-race', tenantId: TENANT_A, customerId, invoiceId: 'invoice-paid',
+      provider: 'openpay' as const, providerOrderId: 'order-reactivation-race', amountCents: 100,
+      status: 'pending' as const, createdAt: new Date().toISOString(), updatedAt: new Date().toISOString(),
+    };
+    const event = {
+      ...candidate('pe-reactivation-race', 'evt-reactivation-race'),
+      claimToken: 'owner-a',
+      payload: {
+        type: 'charge.succeeded',
+        transaction: { id: 'tx-reactivation-race', order_id: order.providerOrderId, status: 'completed' },
+      },
+    };
+    const fakeRepo = {
+      nextEventId: async () => 'pe-reactivation-race-candidate',
+      claimEvent: async () => ({ outcome: 'claimed' as const, event }),
+      renewEventClaim: async (_id: string, token: string) => token === currentOwner,
+      findOrderByProviderOrderId: async () => order,
+      updateOrderStatus: async () => order,
+      nextActionId: async () => 'ma-reactivation-race',
+      createAction: async (action: unknown) => { actions += 1; return action; },
+      markEventProcessed: async (_id: string, token: string) => {
+        closes += 1;
+        return token === currentOwner;
+      },
+    } as unknown as PaymentRepository;
+    const billing = getBillingService();
+    vi.spyOn(billing, 'findInvoiceById').mockResolvedValue({
+      id: order.invoiceId, tenantId: TENANT_A, clientId: customerId,
+      status: 'paid', amount: 100, pendingAmount: 0,
+    } as never);
+    const originalReactivate = StorePaymentDataProvider.prototype.reactivateCustomer;
+    vi.spyOn(StorePaymentDataProvider.prototype, 'reactivateCustomer').mockImplementation(async function (
+      this: StorePaymentDataProvider,
+      id,
+      tenantId,
+    ) {
+      await originalReactivate.call(this, id, tenantId);
+      currentOwner = 'owner-b';
+    });
+    vi.spyOn(getCustomersService(), 'addTimelineEvent').mockImplementation(async () => { timelines += 1; });
+    vi.spyOn(getSuspensionService().repo, 'recordEvent').mockImplementation(async () => {
+      suspensionEvents += 1;
+      return {} as never;
+    });
+    vi.spyOn(store, 'createAlert').mockImplementation(() => { alerts += 1; });
+    const service = new PaymentService(fakeRepo);
+
+    try {
+      const result = await service.processWebhook({
+        provider: 'openpay', providerEventId: event.providerEventId, eventType: event.eventType,
+        payload: event.payload, tenantId: TENANT_A,
+      });
+
+      expect(result.idempotentReason).toBe('in_progress');
+      expect(store.CLIENTS.find((client) => client.id === customerId)?.status).toBe('active');
+      expect({ timelines, actions, suspensionEvents, alerts, closes }).toEqual({
+        timelines: 0, actions: 0, suspensionEvents: 0, alerts: 0, closes: 0,
+      });
+    } finally {
+      store.CLIENTS = originalClients;
+    }
   });
 });
