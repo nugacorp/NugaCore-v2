@@ -30,6 +30,7 @@ import type {
 } from '../../backend/domains/payments/types';
 import { getBillingService } from '../../backend/domains/billing/service';
 import { engineStore } from '../../backend/domains/suspension/engine-store';
+import { getSuspensionService } from '../../backend/domains/suspension/service';
 import { store } from '../../backend/state/store';
 import type { Client } from '../../src/types';
 
@@ -69,6 +70,13 @@ afterEach(() => {
   engineStore.EVENTS = engineStore.EVENTS.filter(
     (event) => !event.customerId.startsWith(INTERNAL_FENCING_CUSTOMER_PREFIX),
   );
+  engineStore.ORDERS = engineStore.ORDERS.filter(
+    (order) => !order.customerId.startsWith(INTERNAL_FENCING_CUSTOMER_PREFIX),
+  );
+  store.NOC_ALERTS = store.NOC_ALERTS.filter(
+    (alert) => !alert.source.startsWith('Cliente fencing') && !alert.source.startsWith('Cliente checkpoint'),
+  );
+  vi.unstubAllEnvs();
   vi.restoreAllMocks();
 });
 
@@ -756,6 +764,12 @@ describe('PaymentService — ownership antes de efectos', () => {
           actions.push(action);
           return action;
         },
+        updateAction: async (id: string, patch: Partial<MikrotikActionRecord>) => {
+          const action = actions.find((candidateAction) => candidateAction.id === id);
+          if (!action) return null;
+          Object.assign(action, patch);
+          return action;
+        },
         markEventProcessed: async (_id: string, token: string) => {
           if (token !== currentOwner) return false;
           closes += 1;
@@ -806,6 +820,176 @@ describe('PaymentService — ownership antes de efectos', () => {
       expect(closes).toBe(1);
     },
   );
+
+  const runStepProgressHandoff = async (handoff: 'network-order' | 'suspension-event') => {
+    const live = handoff === 'network-order';
+    vi.stubEnv('NUGACORE_LIVE_MODE', 'false');
+    vi.stubEnv('PAYMENTS_ROUTER_LIVE', live ? 'true' : 'false');
+    vi.stubEnv('MIKROTIK_WORKER_COMMIT', 'false');
+
+    let currentOwner = 'owner-a';
+    let claimCount = 0;
+    let closes = 0;
+    let dispatchCalls = 0;
+    let suspensionCalls = 0;
+    const customerId = `${INTERNAL_FENCING_CUSTOMER_PREFIX}checkpoint-${handoff}`;
+    const customerName = `Cliente checkpoint ${handoff}`;
+    const order: PaymentOrderRecord = {
+      id: `po-checkpoint-${handoff}`,
+      tenantId: TENANT_A,
+      customerId,
+      invoiceId: `INV-CHECKPOINT-${handoff}`,
+      provider: 'openpay',
+      providerOrderId: `provider-order-checkpoint-${handoff}`,
+      amountCents: 10_000,
+      status: 'pending',
+      createdAt: new Date().toISOString(),
+      updatedAt: new Date().toISOString(),
+    };
+    const persisted = {
+      ...candidate(`pe-checkpoint-${handoff}`, `evt-checkpoint-${handoff}`),
+      payload: {
+        type: 'charge.succeeded',
+        transaction: {
+          id: `tx-checkpoint-${handoff}`,
+          order_id: order.providerOrderId,
+          status: 'completed',
+        },
+      },
+    };
+    const customer: Client = {
+      id: customerId,
+      tenantId: TENANT_A,
+      name: customerName,
+      type: 'residential',
+      status: 'suspended',
+      email: 'checkpoint@example.test',
+      phone: '0000000000',
+      address: 'Test',
+      city: 'Test',
+      lat: 0,
+      lng: 0,
+      planId: 'plan-test',
+      ip: '192.0.2.3',
+      pppoeUser: `pppoe-checkpoint-${handoff}`,
+    };
+    store.CLIENTS.push(customer);
+    const actions: MikrotikActionRecord[] = [];
+    const fakeRepo = {
+      nextEventId: async () => `pe-checkpoint-candidate-${claimCount}`,
+      claimEvent: async () => {
+        const claimToken = claimCount++ === 0 ? 'owner-a' : 'owner-b';
+        currentOwner = claimToken;
+        return { outcome: 'claimed' as const, event: { ...persisted, claimToken } };
+      },
+      renewEventClaim: async (_id: string, token: string) => token === currentOwner,
+      findOrderByProviderOrderId: async () => order,
+      updateOrderStatus: async () => order,
+      listActions: async (filter?: { customerId?: string; tenantId?: string }) => actions.filter(
+        (action) => (!filter?.customerId || action.customerId === filter.customerId)
+          && (!filter?.tenantId || action.tenantId === filter.tenantId),
+      ),
+      nextActionId: async () => `ma-checkpoint-${handoff}`,
+      createAction: async (action: MikrotikActionRecord) => {
+        actions.push(action);
+        return action;
+      },
+      updateAction: async (id: string, patch: Partial<MikrotikActionRecord>) => {
+        const action = actions.find((candidateAction) => candidateAction.id === id);
+        if (!action) return null;
+        Object.assign(action, patch);
+        return action;
+      },
+      markEventProcessed: async (_id: string, token: string) => {
+        if (token !== currentOwner) return false;
+        closes += 1;
+        return true;
+      },
+    } as unknown as PaymentRepository;
+    const billing = getBillingService();
+    vi.spyOn(billing, 'findInvoiceById').mockResolvedValue({
+      id: order.invoiceId,
+      tenantId: TENANT_A,
+      clientId: customerId,
+      status: 'paid',
+      amount: 100,
+      pendingAmount: 0,
+      payments: [{ transactionId: order.providerOrderId }],
+    } as never);
+    vi.spyOn(billing, 'recordPayment').mockRejectedValue(new Error('no debe duplicar Billing'));
+
+    const suspensionRepo = getSuspensionService().repo;
+    const originalCreateOrder = suspensionRepo.createOrder.bind(suspensionRepo);
+    const originalRecordEvent = suspensionRepo.recordEvent.bind(suspensionRepo);
+    vi.spyOn(suspensionRepo, 'createOrder').mockImplementation(async (input) => {
+      dispatchCalls += 1;
+      const created = await originalCreateOrder(input);
+      if (handoff === 'network-order' && dispatchCalls === 1) currentOwner = 'owner-b';
+      return created;
+    });
+    vi.spyOn(suspensionRepo, 'recordEvent').mockImplementation(async (input) => {
+      suspensionCalls += 1;
+      const created = await originalRecordEvent(input);
+      if (handoff === 'suspension-event' && suspensionCalls === 1) currentOwner = 'owner-b';
+      return created;
+    });
+    const service = new PaymentService(fakeRepo);
+    const input = {
+      provider: 'openpay' as const,
+      providerEventId: persisted.providerEventId,
+      eventType: persisted.eventType,
+      payload: persisted.payload,
+      tenantId: TENANT_A,
+    };
+
+    const first = await service.processWebhook(input);
+    const second = await service.processWebhook(input);
+
+    return {
+      first,
+      second,
+      actions,
+      customer,
+      timeline: store.CLIENT_TIMELINE.filter((event) => event.clientId === customerId),
+      dispatchCalls,
+      networkOrders: engineStore.ORDERS.filter((networkOrder) => networkOrder.customerId === customerId),
+      suspensionCalls,
+      suspensionEvents: engineStore.EVENTS.filter((event) => event.customerId === customerId),
+      alerts: store.NOC_ALERTS.filter((alert) => alert.source === customerName),
+      closes,
+    };
+  };
+
+  it('live: B no repite timeline ni orden de red completados antes del handoff', async () => {
+    const result = await runStepProgressHandoff('network-order');
+
+    expect(result.first.idempotentReason).toBe('in_progress');
+    expect(result.second.idempotent).toBe(false);
+    expect(result.actions).toHaveLength(1);
+    expect(result.dispatchCalls).toBe(1);
+    expect(result.networkOrders).toHaveLength(1);
+    expect(result.timeline).toHaveLength(1);
+    expect(result.suspensionEvents).toHaveLength(1);
+    expect(result.alerts).toHaveLength(1);
+    expect(result.closes).toBe(1);
+    expect(result.customer.status).toBe('active');
+  });
+
+  it('dry-run: B no repite timeline ni evento de suspensión completados antes del handoff', async () => {
+    const result = await runStepProgressHandoff('suspension-event');
+
+    expect(result.first.idempotentReason).toBe('in_progress');
+    expect(result.second.idempotent).toBe(false);
+    expect(result.actions).toHaveLength(1);
+    expect(result.dispatchCalls).toBe(0);
+    expect(result.networkOrders).toHaveLength(0);
+    expect(result.suspensionCalls).toBe(1);
+    expect(result.suspensionEvents).toHaveLength(1);
+    expect(result.timeline).toHaveLength(1);
+    expect(result.alerts).toHaveLength(1);
+    expect(result.closes).toBe(1);
+    expect(result.customer.status).toBe('active');
+  });
 
   it('la reactivación manual sin claim conserva el comportamiento existente', async () => {
     const customerId = `${INTERNAL_FENCING_CUSTOMER_PREFIX}manual`;

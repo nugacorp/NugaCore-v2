@@ -33,6 +33,7 @@ import {
 } from './repository';
 import {
   CreatePaymentOrderInput,
+  MikrotikActionRecord,
   MikrotikActionView,
   PaymentEventRecord,
   PaymentOrderRecord,
@@ -67,6 +68,37 @@ class ClaimOwnershipLostError extends Error {
     this.name = 'ClaimOwnershipLostError';
   }
 }
+
+const WEBHOOK_REACTIVATION_PROGRESS_KEY = '_webhookReactivationProgress';
+
+type WebhookReactivationStep =
+  | 'customerReactivated'
+  | 'timelineAdded'
+  | 'networkDispatched'
+  | 'suspensionEventRecorded'
+  | 'alertCreated';
+
+type WebhookReactivationProgress = Partial<Record<WebhookReactivationStep, true>>;
+
+const readWebhookReactivationProgress = (
+  action: MikrotikActionRecord,
+): WebhookReactivationProgress => {
+  const raw = action.result?.[WEBHOOK_REACTIVATION_PROGRESS_KEY];
+  if (!raw || typeof raw !== 'object' || Array.isArray(raw)) return {};
+  const record = raw as Record<string, unknown>;
+  const progress: WebhookReactivationProgress = {};
+  const steps: WebhookReactivationStep[] = [
+    'customerReactivated',
+    'timelineAdded',
+    'networkDispatched',
+    'suspensionEventRecorded',
+    'alertCreated',
+  ];
+  for (const step of steps) {
+    if (record[step] === true) progress[step] = true;
+  }
+  return progress;
+};
 
 // ── Servicio ──────────────────────────────────────────────────────────
 
@@ -446,8 +478,7 @@ export class PaymentService {
       return { customerId, alreadyActive: true, mikrotikAction: null, message: 'Cliente ya activo.' };
     }
 
-    const routerLive = productionGates.paymentsRouterLive();
-    const dryRun = !routerLive;
+    const requestedDryRun = !productionGates.paymentsRouterLive();
 
     // La acción es el marcador durable de intención y se crea antes del cambio
     // lógico. Así B distingue una reanudación de un cliente que ya era activo.
@@ -467,7 +498,7 @@ export class PaymentService {
         routerId: router?.id,
         actionType: 'reactivate',
         status: 'pending',
-        dryRun,
+        dryRun: requestedDryRun,
         payload: {
           previousStatus: prevStatus,
           invoiceId: context?.invoiceId,
@@ -482,23 +513,52 @@ export class PaymentService {
       await this.repo.createAction(actionRec);
     }
 
-    if (client.status !== 'active') {
-      await webhookFence?.beforeMutation();
-      await dataProvider.reactivateCustomer(customerId, tenantId);
+    // La acción conserva el modo del primer intento aunque cambien los gates
+    // entre A y B. Sus checkpoints hacen reanudable cada paso independiente.
+    let durableAction: MikrotikActionRecord = actionRec;
+    const dryRun = durableAction.dryRun;
+    const routerLive = !dryRun;
+    let progress = readWebhookReactivationProgress(durableAction);
+    const checkpoint = async (step: WebhookReactivationStep): Promise<void> => {
+      if (!webhookFence || progress[step]) return;
+      const nextProgress: WebhookReactivationProgress = { ...progress, [step]: true };
+      // No se fencea este write: registra el hecho de que el efecto anterior
+      // terminó, incluso si el lease rotó durante esa llamada. La siguiente
+      // mutación sí vuelve a pasar por beforeMutation y detiene al owner stale.
+      const updated = await this.repo.updateAction(durableAction.id, {
+        result: {
+          ...(durableAction.result ?? {}),
+          [WEBHOOK_REACTIVATION_PROGRESS_KEY]: nextProgress,
+        },
+      }, tenantId);
+      if (!updated) throw new Error(`No se pudo guardar progreso de reactivación: ${durableAction.id}`);
+      durableAction = updated;
+      progress = nextProgress;
+    };
+
+    if (!progress.customerReactivated) {
+      if (client.status !== 'active') {
+        await webhookFence?.beforeMutation();
+        await dataProvider.reactivateCustomer(customerId, tenantId);
+      }
+      await checkpoint('customerReactivated');
     }
 
-    await webhookFence?.beforeMutation();
-    await getCustomersService().addTimelineEvent({
-      clientId: customerId,
-      eventType: 'status_change',
-      summary: prevStatus
-        ? `Cambio de estado ${prevStatus} → active`
-        : 'Reactivación reanudada para cliente activo',
-      details: `Reactivación por pago confirmado. ${context?.invoiceId ? `Factura: ${context.invoiceId}.` : ''}${dryRun ? ' Pendiente ejecución en router (dry_run).' : ' Orden de reactivación encolada.'}`,
-      createdBy: triggeredBy,
-    });
+    if (!progress.timelineAdded) {
+      await webhookFence?.beforeMutation();
+      await getCustomersService().addTimelineEvent({
+        clientId: customerId,
+        eventType: 'status_change',
+        summary: prevStatus
+          ? `Cambio de estado ${prevStatus} → active`
+          : 'Reactivación reanudada para cliente activo',
+        details: `Reactivación por pago confirmado. ${context?.invoiceId ? `Factura: ${context.invoiceId}.` : ''}${dryRun ? ' Pendiente ejecución en router (dry_run).' : ' Orden de reactivación encolada.'}`,
+        createdBy: triggeredBy,
+      });
+      await checkpoint('timelineAdded');
+    }
 
-    if (routerLive) {
+    if (routerLive && !progress.networkDispatched) {
       await webhookFence?.beforeMutation();
       await dispatchNetworkOrder({
         customerId,
@@ -507,19 +567,23 @@ export class PaymentService {
         reason: `Pago confirmado. Factura: ${context?.invoiceId ?? 'N/A'}`,
         actor: triggeredBy,
       });
+      await checkpoint('networkDispatched');
     }
 
-    await webhookFence?.beforeMutation();
-    await getSuspensionService().repo.recordEvent({
-      customerId,
-      eventType: 'reactivation_order_created',
-      reason: `Pago confirmado vía Payment Engine. Factura: ${context?.invoiceId ?? 'N/A'}.`,
-      automatic: true,
-      actorId: triggeredBy,
-      metadata: { dryRun, routerLive },
-    });
+    if (!progress.suspensionEventRecorded) {
+      await webhookFence?.beforeMutation();
+      await getSuspensionService().repo.recordEvent({
+        customerId,
+        eventType: 'reactivation_order_created',
+        reason: `Pago confirmado vía Payment Engine. Factura: ${context?.invoiceId ?? 'N/A'}.`,
+        automatic: true,
+        actorId: triggeredBy,
+        metadata: { dryRun, routerLive },
+      });
+      await checkpoint('suspensionEventRecorded');
+    }
 
-    if (!isDomainOnDb('customers')) {
+    if (!isDomainOnDb('customers') && !progress.alertCreated) {
       await webhookFence?.beforeMutation();
       store.createAlert(
         'client',
@@ -527,16 +591,17 @@ export class PaymentService {
         client.name,
         `Servicio reactivado por pago confirmado.${dryRun ? ' Acción MikroTik pendiente (dry_run).' : ' Orden de reactivación procesada.'}`,
       );
+      await checkpoint('alertCreated');
     }
 
     logger.info('PaymentEngine: reactivación completada', {
-      customerId, actionId: actionRec.id, dryRun,
+      customerId, actionId: durableAction.id, dryRun,
     });
 
     return {
       customerId,
       alreadyActive: false,
-      mikrotikAction: mikrotikActionToView(actionRec),
+      mikrotikAction: mikrotikActionToView(durableAction),
       message: dryRun
         ? 'Servicio reactivado lógicamente. Acción MikroTik en cola (dry_run=true).'
         : 'Servicio reactivado. Orden de reactivación en cola para el worker.',
