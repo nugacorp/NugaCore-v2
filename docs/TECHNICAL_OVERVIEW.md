@@ -1,5 +1,7 @@
 # Resumen Técnico del Repositorio - NugaCore
 
+Fecha de Actualización: 30 de julio de 2026
+
 **Documento generado para el equipo de desarrollo.**
 
 Este documento proporciona una visión técnica del estado actual del proyecto NugaCore, su arquitectura, los componentes implementados y los pasos críticos pendientes para alcanzar la estabilidad y la preparación para producción.
