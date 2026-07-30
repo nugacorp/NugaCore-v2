@@ -1,9 +1,69 @@
 # Estado de sincronización de migraciones · GitHub ↔ Supabase
 
 Proyecto Supabase: `elshnzkceutvjzxvzqad` (nugacore-staging).
-Última reconciliación: **2026-07-21** (vía `psql` por el pooler).
+Última reconciliación: **2026-07-30** (vía cliente `pg` por el pooler).
 
-## Estado actual (2026-07-16, tras barrido de las 48 ramas)
+## Estado actual (2026-07-30)
+
+**Historial: 51 migraciones registradas · repo: 52 archivos.** El descuadre no es
+drift: son las dos colisiones de versión (4 archivos ocupando 2 versiones) menos
+el huérfano `20260619033952`, ambos documentados abajo.
+
+### Reconciliación 2026-07-30 · SSOT multi-tenant + idempotencia de pagos
+
+Estado previo: **3 pendientes** sobre 48 registradas.
+
+| Versión | Migración | Acción |
+|---|---|---|
+| 20260725210000 | integration_settings_openpay_webhook_token | **Aplicada y registrada.** Añade `wisp_integration_settings.openpay_webhook_token` (texto opaco, no secreto: forma la URL de webhook por WISP). Aditiva e idempotente. |
+| 20260728120000 | payment_events_tenant_idempotency | **Aplicada y registrada.** `payment_events`: `tenant_id` (NOT NULL, backfill `tenant-default`, FK a `tenants` RESTRICT validada), `claimed_at` y `claim_token`; sustituye la unicidad global `uq_provider_event` por `uq_payment_events_tenant_provider_event (tenant_id, provider, provider_event_id)`. Añade el índice único parcial del token de webhook. |
+| 20260730120000 | multi_tenant_complete_ssot_reapply | **Nueva. Aplicada y registrada.** Reaplica el cuerpo de `20260717050000_multi_tenant_complete_ssot` bajo versión propia — ver "Drift resuelto" abajo. Backfill real: **39 tablas** pasaron a tener `tenant_id`. |
+
+Verificación posterior (contra `information_schema`):
+
+```text
+tenant_id presente: 42/42 tablas de la lista del SSOT
+nullable (backfill incompleto): (ninguna)
+payment_events: claim_token, claimed_at, tenant_id
+wisp_integration_settings.openpay_webhook_token: OK
+```
+
+Ninguna tabla emitió el `NOTICE 'tenant_id NOT NULL skipped for %'` que la
+migración usa como escape ante filas huérfanas: el backfill cerró completo en las
+42. Schema cache de PostgREST refrescado (`NOTIFY pgrst`) y comprobado por REST.
+
+### Drift resuelto: colisión de versión que ocultó el SSOT multi-tenant
+
+Dos pares de archivos comparten timestamp. El historial solo puede registrar una
+fila por versión, así que en cada par **una migración quedó sin ejecutar y sin
+posibilidad de ejecutarse**: la versión ya consta como consumida, y todo
+`db push` futuro la salta para siempre.
+
+| Versión duplicada | Archivos | Registrada en la DB | Consecuencia |
+| --- | --- | --- | --- |
+| `20260717040000` | `mikrotik_router_tenant` + `onboarding_status_fail_closed` | `onboarding_status_fail_closed` | Sin daño: `mikrotik_routers.tenant_id` existe, lo reaplicó `20260718175423` |
+| `20260717050000` | `multi_tenant_complete_ssot` + `olt_devices` | `olt_devices` | **El SSOT nunca se aplicó**: 39 de 42 tablas sin `tenant_id` |
+
+Impacto observado antes de la reparación: `/api/commercial/*` y `/api/payments/*`
+respondían **500** en staging. El backend de `main` filtra por `tenant_id` y
+PostgREST rechazaba la consulta porque la columna no existía.
+
+**La reparación no reescribe historial ni renombra archivos.** Renombrar no
+habría servido: el problema está en el historial, no en el disco. Se añadió
+`20260730120000_multi_tenant_complete_ssot_reapply.sql`, con versión propia y el
+cuerpo original repetido — ya era idempotente (`ADD COLUMN IF NOT EXISTS`,
+`CREATE INDEX IF NOT EXISTS`, `DROP POLICY IF EXISTS` antes del `CREATE POLICY`,
+`SET NOT NULL` envuelto en `EXCEPTION`), así que sobre las 3 tablas que ya tenían
+`tenant_id` fue no-op.
+
+El par `20260717040000` **se deja como está**, a propósito: no causó daño y tocar
+archivos ya registrados es justo lo que este documento desaconseja.
+
+> **Regla derivada:** dos archivos nunca pueden compartir versión. Antes de
+> abrir PR con una migración nueva:
+> `ls supabase/migrations | sed -E 's/_.*//' | sort | uniq -d` debe salir vacío.
+
+## Estado histórico (2026-07-16, tras barrido de las 48 ramas)
 
 **Reconciliación actualizada.** Staging tiene aplicadas y registradas las
 migraciones de advisors (`20260717013000`, `20260717020000`, `20260717030000`),
@@ -258,7 +318,7 @@ columnas ni datos. (Tabla vacía al aplicar: 0 filas.)
   `USE_DB_MIKROTIK=true` opera en staging. (El huérfano `20260619033952` es una
   aplicación duplicada de esta misma reconciliación; ver arriba.)
 
-## Reproducir / verificar (solo `psql`, no REST)
+## Reproducir / verificar (Postgres directo; REST solo audita)
 
 ```bash
 set -a; . ./.env; set +a
@@ -283,8 +343,29 @@ psql -c "select tablename, policyname, qual from pg_policies
 Para el barrido de pendientes sobre **todas** las ramas, ver "Cómo se verificó"
 arriba: comparar solo el working tree da falsos negativos.
 
-> El CLI `supabase` instalado (2.67.1) está roto localmente por la clave
-> `db.health_timeout` (inválida para esa versión) en `supabase/config.toml`; por eso
-> se usa `psql` directo por el pooler en lugar de `supabase db push`. Para volver a
-> usar el CLI: actualizarlo (≥2.109) o quitar esa clave del config. El REST HTTPS
-> (443) sigue bloqueado desde el entorno local; ver memoria del proyecto.
+### Notas de entorno (actualizadas 2026-07-30)
+
+- **El CLI `supabase` sigue sin servir para aplicar**, pero ya no por
+  `db.health_timeout`: con `npx supabase` (2.110.0) el config parsea bien y aun
+  así `migration list --db-url` falla contra el pooler con
+  `LegacyDbConnectError: PgClient: Failed to connect`, sin detalle del servidor.
+  Es su propio driver: el mismo host/usuario/password conecta sin problema con
+  el cliente `pg` de Node. Además `supabase login` aborta en entornos sin TTY
+  (`LegacyLoginMissingTokenError`), así que exige `SUPABASE_ACCESS_TOKEN`.
+- **Conectar: solo por el pooler.** El host directo
+  `db.elshnzkceutvjzxvzqad.supabase.co` resuelve **solo AAAA (IPv6)** y da
+  timeout desde el entorno local. Usar
+  `aws-1-us-west-1.pooler.supabase.com:5432` con usuario
+  `postgres.${SUPABASE_PROJECT_REF}`.
+- **El REST HTTPS (443) ya NO está bloqueado.** La nota anterior decía lo
+  contrario; se comprobó esta sesión usando PostgREST para leer el esquema. Sirve
+  para *auditar* (el spec OpenAPI de `/rest/v1/` lista tablas y columnas, útil
+  para diffear el repo contra el remoto sin credenciales de Postgres), pero **no
+  para aplicar**: ni la secret key ni la publishable ejecutan DDL.
+
+```bash
+# Auditoría de esquema sin password de Postgres (solo secret key)
+curl -s -H "apikey: $SUPABASE_SECRET_KEY" -H "Authorization: Bearer $SUPABASE_SECRET_KEY" \
+  -H "Accept: application/openapi+json" "$SUPABASE_URL/rest/v1/" > spec.json
+# spec.definitions.<tabla>.properties = columnas expuestas
+```
