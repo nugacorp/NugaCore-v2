@@ -40,6 +40,7 @@ diseño vivos** se agrupan por dominio.
 
 | Documento | Tema |
 | --- | --- |
+| [`reports/REPO_REVIEW_2026-07-15_29.md`](reports/REPO_REVIEW_2026-07-15_29.md) | Revisión de las dos semanas del 15 al 29 de julio + drift de migraciones detectado |
 | [`reports/SPRINT_HANDOFF_2026-07-15.md`](reports/SPRINT_HANDOFF_2026-07-15.md) | Resumen del sprint (RSC, UX Routers, inventario, host-apply) |
 | [`wireguard/WIREGUARD_HOST_APPLY.md`](wireguard/WIREGUARD_HOST_APPLY.md) | Apply automático peers → `wg0` |
 | [`mikrotik/ROUTEROS_RSC_IMPORT_HARDENING.md`](mikrotik/ROUTEROS_RSC_IMPORT_HARDENING.md) | Endurecimiento `/import` CHR |
