@@ -47,6 +47,8 @@ export interface PaymentEventRow {
   payload: Record<string, unknown>;
   received_at?: string | null;
   processed_at?: string | null;
+  claimed_at?: string | null;
+  claim_token?: string | null;
 }
 
 export interface MikrotikActionRow {
@@ -127,6 +129,8 @@ export const rowToPaymentEvent = (r: PaymentEventRow): PaymentEventRecord => ({
   payload: r.payload,
   receivedAt: r.received_at ?? new Date().toISOString(),
   processedAt: r.processed_at ?? undefined,
+  claimedAt: r.claimed_at ?? undefined,
+  claimToken: r.claim_token ?? undefined,
 });
 
 export const paymentEventToView = (rec: PaymentEventRecord): PaymentEventView => ({

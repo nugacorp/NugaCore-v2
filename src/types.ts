@@ -570,6 +570,13 @@ export interface WispIntegrationsSettings {
     privateKeySet: boolean;
     webhookSecretSet: boolean;
     sandbox: boolean;
+    /**
+     * Token opaco por WISP (no secreto). Solo se muestra embebido en la URL de
+     * webhook, nunca aislado. Vacío hasta que se guarda OpenPay habilitado.
+     */
+    webhookToken: string;
+    /** Ruta del webhook de este WISP, ya armada por el backend. '' si no hay token. */
+    webhookPath: string;
   };
   mikrotik: {
     note: string;

@@ -1,3 +1,4 @@
+import crypto from 'crypto';
 import { describe, it, expect, afterEach } from 'vitest';
 import request from 'supertest';
 import { createApp } from '../../backend/app';
@@ -51,5 +52,22 @@ describe('Webhook — fail-closed en runtime endurecido (C-01)', () => {
     const res = await request(app).post('/api/payments/webhook/manual').send(payload);
 
     expect(res.status).toBe(200);
+  });
+
+  it('el webhook genérico no acepta text/plain firmado para una reserialización vacía', async () => {
+    stash('PUBLIC_DEPLOYMENT');
+    stash('WEBHOOK_SECRET_MERCADO_PAGO');
+    process.env.PUBLIC_DEPLOYMENT = 'true';
+    process.env.WEBHOOK_SECRET_MERCADO_PAGO = 'whsec_mp';
+    const signature = crypto.createHmac('sha256', 'whsec_mp').update('{}').digest('hex');
+
+    const res = await request(createApp())
+      .post('/api/payments/webhook/mercadopago')
+      .set('Content-Type', 'text/plain')
+      .set('x-mp-signature', signature)
+      .send('bytes-no-json');
+
+    expect(res.status).toBe(415);
+    expect(res.body.code).toBe('INVALID_WEBHOOK_BODY');
   });
 });

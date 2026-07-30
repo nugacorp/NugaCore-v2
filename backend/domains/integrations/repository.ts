@@ -1,10 +1,23 @@
 import type { SupabaseClient } from '@supabase/supabase-js';
 import { store } from '../../state/store';
 import type { IntegrationSettingsPatch, IntegrationSettingsRecord } from './types';
+import { logger } from '../../common/logger';
 import { nowIso } from '../../common/time';
 import { encryptSecret, decryptSecret } from '../../services/crypto';
+import { DEFAULT_TENANT_ID } from '../tenancy/types';
 
 const DEFAULT_ID = 'default';
+
+/** Inverso de `resolveSettingsId`: la fila legacy 'default' es el tenant por defecto. */
+const tenantIdForSettingsId = (id: string): string =>
+  id === DEFAULT_ID ? DEFAULT_TENANT_ID : id;
+
+/**
+ * Fila de settings del WISP. tenant-default (o ausencia de tenant) mapea a la
+ * fila legacy 'default'; cada otro WISP tiene su propia fila `id = tenantId`.
+ */
+export const resolveSettingsId = (tenantId?: string): string =>
+  !tenantId || tenantId === DEFAULT_TENANT_ID ? DEFAULT_ID : tenantId;
 
 // Cifrado en reposo de credenciales (AES-256-GCM, reutiliza MIKROTIK_CREDENTIALS_KEY).
 // Solo se aplica en el límite con la DB (rowToRecord/recordToRow): el record en
@@ -54,6 +67,7 @@ export const emptyIntegrationSettings = (): IntegrationSettingsRecord => ({
   openpayPrivateKey: '',
   openpayWebhookSecret: '',
   openpaySandbox: true,
+  openpayWebhookToken: '',
   updatedAt: nowIso(),
 });
 
@@ -85,6 +99,7 @@ const rowToRecord = (row: Record<string, unknown>): IntegrationSettingsRecord =>
   openpaySandbox: row.openpay_sandbox === undefined || row.openpay_sandbox === null
     ? true
     : Boolean(row.openpay_sandbox),
+  openpayWebhookToken: String(row.openpay_webhook_token ?? ''),
   updatedAt: String(row.updated_at ?? nowIso()),
 });
 
@@ -114,47 +129,111 @@ const recordToRow = (rec: IntegrationSettingsRecord) => ({
   openpay_private_key: encField(rec.openpayPrivateKey),
   openpay_webhook_secret: encField(rec.openpayWebhookSecret),
   openpay_sandbox: rec.openpaySandbox,
+  openpay_webhook_token: rec.openpayWebhookToken || null,
   updated_at: rec.updatedAt,
 });
 
+/** WISP dueño de un token de webhook, con su fila de settings. */
+export interface OpenPayWebhookOwner {
+  tenantId: string;
+  settings: IntegrationSettingsRecord;
+}
+
 export interface IntegrationsRepository {
-  get(): Promise<IntegrationSettingsRecord>;
-  save(rec: IntegrationSettingsRecord): Promise<IntegrationSettingsRecord>;
+  get(tenantId?: string): Promise<IntegrationSettingsRecord>;
+  /** Fila realmente persistida; null no se confunde con el record vacío de lectura/UI. */
+  getPersisted(tenantId?: string): Promise<IntegrationSettingsRecord | null>;
+  save(rec: IntegrationSettingsRecord, tenantId?: string): Promise<IntegrationSettingsRecord>;
+  /**
+   * Resuelve el WISP dueño de un token de webhook OpenPay. Devuelve null si el
+   * token no existe: nunca cae a otro tenant ni a la fila 'default'.
+   */
+  findByOpenPayWebhookToken(token: string): Promise<OpenPayWebhookOwner | null>;
 }
 
 export class StoreIntegrationsRepository implements IntegrationsRepository {
-  async get(): Promise<IntegrationSettingsRecord> {
-    return store.INTEGRATION_SETTINGS ?? emptyIntegrationSettings();
+  async get(tenantId?: string): Promise<IntegrationSettingsRecord> {
+    const id = resolveSettingsId(tenantId);
+    return (await this.getPersisted(tenantId)) ?? { ...emptyIntegrationSettings(), id };
   }
 
-  async save(rec: IntegrationSettingsRecord): Promise<IntegrationSettingsRecord> {
-    store.INTEGRATION_SETTINGS = rec;
-    return rec;
+  async getPersisted(tenantId?: string): Promise<IntegrationSettingsRecord | null> {
+    const id = resolveSettingsId(tenantId);
+    if (id === DEFAULT_ID) return store.INTEGRATION_SETTINGS;
+    return store.INTEGRATION_SETTINGS_BY_TENANT[id] ?? null;
+  }
+
+  async findByOpenPayWebhookToken(token: string): Promise<OpenPayWebhookOwner | null> {
+    const needle = String(token ?? '').trim();
+    if (!needle) return null;
+    const rows: IntegrationSettingsRecord[] = [
+      ...(store.INTEGRATION_SETTINGS ? [store.INTEGRATION_SETTINGS] : []),
+      ...Object.values(store.INTEGRATION_SETTINGS_BY_TENANT),
+    ];
+    const match = rows.find((rec) => Boolean(rec.openpayWebhookToken) && rec.openpayWebhookToken === needle);
+    return match ? { tenantId: tenantIdForSettingsId(match.id), settings: match } : null;
+  }
+
+  async save(rec: IntegrationSettingsRecord, tenantId?: string): Promise<IntegrationSettingsRecord> {
+    const id = resolveSettingsId(tenantId);
+    const stored = { ...rec, id };
+    if (id === DEFAULT_ID) {
+      store.INTEGRATION_SETTINGS = stored;
+    } else {
+      store.INTEGRATION_SETTINGS_BY_TENANT[id] = stored;
+    }
+    return stored;
   }
 }
 
 export class SupabaseIntegrationsRepository implements IntegrationsRepository {
   constructor(private readonly admin: SupabaseClient) {}
 
-  async get(): Promise<IntegrationSettingsRecord> {
+  async get(tenantId?: string): Promise<IntegrationSettingsRecord> {
+    const id = resolveSettingsId(tenantId);
+    return (await this.getPersisted(tenantId)) ?? { ...emptyIntegrationSettings(), id };
+  }
+
+  async getPersisted(tenantId?: string): Promise<IntegrationSettingsRecord | null> {
+    const id = resolveSettingsId(tenantId);
     const { data, error } = await this.admin
       .from('wisp_integration_settings')
       .select('*')
-      .eq('id', DEFAULT_ID)
+      .eq('id', id)
       .maybeSingle();
     if (error) {
-      if (String(error.code) === '42P01' || String(error.message).includes('does not exist')) {
-        return emptyIntegrationSettings();
-      }
       throw error;
     }
-    return data ? rowToRecord(data as Record<string, unknown>) : emptyIntegrationSettings();
+    return data ? rowToRecord(data as Record<string, unknown>) : null;
   }
 
-  async save(rec: IntegrationSettingsRecord): Promise<IntegrationSettingsRecord> {
+  async findByOpenPayWebhookToken(token: string): Promise<OpenPayWebhookOwner | null> {
+    const needle = String(token ?? '').trim();
+    if (!needle) return null;
+    // `limit(2)`: si por alguna razón dos WISPs comparten token, no se elige uno
+    // arbitrariamente — se rechaza (fail-closed). El índice único lo previene.
     const { data, error } = await this.admin
       .from('wisp_integration_settings')
-      .upsert(recordToRow(rec), { onConflict: 'id' })
+      .select('*')
+      .eq('openpay_webhook_token', needle)
+      .limit(2);
+    if (error) {
+      // Jamás se registra el token; solo el motivo.
+      logger.warn('Integrations: lookup de token de webhook OpenPay falló', {
+        reason: String(error.message || error.code || 'error desconocido'),
+      });
+      return null;
+    }
+    if (!data || data.length !== 1) return null;
+    const rec = rowToRecord(data[0] as Record<string, unknown>);
+    return { tenantId: tenantIdForSettingsId(rec.id), settings: rec };
+  }
+
+  async save(rec: IntegrationSettingsRecord, tenantId?: string): Promise<IntegrationSettingsRecord> {
+    const id = resolveSettingsId(tenantId);
+    const { data, error } = await this.admin
+      .from('wisp_integration_settings')
+      .upsert(recordToRow({ ...rec, id }), { onConflict: 'id' })
       .select('*')
       .single();
     if (error) throw error;

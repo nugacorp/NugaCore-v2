@@ -273,7 +273,10 @@ export const store: {
   SECURITY_AUDIT_LOGS: SecurityAuditLog[];
   BACKUP_POLICY: BackupPolicy;
   NOTIFICATION_SETTINGS: NotificationSettings;
-  INTEGRATION_SETTINGS: IntegrationSettingsRecord;
+  /** null = nunca se persistió la fila legacy 'default'. */
+  INTEGRATION_SETTINGS: IntegrationSettingsRecord | null;
+  /** Credenciales de integración por WISP (multi-tenant). 'default' vive en INTEGRATION_SETTINGS. */
+  INTEGRATION_SETTINGS_BY_TENANT: Record<string, IntegrationSettingsRecord>;
   MONITORING_SNAPSHOTS: MonitoringSnapshot[];
   PAYMENT_ORDERS: PaymentOrderRecord[];
   PAYMENT_EVENTS: PaymentEventRecord[];
@@ -659,34 +662,8 @@ export const store: {
     browserSubscribed: false,
     webhooksCount: 2,
   },
-  INTEGRATION_SETTINGS: {
-    id: 'default',
-    stripeEnabled: false,
-    stripePublishableKey: '',
-    stripeSecretKey: '',
-    stripeWebhookSecret: '',
-    whatsappEnabled: false,
-    whatsappPhoneNumberId: '',
-    whatsappAccessToken: '',
-    whatsappBusinessAccountId: '',
-    whatsappWebhookVerifyToken: '',
-    telegramEnabled: false,
-    telegramBotToken: '',
-    telegramBotUsername: '',
-    codiEnabled: false,
-    codiMerchantId: '',
-    codiBeneficiaryName: '',
-    codiClabe: '',
-    codiWebhookSecret: '',
-    codiCertificateRef: '',
-    openpayEnabled: false,
-    openpayMerchantId: '',
-    openpayPublicKey: '',
-    openpayPrivateKey: '',
-    openpayWebhookSecret: '',
-    openpaySandbox: true,
-    updatedAt: new Date().toISOString(),
-  } satisfies IntegrationSettingsRecord,
+  INTEGRATION_SETTINGS: null,
+  INTEGRATION_SETTINGS_BY_TENANT: {},
   PAYMENT_ORDERS: [],
   PAYMENT_EVENTS: [],
   MIKROTIK_ACTIONS: [],

@@ -16,6 +16,7 @@
 
 import { randomUUID } from 'crypto';
 import { NextFunction, Request, Response } from 'express';
+import { redactSensitivePath } from './log-redaction';
 import { logger } from './logger';
 import { metrics } from './metrics';
 
@@ -42,7 +43,7 @@ export const attachRequestId = (req: Request, res: Response, next: NextFunction)
 
     log.info('request completed', {
       method: req.method,
-      path: req.path,
+      path: redactSensitivePath(req.path),
       status: res.statusCode,
       durationMs: Math.round(durationMs * 100) / 100,
     });

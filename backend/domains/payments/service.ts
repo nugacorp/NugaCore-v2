@@ -25,7 +25,7 @@ import { getSuspensionService } from '../suspension/service';
 import { inventoryRoutersRepository } from '../inventory/routers/repository';
 import { store } from '../../state/store';
 import { buildPaymentDataProvider } from './data-provider';
-import { getProvider } from './providers/index';
+import { resolveProvider } from './providers/index';
 import {
   StorePaymentRepository,
   SupabasePaymentRepository,
@@ -60,10 +60,34 @@ const assertValidProvider = (p: unknown): PaymentProvider => {
   return p as PaymentProvider;
 };
 
+class ClaimOwnershipLostError extends Error {
+  constructor() {
+    super('Webhook claim ownership lost');
+    this.name = 'ClaimOwnershipLostError';
+  }
+}
+
 // ── Servicio ──────────────────────────────────────────────────────────
 
 export class PaymentService {
   constructor(private readonly repo: PaymentRepository) {}
+
+  /**
+   * Barrera de fencing compartida por todos los efectos del webhook. Renueva
+   * el lease y aborta inmediatamente si otro procesador ya rotó el epoch.
+   */
+  private async renewOrThrow(eventId: string, claimToken: string | undefined): Promise<void> {
+    if (!claimToken || !await this.repo.renewEventClaim(eventId, claimToken)) {
+      throw new ClaimOwnershipLostError();
+    }
+  }
+
+  /** El cierre sigue siendo un CAS condicionado por el mismo epoch. */
+  private async closeOrThrow(eventId: string, claimToken: string | undefined): Promise<void> {
+    if (!claimToken || !await this.repo.markEventProcessed(eventId, claimToken)) {
+      throw new ClaimOwnershipLostError();
+    }
+  }
 
   // ── Payment Orders ────────────────────────────────────────────────
 
@@ -100,7 +124,8 @@ export class PaymentService {
       );
     }
 
-    const providerImpl = getProvider(provider);
+    // Credenciales del WISP dueño de la order (OpenPay/SPEI); sin ellas, simulado.
+    const providerImpl = await resolveProvider(provider, tenantId);
 
     const id = await this.repo.nextOrderId();
     const now = nowIso();
@@ -135,25 +160,15 @@ export class PaymentService {
   // ── Webhook processing ────────────────────────────────────────────
 
   async processWebhook(input: ProcessWebhookInput): Promise<WebhookProcessResult> {
-    const { provider, providerEventId, eventType, payload } = input;
+    const { provider, providerEventId, eventType, payload, tenantId } = input;
 
-    // Idempotencia: si ya existe el evento, responder OK sin duplicar
-    const existing = await this.repo.findEventByProviderId(provider, providerEventId);
-    if (existing) {
-      logger.info('PaymentEngine: webhook ya procesado (idempotente)', { provider, providerEventId });
-      return {
-        eventId: existing.id,
-        idempotent: true,
-        invoiceUpdated: false,
-        reactivationTriggered: false,
-        message: 'Evento ya procesado anteriormente.',
-      };
-    }
-
-    // Guardar el evento
-    const eventId = await this.repo.nextEventId();
+    // Idempotencia POR TENANT mediante CLAIM atómico: dos merchants pueden
+    // reutilizar el mismo provider_event_id (solo colisiona dentro del mismo
+    // WISP), y dos entregas simultáneas del mismo evento no pueden procesarse
+    // las dos — solo la que se lleva el claim continúa.
     const eventRec: PaymentEventRecord = {
-      id: eventId,
+      id: await this.repo.nextEventId(),
+      tenantId,
       provider,
       providerEventId,
       eventType,
@@ -161,122 +176,190 @@ export class PaymentService {
       payload,
       receivedAt: nowIso(),
     };
-    await this.repo.createEvent(eventRec);
+    const claim = await this.repo.claimEvent(eventRec);
 
-    // Solo eventos de pago aprobado disparan el flujo completo
-    const isApproved = this.isApprovedEvent(eventType, payload);
-    if (!isApproved) {
-      await this.repo.markEventProcessed(eventId);
-      logger.info('PaymentEngine: webhook recibido (no aprobado, no acción)', { provider, eventType });
+    if (claim.outcome !== 'claimed') {
+      const alreadyProcessed = claim.outcome === 'already_processed';
+      logger.info('PaymentEngine: webhook no reprocesado (idempotente)', {
+        provider, providerEventId, tenantId, reason: claim.outcome,
+      });
       return {
-        eventId, idempotent: false, invoiceUpdated: false,
-        reactivationTriggered: false, message: 'Evento recibido, sin acción (no es aprobación de pago).',
+        eventId: claim.event.id,
+        idempotent: true,
+        idempotentReason: claim.outcome,
+        invoiceUpdated: false,
+        reactivationTriggered: false,
+        message: alreadyProcessed
+          ? 'Evento ya procesado anteriormente.'
+          : 'Evento en proceso por otra entrega del mismo webhook.',
       };
     }
 
-    // Buscar payment_order por providerOrderId
-    const providerOrderId = this.extractProviderOrderId(provider, payload);
-    const order = providerOrderId
-      ? await this.repo.findOrderByProviderOrderId(provider, providerOrderId)
-      : null;
+    // Id real del evento reservado: al recuperar un claim abandonado se
+    // continúa sobre la fila existente, no sobre la candidata.
+    const eventId = claim.event.id;
+    // En un reclaim la fila persistida es la fuente de auditoría. Una
+    // reentrega divergente con la misma identidad no puede cambiar qué evento
+    // se aprueba ni qué order se busca sin actualizar atómicamente esa fila.
+    const claimedEventType = claim.event.eventType;
+    const claimedPayload = claim.event.payload;
+    const claimToken = claim.event.claimToken;
+    const lostOwnershipResult = (): WebhookProcessResult => ({
+      eventId,
+      idempotent: true,
+      idempotentReason: 'in_progress',
+      invoiceUpdated: false,
+      reactivationTriggered: false,
+      message: 'El claim cambió de dueño; esta entrega debe reintentarse.',
+    });
+    try {
+      // Fencing temprano: un procesador que despertó después de que otro
+      // reclamara el lease no llega siquiera a las lecturas que preceden efectos.
+      await this.renewOrThrow(eventId, claimToken);
 
-    let invoiceUpdated = false;
-    let reactivationTriggered = false;
-    let mikrotikActionId: string | undefined;
-
-    if (order) {
-      const orderTenantId = order.tenantId || 'tenant-default';
-      // Marcar order como completada
-      await this.repo.updateOrderStatus(order.id, 'completed', undefined, orderTenantId);
-
-      // Integrar con Billing (idempotente: si la factura ya está paid, no duplica)
-      const invoiceResult = await this.confirmPaymentOnInvoice(order, orderTenantId);
-      invoiceUpdated = invoiceResult.updated;
-
-      // Reactivación lógica del cliente (tenant de la order)
-      const reactivation = await this.reactivateCustomerService(order.customerId, {
-        triggeredBy: `webhook:${provider}:${providerEventId}`,
-        invoiceId: order.invoiceId,
-        tenantId: orderTenantId,
-      });
-      reactivationTriggered = !reactivation.alreadyActive;
-      mikrotikActionId = reactivation.mikrotikAction?.id;
-
-      // Vincular evento a la order
-      await this.repo.markEventProcessed(eventId);
-      logger.info('PaymentEngine: pago confirmado', {
-        orderId: order.id, invoiceId: order.invoiceId, customerId: order.customerId, tenantId: orderTenantId,
-      });
-    } else if (provider === 'codi') {
-      const reference = String(payload.reference ?? payload.referencia ?? '').toUpperCase();
-      if (reference) {
-        const invoiceId = reference.split('-')[0];
-        const orders = await this.repo.listOrders({ invoiceId });
-        const order = orders.find((o) => o.provider === 'codi') ?? orders[0];
-        if (order) {
-          const orderTenantId = order.tenantId || 'tenant-default';
-          await this.repo.updateOrderStatus(order.id, 'completed', undefined, orderTenantId);
-          const invoiceResult = await this.confirmPaymentOnInvoice(order, orderTenantId);
-          invoiceUpdated = invoiceResult.updated;
-          const reactivation = await this.reactivateCustomerService(order.customerId, {
-            triggeredBy: `webhook:codi:${providerEventId}`,
-            invoiceId: order.invoiceId,
-            tenantId: orderTenantId,
-          });
-          reactivationTriggered = !reactivation.alreadyActive;
-          mikrotikActionId = reactivation.mikrotikAction?.id;
-          await this.repo.markEventProcessed(eventId);
-          return {
-            eventId,
-            idempotent: false,
-            invoiceUpdated,
-            reactivationTriggered,
-            mikrotikActionId,
-            message: 'Pago CoDi confirmado y cliente reactivado.',
-          };
-        }
-        // Sin order previa: intentar factura directa por referencia
-        const billing = getBillingService();
-        const invoice = await billing.findInvoiceById(invoiceId);
-        if (invoice && invoice.status !== 'paid') {
-          const invoiceTenantId = invoice.tenantId || 'tenant-default';
-          const amount = Number(payload.amount ?? payload.monto ?? invoice.pendingAmount ?? invoice.amount);
-          await billing.recordPayment(invoice.id, {
-            amount,
-            method: 'Transferencia',
-            transactionId: providerEventId,
-          }, invoiceTenantId);
-          invoiceUpdated = true;
-          const reactivation = await this.reactivateCustomerService(invoice.clientId, {
-            triggeredBy: `webhook:codi:${providerEventId}`,
-            invoiceId: invoice.id,
-            tenantId: invoiceTenantId,
-          });
-          reactivationTriggered = !reactivation.alreadyActive;
-          mikrotikActionId = reactivation.mikrotikAction?.id;
-        }
+      // Solo eventos de pago aprobado disparan el flujo completo
+      const isApproved = this.isApprovedEvent(provider, claimedEventType, claimedPayload);
+      if (!isApproved) {
+        await this.closeOrThrow(eventId, claimToken);
+        logger.info('PaymentEngine: webhook recibido (no aprobado, no acción)', {
+          provider, eventType: claimedEventType, tenantId,
+        });
+        return {
+          eventId, idempotent: false, invoiceUpdated: false,
+          reactivationTriggered: false, message: 'Evento recibido, sin acción (no es aprobación de pago).',
+        };
       }
-      await this.repo.markEventProcessed(eventId);
-      return {
-        eventId,
-        idempotent: false,
-        invoiceUpdated,
-        reactivationTriggered,
-        mikrotikActionId,
-        message: invoiceUpdated ? 'Pago CoDi aplicado a factura.' : 'Evento CoDi sin factura asociada.',
-      };
-    } else {
-      // Webhook de proveedor sin order registrada — guardar y continuar
-      await this.repo.markEventProcessed(eventId);
-      logger.warn('PaymentEngine: webhook sin payment_order asociada', { provider, providerOrderId });
-    }
 
-    return {
-      eventId, idempotent: false, invoiceUpdated, reactivationTriggered, mikrotikActionId,
-      message: invoiceUpdated
-        ? 'Pago confirmado, factura actualizada y reactivación programada.'
-        : 'Evento procesado (sin order asociada o factura ya pagada).',
-    };
+      // Buscar payment_order por providerOrderId DENTRO del WISP del evento: un
+      // provider_order_id de otro merchant nunca puede completar esta order.
+      const providerOrderId = this.extractProviderOrderId(provider, claimedPayload);
+      const order = providerOrderId
+        ? await this.repo.findOrderByProviderOrderId(provider, providerOrderId, tenantId)
+        : null;
+
+      let invoiceUpdated = false;
+      let reactivationTriggered = false;
+      let mikrotikActionId: string | undefined;
+
+      if (order) {
+        const orderTenantId = order.tenantId || 'tenant-default';
+        // Cada llamada mutante tiene su propia barrera: perder ownership dentro
+        // de un efecto impide alcanzar el siguiente.
+        await this.renewOrThrow(eventId, claimToken);
+        await this.repo.updateOrderStatus(order.id, 'completed', undefined, orderTenantId);
+
+        await this.renewOrThrow(eventId, claimToken);
+        const invoiceResult = await this.confirmPaymentOnInvoice(order, orderTenantId);
+        invoiceUpdated = invoiceResult.updated;
+
+        await this.renewOrThrow(eventId, claimToken);
+        const reactivation = await this.reactivateCustomerService(order.customerId, {
+          triggeredBy: `webhook:${provider}:${providerEventId}`,
+          invoiceId: order.invoiceId,
+          tenantId: orderTenantId,
+        });
+        reactivationTriggered = !reactivation.alreadyActive;
+        mikrotikActionId = reactivation.mikrotikAction?.id;
+
+        await this.closeOrThrow(eventId, claimToken);
+        logger.info('PaymentEngine: pago confirmado', {
+          orderId: order.id, invoiceId: order.invoiceId, customerId: order.customerId, tenantId: orderTenantId,
+        });
+      } else if (provider === 'codi') {
+        const reference = String(claimedPayload.reference ?? claimedPayload.referencia ?? '').toUpperCase();
+        if (reference) {
+          const invoiceId = reference.split('-')[0];
+          const orders = await this.repo.listOrders({ invoiceId, tenantId });
+          const order = orders.find((o) => o.provider === 'codi') ?? orders[0];
+          if (order) {
+            const orderTenantId = order.tenantId || 'tenant-default';
+            await this.renewOrThrow(eventId, claimToken);
+            await this.repo.updateOrderStatus(order.id, 'completed', undefined, orderTenantId);
+            await this.renewOrThrow(eventId, claimToken);
+            const invoiceResult = await this.confirmPaymentOnInvoice(order, orderTenantId);
+            invoiceUpdated = invoiceResult.updated;
+            await this.renewOrThrow(eventId, claimToken);
+            const reactivation = await this.reactivateCustomerService(order.customerId, {
+              triggeredBy: `webhook:codi:${providerEventId}`,
+              invoiceId: order.invoiceId,
+              tenantId: orderTenantId,
+            });
+            reactivationTriggered = !reactivation.alreadyActive;
+            mikrotikActionId = reactivation.mikrotikAction?.id;
+            await this.closeOrThrow(eventId, claimToken);
+            return {
+              eventId,
+              idempotent: false,
+              invoiceUpdated,
+              reactivationTriggered,
+              mikrotikActionId,
+              message: 'Pago CoDi confirmado y cliente reactivado.',
+            };
+          }
+          // Sin order previa: intentar factura directa por referencia (del WISP).
+          const billing = getBillingService();
+          const invoice = await billing.findInvoiceById(invoiceId, tenantId);
+          if (invoice) {
+            const invoiceTenantId = invoice.tenantId || 'tenant-default';
+            const paymentAlreadyAppliedByEvent = invoice.payments.some(
+              (payment) => payment.transactionId === providerEventId,
+            );
+            let shouldReactivate = paymentAlreadyAppliedByEvent;
+
+            if (invoice.status !== 'paid' && !paymentAlreadyAppliedByEvent) {
+              await this.renewOrThrow(eventId, claimToken);
+              const amount = Number(
+                claimedPayload.amount ?? claimedPayload.monto ?? invoice.pendingAmount ?? invoice.amount,
+              );
+              await billing.recordPayment(invoice.id, {
+                amount,
+                method: 'Transferencia',
+                transactionId: providerEventId,
+              }, invoiceTenantId);
+              shouldReactivate = true;
+            }
+
+            if (shouldReactivate) {
+              invoiceUpdated = true;
+              await this.renewOrThrow(eventId, claimToken);
+              const reactivation = await this.reactivateCustomerService(invoice.clientId, {
+                triggeredBy: `webhook:codi:${providerEventId}`,
+                invoiceId: invoice.id,
+                tenantId: invoiceTenantId,
+              });
+              reactivationTriggered = !reactivation.alreadyActive;
+              mikrotikActionId = reactivation.mikrotikAction?.id;
+            }
+          }
+        }
+        await this.closeOrThrow(eventId, claimToken);
+        return {
+          eventId,
+          idempotent: false,
+          invoiceUpdated,
+          reactivationTriggered,
+          mikrotikActionId,
+          message: invoiceUpdated ? 'Pago CoDi aplicado a factura.' : 'Evento CoDi sin factura asociada.',
+        };
+      } else {
+        // Webhook de proveedor sin order registrada — guardar y continuar
+        await this.closeOrThrow(eventId, claimToken);
+        logger.warn('PaymentEngine: webhook sin payment_order asociada', { provider, providerOrderId, tenantId });
+      }
+
+      return {
+        eventId, idempotent: false, invoiceUpdated, reactivationTriggered, mikrotikActionId,
+        message: invoiceUpdated
+          ? 'Pago confirmado, factura actualizada y reactivación programada.'
+          : 'Evento procesado (sin order asociada o factura ya pagada).',
+      };
+    } catch (error) {
+      if (!(error instanceof ClaimOwnershipLostError)) throw error;
+      logger.warn('PaymentEngine: ownership del claim perdido; efectos posteriores abortados', {
+        eventId, provider, providerEventId, tenantId,
+      });
+      return lostOwnershipResult();
+    }
   }
 
   // ── Billing integration ───────────────────────────────────────────
@@ -423,8 +506,21 @@ export class PaymentService {
 
   // ── Helpers privados ──────────────────────────────────────────────
 
-  private isApprovedEvent(eventType: string, payload: Record<string, unknown>): boolean {
+  private isApprovedEvent(
+    provider: PaymentProvider,
+    eventType: string,
+    payload: Record<string, unknown>,
+  ): boolean {
     const t = eventType.toLowerCase();
+    if (provider === 'openpay') {
+      const transactionStatus = String(
+        (payload.transaction as { status?: unknown } | undefined)?.status ?? '',
+      ).toLowerCase();
+      // OpenPay publica el cargo completado como charge.succeeded y coloca el
+      // estado dentro de transaction. No inferir aprobación de otros
+      // `*.succeeded` (payout/transfer/fee son eventos financieros distintos).
+      return t === 'charge.succeeded' && transactionStatus === 'completed';
+    }
     if (t.includes('approved') || t.includes('completed') || t.includes('paid') || t.includes('success')) return true;
     const status = (payload.status as string ?? '').toLowerCase();
     return status === 'approved' || status === 'completed' || status === 'paid';

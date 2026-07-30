@@ -1,8 +1,10 @@
 // ====================================================================
 // Provider OpenPay (Fase 4.8) — tarjeta y SPEI/CoDi.
 //
-// Configurable con OPENPAY_MERCHANT_ID + OPENPAY_PRIVATE_KEY.
-// Opera en modo simulado cuando no hay credenciales.
+// Las credenciales llegan INYECTADAS (OpenPayResolvedConfig), resueltas de la
+// fila `wisp_integration_settings` del WISP activo — ver openpay-config.ts.
+// Sin config explícita se usa el entorno (compatibilidad single-WISP).
+// Opera en modo simulado cuando no hay credenciales utilizables.
 // Firma de webhook: X-OpenPay-Signature con HMAC-SHA256.
 //
 // Modo de cargo (chargeMethod):
@@ -20,19 +22,17 @@
 import crypto from 'crypto';
 import { PaymentProvider } from '../types';
 import {
+  isUsableOpenPayConfig,
+  openPayConfigFromEnv,
+  type OpenPayResolvedConfig,
+} from './openpay-config';
+import {
   IPaymentProvider,
   PaymentOrderRequest,
   PaymentOrderResponse,
   ProviderPaymentStatus,
   WebhookVerifyResult,
 } from './index';
-
-const OP_MERCHANT_ID = process.env.OPENPAY_MERCHANT_ID || '';
-const OP_PRIVATE_KEY = process.env.OPENPAY_PRIVATE_KEY || '';
-const SIMULATED = !OP_MERCHANT_ID || !OP_PRIVATE_KEY;
-const OP_BASE = process.env.OPENPAY_SANDBOX === 'false'
-  ? 'https://api.openpay.mx'
-  : 'https://sandbox-api.openpay.mx';
 
 const basicAuth = (key: string) => 'Basic ' + Buffer.from(`${key}:`).toString('base64');
 
@@ -41,11 +41,30 @@ type ChargeMethod = 'card' | 'bank_account';
 export class OpenPayProvider implements IPaymentProvider {
   readonly name: PaymentProvider;
 
+  private readonly config: OpenPayResolvedConfig;
+  private readonly simulated: boolean;
+
   constructor(
     name: PaymentProvider = 'openpay',
     private readonly chargeMethod: ChargeMethod = 'card',
+    config?: OpenPayResolvedConfig,
   ) {
     this.name = name;
+    this.config = config ?? openPayConfigFromEnv();
+    this.simulated = !isUsableOpenPayConfig(this.config);
+  }
+
+  /** Host de la API según el modo sandbox del WISP. */
+  private get baseUrl(): string {
+    return this.config.sandbox ? 'https://sandbox-api.openpay.mx' : 'https://api.openpay.mx';
+  }
+
+  private get chargesUrl(): string {
+    return `${this.baseUrl}/v1/${this.config.merchantId.trim()}/charges`;
+  }
+
+  private get authHeader(): string {
+    return basicAuth(this.config.privateKey.trim());
   }
 
   async createPaymentOrder(req: PaymentOrderRequest): Promise<PaymentOrderResponse> {
@@ -55,7 +74,7 @@ export class OpenPayProvider implements IPaymentProvider {
   }
 
   private async createCardOrder(req: PaymentOrderRequest): Promise<PaymentOrderResponse> {
-    if (SIMULATED) {
+    if (this.simulated) {
       return {
         providerOrderId: `op-sim-${req.orderId}`,
         checkoutUrl: `https://openpay.sim/checkout/${req.orderId}`,
@@ -72,9 +91,9 @@ export class OpenPayProvider implements IPaymentProvider {
       customer: { email: req.customerEmail || 'cliente@nugacore.mx' },
       redirect_url: process.env.OPENPAY_REDIRECT_URL || 'https://app.nugacore.mx/payments/callback',
     };
-    const response = await fetch(`${OP_BASE}/v1/${OP_MERCHANT_ID}/charges`, {
+    const response = await fetch(this.chargesUrl, {
       method: 'POST',
-      headers: { Authorization: basicAuth(OP_PRIVATE_KEY), 'Content-Type': 'application/json' },
+      headers: { Authorization: this.authHeader, 'Content-Type': 'application/json' },
       body: JSON.stringify(body),
     });
     if (!response.ok) throw new Error(`OpenPay API error: ${response.status}`);
@@ -93,7 +112,7 @@ export class OpenPayProvider implements IPaymentProvider {
   // (agreement = convenio CoDi). No hay checkoutUrl; el cliente transfiere.
   private async createSpeiOrder(req: PaymentOrderRequest): Promise<PaymentOrderResponse> {
     const reference = `${req.invoiceId}-${req.customerId}`.toUpperCase();
-    if (SIMULATED) {
+    if (this.simulated) {
       return {
         providerOrderId: `op-spei-sim-${req.orderId}`,
         expiresAt: new Date(Date.now() + 72 * 60 * 60 * 1000).toISOString(),
@@ -116,9 +135,9 @@ export class OpenPayProvider implements IPaymentProvider {
       order_id: req.orderId,
       customer: { email: req.customerEmail || 'cliente@nugacore.mx' },
     };
-    const response = await fetch(`${OP_BASE}/v1/${OP_MERCHANT_ID}/charges`, {
+    const response = await fetch(this.chargesUrl, {
       method: 'POST',
-      headers: { Authorization: basicAuth(OP_PRIVATE_KEY), 'Content-Type': 'application/json' },
+      headers: { Authorization: this.authHeader, 'Content-Type': 'application/json' },
       body: JSON.stringify(body),
     });
     if (!response.ok) throw new Error(`OpenPay API error: ${response.status}`);
@@ -140,9 +159,22 @@ export class OpenPayProvider implements IPaymentProvider {
   }
 
   verifyWebhook(rawBody: string | Buffer, signature: string, secret: string): WebhookVerifyResult {
-    if (SIMULATED) return { valid: true };
-    if (!secret || !signature) return { valid: false, reason: 'missing_secret_or_signature' };
-    const expected = crypto.createHmac('sha256', secret).update(rawBody).digest('hex');
+    // El secreto de la ruta manda; si no lo aporta, se usa el del WISP.
+    const effectiveSecret = secret || this.config.webhookSecret || '';
+    // HAY secreto ⇒ se verifica SIEMPRE, aunque el provider esté en modo
+    // simulado. El simulado describe que no llamamos a la API de OpenPay por
+    // falta de credenciales de COBRO; nunca que un endpoint público acepte
+    // cualquier firma. Sin esto, un despliegue con WEBHOOK_SECRET_OPENPAY pero
+    // sin merchant/private key aprobaba pagos con una firma arbitraria.
+    if (!effectiveSecret) {
+      // Sin secreto configurado: solo el modo simulado (dev sin credenciales)
+      // sigue aceptando, que es el comportamiento hermético de siempre.
+      return this.simulated
+        ? { valid: true }
+        : { valid: false, reason: 'missing_secret_or_signature' };
+    }
+    if (!signature) return { valid: false, reason: 'missing_secret_or_signature' };
+    const expected = crypto.createHmac('sha256', effectiveSecret).update(rawBody).digest('hex');
     // timingSafeEqual lanza si los buffers difieren en longitud: comparar
     // longitud primero evita un 500 ante una firma malformada (queda 400 limpio).
     const sigBuf = Buffer.from(signature);
@@ -154,11 +186,11 @@ export class OpenPayProvider implements IPaymentProvider {
   }
 
   async getPaymentStatus(providerOrderId: string): Promise<ProviderPaymentStatus> {
-    if (SIMULATED) {
+    if (this.simulated) {
       return { providerOrderId, status: 'pending', rawPayload: { simulated: true } };
     }
-    const response = await fetch(`${OP_BASE}/v1/${OP_MERCHANT_ID}/charges/${providerOrderId}`, {
-      headers: { Authorization: basicAuth(OP_PRIVATE_KEY) },
+    const response = await fetch(`${this.chargesUrl}/${providerOrderId}`, {
+      headers: { Authorization: this.authHeader },
     });
     if (!response.ok) return { providerOrderId, status: 'unknown' };
     const data = await response.json() as { status: string; operation_date?: string; amount?: number };

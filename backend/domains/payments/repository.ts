@@ -29,6 +29,48 @@ import {
 const matchesTenant = (recordTenantId: string | undefined, tenantId: string): boolean =>
   (recordTenantId || 'tenant-default') === tenantId;
 
+// ── Claim de eventos (idempotencia bajo concurrencia) ─────────────────
+//
+// Dos entregas simultáneas del mismo webhook pasaban las dos un
+// "buscar y si no existe insertar" y se procesaban las dos. El claim reserva
+// el evento en UNA operación atómica: en memoria, sin `await` entre lectura y
+// escritura; en Postgres, apoyándose en el índice único por
+// (tenant_id, provider, provider_event_id).
+//
+// Un ganador que muere a mitad del procesado dejaría el evento reservado y sin
+// procesar para siempre, así que el claim caduca: pasado el lease otra entrega
+// puede recuperarlo. Mientras el lease siga vivo, nadie más entra.
+
+/** Ventana durante la que un claim en curso bloquea a las demás entregas. */
+export const EVENT_CLAIM_LEASE_MS = 5 * 60 * 1000;
+
+export type ExistingClaimKind = 'already_processed' | 'in_progress' | 'reclaimable';
+
+export const classifyExistingClaim = (
+  existing: { processed: boolean; claimedAt?: string },
+  nowMs: number,
+  leaseMs: number = EVENT_CLAIM_LEASE_MS,
+): ExistingClaimKind => {
+  if (existing.processed) return 'already_processed';
+  const claimedAtMs = existing.claimedAt ? Date.parse(existing.claimedAt) : NaN;
+  // Sin marca de claim (fila legacy o escritura a medias) se considera
+  // abandonada: es preferible reprocesar a dejar el pago sin aplicar.
+  if (!Number.isFinite(claimedAtMs)) return 'reclaimable';
+  return nowMs - claimedAtMs < leaseMs ? 'in_progress' : 'reclaimable';
+};
+
+export type EventClaimOutcome = 'claimed' | 'already_processed' | 'in_progress';
+
+export interface EventClaimResult {
+  outcome: EventClaimOutcome;
+  /** El evento reservado, o el que ya existía cuando el claim no prospera. */
+  event: PaymentEventRecord;
+}
+
+/** Violación de unicidad: otra entrega insertó primero. */
+const isUniqueViolation = (error: { code?: string; message?: string }): boolean =>
+  String(error?.code) === '23505' || /duplicate key|already exists/i.test(String(error?.message ?? ''));
+
 // ── Contrato ──────────────────────────────────────────────────────────
 
 export interface PaymentRepository {
@@ -39,10 +81,21 @@ export interface PaymentRepository {
   createOrder(rec: PaymentOrderRecord): Promise<PaymentOrderRecord>;
   updateOrderStatus(id: string, status: PaymentOrderStatus, patch?: Partial<PaymentOrderRecord>, tenantId?: string): Promise<PaymentOrderRecord | null>;
 
-  // Payment Events (idempotencia por provider_event_id)
-  findEventByProviderId(provider: PaymentProvider, providerEventId: string): Promise<PaymentEventRecord | null>;
+  // Payment Events. La idempotencia es por (tenant, provider, provider_event_id):
+  // dos merchants distintos pueden reutilizar el mismo id de evento sin pisarse.
+  // `tenantId` es OBLIGATORIO — una consulta global puede devolver varias filas
+  // bajo la nueva unicidad, y en Supabase `maybeSingle()` fallaría.
+  findEventByProviderId(provider: PaymentProvider, providerEventId: string, tenantId: string): Promise<PaymentEventRecord | null>;
+  /**
+   * Reserva el evento de forma atómica. Solo `outcome: 'claimed'` autoriza a
+   * procesarlo; el resto de entregas simultáneas reciben el evento existente.
+   */
+  claimEvent(rec: PaymentEventRecord): Promise<EventClaimResult>;
+  /** Renueva el lease solo si el llamador conserva el epoch del claim. */
+  renewEventClaim(id: string, claimToken: string): Promise<boolean>;
   createEvent(rec: PaymentEventRecord): Promise<PaymentEventRecord>;
-  markEventProcessed(id: string): Promise<void>;
+  /** Cierra el evento solo si el llamador conserva el epoch del claim. */
+  markEventProcessed(id: string, claimToken: string): Promise<boolean>;
 
   // Mikrotik Actions
   listActions(filter?: { customerId?: string; status?: string; tenantId?: string }): Promise<MikrotikActionRecord[]>;
@@ -74,12 +127,17 @@ export class StorePaymentRepository implements PaymentRepository {
   }
 
   async findOrderByProviderOrderId(provider: PaymentProvider, providerOrderId: string, tenantId?: string) {
-    const order =
+    // El tenant va DENTRO del predicado: filtrarlo después dejaría que la
+    // primera coincidencia global (la de otro WISP con el mismo
+    // providerOrderId) tapara la del WISP buscado y devolviera null.
+    return (
       (store.PAYMENT_ORDERS as PaymentOrderRecord[]).find(
-        (o) => o.provider === provider && o.providerOrderId === providerOrderId,
-      ) ?? null;
-    if (!order || !tenantId) return order;
-    return matchesTenant(order.tenantId, tenantId) ? order : null;
+        (o) =>
+          o.provider === provider &&
+          o.providerOrderId === providerOrderId &&
+          (!tenantId || matchesTenant(o.tenantId, tenantId)),
+      ) ?? null
+    );
   }
 
   async createOrder(rec: PaymentOrderRecord) {
@@ -99,12 +157,52 @@ export class StorePaymentRepository implements PaymentRepository {
     return order;
   }
 
-  async findEventByProviderId(provider: PaymentProvider, providerEventId: string) {
+  async findEventByProviderId(provider: PaymentProvider, providerEventId: string, tenantId: string) {
     return (
       (store.PAYMENT_EVENTS as PaymentEventRecord[]).find(
-        (e) => e.provider === provider && e.providerEventId === providerEventId,
+        (e) =>
+          e.provider === provider &&
+          e.providerEventId === providerEventId &&
+          matchesTenant(e.tenantId, tenantId),
       ) ?? null
     );
+  }
+
+  async claimEvent(rec: PaymentEventRecord): Promise<EventClaimResult> {
+    // Atómico por construcción: entre la búsqueda y la escritura no hay ningún
+    // `await`, así que el bucle de eventos no puede intercalar otra entrega.
+    const now = Date.now();
+    const nowIso = new Date(now).toISOString();
+    const claimToken = crypto.randomUUID();
+    const tenantId = rec.tenantId || 'tenant-default';
+    const events = store.PAYMENT_EVENTS as PaymentEventRecord[];
+    const existing = events.find(
+      (e) =>
+        e.provider === rec.provider &&
+        e.providerEventId === rec.providerEventId &&
+        matchesTenant(e.tenantId, tenantId),
+    );
+
+    if (existing) {
+      const kind = classifyExistingClaim(existing, now);
+      if (kind !== 'reclaimable') return { outcome: kind, event: { ...existing } };
+      existing.claimedAt = nowIso; // renovar el lease: el reclamador es el dueño
+      existing.claimToken = claimToken;
+      return { outcome: 'claimed', event: { ...existing } };
+    }
+
+    const stamped = { ...rec, tenantId, claimedAt: nowIso, claimToken };
+    events.push(stamped);
+    return { outcome: 'claimed', event: { ...stamped } };
+  }
+
+  async renewEventClaim(id: string, claimToken: string): Promise<boolean> {
+    const event = (store.PAYMENT_EVENTS as PaymentEventRecord[]).find(
+      (candidate) => candidate.id === id && !candidate.processed && candidate.claimToken === claimToken,
+    );
+    if (!event) return false;
+    event.claimedAt = new Date().toISOString();
+    return true;
   }
 
   async createEvent(rec: PaymentEventRecord) {
@@ -113,12 +211,14 @@ export class StorePaymentRepository implements PaymentRepository {
     return stamped;
   }
 
-  async markEventProcessed(id: string) {
-    const event = (store.PAYMENT_EVENTS as PaymentEventRecord[]).find((e) => e.id === id);
-    if (event) {
-      event.processed = true;
-      event.processedAt = new Date().toISOString();
-    }
+  async markEventProcessed(id: string, claimToken: string): Promise<boolean> {
+    const event = (store.PAYMENT_EVENTS as PaymentEventRecord[]).find(
+      (candidate) => candidate.id === id && !candidate.processed && candidate.claimToken === claimToken,
+    );
+    if (!event) return false;
+    event.processed = true;
+    event.processedAt = new Date().toISOString();
+    return true;
   }
 
   async listActions(filter?: { customerId?: string; status?: string; tenantId?: string }) {
@@ -147,7 +247,7 @@ export class StorePaymentRepository implements PaymentRepository {
   }
 
   async nextOrderId() { return store.getUniquePaymentOrderId(); }
-  async nextEventId() { return store.getUniquePaymentEventId(); }
+  async nextEventId() { return 'pe-' + crypto.randomUUID(); }
   async nextActionId() { return store.getUniqueMikrotikActionId(); }
 }
 
@@ -201,32 +301,93 @@ export class SupabasePaymentRepository implements PaymentRepository {
     return this.findOrderById(id, tenantId);
   }
 
-  async findEventByProviderId(provider: PaymentProvider, providerEventId: string) {
+  async findEventByProviderId(provider: PaymentProvider, providerEventId: string, tenantId: string) {
+    // El filtro por tenant es lo que garantiza como mucho una fila: es
+    // exactamente la clave del índice único uq_payment_events_tenant_provider_event.
     const { data } = await this.client
       .from('payment_events').select('*')
-      .eq('provider', provider).eq('provider_event_id', providerEventId).maybeSingle();
+      .eq('provider', provider)
+      .eq('provider_event_id', providerEventId)
+      .eq('tenant_id', tenantId)
+      .maybeSingle();
     return data ? rowToPaymentEvent(data as PaymentEventRow) : null;
+  }
+
+  private eventRow(rec: PaymentEventRecord) {
+    return {
+      id: rec.id, tenant_id: rec.tenantId, provider: rec.provider, provider_event_id: rec.providerEventId,
+      event_type: rec.eventType, processed: rec.processed,
+      payment_order_id: rec.paymentOrderId ?? null,
+      payload: rec.payload, received_at: rec.receivedAt,
+      claimed_at: rec.claimedAt ?? null,
+      claim_token: rec.claimToken ?? null,
+    };
+  }
+
+  async claimEvent(rec: PaymentEventRecord): Promise<EventClaimResult> {
+    const tenantId = rec.tenantId || 'tenant-default';
+    const claimedAt = new Date().toISOString();
+    const claimToken = crypto.randomUUID();
+    const stamped = { ...rec, tenantId, claimedAt, claimToken };
+
+    // El INSERT es el claim: el índice único (tenant_id, provider,
+    // provider_event_id) deja pasar exactamente a una entrega.
+    const { error } = await this.client.from('payment_events').insert(this.eventRow(stamped));
+    if (!error) return { outcome: 'claimed', event: stamped };
+    if (!isUniqueViolation(error)) throw new Error(`claimEvent: ${error.message}`);
+
+    const existing = await this.findEventByProviderId(rec.provider, rec.providerEventId, tenantId);
+    // Perdimos el insert pero no vemos la fila (aún sin commit o borrada):
+    // no procesamos — fail-closed frente a un doble procesado.
+    if (!existing) return { outcome: 'in_progress', event: stamped };
+
+    const kind = classifyExistingClaim(existing, Date.now());
+    if (kind !== 'reclaimable') return { outcome: kind, event: existing };
+
+    // Reclaim por compare-and-swap sobre claimed_at: de todas las entregas que
+    // vean el mismo claim vencido, solo una consigue actualizarlo.
+    let q = this.client
+      .from('payment_events')
+      .update({ claimed_at: claimedAt, claim_token: claimToken })
+      .eq('id', existing.id)
+      .eq('processed', false);
+    q = existing.claimedAt ? q.eq('claimed_at', existing.claimedAt) : q.is('claimed_at', null);
+    q = existing.claimToken ? q.eq('claim_token', existing.claimToken) : q.is('claim_token', null);
+    const { data, error: reclaimError } = await q.select('id');
+    if (reclaimError) throw new Error(`claimEvent(reclaim): ${reclaimError.message}`);
+    if ((data ?? []).length !== 1) return { outcome: 'in_progress', event: existing };
+    return { outcome: 'claimed', event: { ...existing, claimedAt, claimToken } };
+  }
+
+  async renewEventClaim(id: string, claimToken: string): Promise<boolean> {
+    const { data, error } = await this.client
+      .from('payment_events')
+      .update({ claimed_at: new Date().toISOString() })
+      .eq('id', id)
+      .eq('processed', false)
+      .eq('claim_token', claimToken)
+      .select('id');
+    if (error) throw new Error(`renewEventClaim: ${error.message}`);
+    return (data ?? []).length === 1;
   }
 
   async createEvent(rec: PaymentEventRecord) {
     const stamped = { ...rec, tenantId: rec.tenantId || 'tenant-default' };
-    const row = {
-      id: stamped.id, tenant_id: stamped.tenantId, provider: stamped.provider, provider_event_id: stamped.providerEventId,
-      event_type: stamped.eventType, processed: stamped.processed,
-      payment_order_id: stamped.paymentOrderId ?? null,
-      payload: stamped.payload, received_at: stamped.receivedAt,
-    };
-    const { error } = await this.client.from('payment_events').insert(row);
+    const { error } = await this.client.from('payment_events').insert(this.eventRow(stamped));
     if (error) throw new Error(`createEvent: ${error.message}`);
     return stamped;
   }
 
-  async markEventProcessed(id: string) {
-    const { error } = await this.client
+  async markEventProcessed(id: string, claimToken: string): Promise<boolean> {
+    const { data, error } = await this.client
       .from('payment_events')
       .update({ processed: true, processed_at: new Date().toISOString() })
-      .eq('id', id);
+      .eq('id', id)
+      .eq('processed', false)
+      .eq('claim_token', claimToken)
+      .select('id');
     if (error) throw new Error(`markEventProcessed: ${error.message}`);
+    return (data ?? []).length === 1;
   }
 
   async listActions(filter?: { customerId?: string; status?: string; tenantId?: string }) {

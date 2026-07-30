@@ -13,6 +13,7 @@
 
 import { NextFunction, Request, RequestHandler, Response } from 'express';
 import { logger } from './logger';
+import { redactSensitivePath } from './log-redaction';
 
 export class AppError extends Error {
   constructor(
@@ -62,7 +63,11 @@ export class ConflictError extends AppError {
 
 /** 404 JSON para endpoints /api no encontrados (se monta tras las rutas). */
 export const notFoundHandler = (req: Request, res: Response): void => {
-  res.status(404).json({ error: 'Endpoint not found', code: 'ENDPOINT_NOT_FOUND', path: req.path });
+  res.status(404).json({
+    error: 'Endpoint not found',
+    code: 'ENDPOINT_NOT_FOUND',
+    path: redactSensitivePath(req.path),
+  });
 };
 
 /** Envuelve un handler async para canalizar sus errores al errorHandler. */
@@ -79,13 +84,14 @@ export const errorHandler = (
   _next: NextFunction,
 ): void => {
   const log = req.log ?? logger;
+  const safePath = redactSensitivePath(req.path);
 
   if (err instanceof AppError) {
     if (err.statusCode >= 500) {
       log.error('AppError', {
         code: err.code,
         message: err.message,
-        path: req.path,
+        path: safePath,
         method: req.method,
         requestId: req.requestId,
       });
@@ -102,7 +108,7 @@ export const errorHandler = (
         : 'Unexpected server error';
   log.error('Unhandled exception', {
     message,
-    path: req.path,
+    path: safePath,
     method: req.method,
     requestId: req.requestId,
   });

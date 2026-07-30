@@ -11,7 +11,10 @@ import { decryptSecret } from '../../backend/services/crypto';
 //   save: from(t).upsert(row, opts).select('*').single()
 //   get:  from(t).select('*').eq('id', id).maybeSingle()
 const makeFakeAdmin = () => {
-  const captured: { row: Record<string, unknown> | null } = { row: null };
+  const captured: {
+    row: Record<string, unknown> | null;
+    readError: { code: string; message: string } | null;
+  } = { row: null, readError: null };
   const admin = {
     from() {
       return {
@@ -26,7 +29,9 @@ const makeFakeAdmin = () => {
         select() {
           return {
             eq() {
-              return { maybeSingle: async () => ({ data: captured.row, error: null }) };
+              return {
+                maybeSingle: async () => ({ data: captured.row, error: captured.readError }),
+              };
             },
           };
         },
@@ -73,6 +78,37 @@ describe('SupabaseIntegrationsRepository — cifrado en reposo de credenciales',
 
     const read = await repo.get();
     expect(read.stripeSecretKey).toBe('sk_live_round_trip');
+  });
+
+  it('getPersisted() devuelve null sin fila y la fila real cuando existe', async () => {
+    const { admin } = makeFakeAdmin();
+    const repo = new SupabaseIntegrationsRepository(admin);
+
+    expect(await repo.getPersisted('tenant-default')).toBeNull();
+
+    const rec = emptyIntegrationSettings();
+    rec.openpayEnabled = false;
+    await repo.save(rec, 'tenant-default');
+
+    const persisted = await repo.getPersisted('tenant-default');
+    expect(persisted).not.toBeNull();
+    expect(persisted?.openpayEnabled).toBe(false);
+  });
+
+  it('no confunde un error real de schema con ausencia de tabla/fila', async () => {
+    const { admin, captured } = makeFakeAdmin();
+    const repo = new SupabaseIntegrationsRepository(admin);
+    captured.readError = { code: '42703', message: 'column openpay_enabled does not exist' };
+
+    await expect(repo.getPersisted('tenant-default')).rejects.toMatchObject({ code: '42703' });
+  });
+
+  it('propaga 42P01: tabla ausente no equivale a fila ausente ni habilita fallback env', async () => {
+    const { admin, captured } = makeFakeAdmin();
+    const repo = new SupabaseIntegrationsRepository(admin);
+    captured.readError = { code: '42P01', message: 'relation wisp_integration_settings does not exist' };
+
+    await expect(repo.getPersisted('tenant-default')).rejects.toMatchObject({ code: '42P01' });
   });
 
   it('tolera valores legacy en texto plano (sin romper)', async () => {

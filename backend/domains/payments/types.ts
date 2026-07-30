@@ -85,6 +85,16 @@ export interface PaymentEventRecord {
   payload: Record<string, unknown>;
   receivedAt: string;
   processedAt?: string;
+  /**
+   * Instante en que una entrega reservó el evento. Junto a `processed` define
+   * el lease: mientras esté vigente, ninguna otra entrega puede procesarlo.
+   */
+  claimedAt?: string;
+  /**
+   * Epoch opaco del dueño actual. Cada claim/reclaim genera uno nuevo; un
+   * procesador con un token anterior ya no puede renovar ni cerrar la fila.
+   */
+  claimToken?: string;
 }
 
 export interface PaymentEventView {
@@ -134,6 +144,11 @@ export interface MikrotikActionView {
 export interface WebhookProcessResult {
   eventId: string;
   idempotent: boolean;
+  /**
+   * Por qué no se reprocesó: ya estaba procesado, o hay otra entrega del mismo
+   * evento en curso (claim vivo). Solo presente cuando `idempotent` es true.
+   */
+  idempotentReason?: 'already_processed' | 'in_progress';
   invoiceUpdated: boolean;
   reactivationTriggered: boolean;
   mikrotikActionId?: string;
@@ -164,4 +179,11 @@ export interface ProcessWebhookInput {
   providerEventId: string;
   eventType: string;
   payload: Record<string, unknown>;
+  /**
+   * WISP dueño del evento. OBLIGATORIO: acota la idempotencia y la búsqueda de
+   * order. Dos merchants distintos pueden reutilizar el mismo
+   * provider_event_id, y el evento de un WISP nunca debe tocar la order de
+   * otro. La ruta legacy single-WISP pasa `DEFAULT_TENANT_ID` explícitamente.
+   */
+  tenantId: string;
 }
