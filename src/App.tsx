@@ -1650,12 +1650,13 @@ export default function App() {
             )}
 
             {activeTab === 'gis' && (
-              <GisModule 
-                towers={towers} 
+              <GisModule
+                towers={towers}
                 clients={clients}
                 naps={naps}
                 onus={onus}
                 olts={olts}
+                getAuthHeaders={getAuthHeaders}
               />
             )}
 

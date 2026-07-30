@@ -11,10 +11,11 @@ interface GisModuleProps {
   naps?: NapBox[];
   onus?: OnuFTTH[];
   olts?: OltFTTH[];
+  getAuthHeaders?: () => Promise<Record<string, string>> | Record<string, string>;
 }
 
-async function fetchList<T>(url: string): Promise<T> {
-  const res = await fetch(url);
+async function fetchList<T>(url: string, headers: Record<string, string> = {}): Promise<T> {
+  const res = await fetch(url, { headers });
   if (!res.ok) throw new Error(`HTTP ${res.status}`);
   return res.json() as Promise<T>;
 }
@@ -25,6 +26,7 @@ export default function GisModule({
   naps: napsProp = [],
   onus = [],
   olts = [],
+  getAuthHeaders,
 }: GisModuleProps) {
   const [showNapCoverage, setShowNapCoverage] = useState(true);
   const [showDropLines, setShowDropLines] = useState(true);
@@ -37,16 +39,17 @@ export default function GisModule({
 
   const refreshFtth = useCallback(async () => {
     try {
+      const authHeaders = await Promise.resolve(getAuthHeaders?.() ?? {});
       const [naps, segs] = await Promise.all([
-        fetchList<NapBox[]>('/api/naps'),
-        fetchList<FiberSegment[]>('/api/ftth/segments'),
+        fetchList<NapBox[]>('/api/naps', authHeaders),
+        fetchList<FiberSegment[]>('/api/ftth/segments', authHeaders),
       ]);
       setLocalNaps(naps);
       setSegments(segs);
     } catch {
       /* mantener estado previo si la API falla */
     }
-  }, []);
+  }, [getAuthHeaders]);
 
   useEffect(() => {
     void refreshFtth();
@@ -117,16 +120,17 @@ export default function GisModule({
         continuesToThread?: number;
       },
     ) => {
+      const authHeaders = await Promise.resolve(getAuthHeaders?.() ?? {});
       const res = await fetch(`/api/naps/${encodeURIComponent(napId)}/ports/${portNum}`, {
         method: 'PUT',
-        headers: { 'Content-Type': 'application/json' },
+        headers: { ...authHeaders, 'Content-Type': 'application/json' },
         body: JSON.stringify(patch),
       });
       if (!res.ok) throw new Error(`HTTP ${res.status}`);
       const updated = (await res.json()) as NapBox;
       setLocalNaps((prev) => prev.map((n) => (n.id === updated.id ? updated : n)));
     },
-    [],
+    [getAuthHeaders],
   );
 
   return (
@@ -320,12 +324,14 @@ export default function GisModule({
           naps={naps}
           segments={segments}
           onImported={() => void refreshFtth()}
+          getAuthHeaders={getAuthHeaders}
         />
         <FtthInfrastructurePanel
           naps={naps}
           olts={olts}
           segments={segments}
           onSegmentsChange={() => void refreshFtth()}
+          getAuthHeaders={getAuthHeaders}
         />
       </div>
     </div>

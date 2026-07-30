@@ -23,12 +23,13 @@ interface FtthImportPanelProps {
   naps?: NapBox[];
   segments?: FiberSegment[];
   onImported?: () => void;
+  getAuthHeaders?: () => Promise<Record<string, string>> | Record<string, string>;
 }
 
-async function postJson<T>(url: string, body: unknown): Promise<T> {
+async function postJson<T>(url: string, body: unknown, authHeaders: Record<string, string> = {}): Promise<T> {
   const res = await fetch(url, {
     method: 'POST',
-    headers: { 'Content-Type': 'application/json' },
+    headers: { ...authHeaders, 'Content-Type': 'application/json' },
     body: JSON.stringify(body),
   });
   const data = await res.json().catch(() => ({}));
@@ -47,6 +48,7 @@ export default function FtthImportPanel({
   naps = [],
   segments = [],
   onImported,
+  getAuthHeaders,
 }: FtthImportPanelProps) {
   const [format, setFormat] = useState<ImportFormat>('mixed');
   const [napsCsv, setNapsCsv] = useState('');
@@ -70,7 +72,8 @@ export default function FtthImportPanel({
     setError(null);
     setResult(null);
     try {
-      const data = await postJson<FtthImportPreview>('/api/ftth/import/preview', payload());
+      const authHeaders = await Promise.resolve(getAuthHeaders?.() ?? {});
+      const data = await postJson<FtthImportPreview>('/api/ftth/import/preview', payload(), authHeaders);
       setPreview(data);
     } catch (e) {
       setError(e instanceof Error ? e.message : 'Error al previsualizar');
@@ -84,7 +87,8 @@ export default function FtthImportPanel({
     setBusy(true);
     setError(null);
     try {
-      const data = await postJson<FtthImportResult>('/api/ftth/import', payload());
+      const authHeaders = await Promise.resolve(getAuthHeaders?.() ?? {});
+      const data = await postJson<FtthImportResult>('/api/ftth/import', payload(), authHeaders);
       setResult(data);
       setPreview(null);
       onImported?.();

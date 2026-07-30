@@ -7,6 +7,7 @@ interface FtthInfrastructurePanelProps {
   olts: OltFTTH[];
   segments: FiberSegment[];
   onSegmentsChange?: () => void;
+  getAuthHeaders?: () => Promise<Record<string, string>> | Record<string, string>;
 }
 
 /** Panel para registrar tramos de fibra vía API (sin localStorage). */
@@ -15,6 +16,7 @@ export default function FtthInfrastructurePanel({
   olts,
   segments,
   onSegmentsChange,
+  getAuthHeaders,
 }: FtthInfrastructurePanelProps) {
   const [name, setName] = useState('');
   const [threadCount, setThreadCount] = useState(12);
@@ -56,9 +58,10 @@ export default function FtthInfrastructurePanel({
       if (nap && Number.isFinite(nap.lat) && Number.isFinite(nap.lng)) {
         coords.push([nap.lat, nap.lng]);
       }
+      const authHeaders = await Promise.resolve(getAuthHeaders?.() ?? {});
       const res = await fetch('/api/ftth/segments', {
         method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
+        headers: { ...authHeaders, 'Content-Type': 'application/json' },
         body: JSON.stringify({
           name: trimmed,
           threadCount: Math.max(1, Number(threadCount) || 1),
@@ -89,7 +92,11 @@ export default function FtthInfrastructurePanel({
     setBusy(true);
     setError(null);
     try {
-      const res = await fetch(`/api/ftth/segments/${encodeURIComponent(id)}`, { method: 'DELETE' });
+      const authHeaders = await Promise.resolve(getAuthHeaders?.() ?? {});
+      const res = await fetch(`/api/ftth/segments/${encodeURIComponent(id)}`, {
+        method: 'DELETE',
+        headers: authHeaders,
+      });
       if (!res.ok && res.status !== 204) {
         throw new Error(`HTTP ${res.status}`);
       }
