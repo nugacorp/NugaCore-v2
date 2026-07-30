@@ -1,6 +1,15 @@
 import { isDomainOnDb } from '../../config/feature-flags';
 import { BadRequestError, NotFoundError } from '../../common/errors';
 import { isSupabaseAdminConfigured, supabaseAdmin } from '../../services/supabase-admin';
+import {
+  ALLOWED_DOCUMENT_MIME_TYPES,
+  MAX_DOCUMENT_BYTES,
+  buildDocumentPath,
+  createDocumentDownloadUrl,
+  createDocumentUploadUrl,
+  isStorageConfigured,
+  pathBelongsToTenant,
+} from '../../services/supabase-storage';
 import { getCustomersService } from '../customers/service';
 import {
   client360Memory,
@@ -133,11 +142,25 @@ export class Client360Service {
     const fileName = String(body.fileName || '').trim();
     if (!fileName) throw new BadRequestError('Missing fileName', 'MISSING_FIELD');
     const storagePath = body.storagePath ? String(body.storagePath).trim() : undefined;
-    if (storagePath && !/^[\w./-]+$/.test(storagePath)) {
-      throw new BadRequestError('Invalid storagePath', 'INVALID_FIELD');
+    if (storagePath) {
+      // `[\w./-]+` admitía `..`, así que un `../<otro-tenant>/x` pasaba el
+      // filtro. Con el bucket ya en uso eso permitiría apuntar el registro a
+      // un objeto de otro WISP y luego pedir su URL firmada.
+      if (!/^[\w./-]+$/.test(storagePath) || storagePath.split('/').includes('..')) {
+        throw new BadRequestError('Invalid storagePath', 'INVALID_FIELD');
+      }
+      if (!pathBelongsToTenant(storagePath, tenantId)) {
+        throw new BadRequestError('storagePath fuera del tenant', 'INVALID_FIELD');
+      }
+    }
+    // Reutiliza el id emitido por `prepareDocumentUpload` para que la fila y la
+    // ruta del objeto coincidan; si no viene, se genera uno nuevo.
+    const providedId = body.documentId ? String(body.documentId).trim() : '';
+    if (providedId && !/^[\w-]{1,64}$/.test(providedId)) {
+      throw new BadRequestError('Invalid documentId', 'INVALID_FIELD');
     }
     const doc: ClientDocument = {
-      id: uid('doc'),
+      id: providedId || uid('doc'),
       clientId,
       tenantId,
       docType: (String(body.docType || 'other') as ClientDocument['docType']),
@@ -149,7 +172,8 @@ export class Client360Service {
     };
     if (this.useDb) {
       const { error } = await this.admin.from('client_documents').insert({
-        id: doc.id, client_id: clientId, doc_type: doc.docType, file_name: doc.fileName,
+        id: doc.id, client_id: clientId, tenant_id: tenantId,
+        doc_type: doc.docType, file_name: doc.fileName,
         storage_path: doc.storagePath ?? null, mime_type: doc.mimeType ?? null, uploaded_by: uploadedBy ?? null,
       });
       if (error) throw error;
@@ -158,6 +182,68 @@ export class Client360Service {
     }
     await this.logActivity(clientId, tenantId, { action: 'document_added', newValue: fileName });
     return doc;
+  }
+
+  // ── Storage ────────────────────────────────────────────────────────
+  //
+  // El backend no recibe los bytes: firma una URL de subida y el navegador
+  // sube directo al bucket. `documentId` se devuelve para que el registro de
+  // metadatos posterior reutilice el mismo id que ya está en la ruta.
+
+  async prepareDocumentUpload(clientId: string, tenantId: string, body: Record<string, unknown>) {
+    await this.assertClientOwned(clientId, tenantId);
+    if (!isStorageConfigured()) {
+      throw new BadRequestError(
+        'Storage no configurado. Define SUPABASE_URL y SUPABASE_SERVICE_ROLE_KEY.',
+        'STORAGE_UNAVAILABLE',
+      );
+    }
+
+    const fileName = String(body.fileName || '').trim();
+    if (!fileName) throw new BadRequestError('Missing fileName', 'MISSING_FIELD');
+
+    const mimeType = String(body.mimeType || '').trim();
+    if (!ALLOWED_DOCUMENT_MIME_TYPES.includes(mimeType as (typeof ALLOWED_DOCUMENT_MIME_TYPES)[number])) {
+      throw new BadRequestError(
+        `mimeType no permitido. Admitidos: ${ALLOWED_DOCUMENT_MIME_TYPES.join(', ')}`,
+        'INVALID_MIME_TYPE',
+      );
+    }
+
+    // El bucket ya impone el límite; validarlo aquí evita firmar una URL para
+    // una subida que Storage va a rechazar igualmente.
+    const sizeBytes = body.sizeBytes !== undefined ? Number(body.sizeBytes) : undefined;
+    if (sizeBytes !== undefined && (!Number.isFinite(sizeBytes) || sizeBytes <= 0 || sizeBytes > MAX_DOCUMENT_BYTES)) {
+      throw new BadRequestError(`sizeBytes fuera de rango (máx ${MAX_DOCUMENT_BYTES})`, 'INVALID_SIZE');
+    }
+
+    const documentId = uid('doc');
+    const storagePath = buildDocumentPath(tenantId, clientId, documentId, fileName);
+    const signed = await createDocumentUploadUrl(storagePath);
+    return { documentId, fileName, mimeType, ...signed };
+  }
+
+  async getDocumentDownloadUrl(clientId: string, tenantId: string, documentId: string) {
+    await this.assertClientOwned(clientId, tenantId);
+    if (!isStorageConfigured()) {
+      throw new BadRequestError('Storage no configurado.', 'STORAGE_UNAVAILABLE');
+    }
+
+    const documents = await this.listDocuments(clientId, tenantId);
+    const doc = documents.find((d) => d.id === documentId);
+    if (!doc) throw new NotFoundError('Document not found', 'NOT_FOUND');
+    if (!doc.storagePath) {
+      throw new NotFoundError('El documento no tiene archivo asociado', 'NO_STORAGE_OBJECT');
+    }
+
+    // Segunda barrera: `listDocuments` filtra por cliente, pero un storage_path
+    // sembrado con otro prefijo no debe poder firmarse desde este tenant.
+    if (!pathBelongsToTenant(doc.storagePath, tenantId)) {
+      throw new NotFoundError('Document not found', 'NOT_FOUND');
+    }
+
+    const signed = await createDocumentDownloadUrl(doc.storagePath);
+    return { documentId, fileName: doc.fileName, mimeType: doc.mimeType, ...signed };
   }
 
   async listActivity(clientId: string, tenantId: string, limit = 50) {

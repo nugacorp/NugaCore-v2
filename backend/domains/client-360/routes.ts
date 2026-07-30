@@ -49,9 +49,23 @@ router.get('/api/clients/:clientId/documents', requireRoles(READ_ROLES), asyncHa
   res.json(await svc().listDocuments(req.params.clientId, tenantId));
 }));
 
+// Paso 1 de la subida: el backend valida y firma; el navegador sube directo
+// al bucket con la URL devuelta. Los bytes no pasan por Express.
+router.post('/api/clients/:clientId/documents/upload-url', requireRoles([...WRITE]), asyncHandler(async (req, res) => {
+  const tenantId = tenantIdFromRequest(req);
+  res.status(201).json(await svc().prepareDocumentUpload(req.params.clientId, tenantId, req.body || {}));
+}));
+
+// Paso 2: registrar los metadatos (incluido el storagePath ya subido).
 router.post('/api/clients/:clientId/documents', requireRoles([...WRITE]), asyncHandler(async (req, res) => {
   const tenantId = tenantIdFromRequest(req);
   res.status(201).json(await svc().addDocument(req.params.clientId, tenantId, req.body || {}, req.authContext?.userId));
+}));
+
+// Descarga: URL firmada de vida corta. El bucket es privado.
+router.get('/api/clients/:clientId/documents/:documentId/download-url', requireRoles(READ_ROLES), asyncHandler(async (req, res) => {
+  const tenantId = tenantIdFromRequest(req);
+  res.json(await svc().getDocumentDownloadUrl(req.params.clientId, tenantId, req.params.documentId));
 }));
 
 router.get('/api/clients/:clientId/activity', requireRoles(READ_ROLES), asyncHandler(async (req, res) => {
