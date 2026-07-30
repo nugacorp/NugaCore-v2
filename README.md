@@ -5,16 +5,17 @@ NugaCore is a WISP/FTTH operations platform built with React + Vite + TypeScript
 ## Project Direction
 
 - Roadmap maestro: [ROADMAP.md](ROADMAP.md)
+- Estado actual, avances y pendientes: [docs/reports/PROJECT_STATUS_CURRENT.md](./docs/reports/PROJECT_STATUS_CURRENT.md)
+- Revisión detallada del 15–29 de julio: [docs/reports/REPO_REVIEW_2026-07-15_29.md](./docs/reports/REPO_REVIEW_2026-07-15_29.md)
 - Production readiness checklist: [docs/PRODUCTION_READINESS_CHECKLIST.md](./docs/deployment/PRODUCTION_READINESS_CHECKLIST.md)
 - Development handoff checklist: [docs/DEVELOPMENT_HANDOFF_CHECKLIST.md](./docs/planning/DEVELOPMENT_HANDOFF_CHECKLIST.md)
 - Architecture reference: [docs/ARCHITECTURE.md](./docs/architecture/ARCHITECTURE.md)
 
 Current high-level status:
-- Core platform, Auth/RBAC, Customers, Plans, Billing, Payment Engine and Suspension Engine are functionally advanced.
-- **Router onboarding (julio 2026):** `.rsc` CHR-safe, alta dentro de **Sistema → Routers**, inventario sync con enrollment, y **WireGuard host-apply automático** al `wg0` del VPS (sin sync manual). Ver [docs/reports/SPRINT_HANDOFF_2026-07-15.md](./docs/reports/SPRINT_HANDOFF_2026-07-15.md).
-- WireGuard Manager, Router Enrollment, Template Engine and Dynamic Parameters are advanced; staging flags DB ON; production-readiness gates still apply.
-- MikroTik **live** execution (`MIKROTIK_WORKER_LIVE`), deeper NOC, full ERP, AI Ops and SaaS Multiempresa remain gated / future work.
-- Production requires the checklist gates: persistence after restart, tests, build, backups/restore, secret hygiene, RBAC, and no RouterOS live actions without approval.
+- Multi-tenant SaaS, WISP onboarding, CRM/billing, FTTH/GIS, RouterOS enrollment, SNMP/NOC, WireGuard and tenant-scoped payment integrations are functionally advanced.
+- **Production is blocked:** `main` has verified schema drift in staging, critical tenant-isolation findings and a payment-webhook fencing correction still outside `main`.
+- MikroTik/RouterOS live execution and FTTH/WISP live provisioning remain gated and require explicit authorization.
+- See the current status report above for the prioritized P0–P2 backlog and the production-readiness checklist for release gates.
 
 ## Stack
 
