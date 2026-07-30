@@ -28,6 +28,7 @@ diseño vivos** se agrupan por dominio.
 
 ## Puntos de entrada recomendados
 
+- **Mapa técnico del repo (cómo está construido y qué falta):** [`TECHNICAL_OVERVIEW.md`](TECHNICAL_OVERVIEW.md)
 - **Handoff julio 2026 (última ola Router/WG):** [`reports/SPRINT_HANDOFF_2026-07-15.md`](reports/SPRINT_HANDOFF_2026-07-15.md)
 - Estado actual del proyecto: [`reports/PROJECT_STATUS_CURRENT.md`](reports/PROJECT_STATUS_CURRENT.md)
 - Visión y ruta del producto: [`../ROADMAP.md`](../ROADMAP.md)
