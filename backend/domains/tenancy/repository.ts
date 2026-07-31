@@ -24,6 +24,8 @@ export interface TenancyRepository {
   findTenantBySlug(slug: string): Promise<Tenant | null>;
   createTenant(input: CreateTenantInput): Promise<Tenant>;
   listMembershipsByUser(userId: string): Promise<TenantMembership[]>;
+  /** Incluye invited/suspended: permite distinguir "sin membresía" de "inactiva". */
+  listAllMembershipsByUser(userId: string): Promise<TenantMembership[]>;
   listMembershipsByTenant(tenantId: string): Promise<TenantMembership[]>;
   findMembership(tenantId: string, userId: string): Promise<TenantMembership | null>;
   createMembership(input: CreateMembershipInput): Promise<TenantMembership>;
@@ -86,6 +88,10 @@ export class StoreTenancyRepository implements TenancyRepository {
 
   async listMembershipsByUser(userId: string): Promise<TenantMembership[]> {
     return this.memberships.filter((m) => m.userId === userId && m.status === 'active');
+  }
+
+  async listAllMembershipsByUser(userId: string): Promise<TenantMembership[]> {
+    return this.memberships.filter((m) => m.userId === userId);
   }
 
   async listMembershipsByTenant(tenantId: string): Promise<TenantMembership[]> {
@@ -205,6 +211,15 @@ export class SupabaseTenancyRepository implements TenancyRepository {
       .eq('user_id', userId)
       .eq('status', 'active');
     if (error) return fail('listMembershipsByUser', error);
+    return ((data as TenantMembershipRow[] | null) ?? []).map(rowToMembership);
+  }
+
+  async listAllMembershipsByUser(userId: string): Promise<TenantMembership[]> {
+    const { data, error } = await this.client
+      .from(MEMBERSHIPS_TABLE)
+      .select('*')
+      .eq('user_id', userId);
+    if (error) return fail('listAllMembershipsByUser', error);
     return ((data as TenantMembershipRow[] | null) ?? []).map(rowToMembership);
   }
 

@@ -45,6 +45,16 @@ export const isProduction = env.NODE_ENV === 'production';
 export const isPublicDeployment = env.PUBLIC_DEPLOYMENT;
 export const isHardenedRuntime = isProduction || isPublicDeployment;
 
+/**
+ * Misma decisión que `isHardenedRuntime`, pero leyendo process.env EN CADA
+ * LLAMADA. `isHardenedRuntime` se congela al importar el módulo; los gates de
+ * seguridad que deben poder auditarse (y probarse) por request usan esta
+ * versión para que un cambio de entorno nunca deje un fallback encendido.
+ */
+export const isHardenedRuntimeNow = (): boolean =>
+  (process.env.NODE_ENV || '').trim() === 'production'
+  || (process.env.PUBLIC_DEPLOYMENT || '').trim().toLowerCase() === 'true';
+
 // ====================================================================
 // Validación de entorno.
 //
