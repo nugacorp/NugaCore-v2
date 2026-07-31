@@ -1306,6 +1306,44 @@ describe('PaymentService — ownership antes de efectos', () => {
     expect(store.CLIENTS.find((client) => client.id === customerId)?.status).toBe('active');
   });
 
+  it('la ruta manual no deja acciones pending si falla Customers y el retry no duplica', async () => {
+    const customerId = `${INTERNAL_FENCING_CUSTOMER_PREFIX}manual-failure`;
+    store.CLIENTS.push({
+      id: customerId,
+      name: 'Cliente manual failure',
+      type: 'residential',
+      status: 'suspended',
+      email: 'manual-failure@example.test',
+      phone: '0000000000',
+      address: 'Test',
+      city: 'Test',
+      lat: 0,
+      lng: 0,
+      planId: 'plan-test',
+      ip: '192.0.2.3',
+    });
+    const actions: MikrotikActionRecord[] = [];
+    let actionSeq = 0;
+    const manualRepo = {
+      nextActionId: async () => `ma-manual-failure-${++actionSeq}`,
+      createAction: async (action: MikrotikActionRecord) => {
+        actions.push(action);
+        return action;
+      },
+    } as unknown as PaymentRepository;
+    vi.spyOn(StorePaymentDataProvider.prototype, 'reactivateCustomer')
+      .mockRejectedValue(new Error('customers unavailable'));
+    const service = new PaymentService(manualRepo);
+
+    await expect(service.reactivateCustomerService(customerId, { triggeredBy: 'manual:test' }))
+      .rejects.toThrow('customers unavailable');
+    await expect(service.reactivateCustomerService(customerId, { triggeredBy: 'manual:test' }))
+      .rejects.toThrow('customers unavailable');
+
+    expect(actions).toHaveLength(0);
+    expect(store.CLIENTS.find((client) => client.id === customerId)?.status).toBe('suspended');
+  });
+
   it('CoDi factura directa: B reanuda la reactivación tras reclaim durante recordPayment', async () => {
     let currentOwner = 'owner-a';
     let claimCount = 0;

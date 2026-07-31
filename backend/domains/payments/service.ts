@@ -364,6 +364,7 @@ export class PaymentService {
                   tenantId: invoiceTenantId,
                   amount,
                   method: 'Transferencia',
+                  provider: 'codi',
                   transactionId: providerEventId,
                 },
               );
@@ -453,7 +454,6 @@ export class PaymentService {
     if (invoice.payments.some((payment) => payment.transactionId === transactionId)) {
       logger.info('PaymentEngine: pago ya aplicado por esta transacción (idempotente)', {
         invoiceId: order.invoiceId,
-        transactionId,
       });
       return { updated: true };
     }
@@ -472,6 +472,7 @@ export class PaymentService {
       tenantId: effectiveTenantId,
       amount: order.amountCents / 100,
       method: order.provider,
+      provider: order.provider,
       transactionId,
     });
 
@@ -486,7 +487,7 @@ export class PaymentService {
    */
   private async applyWebhookPaymentOrThrow(
     webhookFence: WebhookMutationFence | undefined,
-    payment: { invoiceId: string; tenantId: string; amount: number; method: string; transactionId: string },
+    payment: { invoiceId: string; tenantId: string; amount: number; method: string; provider: string; transactionId: string },
   ): Promise<void> {
     const billing = getBillingService();
     if (!webhookFence) {
@@ -501,7 +502,7 @@ export class PaymentService {
     await webhookFence.beforeMutation();
     const result = await billing.applyWebhookPayment({
       ...payment,
-      idempotencyKey: webhookPaymentIdempotencyKey(webhookFence.eventId, payment.transactionId),
+      idempotencyKey: webhookPaymentIdempotencyKey(payment.provider, payment.transactionId),
       claim: { eventId: webhookFence.eventId, claimToken: webhookFence.claimToken },
     });
     // El ledger es la autoridad del claim: si dice que el owner cambió, esta
@@ -551,6 +552,22 @@ export class PaymentService {
       : client.status === 'active' ? undefined : client.status;
     const routers = inventoryRoutersRepository.list();
     const router = routers.find((r) => r.encryptedPassword || r.hasCredentials) ?? routers[0];
+    // Contrato histórico manual: Customers y timeline se completan ANTES de
+    // persistir la acción. Si cualquiera falla, no queda una acción pending y
+    // un retry vuelve a empezar sin duplicar acciones huérfanas.
+    const manualProgress: WebhookReactivationProgress = {};
+    if (!webhookFence) {
+      await dataProvider.reactivateCustomer(customerId, tenantId);
+      manualProgress.customerReactivated = true;
+      await getCustomersService().addTimelineEvent({
+        clientId: customerId,
+        eventType: 'status_change',
+        summary: `Cambio de estado ${prevStatus} → active`,
+        details: `Reactivación por pago confirmado. ${context?.invoiceId ? `Factura: ${context.invoiceId}.` : ''}${requestedDryRun ? ' Pendiente ejecución en router (dry_run).' : ' Orden de reactivación encolada.'}`,
+        createdBy: triggeredBy,
+      });
+      manualProgress.timelineAdded = true;
+    }
     let actionRec = existingAction;
     if (!actionRec) {
       const candidate: MikrotikActionRecord = {
@@ -594,7 +611,9 @@ export class PaymentService {
     const durableAction: MikrotikActionRecord = actionRec;
     const dryRun = durableAction.dryRun;
     const routerLive = !dryRun;
-    let progress = readWebhookReactivationProgress(durableAction);
+    let progress = webhookFence
+      ? readWebhookReactivationProgress(durableAction)
+      : manualProgress;
     const effectKey = (step: WebhookReactivationStep): string =>
       stepIdempotencyKey(durableAction.id, step);
 

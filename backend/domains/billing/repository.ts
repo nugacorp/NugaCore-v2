@@ -92,6 +92,8 @@ export interface WebhookPaymentInput {
   tenantId: string;
   amount: number;
   method: string;
+  /** Proveedor que asignó transactionId/orderId. */
+  provider: string;
   transactionId: string;
   /** Identidad tenant-scoped del pago; estable entre owners y reentregas. */
   idempotencyKey: string;
@@ -363,16 +365,27 @@ export class StoreBillingRepository implements BillingRepository {
       return { outcome: 'ownership_lost', invoice: null };
     }
 
-    const existing = store.PAYMENT_ALLOCATIONS.find(
+    const existingByCharge = store.PAYMENT_ALLOCATIONS.find(
+      (a) =>
+        (a.tenantId || 'tenant-default') === input.tenantId
+        && a.provider === input.provider
+        && a.transactionId === input.transactionId,
+    );
+    const existingByKey = store.PAYMENT_ALLOCATIONS.find(
       (a) =>
         (a.tenantId || 'tenant-default') === input.tenantId
         && a.idempotencyKey === input.idempotencyKey,
     );
+    if (existingByKey && existingByCharge && existingByKey.id !== existingByCharge.id) {
+      throw new IdempotencyConflictError(BILLING_IDEMPOTENCY_SCOPE, input.idempotencyKey);
+    }
+    const existing = existingByCharge ?? existingByKey;
     if (existing) {
       if (
         existing.invoiceId !== input.invoiceId
         || existing.amount !== input.amount
         || existing.method !== input.method
+        || existing.provider !== input.provider
         || (existing.transactionId ?? null) !== (input.transactionId ?? null)
       ) {
         throw new IdempotencyConflictError(BILLING_IDEMPOTENCY_SCOPE, input.idempotencyKey);
@@ -395,6 +408,7 @@ export class StoreBillingRepository implements BillingRepository {
       method: input.method,
       paymentDate: new Date().toISOString(),
       transactionId: input.transactionId,
+      provider: input.provider,
       remainingAfterPayment: invoicePendingAmount(invoice),
       tenantId: input.tenantId,
       idempotencyKey: input.idempotencyKey,
@@ -723,6 +737,7 @@ export class SupabaseBillingRepository implements BillingRepository {
       p_invoice_id: input.invoiceId,
       p_amount_cents: Math.round(input.amount * 100),
       p_method: input.method,
+      p_provider: input.provider,
       p_transaction_id: input.transactionId,
       p_idempotency_key: input.idempotencyKey,
     });
@@ -733,6 +748,9 @@ export class SupabaseBillingRepository implements BillingRepository {
       throw new Error(`applyWebhookPayment: ${error.message}`);
     }
 
+    if (Array.isArray(data) && data.length !== 1) {
+      throw new Error(`applyWebhookPayment: cardinalidad inválida (${data.length})`);
+    }
     const outcome = Array.isArray(data) ? data[0] : data;
     if (outcome === 'ownership_lost') return { outcome, invoice: null };
     if (outcome !== 'created' && outcome !== 'existing') {

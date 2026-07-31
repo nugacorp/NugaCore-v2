@@ -673,7 +673,7 @@ describe('Destinos idempotentes por actionId + step', () => {
 
 describe('Billing webhook atómico e idempotente', () => {
   const INVOICE_ID = 'INV-DURABLE-1';
-  const KEY = webhookPaymentIdempotencyKey(EVENT_ID, 'tx-1');
+  const KEY = webhookPaymentIdempotencyKey('openpay', 'tx-1');
 
   const seedStoreInvoice = () => {
     store.INVOICES.unshift({
@@ -700,6 +700,7 @@ describe('Billing webhook atómico e idempotente', () => {
       tenantId: TENANT_A,
       amount: 100,
       method: 'openpay',
+      provider: 'openpay',
       transactionId: 'tx-1',
       idempotencyKey: KEY,
       claim: { eventId: EVENT_ID, claimToken: 'owner-a' },
@@ -717,6 +718,79 @@ describe('Billing webhook atómico e idempotente', () => {
     expect(store.PAYMENT_ALLOCATIONS.filter((a) => a.invoiceId === INVOICE_ID)).toHaveLength(1);
   });
 
+  it('Store: evt-A/evt-B del mismo provider transaction recuperan un único cobro', async () => {
+    seedStoreInvoice();
+    store.PAYMENT_EVENTS.push(claimedEvent(OTHER_EVENT_ID, TENANT_A, 'owner-b'));
+    const repo = new StoreBillingRepository();
+    const common = {
+      invoiceId: INVOICE_ID,
+      tenantId: TENANT_A,
+      amount: 100,
+      method: 'openpay',
+      provider: 'openpay',
+      transactionId: 'tx-shared-between-events',
+    };
+
+    const first = await repo.applyWebhookPayment({
+      ...common,
+      idempotencyKey: webhookPaymentIdempotencyKey('openpay', common.transactionId),
+      claim: { eventId: EVENT_ID, claimToken: 'owner-a' },
+    });
+    const second = await repo.applyWebhookPayment({
+      ...common,
+      idempotencyKey: webhookPaymentIdempotencyKey('openpay', common.transactionId),
+      claim: { eventId: OTHER_EVENT_ID, claimToken: 'owner-b' },
+    });
+
+    expect(first.outcome).toBe('created');
+    expect(second.outcome).toBe('existing');
+    expect(store.PAYMENT_ALLOCATIONS.filter((a) => a.invoiceId === INVOICE_ID)).toHaveLength(1);
+  });
+
+  it.each([
+    {
+      name: 'parcial vigente', dueDate: '2099-12-31', initialStatus: 'unpaid',
+      initialCfdi: 'generated', amount: 25, expectedStatus: 'unpaid', expectedCfdi: 'pending', uuid: 'uuid-previo',
+    },
+    {
+      name: 'parcial vencida', dueDate: '2020-01-01', initialStatus: 'overdue',
+      initialCfdi: 'generated', amount: 25, expectedStatus: 'overdue', expectedCfdi: 'pending', uuid: 'uuid-previo',
+    },
+    {
+      name: 'total', dueDate: '2099-12-31', initialStatus: 'unpaid',
+      initialCfdi: 'pending', amount: 100, expectedStatus: 'paid', expectedCfdi: 'generated', uuid: undefined,
+    },
+    {
+      name: 'cancelada terminal', dueDate: '2020-01-01', initialStatus: 'canceled',
+      initialCfdi: 'canceled', amount: 25, expectedStatus: 'canceled', expectedCfdi: 'canceled', uuid: undefined,
+    },
+  ] as const)('Store: transición CFDI paritaria — $name', async (scenario) => {
+    seedStoreInvoice();
+    const invoice = store.INVOICES.find((row) => row.id === INVOICE_ID)!;
+    invoice.dueDateStr = scenario.dueDate;
+    invoice.status = scenario.initialStatus;
+    invoice.cfdiStatus = scenario.initialCfdi;
+    invoice.cfdiUuid = scenario.uuid;
+    const repo = new StoreBillingRepository();
+
+    const result = await repo.applyWebhookPayment({
+      invoiceId: INVOICE_ID,
+      tenantId: TENANT_A,
+      amount: scenario.amount,
+      method: 'openpay',
+      provider: 'openpay',
+      transactionId: `tx-${scenario.name}`,
+      idempotencyKey: webhookPaymentIdempotencyKey('openpay', `tx-${scenario.name}`),
+      claim: { eventId: EVENT_ID, claimToken: 'owner-a' },
+    });
+
+    expect(result.invoice).toMatchObject({
+      status: scenario.expectedStatus,
+      cfdiStatus: scenario.expectedCfdi,
+    });
+    if (scenario.expectedStatus === 'paid') expect(result.invoice?.cfdiUuid).toEqual(expect.any(String));
+  });
+
   it('Store: un claim vencido devuelve ownership_lost sin tocar el ledger', async () => {
     seedStoreInvoice();
     const repo = new StoreBillingRepository();
@@ -726,6 +800,7 @@ describe('Billing webhook atómico e idempotente', () => {
       tenantId: TENANT_A,
       amount: 100,
       method: 'openpay',
+      provider: 'openpay',
       transactionId: 'tx-1',
       idempotencyKey: KEY,
       claim: { eventId: EVENT_ID, claimToken: 'owner-viejo' },
@@ -743,6 +818,7 @@ describe('Billing webhook atómico e idempotente', () => {
       invoiceId: INVOICE_ID,
       tenantId: TENANT_A,
       method: 'openpay',
+      provider: 'openpay',
       transactionId: 'tx-1',
       idempotencyKey: KEY,
       claim: { eventId: EVENT_ID, claimToken: 'owner-a' },
@@ -761,6 +837,7 @@ describe('Billing webhook atómico e idempotente', () => {
       tenantId: TENANT_A,
       amount: 100,
       method: 'openpay',
+      provider: 'openpay',
       transactionId: 'tx-1',
       idempotencyKey: KEY,
       claim: { eventId: EVENT_ID, claimToken: 'owner-a' },
@@ -781,8 +858,9 @@ describe('Billing webhook atómico e idempotente', () => {
       tenantId: TENANT_A,
       amount: 25,
       method: 'openpay',
+      provider: 'openpay',
       transactionId: 'tx-copy',
-      idempotencyKey: webhookPaymentIdempotencyKey(EVENT_ID, 'tx-copy'),
+      idempotencyKey: webhookPaymentIdempotencyKey('openpay', 'tx-copy'),
       claim: { eventId: EVENT_ID, claimToken: 'owner-a' },
     });
 
@@ -813,6 +891,7 @@ describe('Billing webhook atómico e idempotente', () => {
       tenantId: TENANT_A,
       amount: 100,
       method: 'openpay',
+      provider: 'openpay',
       transactionId: 'tx-1',
       idempotencyKey: KEY,
       claim: { eventId: EVENT_ID, claimToken: 'owner-a' },
@@ -826,6 +905,97 @@ describe('Billing webhook atómico e idempotente', () => {
     expect(db.rows('invoices')[0].applied_cents).toBe(10_000);
   });
 
+  it('Supabase simulator: evt-A/evt-B del mismo provider transaction recuperan un único cobro', async () => {
+    const db = supabaseWorld();
+    seedClaim(db);
+    seedClaim(db, claimedEvent(OTHER_EVENT_ID, TENANT_A, 'owner-b'));
+    db.seed('invoices', [{
+      id: INVOICE_ID,
+      tenant_id: TENANT_A,
+      client_id: `${PREFIX}billing`,
+      client_name: 'Cliente durable',
+      total_cents: 10_000,
+      applied_cents: 0,
+      due_date: '2026-12-31',
+      status: 'unpaid',
+      cfdi_status: 'pending',
+    }]);
+    const repo = new SupabaseBillingRepository(asSupabaseClient<SupabaseClient>(db));
+    const common = {
+      invoiceId: INVOICE_ID,
+      tenantId: TENANT_A,
+      amount: 100,
+      method: 'openpay',
+      provider: 'openpay',
+      transactionId: 'tx-shared-between-events',
+    };
+
+    expect((await repo.applyWebhookPayment({
+      ...common,
+      idempotencyKey: webhookPaymentIdempotencyKey('openpay', common.transactionId),
+      claim: { eventId: EVENT_ID, claimToken: 'owner-a' },
+    })).outcome).toBe('created');
+    expect((await repo.applyWebhookPayment({
+      ...common,
+      idempotencyKey: webhookPaymentIdempotencyKey('openpay', common.transactionId),
+      claim: { eventId: OTHER_EVENT_ID, claimToken: 'owner-b' },
+    })).outcome).toBe('existing');
+    expect(db.rows('payments')).toHaveLength(1);
+    expect(db.rows('payment_applications')).toHaveLength(1);
+  });
+
+  it.each([
+    {
+      name: 'parcial vigente', dueDate: '2099-12-31', initialStatus: 'unpaid',
+      initialCfdi: 'generated', amount: 25, expectedStatus: 'unpaid', expectedCfdi: 'pending', uuid: 'uuid-previo',
+    },
+    {
+      name: 'parcial vencida', dueDate: '2020-01-01', initialStatus: 'overdue',
+      initialCfdi: 'generated', amount: 25, expectedStatus: 'overdue', expectedCfdi: 'pending', uuid: 'uuid-previo',
+    },
+    {
+      name: 'total', dueDate: '2099-12-31', initialStatus: 'unpaid',
+      initialCfdi: 'pending', amount: 100, expectedStatus: 'paid', expectedCfdi: 'generated', uuid: null,
+    },
+    {
+      name: 'cancelada terminal', dueDate: '2020-01-01', initialStatus: 'canceled',
+      initialCfdi: 'canceled', amount: 25, expectedStatus: 'canceled', expectedCfdi: 'canceled', uuid: null,
+    },
+  ])('Supabase simulator: transición CFDI paritaria — $name', async (scenario) => {
+    const db = supabaseWorld();
+    seedClaim(db);
+    db.seed('invoices', [{
+      id: INVOICE_ID,
+      tenant_id: TENANT_A,
+      client_id: `${PREFIX}billing`,
+      client_name: 'Cliente durable',
+      total_cents: 10_000,
+      applied_cents: 0,
+      amount_paid: 0,
+      due_date: scenario.dueDate,
+      status: scenario.initialStatus,
+      cfdi_status: scenario.initialCfdi,
+      cfdi_uuid: scenario.uuid,
+    }]);
+    const repo = new SupabaseBillingRepository(asSupabaseClient<SupabaseClient>(db));
+
+    await repo.applyWebhookPayment({
+      invoiceId: INVOICE_ID,
+      tenantId: TENANT_A,
+      amount: scenario.amount,
+      method: 'openpay',
+      provider: 'openpay',
+      transactionId: `tx-${scenario.name}`,
+      idempotencyKey: webhookPaymentIdempotencyKey('openpay', `tx-${scenario.name}`),
+      claim: { eventId: EVENT_ID, claimToken: 'owner-a' },
+    });
+
+    const invoice = db.rows('invoices')[0];
+    expect(invoice.status).toBe(scenario.expectedStatus);
+    expect(invoice.cfdi_status).toBe(scenario.expectedCfdi);
+    if (scenario.expectedStatus === 'paid') expect(invoice.cfdi_uuid).toEqual(expect.any(String));
+  });
+
   it('Supabase: sin la RPC el pago no se aplica por la ruta insegura', async () => {
     const db = supabaseWorld();
     seedClaim(db);
@@ -837,6 +1007,7 @@ describe('Billing webhook atómico e idempotente', () => {
       tenantId: TENANT_A,
       amount: 100,
       method: 'openpay',
+      provider: 'openpay',
       transactionId: 'tx-1',
       idempotencyKey: KEY,
       claim: { eventId: EVENT_ID, claimToken: 'owner-a' },
@@ -863,6 +1034,7 @@ describe('Billing webhook atómico e idempotente', () => {
       tenantId: TENANT_A,
       amount: 100,
       method: 'openpay',
+      provider: 'openpay',
       transactionId: 'tx-1',
       idempotencyKey: KEY,
       claim: { eventId: EVENT_ID, claimToken: 'owner-a' },
@@ -892,7 +1064,13 @@ describe('Billing webhook atómico e idempotente', () => {
       },
     ]);
     const repo = new SupabaseBillingRepository(asSupabaseClient<SupabaseClient>(db));
-    const common = { amount: 100, method: 'openpay', transactionId: 'tx-shared', idempotencyKey: 'shared-key' };
+    const common = {
+      amount: 100,
+      method: 'openpay',
+      provider: 'openpay',
+      transactionId: 'tx-shared',
+      idempotencyKey: 'shared-key',
+    };
 
     await expect(repo.applyWebhookPayment({
       ...common,

@@ -18,7 +18,7 @@ export async function dispatchNetworkOrder(input: {
   idempotencyKey?: string;
 }): Promise<void> {
   const repo = getSuspensionService().repo;
-  await repo.createOrder({
+  const order = await repo.createOrder({
     customerId: input.customerId,
     orderType: input.orderType,
     source: input.source,
@@ -29,6 +29,9 @@ export async function dispatchNetworkOrder(input: {
   // El worker puede procesar la MISMA fila más de una vez: la garantía de T5
   // es una orden durable, no una única invocación ni exactly-once en RouterOS.
   if (productionGates.mikrotikWorkerCommit()) {
-    await processPendingOrders(input.actor ?? input.source);
+    await processPendingOrders(input.actor ?? input.source, {
+      tenantId: order.tenantId || input.tenantId || 'tenant-default',
+      orderId: order.id,
+    });
   }
 }

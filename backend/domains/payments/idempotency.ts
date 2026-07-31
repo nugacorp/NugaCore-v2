@@ -25,11 +25,11 @@ export const stepIdempotencyKey = (actionId: string, step: WebhookReactivationSt
   `${actionId}:${step}`;
 
 /**
- * Identidad del pago Billing. Se ancla al evento y a la transacción del
- * proveedor: una reentrega del mismo cobro recupera el pago existente y una
- * transacción distinta del mismo evento no se confunde con él.
+ * Identidad del cobro Billing, independiente de la entrega. Dos event IDs
+ * distintos del mismo proveedor pueden representar el mismo charge/order;
+ * ambos deben recuperar una sola fila tenant-scoped.
  */
 export const webhookPaymentIdempotencyKey = (
-  paymentEventId: string,
+  provider: string,
   transactionId: string,
-): string => `pe:${paymentEventId}:payment:${transactionId}`;
+): string => `charge:${provider.toLowerCase()}:${transactionId}`;

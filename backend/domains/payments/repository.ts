@@ -615,6 +615,9 @@ export class SupabasePaymentRepository implements PaymentRepository {
     // RPC ausente, deadlock, error de serialización o cualquier fallo de base
     // se propagan como retryable: nunca se traducen a "no hay progreso".
     if (error) throw new Error(`checkpointReactivationStep: ${error.message}`);
+    if (Array.isArray(data) && data.length !== 1) {
+      throw new Error(`checkpointReactivationStep: cardinalidad inválida (${data.length})`);
+    }
     const outcome = Array.isArray(data) ? data[0] : data;
     if (outcome === 'applied' || outcome === 'already_applied' || outcome === 'ownership_lost') {
       return outcome;

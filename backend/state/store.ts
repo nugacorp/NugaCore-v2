@@ -104,6 +104,8 @@ export interface PaymentAllocation {
   method: string;
   paymentDate: string;
   transactionId?: string;
+  /** Proveedor del cobro durable; ausente en pagos manuales/históricos. */
+  provider?: string;
   remainingAfterPayment: number;
   /**
    * Identidad tenant-scoped del pago de webhook (T5). Nula en pagos manuales

@@ -76,9 +76,18 @@ export const registerWebhookRpcs = (db: FakePostgrest): void => {
     if (!invoice) throw new Error('invoice not found for billing apply');
 
     const amountCents = Number(args.p_amount_cents);
-    const existing = db.rows('payments').find(
+    const existingByCharge = db.rows('payments').find(
+      (row) => row.tenant_id === args.p_tenant_id
+        && row.provider === args.p_provider
+        && row.transaction_id === args.p_transaction_id,
+    );
+    const existingByKey = db.rows('payments').find(
       (row) => row.tenant_id === args.p_tenant_id && row.idempotency_key === args.p_idempotency_key,
     );
+    if (existingByCharge && existingByKey && existingByCharge.id !== existingByKey.id) {
+      throw new Error('idempotency_conflict: charge identity and key point to different rows');
+    }
+    const existing = existingByCharge ?? existingByKey;
 
     let paymentId: string;
     let outcome: 'created' | 'existing';
@@ -87,6 +96,7 @@ export const registerWebhookRpcs = (db: FakePostgrest): void => {
         Number(existing.amount_cents) !== amountCents
         || existing.client_id !== invoice.client_id
         || existing.method !== args.p_method
+        || existing.provider !== args.p_provider
         || (existing.transaction_id ?? null) !== (args.p_transaction_id ?? null)
         || existing.status !== 'confirmed'
       ) {
@@ -107,6 +117,7 @@ export const registerWebhookRpcs = (db: FakePostgrest): void => {
         client_name: invoice.client_name,
         amount_cents: amountCents,
         method: args.p_method,
+        provider: args.p_provider,
         transaction_id: args.p_transaction_id ?? null,
         idempotency_key: args.p_idempotency_key,
         payment_date: new Date().toISOString(),
@@ -155,9 +166,18 @@ export const registerWebhookRpcs = (db: FakePostgrest): void => {
     const totalCents = Number(invoice.total_cents ?? Math.round(Number(invoice.amount ?? 0) * 100));
     invoice.applied_cents = appliedCents;
     invoice.amount_paid = Math.round(appliedCents) / 100;
-    invoice.status = appliedCents >= totalCents
-      ? 'paid'
-      : new Date(String(invoice.due_date)).getTime() < Date.now() ? 'overdue' : 'unpaid';
+    if (invoice.status === 'canceled') {
+      invoice.cfdi_status = 'canceled';
+    } else if (appliedCents >= totalCents) {
+      invoice.status = 'paid';
+      invoice.cfdi_status = 'generated';
+      invoice.cfdi_uuid ||= `cfdi-${paymentId}`;
+    } else {
+      invoice.status = new Date(String(invoice.due_date)).getTime() < Date.now()
+        ? 'overdue'
+        : 'unpaid';
+      if (invoice.cfdi_status === 'generated') invoice.cfdi_status = 'pending';
+    }
     return outcome;
   });
 };
@@ -189,4 +209,9 @@ export const registerWebhookUniqueIndexes = (db: FakePostgrest): void => {
   partialTenantKey('suspension_events', 'uq_suspension_events_tenant_idempotency');
   partialTenantKey('noc_alerts', 'uq_noc_alerts_tenant_idempotency');
   partialTenantKey('payments', 'uq_payments_tenant_idempotency');
+  db.addUniqueIndex('uq_payments_tenant_provider_transaction', {
+    table: 'payments',
+    columns: ['tenant_id', 'provider', 'transaction_id'],
+    where: (row) => row.provider != null && row.transaction_id != null,
+  });
 };

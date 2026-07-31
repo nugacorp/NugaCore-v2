@@ -63,6 +63,13 @@ export interface CreateOrderInput {
   idempotencyKey?: string;
 }
 
+export interface OrderListFilter {
+  customerId?: string;
+  status?: string;
+  tenantId?: string;
+  orderId?: string;
+}
+
 const isUniqueViolation = (error: { code?: string; message?: string }): boolean =>
   String(error?.code) === '23505' || /duplicate key|already exists/i.test(String(error?.message ?? ''));
 
@@ -93,7 +100,7 @@ export interface SuspensionRepository {
   recordEvent(input: RecordEventInput): Promise<SuspensionEvent>;
   listEvents(customerId?: string): Promise<SuspensionEvent[]>;
 
-  listOrders(filter?: { customerId?: string; status?: string }): Promise<SuspensionOrder[]>;
+  listOrders(filter?: OrderListFilter): Promise<SuspensionOrder[]>;
   openOrders(customerId: string, orderType?: SuspensionOrder['orderType']): Promise<SuspensionOrder[]>;
   createOrder(input: CreateOrderInput): Promise<SuspensionOrder>;
   cancelOpenOrders(customerId: string, orderType: SuspensionOrder['orderType'], reason: string, actorId?: string): Promise<number>;
@@ -121,10 +128,12 @@ export class StoreSuspensionRepository implements SuspensionRepository {
     return customerId ? engineStore.EVENTS.filter((e) => e.customerId === customerId) : engineStore.EVENTS;
   }
 
-  async listOrders(filter?: { customerId?: string; status?: string }) {
+  async listOrders(filter?: OrderListFilter) {
     let rows = engineStore.ORDERS;
     if (filter?.customerId) rows = rows.filter((o) => o.customerId === filter.customerId);
     if (filter?.status) rows = rows.filter((o) => o.status === filter.status);
+    if (filter?.tenantId) rows = rows.filter((o) => (o.tenantId || 'tenant-default') === filter.tenantId);
+    if (filter?.orderId) rows = rows.filter((o) => o.id === filter.orderId);
     return rows;
   }
   async openOrders(customerId: string, orderType?: SuspensionOrder['orderType']) {
@@ -220,16 +229,18 @@ export class SupabaseSuspensionRepository implements SuspensionRepository {
     return (data || []).map((r) => rowToEvent(r as EventRow));
   }
 
-  private async loadOrders(table: 'suspension_orders' | 'reactivation_orders', orderType: SuspensionOrder['orderType'], filter?: { customerId?: string; status?: string }) {
+  private async loadOrders(table: 'suspension_orders' | 'reactivation_orders', orderType: SuspensionOrder['orderType'], filter?: OrderListFilter) {
     let q = this.client.from(table).select('*').order('created_at', { ascending: false });
     if (filter?.customerId) q = q.eq('customer_id', filter.customerId);
     if (filter?.status) q = q.eq('status', filter.status);
+    if (filter?.tenantId) q = q.eq('tenant_id', filter.tenantId);
+    if (filter?.orderId) q = q.eq('id', filter.orderId);
     const { data, error } = await q;
     if (error) throw new Error(`loadOrders(${table}): ${error.message}`);
     return (data || []).map((r) => rowToOrder(r as OrderRow, orderType));
   }
 
-  async listOrders(filter?: { customerId?: string; status?: string }): Promise<SuspensionOrder[]> {
+  async listOrders(filter?: OrderListFilter): Promise<SuspensionOrder[]> {
     const [susp, react] = await Promise.all([
       this.loadOrders('suspension_orders', 'suspension', filter),
       this.loadOrders('reactivation_orders', 'reactivation', filter),

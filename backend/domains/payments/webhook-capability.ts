@@ -91,6 +91,13 @@ export const evaluateWebhookCapability = async (
     };
   }
 
+  if (Array.isArray(data) && data.length !== 1) {
+    return {
+      ready: false,
+      code: 'schema_not_ready',
+      reason: `La capability devolvió cardinalidad inválida (${data.length}).`,
+    };
+  }
   const payload = (Array.isArray(data) ? data[0] : data) as
     | { ready?: unknown; missing?: unknown }
     | null;

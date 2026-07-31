@@ -12,13 +12,17 @@
 //     'payment-engine', que es justo lo que escribe el Payment Engine.
 // ====================================================================
 
-import { readFileSync } from 'fs';
+import { readdirSync, readFileSync } from 'fs';
 import { describe, expect, it } from 'vitest';
 
-const sql = readFileSync(
-  new URL('../../supabase/migrations/20260730120000_webhook_durable_idempotency.sql', import.meta.url),
-  'utf8',
+const migrationsDir = new URL('../../supabase/migrations/', import.meta.url);
+const durableMigrationFiles = readdirSync(migrationsDir).filter((name) =>
+  name.endsWith('_webhook_durable_idempotency.sql'),
 );
+const migrationFile = durableMigrationFiles[0] ?? '';
+const sql = migrationFile
+  ? readFileSync(new URL(migrationFile, migrationsDir), 'utf8')
+  : '';
 
 const IDEMPOTENT_TABLES = [
   'mikrotik_actions',
@@ -42,6 +46,11 @@ const positionOf = (needle: RegExp): number => {
 };
 
 describe('Migración de idempotencia durable — invariantes estáticas', () => {
+  it('usa una versión única posterior al historial de main', () => {
+    expect(durableMigrationFiles).toHaveLength(1);
+    expect(Number(migrationFile.slice(0, 14))).toBeGreaterThan(20260730140000);
+  });
+
   it('es aditiva: columnas nullable y ningún CREATE TABLE', () => {
     expect(sql).not.toMatch(/CREATE TABLE/i);
     for (const stmt of sql.match(/ADD COLUMN[^,;]*/gi) ?? []) {
@@ -61,7 +70,8 @@ describe('Migración de idempotencia durable — invariantes estáticas', () => 
   });
 
   it('la unicidad es PARCIAL y tenant-scoped: nunca fabrica claves históricas', () => {
-    const uniques = sql.match(/CREATE UNIQUE INDEX[^;]*/gi) ?? [];
+    const uniques = (sql.match(/CREATE UNIQUE INDEX[^;]*/gi) ?? [])
+      .filter((stmt) => !/uq_payments_tenant_provider_transaction/i.test(stmt));
     expect(uniques.length).toBeGreaterThan(0);
     for (const stmt of uniques) {
       expect(stmt, stmt).toMatch(/IF NOT EXISTS/i);
@@ -161,9 +171,49 @@ describe('Migración de idempotencia durable — invariantes estáticas', () => 
     // no se serializan entre sí, por lo que el INSERT debe perder la carrera
     // sin abortar la transacción y luego validar la fila ganadora.
     expect(body).toMatch(
-      /INSERT INTO public\.payments[\s\S]*?ON CONFLICT\s*\(tenant_id, idempotency_key\)[\s\S]*?DO NOTHING[\s\S]*?RETURNING id/i,
+      /INSERT INTO public\.payments[\s\S]*?ON CONFLICT\s*\(tenant_id, provider, transaction_id\)[\s\S]*?DO NOTHING[\s\S]*?RETURNING id/i,
     );
     expect(body).toMatch(/IF NOT FOUND[\s\S]*?FROM public\.payments[\s\S]*?FOR UPDATE/i);
+  });
+
+  it('Billing tipa status/CFDI con los enums reales y conserva canceled terminal', () => {
+    const body = sql.slice(positionOf(/CREATE OR REPLACE FUNCTION public\.billing_apply_webhook_payment/));
+    expect(body).toMatch(/v_status\s+(public\.)?invoice_status/i);
+    expect(body).toMatch(/v_cfdi_status\s+(public\.)?cfdi_status/i);
+    expect(body).toMatch(/IF\s+v_current_status\s*=\s*'canceled'/i);
+    expect(body).toMatch(/cfdi_status\s*=\s*v_cfdi_status/i);
+    expect(body).toMatch(/cfdi_uuid\s*=\s*v_cfdi_uuid/i);
+  });
+
+  it('los conflictos SQL no imprimen transaction/order ni la key derivada', () => {
+    const body = sql.slice(positionOf(/CREATE OR REPLACE FUNCTION public\.billing_apply_webhook_payment/));
+    for (const statement of body.match(/RAISE EXCEPTION[^;]*/gi) ?? []) {
+      expect(statement).not.toMatch(/p_transaction_id|p_idempotency_key/i);
+    }
+  });
+
+  it('impone identidad única tenant + provider + transaction independiente del eventId', () => {
+    expect(sql).toMatch(/ADD COLUMN IF NOT EXISTS provider TEXT/i);
+    expect(sql).toMatch(
+      /CREATE UNIQUE INDEX IF NOT EXISTS uq_payments_tenant_provider_transaction[\s\S]*?\(tenant_id, provider, transaction_id\)[\s\S]*?WHERE provider IS NOT NULL AND transaction_id IS NOT NULL/i,
+    );
+    const body = sql.slice(positionOf(/CREATE OR REPLACE FUNCTION public\.billing_apply_webhook_payment/));
+    expect(body).toMatch(/p_provider\s+TEXT/i);
+    expect(body).toMatch(/tenant_id\s*=\s*p_tenant_id[\s\S]*?provider\s*=\s*p_provider[\s\S]*?transaction_id\s*=\s*p_transaction_id/i);
+  });
+
+  it('la capability valida definición real de índices, propiedades de RPC y privilegios', () => {
+    const body = sql.slice(positionOf(/CREATE OR REPLACE FUNCTION public\.payments_webhook_schema_capability/));
+    expect(body).toMatch(/pg_index/i);
+    expect(body).toMatch(/indisunique/i);
+    expect(body).toMatch(/pg_get_expr\s*\(/i);
+    expect(body).toMatch(/prosecdef/i);
+    expect(body).toMatch(/proconfig/i);
+    expect(body).toMatch(/has_function_privilege\s*\(\s*'service_role'/i);
+    expect(body).toMatch(/has_function_privilege\s*\(\s*'anon'/i);
+    expect(body).toMatch(/has_function_privilege\s*\(\s*'authenticated'/i);
+    expect(body).toMatch(/aclexplode/i);
+    expect(body).toMatch(/grantee\s*=\s*0/i);
   });
 
   it('es reejecutable: índices con guarda y funciones CREATE OR REPLACE', () => {
