@@ -62,6 +62,7 @@ export interface PaymentRow {
   client_name: string;
   amount_cents: number;
   method: string;
+  provider?: string | null;
   transaction_id: string | null;
   idempotency_key: string | null;
   payment_date: string;                // TIMESTAMPTZ
@@ -121,6 +122,7 @@ export const rowToInvoicePayment = (pa: PaymentApplicationRow): InvoicePayment =
     date: dateStr,
     amount: roundMoney(pa.applied_cents / 100),
     method: pa.payment?.method ?? 'Transferencia',
+    ...(pa.payment?.provider ? { provider: pa.payment.provider } : {}),
     ...(pa.payment?.transaction_id ? { transactionId: pa.payment.transaction_id } : {}),
   };
 };

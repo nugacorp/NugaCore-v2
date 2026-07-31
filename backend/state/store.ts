@@ -219,6 +219,8 @@ export type MikrotikActionStatus = 'pending' | 'executing' | 'completed' | 'fail
 
 export interface PaymentOrderRecord {
   id: string;
+  /** WISP dueño de la orden; ausente en filas legacy => tenant-default. */
+  tenantId?: string;
   customerId: string;
   invoiceId: string;
   provider: string;

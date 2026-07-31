@@ -59,6 +59,50 @@ INSERT INTO public.invoices (
   ('inv-full', 'tenant-a', 'client-full', 'Full', 10000, CURRENT_DATE + 10, 'unpaid', 'pending', NULL),
   ('inv-canceled', 'tenant-a', 'client-canceled', 'Canceled', 10000, CURRENT_DATE - 10, 'canceled', 'canceled', NULL);
 
+-- El borde PostgreSQL también falla cerrado: importes no positivos no llegan
+-- al ledger y un valor fuera de INTEGER ni siquiera puede cruzar la firma RPC.
+DO $$
+DECLARE
+  payments_before INTEGER := (SELECT count(*) FROM public.payments);
+  applications_before INTEGER := (SELECT count(*) FROM public.payment_applications);
+BEGIN
+  BEGIN
+    PERFORM public.billing_apply_webhook_payment(
+      'tenant-a', 'evt-a', 'owner-a', 'inv-race', -1,
+      'openpay', 'openpay', 'tx-invalid-negative', 'charge:openpay:tx-invalid-negative'
+    );
+    RAISE EXCEPTION 'negative amount accepted';
+  EXCEPTION WHEN OTHERS THEN
+    IF SQLERRM = 'negative amount accepted' OR SQLERRM NOT LIKE 'invalid_payment_amount:%' THEN
+      RAISE;
+    END IF;
+  END;
+
+  BEGIN
+    PERFORM public.billing_apply_webhook_payment(
+      'tenant-a', 'evt-a', 'owner-a', 'inv-race', 0,
+      'openpay', 'openpay', 'tx-invalid-zero', 'charge:openpay:tx-invalid-zero'
+    );
+    RAISE EXCEPTION 'zero amount accepted';
+  EXCEPTION WHEN OTHERS THEN
+    IF SQLERRM = 'zero amount accepted' OR SQLERRM NOT LIKE 'invalid_payment_amount:%' THEN
+      RAISE;
+    END IF;
+  END;
+
+  BEGIN
+    PERFORM 2147483648::INTEGER;
+    RAISE EXCEPTION 'INTEGER overflow accepted';
+  EXCEPTION WHEN numeric_value_out_of_range THEN
+    NULL;
+  END;
+
+  IF (SELECT count(*) FROM public.payments) <> payments_before
+     OR (SELECT count(*) FROM public.payment_applications) <> applications_before THEN
+    RAISE EXCEPTION 'invalid amount changed billing ledger';
+  END IF;
+END $$;
+
 SET ROLE service_role;
 SELECT public.billing_apply_webhook_payment(
   'tenant-a', 'evt-a', 'owner-a', 'inv-race', 10000,

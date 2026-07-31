@@ -29,6 +29,7 @@ import {
   SupabaseBillingRepository,
   WebhookPaymentInput,
   WebhookPaymentResult,
+  webhookPaymentAmountCents,
 } from './repository';
 import { AccountBalance, CreatePaymentBody, PaymentRecord } from './types';
 
@@ -231,7 +232,8 @@ export class BillingService {
   }
 
   /** Ruta del webhook: atómica, idempotente y condicionada al claim vigente. */
-  applyWebhookPayment(input: WebhookPaymentInput): Promise<WebhookPaymentResult> {
+  async applyWebhookPayment(input: WebhookPaymentInput): Promise<WebhookPaymentResult> {
+    webhookPaymentAmountCents(input.amount);
     return this.repo.applyWebhookPayment(input);
   }
 

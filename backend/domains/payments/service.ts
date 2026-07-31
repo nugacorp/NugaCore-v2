@@ -15,7 +15,12 @@
 
 import { createHash } from 'node:crypto';
 import { logger } from '../../common/logger';
-import { BadRequestError, IdempotencyConflictError, NotFoundError } from '../../common/errors';
+import {
+  BadRequestError,
+  IdempotencyConflictError,
+  NotFoundError,
+  ServiceUnavailableError,
+} from '../../common/errors';
 import { productionGates } from '../../config/production-gates';
 import { dispatchNetworkOrder } from '../../bridges/network-order-dispatch';
 import { isDomainOnDb } from '../../config/feature-flags';
@@ -24,6 +29,7 @@ import { getBillingService } from '../billing/service';
 import { getCustomersService } from '../customers/service';
 import { getSuspensionService } from '../suspension/service';
 import { inventoryRoutersRepository } from '../inventory/routers/repository';
+import { filterRoutersByTenant, findRouterForTenant } from '../mikrotik/tenant-filter';
 import { store } from '../../state/store';
 import { buildPaymentDataProvider } from './data-provider';
 import { resolveProvider } from './providers/index';
@@ -348,12 +354,12 @@ export class PaymentService {
           const invoice = await billing.findInvoiceById(invoiceId, tenantId);
           if (invoice) {
             const invoiceTenantId = invoice.tenantId || 'tenant-default';
-            const paymentAlreadyAppliedByEvent = invoice.payments.some(
-              (payment) => payment.transactionId === providerEventId,
+            const paymentAlreadyAppliedByProvider = invoice.payments.some(
+              (payment) => payment.provider === 'codi' && payment.transactionId === providerEventId,
             );
-            let shouldReactivate = paymentAlreadyAppliedByEvent;
+            let shouldReactivate = paymentAlreadyAppliedByProvider;
 
-            if (invoice.status !== 'paid' && !paymentAlreadyAppliedByEvent) {
+            if (invoice.status !== 'paid' && !paymentAlreadyAppliedByProvider) {
               const amount = Number(
                 claimedPayload.amount ?? claimedPayload.monto ?? invoice.pendingAmount ?? invoice.amount,
               );
@@ -451,9 +457,12 @@ export class PaymentService {
     }
 
     const transactionId = order.providerOrderId ?? order.id;
-    if (invoice.payments.some((payment) => payment.transactionId === transactionId)) {
-      logger.info('PaymentEngine: pago ya aplicado por esta transacción (idempotente)', {
+    if (invoice.payments.some(
+      (payment) => payment.provider === order.provider && payment.transactionId === transactionId,
+    )) {
+      logger.info('PaymentEngine: cobro del proveedor ya aplicado (idempotente)', {
         invoiceId: order.invoiceId,
+        provider: order.provider,
       });
       return { updated: true };
     }
@@ -551,7 +560,20 @@ export class PaymentService {
       ? durablePreviousStatus
       : client.status === 'active' ? undefined : client.status;
     const routers = inventoryRoutersRepository.list();
-    const router = routers.find((r) => r.encryptedPassword || r.hasCredentials) ?? routers[0];
+    const tenantRouters = filterRoutersByTenant(routers, tenantId);
+    // Una acción durable conserva su destino original. Para una acción nueva,
+    // el router explícito del cliente manda; el fallback nunca sale del tenant.
+    const durableRouterId = existingAction?.routerId;
+    const requestedRouterId = durableRouterId ?? client.routerId;
+    const router = requestedRouterId
+      ? findRouterForTenant(routers, requestedRouterId, tenantId)
+      : tenantRouters.find((r) => r.encryptedPassword || r.hasCredentials) ?? tenantRouters[0];
+    if (!router) {
+      throw new ServiceUnavailableError(
+        'No hay un router disponible para el tenant del cliente.',
+        'TENANT_ROUTER_UNAVAILABLE',
+      );
+    }
     // Contrato histórico manual: Customers y timeline se completan ANTES de
     // persistir la acción. Si cualquiera falla, no queda una acción pending y
     // un retry vuelve a empezar sin duplicar acciones huérfanas.
@@ -574,7 +596,7 @@ export class PaymentService {
         id: await this.repo.nextActionId(),
         tenantId,
         customerId,
-        routerId: router?.id,
+        routerId: router.id,
         actionType: 'reactivate',
         status: 'pending',
         dryRun: requestedDryRun,

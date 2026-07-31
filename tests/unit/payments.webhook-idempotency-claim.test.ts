@@ -39,6 +39,7 @@ import type { Client } from '../../src/types';
 const TENANT_A = 'tenant-a';
 const TENANT_B = 'tenant-b';
 const INTERNAL_FENCING_CUSTOMER_PREFIX = 'customer-internal-fencing-';
+const INTERNAL_FENCING_ROUTER_ID = 'router-internal-fencing-tenant-a';
 
 const repo = new StorePaymentRepository();
 
@@ -59,7 +60,23 @@ const candidate = (
 
 const events = () => store.PAYMENT_EVENTS as PaymentEventRecord[];
 
-beforeEach(() => { store.PAYMENT_EVENTS.length = 0; });
+beforeEach(() => {
+  store.PAYMENT_EVENTS.length = 0;
+  store.MIKROTIK_ROUTERS.push({
+    id: INTERNAL_FENCING_ROUTER_ID,
+    tenantId: TENANT_A,
+    name: 'Router fencing tenant A',
+    ipAddress: '192.0.2.254',
+    apiPort: 8728,
+    username: 'fixture',
+    encryptedPassword: 'x',
+    isOnline: true,
+    cpuUsagePct: 0,
+    memoryUsagePct: 0,
+    routerOsVersion: '7.15',
+    lastHealthCheckAt: new Date().toISOString(),
+  });
+});
 afterEach(() => {
   store.PAYMENT_EVENTS.length = 0;
   store.CLIENTS = store.CLIENTS.filter((client) => !client.id.startsWith(INTERNAL_FENCING_CUSTOMER_PREFIX));
@@ -77,6 +94,9 @@ afterEach(() => {
   );
   store.NOC_ALERTS = store.NOC_ALERTS.filter(
     (alert) => !alert.source.startsWith('Cliente fencing') && !alert.source.startsWith('Cliente checkpoint'),
+  );
+  store.MIKROTIK_ROUTERS = store.MIKROTIK_ROUTERS.filter(
+    (router) => router.id !== INTERNAL_FENCING_ROUTER_ID,
   );
   vi.unstubAllEnvs();
   vi.restoreAllMocks();
@@ -1383,7 +1403,7 @@ describe('PaymentService — ownership antes de efectos', () => {
       counters.billing += 1;
       invoice.status = 'paid';
       invoice.pendingAmount = 0;
-      invoice.payments.push({ transactionId: event.providerEventId } as never);
+      invoice.payments.push({ provider: 'codi', transactionId: event.providerEventId } as never);
       currentOwner = 'owner-b';
       return { outcome: 'created', invoice } as never;
     });

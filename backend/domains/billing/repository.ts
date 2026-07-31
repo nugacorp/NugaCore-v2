@@ -17,7 +17,7 @@ import type { SupabaseClient } from '@supabase/supabase-js';
 import { Invoice } from '../../../src/types';
 import { store } from '../../state/store';
 import { logger } from '../../common/logger';
-import { IdempotencyConflictError } from '../../common/errors';
+import { BadRequestError, IdempotencyConflictError } from '../../common/errors';
 import {
   AllocationEntry,
   EnrichedInvoice,
@@ -110,6 +110,34 @@ export interface WebhookPaymentResult {
 }
 
 export const BILLING_IDEMPOTENCY_SCOPE = 'payments';
+
+const POSTGRES_INTEGER_MAX = 2_147_483_647;
+
+/**
+ * Normaliza el importe del webhook al mismo dominio que acepta la RPC
+ * (`INTEGER` de centavos). Validar antes de consultar adapters evita que
+ * NaN/Infinity, importes no positivos, sub-centavo u overflow produzcan
+ * efectos distintos entre Store y PostgreSQL.
+ */
+export const webhookPaymentAmountCents = (amount: number): number => {
+  const cents = Math.round(amount * 100);
+  const normalizedAmount = cents / 100;
+  const centTolerance = Number.EPSILON * Math.max(1, Math.abs(amount)) * 4;
+  if (
+    !Number.isFinite(amount)
+    || amount <= 0
+    || !Number.isSafeInteger(cents)
+    || cents <= 0
+    || cents > POSTGRES_INTEGER_MAX
+    || Math.abs(amount - normalizedAmount) > centTolerance
+  ) {
+    throw new BadRequestError(
+      'El importe del webhook debe ser finito, positivo y representable en centavos.',
+      'INVALID_AMOUNT',
+    );
+  }
+  return cents;
+};
 
 // ── Contrato ──────────────────────────────────────────────────────────
 
@@ -347,6 +375,7 @@ export class StoreBillingRepository implements BillingRepository {
   }
 
   async applyWebhookPayment(input: WebhookPaymentInput): Promise<WebhookPaymentResult> {
+    webhookPaymentAmountCents(input.amount);
     // Toda la secuencia es síncrona tras esta línea: sin `await` intermedio el
     // bucle de eventos no puede intercalar a otro owner, que es la propiedad
     // que en Supabase da la transacción. Payments y Billing comparten Store
@@ -398,6 +427,7 @@ export class StoreBillingRepository implements BillingRepository {
       date: new Date().toISOString().replace('T', ' ').substring(0, 16),
       amount: input.amount,
       method: input.method,
+      provider: input.provider,
       transactionId: input.transactionId,
     });
     syncStatus(invoice);
@@ -448,7 +478,7 @@ export class SupabaseBillingRepository implements BillingRepository {
     if (invoiceIds.length === 0) return new Map();
     const { data, error } = await this.client
       .from('payment_applications')
-      .select('id, payment_id, invoice_id, applied_cents, applied_at, applied_by, payments(id, method, transaction_id, amount_cents, payment_date, status)')
+      .select('id, payment_id, invoice_id, applied_cents, applied_at, applied_by, payments(id, method, provider, transaction_id, amount_cents, payment_date, status)')
       .in('invoice_id', invoiceIds)
       .order('applied_at', { ascending: true });
     if (error) throw new Error(`payment_applications: ${error.message}`);
@@ -726,6 +756,7 @@ export class SupabaseBillingRepository implements BillingRepository {
   }
 
   async applyWebhookPayment(input: WebhookPaymentInput): Promise<WebhookPaymentResult> {
+    const amountCents = webhookPaymentAmountCents(input.amount);
     // Una sola transacción Postgres: bloquea el evento, después la factura,
     // crea o recupera el pago por identidad, garantiza UNA aplicación y
     // recalcula totales desde la suma real. No hay fallback a la ruta
@@ -735,7 +766,7 @@ export class SupabaseBillingRepository implements BillingRepository {
       p_event_id: input.claim.eventId,
       p_claim_token: input.claim.claimToken,
       p_invoice_id: input.invoiceId,
-      p_amount_cents: Math.round(input.amount * 100),
+      p_amount_cents: amountCents,
       p_method: input.method,
       p_provider: input.provider,
       p_transaction_id: input.transactionId,

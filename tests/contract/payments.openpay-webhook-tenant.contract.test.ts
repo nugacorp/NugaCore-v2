@@ -33,6 +33,7 @@ import { store } from '../../backend/state/store';
 
 const TENANT_A = 'tenant-a';
 const TENANT_B = 'tenant-b';
+const TEST_ROUTER_PREFIX = 'router-openpay-contract-';
 
 /** Cuerpo único de rechazo: no distingue token inexistente de secreto ausente. */
 const REJECTED = { error: 'Webhook no disponible.', code: 'WEBHOOK_REJECTED' };
@@ -125,6 +126,7 @@ const seedCustomer = (tenantId: string): string => {
     planId: 'plan-basic',
     ip: '10.100.0.1',
     connectionType: 'WISP',
+    routerId: `${TEST_ROUTER_PREFIX}${tenantId}`,
   } as (typeof store.CLIENTS)[number]);
   return id;
 };
@@ -146,6 +148,9 @@ const reset = () => {
   engineStore.EVENTS.length = 0;
   engineStore.ORDERS.length = 0;
   store.CLIENTS = store.CLIENTS.filter((c) => !c.id.startsWith('c-tenant-'));
+  store.MIKROTIK_ROUTERS = store.MIKROTIK_ROUTERS.filter(
+    (router) => !router.id.startsWith(TEST_ROUTER_PREFIX),
+  );
   resetIntegrationsService();
   resetPaymentService();
   vi.unstubAllEnvs();
@@ -154,6 +159,22 @@ const reset = () => {
 
 beforeEach(() => {
   reset();
+  for (const tenantId of [TENANT_A, TENANT_B]) {
+    store.MIKROTIK_ROUTERS.push({
+      id: `${TEST_ROUTER_PREFIX}${tenantId}`,
+      tenantId,
+      name: `Router ${tenantId}`,
+      ipAddress: tenantId === TENANT_A ? '192.0.2.10' : '192.0.2.20',
+      apiPort: 8728,
+      username: 'fixture',
+      encryptedPassword: 'x',
+      isOnline: true,
+      cpuUsagePct: 0,
+      memoryUsagePct: 0,
+      routerOsVersion: '7.15',
+      lastHealthCheckAt: new Date().toISOString(),
+    });
+  }
   app = createApp();
 });
 
