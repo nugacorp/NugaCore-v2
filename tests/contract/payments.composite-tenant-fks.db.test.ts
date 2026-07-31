@@ -1,7 +1,7 @@
 import { afterAll, beforeAll, describe, expect, it } from 'vitest';
 
 import { findPgBinDir, startHermeticPg, type HermeticPg } from '../helpers/hermetic-pg';
-import { applySchema } from '../helpers/nugacore-schema';
+import { applySchema, listMigrations } from '../helpers/nugacore-schema';
 
 // ====================================================================
 // MT-05 — Postgres debe RECHAZAR relaciones cruzadas entre WISPs.
@@ -24,6 +24,7 @@ const ROLLBACK_PATH = `supabase/rollbacks/20260731043206_payment_engine_composit
 
 const BOOT_TIMEOUT_MS = 600_000;
 const CASE_TIMEOUT_MS = 180_000;
+const delay = (ms: number) => new Promise<void>((resolve) => setTimeout(resolve, ms));
 
 if (OPT_IN && !PG_BIN) {
   describe('MT-05 FKs compuestas — configuración requerida', () => {
@@ -68,6 +69,7 @@ const insertEvent = (id: string, tenant: string, orderId: string | null) => `
 
 describe.skipIf(!OPT_IN || !PG_BIN)('MT-05 — FKs compuestas por tenant (Postgres hermético)', () => {
   let pg: HermeticPg;
+  let fullApplied: string[];
 
   /** Crea una base a partir de una plantilla ya migrada (barato). */
   const fork = (template: string, name: string): string => {
@@ -111,7 +113,7 @@ describe.skipIf(!OPT_IN || !PG_BIN)('MT-05 — FKs compuestas por tenant (Postgr
     // payment_orders.tenant_id ya existe. La migración debe ser idempotente
     // sobre ese estado, no asumir que la columna falta.
     pg.exec('CREATE DATABASE base_full');
-    applySchema(pg, 'base_full', { mode: 'full', before: MIGRATION });
+    fullApplied = applySchema(pg, 'base_full', { mode: 'full', before: MIGRATION });
   }, BOOT_TIMEOUT_MS);
 
   afterAll(() => {
@@ -129,6 +131,46 @@ describe.skipIf(!OPT_IN || !PG_BIN)('MT-05 — FKs compuestas por tenant (Postgr
     },
     CASE_TIMEOUT_MS,
   );
+
+  it('full aplica sin skips todo el historial real anterior a MT-05', () => {
+    expect(fullApplied).toEqual(listMigrations().filter((file) => file < MIGRATION));
+  });
+
+  it('full crea inventario y aplica sus stamps tenant/RLS posteriores', () => {
+    expect(pg.scalar(`SELECT to_regclass('public.warehouses')::text`, 'base_full')).toBe(
+      'warehouses',
+    );
+    expect(pg.scalar(`SELECT to_regclass('public.inventory_transfers')::text`, 'base_full')).toBe(
+      'inventory_transfers',
+    );
+    expect(hasColumn('base_full', 'inventory_items', 'operational_status')).toBe(true);
+    expect(hasColumn('base_full', 'inventory_items', 'tenant_id')).toBe(true);
+    expect(hasColumn('base_full', 'warehouses', 'tenant_id')).toBe(true);
+    expect(
+      pg.scalar(
+        `SELECT is_nullable FROM information_schema.columns
+         WHERE table_schema='public' AND table_name='warehouses' AND column_name='tenant_id'`,
+        'base_full',
+      ),
+    ).toBe('NO');
+    expect(
+      pg.scalar(
+        `SELECT (column_default = '''tenant-default''::text')::text
+         FROM information_schema.columns
+         WHERE table_schema='public' AND table_name='warehouses' AND column_name='tenant_id'`,
+        'base_full',
+      ),
+    ).toBe('true');
+    expect(
+      pg.scalar(
+        `SELECT count(*)::text FROM pg_policies
+         WHERE schemaname='public'
+           AND ((tablename='warehouses' AND policyname='warehouses_service_role')
+             OR (tablename='inventory_transfers' AND policyname='inventory_transfers_service_role'))`,
+        'base_full',
+      ),
+    ).toBe('2');
+  });
 
   describe.each([
     ['upgrade desde el esquema previo con drift', 'base_drift'],
@@ -355,6 +397,79 @@ describe.skipIf(!OPT_IN || !PG_BIN)('MT-05 — FKs compuestas por tenant (Postgr
         expect(res.stderr).toMatch(/payment_events cruzados=1/);
         // Ni siquiera se creó la columna: falló antes de cualquier DDL.
         expect(hasColumn(db, 'payment_orders', 'tenant_id')).toBe(false);
+      },
+      CASE_TIMEOUT_MS,
+    );
+  });
+
+  describe('contención de locks', () => {
+    it(
+      'aborta acotadamente y sin DDL/DML parcial si otro writer retiene clients',
+      async () => {
+        const db = fork('base_drift', 'mt05_lock_timeout');
+        pg.exec(FIXTURE, db);
+        pg.exec(
+          `INSERT INTO public.payment_orders
+             (id, customer_id, invoice_id, provider, amount_cents, status)
+           VALUES ('po-lock-sentinel', 'cli-a', 'inv-a', 'openpay', 10000, 'pending')`,
+          db,
+        );
+        const blocker = pg.startSession(
+          `BEGIN;
+           LOCK TABLE public.clients IN ACCESS EXCLUSIVE MODE;
+           SELECT pg_sleep(8);
+           ROLLBACK;`,
+          db,
+        );
+
+        try {
+          let lockHeld = false;
+          for (let attempt = 0; attempt < 100; attempt += 1) {
+            lockHeld =
+              pg.scalar(
+                `SELECT count(*)::text
+                 FROM pg_locks l
+                 JOIN pg_class c ON c.oid = l.relation
+                 JOIN pg_namespace n ON n.oid = c.relnamespace
+                 WHERE l.database = (SELECT oid FROM pg_database WHERE datname = current_database())
+                   AND n.nspname = 'public'
+                   AND c.relname = 'clients'
+                   AND l.mode = 'AccessExclusiveLock'
+                   AND l.granted`,
+                db,
+              ) === '1';
+            if (lockHeld) break;
+            await delay(50);
+          }
+          expect(lockHeld, 'la sesión bloqueadora no obtuvo ACCESS EXCLUSIVE').toBe(true);
+
+          const startedAt = Date.now();
+          const res = pg.runFile(MIGRATION_PATH, db);
+          const elapsedMs = Date.now() - startedAt;
+
+          expect(res.code).not.toBe(0);
+          expect(res.stderr).toMatch(/lock timeout/i);
+          expect(elapsedMs).toBeGreaterThanOrEqual(1_500);
+          expect(elapsedMs).toBeLessThan(5_000);
+
+          // La primera mutación de MT-05 sería crear esta columna.
+          expect(hasColumn(db, 'payment_orders', 'tenant_id')).toBe(false);
+          expect(constraintDef(db, 'uq_clients_tenant_id_id')).toBe('<ausente>');
+          expect(constraintDef(db, 'payment_orders_tenant_invoice_fkey')).toBe('<ausente>');
+          expect(constraintDef(db, 'payment_orders_invoice_id_fkey')).toBe(
+            'FOREIGN KEY (invoice_id) REFERENCES invoices(id)',
+          );
+          expect(
+            pg.scalar(
+              `SELECT customer_id || ':' || invoice_id || ':' || amount_cents::text
+               FROM public.payment_orders WHERE id = 'po-lock-sentinel'`,
+              db,
+            ),
+          ).toBe('cli-a:inv-a:10000');
+        } finally {
+          blocker.stop();
+          await Promise.race([blocker.exited, delay(5_000)]);
+        }
       },
       CASE_TIMEOUT_MS,
     );

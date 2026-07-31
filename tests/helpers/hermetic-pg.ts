@@ -29,6 +29,12 @@ export interface PgResult {
   stderr: string;
 }
 
+export interface PgSession {
+  processId: number | undefined;
+  exited: Promise<number | null>;
+  stop(): void;
+}
+
 export interface HermeticPg {
   port: number;
   binDir: string;
@@ -37,6 +43,8 @@ export interface HermeticPg {
   run(sql: string, db?: string): PgResult;
   /** Ejecuta un archivo .sql. No lanza. */
   runFile(file: string, db?: string): PgResult;
+  /** Abre una conexión psql persistente para pruebas de concurrencia/locks. */
+  startSession(sql: string, db?: string): PgSession;
   /** Ejecuta SQL y lanza si falla. Devuelve stdout recortado. */
   exec(sql: string, db?: string): string;
   /** Ejecuta SQL de una sola columna/fila y devuelve el valor como texto. */
@@ -188,6 +196,33 @@ export async function startHermeticPg(): Promise<HermeticPg> {
     run: (sql, db = 'postgres') => invoke(['-c', sql], db),
 
     runFile: (file, db = 'postgres') => invoke(['-f', file], db),
+
+    startSession(sql, db = 'postgres') {
+      const child = spawn(
+        psqlPath,
+        [
+          '-h', '127.0.0.1',
+          '-p', String(port),
+          '-U', 'postgres',
+          '-d', db,
+          '-X',
+          '-q',
+          '-v', 'ON_ERROR_STOP=1',
+          '-c', sql,
+        ],
+        { stdio: 'ignore', env: psqlEnv },
+      );
+      const exited = new Promise<number | null>((resolve) => {
+        child.once('exit', (code) => resolve(code));
+      });
+      return {
+        processId: child.pid,
+        exited,
+        stop() {
+          if (child.exitCode === null) child.kill();
+        },
+      };
+    },
 
     exec(sql, db = 'postgres') {
       const res = invoke(['-c', sql], db);

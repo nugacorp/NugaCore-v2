@@ -26,9 +26,21 @@
 --
 -- No corrige cruces ni huerfanos. El preflight aborta con cantidades
 -- saneadas; toda la migracion es una sola transaccion.
+--
+-- Rollout operativo (NO aplicar live sin autorizacion explicita):
+--   - medir antes en un clon el volumen de las cuatro tablas y la duracion
+--     de preflight, indices y VALIDATE;
+--   - reservar una ventana de mantenimiento con writers pausados y confirmar
+--     que no haya transacciones largas sobre clients/invoices/orders/events;
+--   - lock_timeout=2s hace fail-fast antes de cualquier DDL/DML si no puede
+--     obtener el orden determinista de locks. No aumentarlo a ciegas;
+--   - el fallo revierte la transaccion completa. Tras liberar la contencion,
+--     el deploy puede reintentarse con el mismo archivo idempotente.
 -- ====================================================================
 
 BEGIN;
+
+SET LOCAL lock_timeout = '2s';
 
 -- --------------------------------------------------------------------
 -- PREFLIGHT. Locks no mutantes evitan que aparezca un cruce entre el conteo

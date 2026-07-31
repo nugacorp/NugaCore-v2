@@ -28,24 +28,6 @@ export const PRELUDE_SQL = resolve(process.cwd(), 'tests/helpers/supabase-prelud
  */
 export const SSOT_SHADOWED_BY_COLLISION = '20260717050000_multi_tenant_complete_ssot.sql';
 
-/**
- * Migraciones que NO aplican sobre una base limpia, por bugs propios y
- * ajenos a MT-05. Se omiten con motivo explícito en vez de dejar que
- * rompan una suite que no las está probando.
- *
- * - inventory_schema: `CREATE TABLE IF NOT EXISTS inventory_items` no hace
- *   nada porque init_schema ya creó la tabla sin `operational_status`, y
- *   más abajo el archivo indexa esa columna → «column "operational_status"
- *   does not exist». La reconciliación que añade la columna
- *   (20260714000000) corre DESPUÉS. En staging quedó consistente por el
- *   orden histórico de aplicación; una base nueva no puede reproducirlo.
- *   Deuda registrada, fuera del alcance de MT-05.
- */
-export const BROKEN_ON_CLEAN_DB: Readonly<Record<string, string>> = {
-  '20260622000000_inventory_schema.sql':
-    'indexa inventory_items.operational_status antes de que 20260714000000 la añada',
-};
-
 export type SchemaMode = 'full' | 'drift';
 
 export interface ApplyOptions {
@@ -73,7 +55,7 @@ export function applySchema(pg: HermeticPg, db: string, options: ApplyOptions = 
     throw new Error(`Prelude de Supabase falló:\n${prelude.stderr}`);
   }
 
-  const omitted = new Set([...skip, ...Object.keys(BROKEN_ON_CLEAN_DB)]);
+  const omitted = new Set(skip);
   if (mode === 'drift') omitted.add(SSOT_SHADOWED_BY_COLLISION);
 
   const applied: string[] = [];
