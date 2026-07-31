@@ -61,6 +61,21 @@ export class ConflictError extends AppError {
   }
 }
 
+/**
+ * 503 — la petición no se puede resolver de forma segura ahora mismo.
+ *
+ * Se usa cuando fallar es la respuesta correcta y degradar sería inseguro:
+ * p. ej. si no se puede determinar el tenant del usuario (MT-02). Antes ese
+ * caso caía a `tenant-default`, es decir, un fallo de base de datos CONCEDÍA
+ * acceso al WISP por defecto.
+ */
+export class ServiceUnavailableError extends AppError {
+  constructor(message = 'Service unavailable', code = 'SERVICE_UNAVAILABLE') {
+    super(503, message, code);
+    this.name = 'ServiceUnavailableError';
+  }
+}
+
 /** 404 JSON para endpoints /api no encontrados (se monta tras las rutas). */
 export const notFoundHandler = (req: Request, res: Response): void => {
   res.status(404).json({

@@ -1,7 +1,7 @@
 import { NextFunction, Request, Response } from 'express';
 import { env, isHardenedRuntime } from '../config/env';
 import { readRequestedTenantId, resolveTenantIdForUser } from '../domains/tenancy/resolve-tenant';
-import { DEFAULT_TENANT_ID } from '../domains/tenancy/types';
+import { ServiceUnavailableError } from './errors';
 import { logger } from './logger';
 import { isSupabaseAdminConfigured, supabaseAdmin } from '../services/supabase-admin';
 import { AppRole, normalizeRole } from './rbac';
@@ -93,7 +93,11 @@ export const attachAuthContext = async (req: Request, _res: Response, next: Next
         // el cliente puede editarlo con supabase.auth.updateUser().
         const meta = data.user.app_metadata as Record<string, unknown> | undefined;
         const claimTenant = typeof meta?.tenant_id === 'string' ? meta.tenant_id : null;
-        let tenantId = DEFAULT_TENANT_ID;
+        // MT-02: si el tenant no se puede resolver, NO se degrada al WISP por
+        // defecto. Antes un fallo de base de datos aquí CONCEDÍA acceso a
+        // tenant-default; ahora la petición muere con 503. Fallar es la
+        // respuesta correcta: servir datos del WISP equivocado, no.
+        let tenantId: string;
         try {
           tenantId = await resolveTenantIdForUser({
             userId: data.user.id,
@@ -103,9 +107,16 @@ export const attachAuthContext = async (req: Request, _res: Response, next: Next
             source: 'supabase-jwt',
           });
         } catch (tenantErr) {
-          logger.warn('Tenant resolution failed; using default', {
+          logger.error('Tenant resolution failed; rejecting request', {
+            userId: data.user.id,
             message: tenantErr instanceof Error ? tenantErr.message : String(tenantErr),
           });
+          return next(
+            new ServiceUnavailableError(
+              'No se pudo determinar el WISP de la sesión',
+              'TENANT_RESOLUTION_FAILED',
+            ),
+          );
         }
         req.authContext = {
           userId: data.user.id,
@@ -129,7 +140,10 @@ export const attachAuthContext = async (req: Request, _res: Response, next: Next
       ? req.headers['x-user-id'][0]
       : req.headers['x-user-id'];
     const userId = (headerUserId || 'header-user').toString();
-    let tenantId = DEFAULT_TENANT_ID;
+    // Mismo criterio fail-closed que la rama JWT. Esta rama solo corre en
+    // desarrollo, pero degradar aquí enmascararía en local el fallo que en
+    // producción queremos ver.
+    let tenantId: string;
     try {
       tenantId = await resolveTenantIdForUser({
         userId,
@@ -137,9 +151,16 @@ export const attachAuthContext = async (req: Request, _res: Response, next: Next
         source: 'trusted-headers',
       });
     } catch (tenantErr) {
-      logger.warn('Tenant resolution failed (trusted-headers); using default', {
+      logger.error('Tenant resolution failed (trusted-headers); rejecting request', {
+        userId,
         message: tenantErr instanceof Error ? tenantErr.message : String(tenantErr),
       });
+      return next(
+        new ServiceUnavailableError(
+          'No se pudo determinar el WISP de la sesión',
+          'TENANT_RESOLUTION_FAILED',
+        ),
+      );
     }
 
     req.authContext = {
