@@ -172,6 +172,12 @@ router.post(
           source: 'automation',
           actorId: req.authContext?.userId,
         });
+        // NOTA (PR-1A.2): escritura directa al store en memoria, NO al
+        // repositorio. No persiste ni lleva tenant_id ni con USE_DB_CUSTOMERS=true.
+        // Se deja así a propósito: toda esta rama muta el store de forma síncrona
+        // (status, MIKROTIK_LOGS, createAlert, logSuspensionAction), y persistir
+        // solo el timeline dejaría estado medio guardado. Se cierra en PR-3
+        // (persistencia completa) junto con el resto del bloque.
         store.addClientTimelineEvent({
           clientId: client.id,
           eventType: 'status_change',

@@ -323,7 +323,29 @@ export class SupabaseCustomersRepository implements CustomersRepository {
   async addTimelineEvent(event: Omit<ClientTimelineEvent, 'id' | 'createdAt'>): Promise<void> {
     const id = 'ct-' + Date.now() + '-' + Math.floor(Math.random() * 90 + 10);
     const createdAt = new Date().toISOString();
-    const { error } = await this.client.from(TIMELINE_TABLE).insert(timelineToRow(event, id, createdAt));
+
+    const { data: clientRow, error: clientError } = await this.client
+      .from(CLIENTS_TABLE)
+      .select('tenant_id')
+      .eq('id', event.clientId)
+      .maybeSingle();
+
+    if (clientError) return fail('addTimelineEvent:resolveTenant', clientError);
+
+    // Fail-closed: sin tenant legible NO se escribe. Un fallback a
+    // 'tenant-default' aquí sellaría el evento en el WISP equivocado y sería
+    // el mismo patrón fail-open que PR-1B debe eliminar de tenant-scope.
+    const tenantId = (clientRow as { tenant_id?: string | null } | null)?.tenant_id?.trim();
+    if (!tenantId) {
+      return fail(
+        'addTimelineEvent:resolveTenant',
+        new Error(`Cliente ${event.clientId} sin tenant_id resoluble; no se escribe el evento`),
+      );
+    }
+
+    const { error } = await this.client
+      .from(TIMELINE_TABLE)
+      .insert(timelineToRow(event, id, createdAt, tenantId));
     if (error) fail('addTimelineEvent', error);
   }
 }
