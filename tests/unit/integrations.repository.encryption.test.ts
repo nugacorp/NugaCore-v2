@@ -115,8 +115,14 @@ describe('SupabaseIntegrationsRepository — cifrado en reposo de credenciales',
     const { admin, captured } = makeFakeAdmin();
     const repo = new SupabaseIntegrationsRepository(admin);
 
-    // Simula una fila escrita antes del cifrado (texto plano en DB).
-    captured.row = { id: 'default', stripe_secret_key: 'sk_live_LEGACY_PLANO' };
+    // Simula una fila escrita antes del cifrado (texto plano en DB). Legacy en
+    // cuanto al cifrado, no en cuanto a tenancy: `tenant_id` ya es NOT NULL
+    // tras la migración de canonicalización (ver integrations.tenant-canonical).
+    captured.row = {
+      id: 'default',
+      tenant_id: 'tenant-default',
+      stripe_secret_key: 'sk_live_LEGACY_PLANO',
+    };
 
     const read = await repo.get();
     expect(read.stripeSecretKey).toBe('sk_live_LEGACY_PLANO');

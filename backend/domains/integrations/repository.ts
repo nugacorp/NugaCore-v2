@@ -9,15 +9,28 @@ import { DEFAULT_TENANT_ID } from '../tenancy/types';
 const DEFAULT_ID = 'default';
 
 /** Inverso de `resolveSettingsId`: la fila legacy 'default' es el tenant por defecto. */
-const tenantIdForSettingsId = (id: string): string =>
+export const tenantIdForSettingsId = (id: string): string =>
   id === DEFAULT_ID ? DEFAULT_TENANT_ID : id;
+
+/**
+ * WISP canónico de una petición. La ausencia de tenant es el WISP por defecto;
+ * es la única regla implícita que queda y está acotada a este punto.
+ */
+export const resolveTenantId = (tenantId?: string): string =>
+  tenantId?.trim() ? tenantId.trim() : DEFAULT_TENANT_ID;
 
 /**
  * Fila de settings del WISP. tenant-default (o ausencia de tenant) mapea a la
  * fila legacy 'default'; cada otro WISP tiene su propia fila `id = tenantId`.
+ *
+ * Sigue existiendo porque la columna `id` es la PK de la tabla y hay que
+ * escribirla coherente durante la transición, pero NO es la clave de scoping:
+ * leer o upsertar por `id` es exactamente el fallo que corrige MT-03.
  */
-export const resolveSettingsId = (tenantId?: string): string =>
-  !tenantId || tenantId === DEFAULT_TENANT_ID ? DEFAULT_ID : tenantId;
+export const resolveSettingsId = (tenantId?: string): string => {
+  const canonical = resolveTenantId(tenantId);
+  return canonical === DEFAULT_TENANT_ID ? DEFAULT_ID : canonical;
+};
 
 // Cifrado en reposo de credenciales (AES-256-GCM, reutiliza MIKROTIK_CREDENTIALS_KEY).
 // Solo se aplica en el límite con la DB (rowToRecord/recordToRow): el record en
@@ -43,6 +56,7 @@ const decField = (value: unknown): string => {
 
 export const emptyIntegrationSettings = (): IntegrationSettingsRecord => ({
   id: DEFAULT_ID,
+  tenantId: DEFAULT_TENANT_ID,
   stripeEnabled: false,
   stripePublishableKey: '',
   stripeSecretKey: '',
@@ -73,6 +87,10 @@ export const emptyIntegrationSettings = (): IntegrationSettingsRecord => ({
 
 const rowToRecord = (row: Record<string, unknown>): IntegrationSettingsRecord => ({
   id: String(row.id ?? DEFAULT_ID),
+  // Sin `tenant_id` la fila es anterior a la migración de canonicalización y no
+  // se puede afirmar de quién es. Se deja vacío a propósito: los llamadores
+  // comparan contra el WISP pedido y rechazan, en vez de adivinar tenant-default.
+  tenantId: String(row.tenant_id ?? ''),
   stripeEnabled: Boolean(row.stripe_enabled),
   stripePublishableKey: String(row.stripe_publishable_key ?? ''),
   stripeSecretKey: decField(row.stripe_secret_key),
@@ -105,6 +123,9 @@ const rowToRecord = (row: Record<string, unknown>): IntegrationSettingsRecord =>
 
 const recordToRow = (rec: IntegrationSettingsRecord) => ({
   id: rec.id,
+  // Identidad canónica: sin esto la DB etiqueta la fila con su DEFAULT y una
+  // configuración de tenant-b acaba marcada como tenant-default (MT-03).
+  tenant_id: rec.tenantId,
   stripe_enabled: rec.stripeEnabled,
   stripe_publishable_key: rec.stripePublishableKey || null,
   stripe_secret_key: encField(rec.stripeSecretKey),
@@ -133,6 +154,19 @@ const recordToRow = (rec: IntegrationSettingsRecord) => ({
   updated_at: rec.updatedAt,
 });
 
+/**
+ * Última barrera antes de entregar credenciales: la fila tiene que declararse
+ * del WISP que se pidió. Cubre el filtro roto, la fila legacy sin estampar y el
+ * upsert que resolvió por la columna equivocada — todos casos en los que el
+ * llamador recibiría secretos ajenos sin enterarse.
+ */
+const assertOwnedBy = (rec: IntegrationSettingsRecord, expected: string): void => {
+  if (rec.tenantId === expected) return;
+  throw new Error(
+    `Integrations: la fila de settings no pertenece al WISP solicitado (tenant esperado ${expected}, fila ${rec.tenantId || 'sin tenant_id'})`,
+  );
+};
+
 /** WISP dueño de un token de webhook, con su fila de settings. */
 export interface OpenPayWebhookOwner {
   tenantId: string;
@@ -153,8 +187,14 @@ export interface IntegrationsRepository {
 
 export class StoreIntegrationsRepository implements IntegrationsRepository {
   async get(tenantId?: string): Promise<IntegrationSettingsRecord> {
-    const id = resolveSettingsId(tenantId);
-    return (await this.getPersisted(tenantId)) ?? { ...emptyIntegrationSettings(), id };
+    const canonical = resolveTenantId(tenantId);
+    return (
+      (await this.getPersisted(tenantId)) ?? {
+        ...emptyIntegrationSettings(),
+        id: resolveSettingsId(tenantId),
+        tenantId: canonical,
+      }
+    );
   }
 
   async getPersisted(tenantId?: string): Promise<IntegrationSettingsRecord | null> {
@@ -171,12 +211,12 @@ export class StoreIntegrationsRepository implements IntegrationsRepository {
       ...Object.values(store.INTEGRATION_SETTINGS_BY_TENANT),
     ];
     const match = rows.find((rec) => Boolean(rec.openpayWebhookToken) && rec.openpayWebhookToken === needle);
-    return match ? { tenantId: tenantIdForSettingsId(match.id), settings: match } : null;
+    return match ? { tenantId: match.tenantId || tenantIdForSettingsId(match.id), settings: match } : null;
   }
 
   async save(rec: IntegrationSettingsRecord, tenantId?: string): Promise<IntegrationSettingsRecord> {
     const id = resolveSettingsId(tenantId);
-    const stored = { ...rec, id };
+    const stored = { ...rec, id, tenantId: resolveTenantId(tenantId) };
     if (id === DEFAULT_ID) {
       store.INTEGRATION_SETTINGS = stored;
     } else {
@@ -190,21 +230,33 @@ export class SupabaseIntegrationsRepository implements IntegrationsRepository {
   constructor(private readonly admin: SupabaseClient) {}
 
   async get(tenantId?: string): Promise<IntegrationSettingsRecord> {
-    const id = resolveSettingsId(tenantId);
-    return (await this.getPersisted(tenantId)) ?? { ...emptyIntegrationSettings(), id };
+    const canonical = resolveTenantId(tenantId);
+    return (
+      (await this.getPersisted(tenantId)) ?? {
+        ...emptyIntegrationSettings(),
+        id: resolveSettingsId(tenantId),
+        tenantId: canonical,
+      }
+    );
   }
 
   async getPersisted(tenantId?: string): Promise<IntegrationSettingsRecord | null> {
-    const id = resolveSettingsId(tenantId);
+    const canonical = resolveTenantId(tenantId);
+    // El scoping va por `tenant_id`, la identidad canónica. El backend habla
+    // con Supabase como service_role, así que RLS no acota nada aquí: si el
+    // filtro no es correcto, no hay segunda barrera.
     const { data, error } = await this.admin
       .from('wisp_integration_settings')
       .select('*')
-      .eq('id', id)
+      .eq('tenant_id', canonical)
       .maybeSingle();
     if (error) {
       throw error;
     }
-    return data ? rowToRecord(data as Record<string, unknown>) : null;
+    if (!data) return null;
+    const rec = rowToRecord(data as Record<string, unknown>);
+    assertOwnedBy(rec, canonical);
+    return rec;
   }
 
   async findByOpenPayWebhookToken(token: string): Promise<OpenPayWebhookOwner | null> {
@@ -226,18 +278,31 @@ export class SupabaseIntegrationsRepository implements IntegrationsRepository {
     }
     if (!data || data.length !== 1) return null;
     const rec = rowToRecord(data[0] as Record<string, unknown>);
-    return { tenantId: tenantIdForSettingsId(rec.id), settings: rec };
+    // El dueño sale de la columna canónica. Una fila sin `tenant_id` es previa
+    // a la migración: no se resuelve a nadie antes que atribuirla al WISP
+    // equivocado y cobrarle el webhook a otro.
+    if (!rec.tenantId) {
+      logger.warn('Integrations: fila de webhook OpenPay sin tenant_id canónico', { settingsId: rec.id });
+      return null;
+    }
+    return { tenantId: rec.tenantId, settings: rec };
   }
 
   async save(rec: IntegrationSettingsRecord, tenantId?: string): Promise<IntegrationSettingsRecord> {
-    const id = resolveSettingsId(tenantId);
+    const canonical = resolveTenantId(tenantId);
+    const row = recordToRow({ ...rec, id: resolveSettingsId(tenantId), tenantId: canonical });
+    // `onConflict: 'tenant_id'` — el índice único de la migración. Con
+    // `onConflict: 'id'` un WISP podría pisar la fila de otro cuya PK legacy
+    // coincidiera; el WISP dueño es lo que decide el destino de la escritura.
     const { data, error } = await this.admin
       .from('wisp_integration_settings')
-      .upsert(recordToRow({ ...rec, id }), { onConflict: 'id' })
+      .upsert(row, { onConflict: 'tenant_id' })
       .select('*')
       .single();
     if (error) throw error;
-    return rowToRecord(data as Record<string, unknown>);
+    const saved = rowToRecord(data as Record<string, unknown>);
+    assertOwnedBy(saved, canonical);
+    return saved;
   }
 }
 
