@@ -110,6 +110,8 @@ export const engineStore = {
 
   createOrder(input: {
     customerId: string;
+    tenantId?: string;
+    routerId?: string;
     invoiceId?: string;
     orderType: SuspensionOrder['orderType'];
     source: 'engine' | 'manual' | 'payment-engine' | 'provisioning-center' | 'service-status';

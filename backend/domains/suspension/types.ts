@@ -20,6 +20,13 @@ export type OrderStatus = 'PENDING' | 'QUEUED' | 'EXECUTED' | 'FAILED' | 'CANCEL
 
 export type OrderType = 'suspension' | 'reactivation';
 
+export type SuspensionOrderSource =
+  | 'engine'
+  | 'manual'
+  | 'payment-engine'
+  | 'provisioning-center'
+  | 'service-status';
+
 export type SuspensionEventType =
   | 'evaluated'
   | 'state_changed'
@@ -91,10 +98,14 @@ export interface SuspensionEvent {
 export interface SuspensionOrder {
   id: string;
   customerId: string;
+  /** Scope obligatorio para órdenes creadas por Payments; legacy puede omitirlo. */
+  tenantId?: string;
+  /** Router ya validado por el productor de la orden. */
+  routerId?: string;
   invoiceId?: string;
   orderType: OrderType;
   status: OrderStatus;
-  source: 'engine' | 'manual' | 'payment-engine' | 'provisioning-center' | 'service-status';
+  source: SuspensionOrderSource;
   reason?: string;
   scheduledFor?: string;
   executedAt?: string;

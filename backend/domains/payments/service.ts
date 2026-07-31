@@ -753,6 +753,8 @@ export class PaymentService {
       await webhookFence?.beforeMutation();
       await dispatchNetworkOrder({
         customerId,
+        tenantId,
+        routerId: router!.id,
         orderType: 'reactivation',
         source: 'payment-engine',
         reason: `Pago confirmado. Factura: ${context?.invoiceId ?? 'N/A'}`,
