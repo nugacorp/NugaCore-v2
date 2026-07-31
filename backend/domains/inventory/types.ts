@@ -56,6 +56,7 @@ export type TransferStatus = 'pending' | 'completed' | 'cancelled';
 
 export interface InventoryTransfer {
   id: string;
+  readonly tenantId: string;
   itemId: string;
   itemName: string;
   qty: number;

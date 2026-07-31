@@ -70,6 +70,7 @@ const insertEvent = (id: string, tenant: string, orderId: string | null) => `
 describe.skipIf(!OPT_IN || !PG_BIN)('MT-05 — FKs compuestas por tenant (Postgres hermético)', () => {
   let pg: HermeticPg;
   let fullApplied: string[];
+  let releaseApplied: string[];
 
   /** Crea una base a partir de una plantilla ya migrada (barato). */
   const fork = (template: string, name: string): string => {
@@ -114,6 +115,12 @@ describe.skipIf(!OPT_IN || !PG_BIN)('MT-05 — FKs compuestas por tenant (Postgr
     // sobre ese estado, no asumir que la columna falta.
     pg.exec('CREATE DATABASE base_full');
     fullApplied = applySchema(pg, 'base_full', { mode: 'full', before: MIGRATION });
+
+    // Clean release: aplica también MT-05 y sus fixups posteriores. Este
+    // probe corrige la sobredeclaración anterior comprobando directamente
+    // el ownership relacional de inventory_transfers.
+    pg.exec('CREATE DATABASE base_release');
+    releaseApplied = applySchema(pg, 'base_release', { mode: 'full' });
   }, BOOT_TIMEOUT_MS);
 
   afterAll(() => {
@@ -136,7 +143,7 @@ describe.skipIf(!OPT_IN || !PG_BIN)('MT-05 — FKs compuestas por tenant (Postgr
     expect(fullApplied).toEqual(listMigrations().filter((file) => file < MIGRATION));
   });
 
-  it('full crea inventario y aplica sus stamps tenant/RLS posteriores', () => {
+  it('full crea inventario y aplica los stamps previos de items/warehouses y sus políticas RLS', () => {
     expect(pg.scalar(`SELECT to_regclass('public.warehouses')::text`, 'base_full')).toBe(
       'warehouses',
     );
@@ -170,6 +177,27 @@ describe.skipIf(!OPT_IN || !PG_BIN)('MT-05 — FKs compuestas por tenant (Postgr
         'base_full',
       ),
     ).toBe('2');
+  });
+
+  it('clean release comprueba directamente tenant_id y constraints de inventory_transfers', () => {
+    expect(releaseApplied).toEqual(listMigrations());
+    expect(hasColumn('base_release', 'inventory_transfers', 'tenant_id')).toBe(true);
+    expect(
+      pg.scalar(
+        `SELECT is_nullable FROM information_schema.columns
+         WHERE table_schema='public' AND table_name='inventory_transfers' AND column_name='tenant_id'`,
+        'base_release',
+      ),
+    ).toBe('NO');
+    expect(constraintDef('base_release', 'inventory_transfers_tenant_item_fkey')).toBe(
+      'FOREIGN KEY (tenant_id, item_id) REFERENCES inventory_items(tenant_id, id) ON DELETE CASCADE',
+    );
+    expect(constraintDef('base_release', 'inventory_transfers_tenant_from_warehouse_fkey')).toBe(
+      'FOREIGN KEY (tenant_id, from_warehouse) REFERENCES warehouses(tenant_id, name) ON DELETE RESTRICT',
+    );
+    expect(constraintDef('base_release', 'inventory_transfers_tenant_to_warehouse_fkey')).toBe(
+      'FOREIGN KEY (tenant_id, to_warehouse) REFERENCES warehouses(tenant_id, name) ON DELETE RESTRICT',
+    );
   });
 
   describe.each([

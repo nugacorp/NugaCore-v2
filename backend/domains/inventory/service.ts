@@ -152,28 +152,31 @@ export class InventoryService {
   }
 
   // --- Transfers ----------------------------------------------------
-  listTransfers(): Promise<InventoryTransfer[]> {
-    return this.repo.listTransfers();
+  listTransfers(tenantId: string): Promise<InventoryTransfer[]> {
+    return this.repo.listTransfers(tenantId);
   }
 
-  getTransfer(id: string): Promise<InventoryTransfer | null> {
-    return this.repo.getTransfer(id);
+  getTransfer(id: string, tenantId: string): Promise<InventoryTransfer | null> {
+    return this.repo.getTransfer(id, tenantId);
   }
 
-  createTransfer(input: Omit<CreateTransferInput, 'qty'> & { qty: unknown }): Promise<InventoryTransfer> {
+  createTransfer(
+    input: Omit<CreateTransferInput, 'qty'> & { qty: unknown },
+    tenantId: string,
+  ): Promise<InventoryTransfer> {
     const qty = positiveQty(input.qty);
     if (!input.itemId || !input.toWarehouse) {
       throw new BadRequestError('Missing required fields: itemId, toWarehouse', 'MISSING_FIELD');
     }
-    return this.repo.createTransfer({ ...input, qty });
+    return this.repo.createTransfer({ ...input, qty }, tenantId);
   }
 
-  completeTransfer(id: string): Promise<InventoryTransfer> {
-    return this.repo.completeTransfer(id);
+  completeTransfer(id: string, tenantId: string): Promise<InventoryTransfer> {
+    return this.repo.completeTransfer(id, tenantId);
   }
 
-  cancelTransfer(id: string): Promise<InventoryTransfer> {
-    return this.repo.cancelTransfer(id);
+  cancelTransfer(id: string, tenantId: string): Promise<InventoryTransfer> {
+    return this.repo.cancelTransfer(id, tenantId);
   }
 }
 

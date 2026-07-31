@@ -14,6 +14,8 @@ import { createApp } from '../../backend/app';
 
 const ADMIN = { 'x-user-role': 'super admin', 'x-user-id': 'test-admin' };
 const READER = { 'x-user-role': 'solo lectura', 'x-user-id': 'test-reader' };
+const TENANT_B_ADMIN = { ...ADMIN, 'x-tenant-id': 'tenant-b' };
+const TENANT_B_READER = { ...READER, 'x-tenant-id': 'tenant-b' };
 
 const ITEM_VIEW_KEYS = ['id', 'name', 'category', 'model', 'brand', 'qty', 'warehouse', 'serials', 'operationalStatus', 'stateUpdatedAt'];
 
@@ -150,7 +152,18 @@ describe('API v1 — Inventario: almacenes (Fase 5.1)', () => {
 
 describe('API v1 — Inventario: transferencias (Fase 5.1)', () => {
   let app: Express;
-  beforeAll(() => { app = createApp(); });
+  beforeAll(async () => {
+    const { getWispOnboardingService } = await import('../../backend/domains/wisp-onboarding/service');
+    const onboarding = getWispOnboardingService() as unknown as {
+      repo: { upsert(state: Record<string, unknown>): Promise<unknown> };
+    };
+    await onboarding.repo.upsert({
+      tenantId: 'tenant-b', status: 'completed', currentStep: 'done',
+      completedSteps: ['company', 'zone', 'billing', 'router', 'done'],
+      completedAt: new Date().toISOString(), updatedAt: new Date().toISOString(),
+    });
+    app = createApp();
+  });
 
   it('POST /api/inventory/transfers con rol insuficiente -> 403', async () => {
     const res = await request(app).post('/api/inventory/transfers').set(READER).send({ itemId: 'item-1', qty: 1, toWarehouse: 'Torre Alfa' });
@@ -194,5 +207,33 @@ describe('API v1 — Inventario: transferencias (Fase 5.1)', () => {
     const cancelled = await request(app).post(`/api/inventory/transfers/${id}/cancel`).set(ADMIN);
     expect(cancelled.status).toBe(200);
     expect(cancelled.body.status).toBe('cancelled');
+  });
+
+  it('caller propaga tenant: B no lista/lee/completa/cancela transferencias default', async () => {
+    const createdForList = await request(app).post('/api/inventory/transfers').set(ADMIN)
+      .send({ itemId: 'item-1', qty: 1, toWarehouse: 'Coche Tecnico 2' });
+    const createdForCancel = await request(app).post('/api/inventory/transfers').set(ADMIN)
+      .send({ itemId: 'item-1', qty: 1, toWarehouse: 'Coche Tecnico 2' });
+    expect(createdForList.status).toBe(201);
+    expect(createdForList.body.tenantId).toBe('tenant-default');
+    expect(createdForCancel.status).toBe(201);
+
+    const listAsB = await request(app).get('/api/inventory/transfers').set(TENANT_B_READER);
+    expect(listAsB.status).toBe(200);
+    expect(listAsB.body.some((row: { id: string }) => row.id === createdForList.body.id)).toBe(false);
+
+    expect((await request(app).get(`/api/inventory/transfers/${createdForList.body.id}`)
+      .set(TENANT_B_READER)).status).toBe(404);
+    expect((await request(app).post(`/api/inventory/transfers/${createdForList.body.id}/complete`)
+      .set(TENANT_B_ADMIN)).status).toBe(404);
+    expect((await request(app).post(`/api/inventory/transfers/${createdForCancel.body.id}/cancel`)
+      .set(TENANT_B_ADMIN)).status).toBe(404);
+  });
+
+  it('caller no permite a B crear con relaciones del tenant default', async () => {
+    const res = await request(app).post('/api/inventory/transfers').set(TENANT_B_ADMIN)
+      .send({ itemId: 'item-1', qty: 1, toWarehouse: 'Coche Tecnico 2', tenantId: 'tenant-default' });
+
+    expect(res.status).toBe(404);
   });
 });
