@@ -7,6 +7,13 @@
 
 export type PaymentProvider = 'manual' | 'mercado_pago' | 'openpay' | 'spei' | 'codi';
 
+/**
+ * Registro que SE ESCRIBE con dueño conocido. Los Record leídos de la base
+ * pueden traer `tenantId` ausente (filas legacy anteriores al stamp), pero
+ * nada nuevo entra sin WISP: el compilador rechaza el insert sin `tenantId`.
+ */
+export type TenantOwned<T> = T & { tenantId: string };
+
 export type PaymentOrderStatus =
   | 'pending'
   | 'processing'
@@ -249,7 +256,18 @@ export interface CreatePaymentOrderInput {
   invoiceId: string;
   provider: PaymentProvider;
   amountCents: number;
-  tenantId?: string;
+  /**
+   * WISP dueño de la order. OBLIGATORIO: decide qué cliente y qué factura se
+   * validan, y con qué credenciales de proveedor se cobra.
+   */
+  tenantId: string;
+}
+
+/** Contexto de una reactivación. El WISP dueño del cliente es obligatorio. */
+export interface ReactivationContext {
+  tenantId: string;
+  triggeredBy?: string;
+  invoiceId?: string;
 }
 
 export interface ProcessWebhookInput {
