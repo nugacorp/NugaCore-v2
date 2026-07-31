@@ -9,22 +9,31 @@
 // transición, pero deja de ser autoridad.
 // ====================================================================
 
-import { describe, expect, it } from 'vitest';
+import { afterEach, describe, expect, it } from 'vitest';
 import type { SupabaseClient } from '@supabase/supabase-js';
 import {
+  StoreIntegrationsRepository,
   SupabaseIntegrationsRepository,
   emptyIntegrationSettings,
 } from '../../backend/domains/integrations/repository';
+import type { IntegrationSettingsRecord } from '../../backend/domains/integrations/types';
+import { store } from '../../backend/state/store';
 
 type Row = Record<string, unknown>;
 
-/**
- * Tabla en memoria con la semántica que importa: el upsert resuelve conflictos
- * por la columna que pide `onConflict`, no por la PK. Así un `onConflict: 'id'`
- * sobre datos de otro WISP se manifiesta como lo que sería en Postgres.
- */
+/** Fake post-migración: PK(id) y UNIQUE(tenant_id) siguen activas en un upsert. */
 const makeFakeAdmin = (seed: Row[] = []) => {
   const table: Row[] = seed.map((r) => ({ ...r }));
+  for (let i = 0; i < table.length; i += 1) {
+    if (table.findIndex((row) => row.id === table[i].id) !== i) {
+      throw new Error(`fixture inválido: PK id duplicada (${String(table[i].id)})`);
+    }
+    if (table.findIndex((row) => row.tenant_id === table[i].tenant_id) !== i) {
+      throw new Error(
+        `fixture inválido: UNIQUE tenant_id duplicada (${String(table[i].tenant_id)})`,
+      );
+    }
+  }
   const calls: { filters: Array<[string, unknown]>; onConflict: string | null } = {
     filters: [],
     onConflict: null,
@@ -59,12 +68,27 @@ const makeFakeAdmin = (seed: Row[] = []) => {
           const key = opts?.onConflict ?? 'id';
           calls.onConflict = key;
           const at = table.findIndex((r) => r[key] === row[key]);
-          if (at >= 0) table[at] = { ...table[at], ...row };
-          else table.push({ ...row });
-          const written = table[at >= 0 ? at : table.length - 1];
+          const candidate = at >= 0 ? { ...table[at], ...row } : { ...row };
+          const violatesId = table.some((existing, index) => index !== at && existing.id === candidate.id);
+          const violatesTenant = table.some(
+            (existing, index) => index !== at && existing.tenant_id === candidate.tenant_id,
+          );
+          const error = violatesId || violatesTenant
+            ? {
+                code: '23505',
+                message: `duplicate key value violates unique constraint ${
+                  violatesId ? 'wisp_integration_settings_pkey' : 'uq_wisp_integration_settings_tenant_id'
+                }`,
+              }
+            : null;
+          if (!error) {
+            if (at >= 0) table[at] = candidate;
+            else table.push(candidate);
+          }
+          const written = error ? null : candidate;
           return {
             select() {
-              return { single: async () => ({ data: written, error: null }) };
+              return { single: async () => ({ data: written, error }) };
             },
           };
         },
@@ -161,7 +185,7 @@ describe('MT-03 — el repositorio estampa y acota por tenant_id', () => {
     expect(await repo.getPersisted('tenant-a')).toBeNull();
   });
 
-  it('A no puede sobrescribir la fila de B por colisión de id', async () => {
+  it('una colisión de PK id aborta aunque onConflict sea tenant_id', async () => {
     const { admin, table, calls } = makeFakeAdmin([
       rowFor('tenant-b', 'tenant-a', { openpay_merchant_id: 'MERCHANT_B' }),
     ]);
@@ -169,14 +193,14 @@ describe('MT-03 — el repositorio estampa y acota por tenant_id', () => {
 
     const rec = emptyIntegrationSettings();
     rec.openpayMerchantId = 'MERCHANT_A';
-    await repo.save(rec, 'tenant-a');
+    await expect(repo.save(rec, 'tenant-a')).rejects.toMatchObject({ code: '23505' });
 
-    // El upsert resuelve por tenant_id: la fila de B queda intacta.
+    // PostgreSQL no cambia de arbiter: la PK sigue siendo una constraint y
+    // rechaza el INSERT antes de que aparezca una segunda fila con el mismo id.
     expect(calls.onConflict).toBe('tenant_id');
-    const b = table.find((r) => r.tenant_id === 'tenant-b');
-    expect(b?.openpay_merchant_id).toBe('MERCHANT_B');
-    const a = table.find((r) => r.tenant_id === 'tenant-a');
-    expect(a?.openpay_merchant_id).toBe('MERCHANT_A');
+    expect(table).toEqual([
+      rowFor('tenant-b', 'tenant-a', { openpay_merchant_id: 'MERCHANT_B' }),
+    ]);
   });
 
   it('el dueño del webhook OpenPay sale de tenant_id, no de id', async () => {
@@ -210,6 +234,11 @@ describe('MT-03 — el repositorio estampa y acota por tenant_id', () => {
 });
 
 describe('MT-03 — el repositorio en memoria expone la misma identidad canónica', () => {
+  afterEach(() => {
+    store.INTEGRATION_SETTINGS = null;
+    store.INTEGRATION_SETTINGS_BY_TENANT = {};
+  });
+
   it('el record del store lleva el tenant real', async () => {
     const { StoreIntegrationsRepository } = await import(
       '../../backend/domains/integrations/repository'
@@ -222,5 +251,93 @@ describe('MT-03 — el repositorio en memoria expone la misma identidad canónic
     const def = await repo.save(emptyIntegrationSettings(), 'tenant-default');
     expect(def.tenantId).toBe('tenant-default');
     expect(def.id).toBe('default');
+  });
+
+  it('A no recibe secretos de un record stamped a B aunque esté bajo la clave A', async () => {
+    const repo = new StoreIntegrationsRepository();
+    store.INTEGRATION_SETTINGS_BY_TENANT['tenant-a'] = {
+      ...emptyIntegrationSettings(),
+      id: 'tenant-a',
+      tenantId: 'tenant-b',
+      openpayMerchantId: 'MERCHANT_B',
+    };
+
+    expect(await repo.getPersisted('tenant-a')).toBeNull();
+    expect((await repo.get('tenant-a')).openpayMerchantId).toBe('');
+  });
+
+  it('rechaza un record no-default sin stamp tenantId', async () => {
+    const repo = new StoreIntegrationsRepository();
+    const unstamped = {
+      ...emptyIntegrationSettings(),
+      id: 'tenant-a',
+      openpayMerchantId: 'UNSTAMPED_SECRET',
+    } as Partial<IntegrationSettingsRecord>;
+    delete unstamped.tenantId;
+    store.INTEGRATION_SETTINGS_BY_TENANT['tenant-a'] =
+      unstamped as IntegrationSettingsRecord;
+
+    expect(await repo.getPersisted('tenant-a')).toBeNull();
+  });
+
+  it('normaliza sólo la fila legacy id=default sin stamp a tenant-default', async () => {
+    const repo = new StoreIntegrationsRepository();
+    const legacy = {
+      ...emptyIntegrationSettings(),
+      id: 'default',
+      openpayMerchantId: 'LEGACY_DEFAULT',
+    } as Partial<IntegrationSettingsRecord>;
+    delete legacy.tenantId;
+    store.INTEGRATION_SETTINGS = legacy as IntegrationSettingsRecord;
+
+    expect(await repo.getPersisted('tenant-default')).toMatchObject({
+      id: 'default',
+      tenantId: 'tenant-default',
+      openpayMerchantId: 'LEGACY_DEFAULT',
+    });
+  });
+
+  it('devuelve null ante token OpenPay duplicado en dos tenants', async () => {
+    const repo = new StoreIntegrationsRepository();
+    store.INTEGRATION_SETTINGS_BY_TENANT['tenant-a'] = {
+      ...emptyIntegrationSettings(),
+      id: 'tenant-a',
+      tenantId: 'tenant-a',
+      openpayWebhookToken: 'duplicate-token',
+    };
+    store.INTEGRATION_SETTINGS_BY_TENANT['tenant-b'] = {
+      ...emptyIntegrationSettings(),
+      id: 'tenant-b',
+      tenantId: 'tenant-b',
+      openpayWebhookToken: 'duplicate-token',
+    };
+
+    expect(await repo.findByOpenPayWebhookToken('duplicate-token')).toBeNull();
+  });
+
+  it('devuelve null si el único owner del token carece de stamp válido', async () => {
+    const repo = new StoreIntegrationsRepository();
+    const unstamped = {
+      ...emptyIntegrationSettings(),
+      id: 'tenant-a',
+      openpayWebhookToken: 'unstamped-token',
+    } as Partial<IntegrationSettingsRecord>;
+    delete unstamped.tenantId;
+    store.INTEGRATION_SETTINGS_BY_TENANT['tenant-a'] =
+      unstamped as IntegrationSettingsRecord;
+
+    expect(await repo.findByOpenPayWebhookToken('unstamped-token')).toBeNull();
+  });
+
+  it('devuelve null si el owner del token contradice la clave del store', async () => {
+    const repo = new StoreIntegrationsRepository();
+    store.INTEGRATION_SETTINGS_BY_TENANT['tenant-a'] = {
+      ...emptyIntegrationSettings(),
+      id: 'tenant-a',
+      tenantId: 'tenant-b',
+      openpayWebhookToken: 'cross-stamped-token',
+    };
+
+    expect(await repo.findByOpenPayWebhookToken('cross-stamped-token')).toBeNull();
   });
 });

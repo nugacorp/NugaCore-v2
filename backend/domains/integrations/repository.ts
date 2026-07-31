@@ -8,10 +8,6 @@ import { DEFAULT_TENANT_ID } from '../tenancy/types';
 
 const DEFAULT_ID = 'default';
 
-/** Inverso de `resolveSettingsId`: la fila legacy 'default' es el tenant por defecto. */
-export const tenantIdForSettingsId = (id: string): string =>
-  id === DEFAULT_ID ? DEFAULT_TENANT_ID : id;
-
 /**
  * WISP canónico de una petición. La ausencia de tenant es el WISP por defecto;
  * es la única regla implícita que queda y está acotada a este punto.
@@ -167,6 +163,28 @@ const assertOwnedBy = (rec: IntegrationSettingsRecord, expected: string): void =
   );
 };
 
+/**
+ * Valida un record del store contra la ubicación en que fue encontrado.
+ * `tenantId` es la autoridad; la única normalización permitida es la fila
+ * histórica `id=default`, anterior al stamp canónico.
+ */
+const normalizeStoreOwnedRecord = (
+  rec: IntegrationSettingsRecord | null | undefined,
+  expectedTenantId: string,
+): IntegrationSettingsRecord | null => {
+  if (!rec) return null;
+  const stampedTenantId = String(rec.tenantId ?? '').trim();
+  if (!stampedTenantId) {
+    if (expectedTenantId === DEFAULT_TENANT_ID && rec.id === DEFAULT_ID) {
+      return { ...rec, tenantId: DEFAULT_TENANT_ID };
+    }
+    return null;
+  }
+  return stampedTenantId === expectedTenantId
+    ? { ...rec, tenantId: stampedTenantId }
+    : null;
+};
+
 /** WISP dueño de un token de webhook, con su fila de settings. */
 export interface OpenPayWebhookOwner {
   tenantId: string;
@@ -198,20 +216,33 @@ export class StoreIntegrationsRepository implements IntegrationsRepository {
   }
 
   async getPersisted(tenantId?: string): Promise<IntegrationSettingsRecord | null> {
+    const canonical = resolveTenantId(tenantId);
     const id = resolveSettingsId(tenantId);
-    if (id === DEFAULT_ID) return store.INTEGRATION_SETTINGS;
-    return store.INTEGRATION_SETTINGS_BY_TENANT[id] ?? null;
+    const rec = id === DEFAULT_ID
+      ? store.INTEGRATION_SETTINGS
+      : store.INTEGRATION_SETTINGS_BY_TENANT[id];
+    return normalizeStoreOwnedRecord(rec, canonical);
   }
 
   async findByOpenPayWebhookToken(token: string): Promise<OpenPayWebhookOwner | null> {
     const needle = String(token ?? '').trim();
     if (!needle) return null;
-    const rows: IntegrationSettingsRecord[] = [
-      ...(store.INTEGRATION_SETTINGS ? [store.INTEGRATION_SETTINGS] : []),
-      ...Object.values(store.INTEGRATION_SETTINGS_BY_TENANT),
+    const rows: Array<{ expectedTenantId: string; settings: IntegrationSettingsRecord }> = [
+      ...(store.INTEGRATION_SETTINGS
+        ? [{ expectedTenantId: DEFAULT_TENANT_ID, settings: store.INTEGRATION_SETTINGS }]
+        : []),
+      ...Object.entries(store.INTEGRATION_SETTINGS_BY_TENANT).map(([key, settings]) => ({
+        expectedTenantId: resolveTenantId(key),
+        settings,
+      })),
     ];
-    const match = rows.find((rec) => Boolean(rec.openpayWebhookToken) && rec.openpayWebhookToken === needle);
-    return match ? { tenantId: match.tenantId || tenantIdForSettingsId(match.id), settings: match } : null;
+    const matches = rows.filter(
+      ({ settings }) => Boolean(settings.openpayWebhookToken) && settings.openpayWebhookToken === needle,
+    );
+    if (matches.length !== 1) return null;
+    const match = matches[0];
+    const settings = normalizeStoreOwnedRecord(match.settings, match.expectedTenantId);
+    return settings ? { tenantId: settings.tenantId, settings } : null;
   }
 
   async save(rec: IntegrationSettingsRecord, tenantId?: string): Promise<IntegrationSettingsRecord> {
