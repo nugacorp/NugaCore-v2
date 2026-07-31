@@ -28,6 +28,8 @@ import type {
   PaymentOrderRecord,
   PaymentProvider,
 } from '../../backend/domains/payments/types';
+import { IdempotencyConflictError } from '../../backend/common/errors';
+import { logger } from '../../backend/common/logger';
 import { getBillingService } from '../../backend/domains/billing/service';
 import { engineStore } from '../../backend/domains/suspension/engine-store';
 import { getSuspensionService } from '../../backend/domains/suspension/service';
@@ -418,6 +420,53 @@ describe('PaymentService — ownership antes de efectos', () => {
     };
   };
 
+  it('un conflicto determinista no cierra el evento y deja auditoría estructurada', async () => {
+    const payload = {
+      type: 'charge.succeeded',
+      transaction: { id: 'tx-conflict', order_id: 'order-conflict', status: 'completed' },
+    };
+    const event = { ...candidate('pe-conflict', 'evt-conflict'), claimToken: 'owner-a', payload };
+    const markEventProcessed = vi.fn(async () => true);
+    const fakeRepo = {
+      nextEventId: async () => 'pe-candidate',
+      claimEvent: async () => ({ outcome: 'claimed' as const, event }),
+      renewEventClaim: async () => true,
+      findOrderByProviderOrderId: async () => ({
+        id: 'order-conflict', tenantId: TENANT_A, customerId: 'customer-conflict',
+        invoiceId: 'invoice-conflict', provider: 'openpay', amountCents: 1_000,
+      }),
+      updateOrderStatus: async () => undefined,
+      markEventProcessed,
+    } as unknown as PaymentRepository;
+    const service = new PaymentService(fakeRepo);
+    const conflict = new IdempotencyConflictError('payments', 'payment-key');
+    (service as unknown as { confirmPaymentOnInvoice: () => Promise<never> }).confirmPaymentOnInvoice =
+      async () => { throw conflict; };
+    const audit = vi.spyOn(logger, 'error').mockImplementation(() => undefined);
+
+    await expect(service.processWebhook({
+      provider: 'openpay',
+      providerEventId: event.providerEventId,
+      eventType: event.eventType,
+      payload,
+      tenantId: TENANT_A,
+    })).rejects.toBe(conflict);
+
+    expect(markEventProcessed).not.toHaveBeenCalled();
+    expect(conflict.message).not.toContain('payment-key');
+    expect(audit).toHaveBeenCalledWith(
+      'PaymentEngine: conflicto de idempotencia; requiere intervención',
+      expect.objectContaining({
+        eventId: event.id,
+        providerEventId: event.providerEventId,
+        tenantId: TENANT_A,
+        scope: 'payments',
+        idempotencyKeyFingerprint: expect.stringMatching(/^[a-f0-9]{16}$/),
+      }),
+    );
+    expect(audit.mock.calls[0]?.[1]).not.toHaveProperty('idempotencyKey');
+  });
+
   it('ruta normal: reclaim durante updateOrderStatus aborta antes de Billing/reactivación y B continúa', async () => {
     let currentOwner = 'owner-a';
     let claimCount = 0;
@@ -667,11 +716,11 @@ describe('PaymentService — ownership antes de efectos', () => {
         if (findInvoiceCalls === 1) currentOwner = 'owner-b';
         return invoice as never;
       });
-      vi.spyOn(billing, 'recordPayment').mockImplementation(async (_invoiceId, payment) => {
+      vi.spyOn(billing, 'applyWebhookPayment').mockImplementation(async (payment) => {
         paymentCalls += 1;
         invoice.pendingAmount -= payment.amount;
         invoice.payments.push({ transactionId: payment.transactionId ?? '' });
-        return invoice as never;
+        return { outcome: 'created', invoice } as never;
       });
       vi.spyOn(PaymentService.prototype, 'reactivateCustomerService').mockResolvedValue({
         customerId: order.customerId,
@@ -743,36 +792,31 @@ describe('PaymentService — ownership antes de efectos', () => {
         pppoeUser: `pppoe-${provider}`,
       };
       store.CLIENTS.push(customer);
-      const actions: MikrotikActionRecord[] = [];
+      const actionRepo = new StorePaymentRepository();
+      const persistedStoreEvent = { ...persisted, claimToken: 'owner-a' };
+      store.PAYMENT_EVENTS.push(persistedStoreEvent);
       const fakeRepo = {
         nextEventId: async () => `pe-reactivation-candidate-${claimCount}`,
         claimEvent: async () => {
           const claimToken = claimCount++ === 0 ? 'owner-a' : 'owner-b';
           currentOwner = claimToken;
+          persistedStoreEvent.claimToken = claimToken;
           return { outcome: 'claimed' as const, event: { ...persisted, claimToken } };
         },
         renewEventClaim: async (_id: string, token: string) => token === currentOwner,
         findOrderByProviderOrderId: async () => provider === 'openpay' ? order : null,
         listOrders: async () => provider === 'codi' ? [order] : [],
         updateOrderStatus: async () => order,
-        listActions: async (filter?: { customerId?: string; tenantId?: string }) => actions.filter(
-          (action) => (!filter?.customerId || action.customerId === filter.customerId)
-            && (!filter?.tenantId || action.tenantId === filter.tenantId),
-        ),
-        nextActionId: async () => `ma-reactivation-fence-${actions.length + 1}`,
-        createAction: async (action: MikrotikActionRecord) => {
-          actions.push(action);
-          return action;
-        },
-        updateAction: async (id: string, patch: Partial<MikrotikActionRecord>) => {
-          const action = actions.find((candidateAction) => candidateAction.id === id);
-          if (!action) return null;
-          Object.assign(action, patch);
-          return action;
-        },
+        listActions: actionRepo.listActions.bind(actionRepo),
+        findActionByIdempotencyKey: actionRepo.findActionByIdempotencyKey.bind(actionRepo),
+        nextActionId: async () => 'ma-reactivation-fence-root',
+        createAction: actionRepo.createAction.bind(actionRepo),
+        createActionIdempotent: actionRepo.createActionIdempotent.bind(actionRepo),
+        checkpointReactivationStep: actionRepo.checkpointReactivationStep.bind(actionRepo),
         markEventProcessed: async (_id: string, token: string) => {
           if (token !== currentOwner) return false;
           closes += 1;
+          persistedStoreEvent.processed = true;
           return true;
         },
       } as unknown as PaymentRepository;
@@ -786,7 +830,7 @@ describe('PaymentService — ownership antes de efectos', () => {
         pendingAmount: 0,
         payments: [{ transactionId: order.providerOrderId }],
       } as never);
-      vi.spyOn(billing, 'recordPayment').mockRejectedValue(new Error('no debe duplicar Billing'));
+      vi.spyOn(billing, 'applyWebhookPayment').mockRejectedValue(new Error('no debe duplicar Billing'));
       const originalReactivate = StorePaymentDataProvider.prototype.reactivateCustomer;
       vi.spyOn(StorePaymentDataProvider.prototype, 'reactivateCustomer').mockImplementation(async function (
         this: StorePaymentDataProvider,
@@ -795,7 +839,10 @@ describe('PaymentService — ownership antes de efectos', () => {
       ) {
         await originalReactivate.call(this, id, tenantId);
         reactivationWrites += 1;
-        if (reactivationWrites === 1) currentOwner = 'owner-b';
+        if (reactivationWrites === 1) {
+          currentOwner = 'owner-b';
+          persistedStoreEvent.claimToken = 'owner-b';
+        }
       });
       const input = {
         provider,
@@ -806,17 +853,19 @@ describe('PaymentService — ownership antes de efectos', () => {
       };
 
       const first = await new PaymentService(fakeRepo).processWebhook(input);
+      const actionsAfterFirst = await actionRepo.listActions({ customerId, tenantId: TENANT_A });
       expect(first.idempotentReason).toBe('in_progress');
       expect(customer.status).toBe('active');
-      expect(actions).toHaveLength(1);
-      expect(actions[0].triggeredBy).toBe(triggeredBy);
+      expect(actionsAfterFirst).toHaveLength(1);
+      expect(actionsAfterFirst[0].triggeredBy).toBe(triggeredBy);
       expect(store.CLIENT_TIMELINE.filter((event) => event.clientId === customerId)).toHaveLength(0);
       expect(engineStore.EVENTS.filter((event) => event.customerId === customerId)).toHaveLength(0);
 
       const second = await new PaymentService(fakeRepo).processWebhook(input);
+      const actionsAfterSecond = await actionRepo.listActions({ customerId, tenantId: TENANT_A });
       expect(second.idempotent).toBe(false);
-      expect(actions).toHaveLength(1);
-      expect(actions[0].triggeredBy).toBe(triggeredBy);
+      expect(actionsAfterSecond).toHaveLength(1);
+      expect(actionsAfterSecond[0].triggeredBy).toBe(triggeredBy);
       expect(closes).toBe(1);
     },
   );
@@ -874,35 +923,30 @@ describe('PaymentService — ownership antes de efectos', () => {
       pppoeUser: `pppoe-checkpoint-${handoff}`,
     };
     store.CLIENTS.push(customer);
-    const actions: MikrotikActionRecord[] = [];
+    const actionRepo = new StorePaymentRepository();
+    const persistedStoreEvent = { ...persisted, claimToken: 'owner-a' };
+    store.PAYMENT_EVENTS.push(persistedStoreEvent);
     const fakeRepo = {
       nextEventId: async () => `pe-checkpoint-candidate-${claimCount}`,
       claimEvent: async () => {
         const claimToken = claimCount++ === 0 ? 'owner-a' : 'owner-b';
         currentOwner = claimToken;
+        persistedStoreEvent.claimToken = claimToken;
         return { outcome: 'claimed' as const, event: { ...persisted, claimToken } };
       },
       renewEventClaim: async (_id: string, token: string) => token === currentOwner,
       findOrderByProviderOrderId: async () => order,
       updateOrderStatus: async () => order,
-      listActions: async (filter?: { customerId?: string; tenantId?: string }) => actions.filter(
-        (action) => (!filter?.customerId || action.customerId === filter.customerId)
-          && (!filter?.tenantId || action.tenantId === filter.tenantId),
-      ),
+      listActions: actionRepo.listActions.bind(actionRepo),
+      findActionByIdempotencyKey: actionRepo.findActionByIdempotencyKey.bind(actionRepo),
       nextActionId: async () => `ma-checkpoint-${handoff}`,
-      createAction: async (action: MikrotikActionRecord) => {
-        actions.push(action);
-        return action;
-      },
-      updateAction: async (id: string, patch: Partial<MikrotikActionRecord>) => {
-        const action = actions.find((candidateAction) => candidateAction.id === id);
-        if (!action) return null;
-        Object.assign(action, patch);
-        return action;
-      },
+      createAction: actionRepo.createAction.bind(actionRepo),
+      createActionIdempotent: actionRepo.createActionIdempotent.bind(actionRepo),
+      checkpointReactivationStep: actionRepo.checkpointReactivationStep.bind(actionRepo),
       markEventProcessed: async (_id: string, token: string) => {
         if (token !== currentOwner) return false;
         closes += 1;
+        persistedStoreEvent.processed = true;
         return true;
       },
     } as unknown as PaymentRepository;
@@ -916,7 +960,7 @@ describe('PaymentService — ownership antes de efectos', () => {
       pendingAmount: 0,
       payments: [{ transactionId: order.providerOrderId }],
     } as never);
-    vi.spyOn(billing, 'recordPayment').mockRejectedValue(new Error('no debe duplicar Billing'));
+    vi.spyOn(billing, 'applyWebhookPayment').mockRejectedValue(new Error('no debe duplicar Billing'));
 
     const suspensionRepo = getSuspensionService().repo;
     const originalCreateOrder = suspensionRepo.createOrder.bind(suspensionRepo);
@@ -924,13 +968,19 @@ describe('PaymentService — ownership antes de efectos', () => {
     vi.spyOn(suspensionRepo, 'createOrder').mockImplementation(async (input) => {
       dispatchCalls += 1;
       const created = await originalCreateOrder(input);
-      if (handoff === 'network-order' && dispatchCalls === 1) currentOwner = 'owner-b';
+      if (handoff === 'network-order' && dispatchCalls === 1) {
+        currentOwner = 'owner-b';
+        persistedStoreEvent.claimToken = 'owner-b';
+      }
       return created;
     });
     vi.spyOn(suspensionRepo, 'recordEvent').mockImplementation(async (input) => {
       suspensionCalls += 1;
       const created = await originalRecordEvent(input);
-      if (handoff === 'suspension-event' && suspensionCalls === 1) currentOwner = 'owner-b';
+      if (handoff === 'suspension-event' && suspensionCalls === 1) {
+        currentOwner = 'owner-b';
+        persistedStoreEvent.claimToken = 'owner-b';
+      }
       return created;
     });
     const service = new PaymentService(fakeRepo);
@@ -948,7 +998,7 @@ describe('PaymentService — ownership antes de efectos', () => {
     return {
       first,
       second,
-      actions,
+      actions: await actionRepo.listActions({ customerId, tenantId: TENANT_A }),
       customer,
       timeline: store.CLIENT_TIMELINE.filter((event) => event.clientId === customerId),
       dispatchCalls,
@@ -960,13 +1010,197 @@ describe('PaymentService — ownership antes de efectos', () => {
     };
   };
 
-  it('live: B no repite timeline ni orden de red completados antes del handoff', async () => {
+  const runConcurrentStepProgressHandoff = async (
+    handoff: 'network-order' | 'suspension-event',
+  ) => {
+    const live = handoff === 'network-order';
+    const targetStep = live ? 'networkDispatched' : 'suspensionEventRecorded';
+    vi.stubEnv('NUGACORE_LIVE_MODE', 'false');
+    vi.stubEnv('PAYMENTS_ROUTER_LIVE', live ? 'true' : 'false');
+    vi.stubEnv('MIKROTIK_WORKER_COMMIT', 'false');
+
+    let currentOwner = 'owner-a';
+    let claimCount = 0;
+    let closes = 0;
+    let processed = false;
+    let dispatchCalls = 0;
+    let suspensionCalls = 0;
+    let targetCheckpointBlocked = false;
+    let signalTargetCheckpointBlocked!: () => void;
+    let releaseTargetCheckpoint!: () => void;
+    const targetCheckpointReached = new Promise<void>((resolve) => {
+      signalTargetCheckpointBlocked = resolve;
+    });
+    const targetCheckpointRelease = new Promise<void>((resolve) => {
+      releaseTargetCheckpoint = resolve;
+    });
+
+    const customerId = `${INTERNAL_FENCING_CUSTOMER_PREFIX}checkpoint-concurrent-${handoff}`;
+    const customerName = `Cliente checkpoint concurrente ${handoff}`;
+    const order: PaymentOrderRecord = {
+      id: `po-checkpoint-concurrent-${handoff}`,
+      tenantId: TENANT_A,
+      customerId,
+      invoiceId: `INV-CHECKPOINT-CONCURRENT-${handoff}`,
+      provider: 'openpay',
+      providerOrderId: `provider-order-checkpoint-concurrent-${handoff}`,
+      amountCents: 10_000,
+      status: 'pending',
+      createdAt: new Date().toISOString(),
+      updatedAt: new Date().toISOString(),
+    };
+    const persisted = {
+      ...candidate(`pe-checkpoint-concurrent-${handoff}`, `evt-checkpoint-concurrent-${handoff}`),
+      payload: {
+        type: 'charge.succeeded',
+        transaction: {
+          id: `tx-checkpoint-concurrent-${handoff}`,
+          order_id: order.providerOrderId,
+          status: 'completed',
+        },
+      },
+    };
+    const customer: Client = {
+      id: customerId,
+      tenantId: TENANT_A,
+      name: customerName,
+      type: 'residential',
+      status: 'suspended',
+      email: 'checkpoint-concurrent@example.test',
+      phone: '0000000000',
+      address: 'Test',
+      city: 'Test',
+      lat: 0,
+      lng: 0,
+      planId: 'plan-test',
+      ip: '192.0.2.4',
+      pppoeUser: `pppoe-checkpoint-concurrent-${handoff}`,
+    };
+    store.CLIENTS.push(customer);
+
+    const actionRepo = new StorePaymentRepository();
+    const persistedStoreEvent = { ...persisted, claimToken: 'owner-a' };
+    store.PAYMENT_EVENTS.push(persistedStoreEvent);
+    const fakeRepo = {
+      nextEventId: async () => `pe-checkpoint-concurrent-candidate-${claimCount}`,
+      claimEvent: async () => {
+        if (processed) {
+          return {
+            outcome: 'already_processed' as const,
+            event: { ...persisted, processed: true, claimToken: currentOwner },
+          };
+        }
+        const claimToken = claimCount++ === 0 ? 'owner-a' : 'owner-b';
+        currentOwner = claimToken;
+        persistedStoreEvent.claimToken = claimToken;
+        return { outcome: 'claimed' as const, event: { ...persisted, claimToken } };
+      },
+      renewEventClaim: async (_id: string, token: string) => token === currentOwner,
+      findOrderByProviderOrderId: async () => order,
+      updateOrderStatus: async () => order,
+      listActions: actionRepo.listActions.bind(actionRepo),
+      findActionByIdempotencyKey: actionRepo.findActionByIdempotencyKey.bind(actionRepo),
+      nextActionId: async () => `ma-checkpoint-concurrent-${handoff}`,
+      createAction: actionRepo.createAction.bind(actionRepo),
+      createActionIdempotent: actionRepo.createActionIdempotent.bind(actionRepo),
+      checkpointReactivationStep: async (checkpointInput: Parameters<
+        StorePaymentRepository['checkpointReactivationStep']
+      >[0]) => {
+        if (
+          !targetCheckpointBlocked
+          && checkpointInput.claimToken === 'owner-a'
+          && checkpointInput.step === targetStep
+        ) {
+          targetCheckpointBlocked = true;
+          signalTargetCheckpointBlocked();
+          await targetCheckpointRelease;
+        }
+        return actionRepo.checkpointReactivationStep(checkpointInput);
+      },
+      markEventProcessed: async (_id: string, token: string) => {
+        if (token !== currentOwner || processed) return false;
+        processed = true;
+        persistedStoreEvent.processed = true;
+        closes += 1;
+        return true;
+      },
+    } as unknown as PaymentRepository;
+
+    const billing = getBillingService();
+    vi.spyOn(billing, 'findInvoiceById').mockResolvedValue({
+      id: order.invoiceId,
+      tenantId: TENANT_A,
+      clientId: customerId,
+      status: 'paid',
+      amount: 100,
+      pendingAmount: 0,
+      payments: [{ transactionId: order.providerOrderId }],
+    } as never);
+    vi.spyOn(billing, 'applyWebhookPayment').mockRejectedValue(new Error('no debe duplicar Billing'));
+
+    const suspensionRepo = getSuspensionService().repo;
+    const originalCreateOrder = suspensionRepo.createOrder.bind(suspensionRepo);
+    const originalRecordEvent = suspensionRepo.recordEvent.bind(suspensionRepo);
+    vi.spyOn(suspensionRepo, 'createOrder').mockImplementation(async (input) => {
+      dispatchCalls += 1;
+      return originalCreateOrder(input);
+    });
+    vi.spyOn(suspensionRepo, 'recordEvent').mockImplementation(async (input) => {
+      suspensionCalls += 1;
+      return originalRecordEvent(input);
+    });
+
+    const service = new PaymentService(fakeRepo);
+    const input = {
+      provider: 'openpay' as const,
+      providerEventId: persisted.providerEventId,
+      eventType: persisted.eventType,
+      payload: persisted.payload,
+      tenantId: TENANT_A,
+    };
+
+    const firstPromise = service.processWebhook(input);
+    await targetCheckpointReached;
+    const second = await service.processWebhook(input);
+    const progressAfterB = {
+      ...((store.MIKROTIK_ACTIONS.find((action) => action.customerId === customerId)
+        ?.result?.['_webhookReactivationProgress'] ?? {}) as Record<string, unknown>),
+    };
+    releaseTargetCheckpoint();
+    const first = await firstPromise;
+    const finalProgress = {
+      ...((store.MIKROTIK_ACTIONS.find((action) => action.customerId === customerId)
+        ?.result?.['_webhookReactivationProgress'] ?? {}) as Record<string, unknown>),
+    };
+    const redelivery = await service.processWebhook(input);
+
+    return {
+      first,
+      second,
+      redelivery,
+      actions: store.MIKROTIK_ACTIONS.filter((action) => action.customerId === customerId),
+      customer,
+      timeline: store.CLIENT_TIMELINE.filter((event) => event.clientId === customerId),
+      dispatchCalls,
+      networkOrders: engineStore.ORDERS.filter((networkOrder) => networkOrder.customerId === customerId),
+      suspensionCalls,
+      suspensionEvents: engineStore.EVENTS.filter((event) => event.customerId === customerId),
+      alerts: store.NOC_ALERTS.filter((alert) => alert.source === customerName),
+      closes,
+      progressAfterB,
+      finalProgress,
+    };
+  };
+
+  it('live: B recupera la misma orden durable si A pierde ownership antes del checkpoint', async () => {
     const result = await runStepProgressHandoff('network-order');
 
     expect(result.first.idempotentReason).toBe('in_progress');
     expect(result.second.idempotent).toBe(false);
     expect(result.actions).toHaveLength(1);
-    expect(result.dispatchCalls).toBe(1);
+    // Dos intentos del adapter son válidos: la garantía es UNA fila durable,
+    // no exactly-once del worker ni de RouterOS.
+    expect(result.dispatchCalls).toBe(2);
     expect(result.networkOrders).toHaveLength(1);
     expect(result.timeline).toHaveLength(1);
     expect(result.suspensionEvents).toHaveLength(1);
@@ -975,7 +1209,7 @@ describe('PaymentService — ownership antes de efectos', () => {
     expect(result.customer.status).toBe('active');
   });
 
-  it('dry-run: B no repite timeline ni evento de suspensión completados antes del handoff', async () => {
+  it('dry-run: B recupera el mismo evento durable si A pierde ownership antes del checkpoint', async () => {
     const result = await runStepProgressHandoff('suspension-event');
 
     expect(result.first.idempotentReason).toBe('in_progress');
@@ -983,12 +1217,59 @@ describe('PaymentService — ownership antes de efectos', () => {
     expect(result.actions).toHaveLength(1);
     expect(result.dispatchCalls).toBe(0);
     expect(result.networkOrders).toHaveLength(0);
-    expect(result.suspensionCalls).toBe(1);
+    expect(result.suspensionCalls).toBe(2);
     expect(result.suspensionEvents).toHaveLength(1);
     expect(result.timeline).toHaveLength(1);
     expect(result.alerts).toHaveLength(1);
     expect(result.closes).toBe(1);
     expect(result.customer.status).toBe('active');
+  });
+
+  it('live concurrente: B recupera la orden durable mientras A espera checkpoint y A stale no borra progreso', async () => {
+    const result = await runConcurrentStepProgressHandoff('network-order');
+
+    expect.soft(result.first.idempotentReason).toBe('in_progress');
+    expect.soft(result.second.idempotent).toBe(false);
+    expect.soft(result.redelivery.idempotentReason).toBe('already_processed');
+    expect.soft(result.actions).toHaveLength(1);
+    // A y B intentan el destino; create-or-return conserva una sola orden.
+    expect.soft(result.dispatchCalls).toBe(2);
+    expect.soft(result.networkOrders).toHaveLength(1);
+    expect.soft(result.timeline).toHaveLength(1);
+    expect.soft(result.suspensionEvents).toHaveLength(1);
+    expect.soft(result.alerts).toHaveLength(1);
+    expect.soft(result.closes).toBe(1);
+    expect.soft(result.progressAfterB).toEqual({
+      customerReactivated: true,
+      timelineAdded: true,
+      networkDispatched: true,
+      suspensionEventRecorded: true,
+      alertCreated: true,
+    });
+    expect.soft(result.finalProgress).toEqual(result.progressAfterB);
+  });
+
+  it('dry-run concurrente: B recupera el evento mientras A espera checkpoint y A stale no borra progreso', async () => {
+    const result = await runConcurrentStepProgressHandoff('suspension-event');
+
+    expect.soft(result.first.idempotentReason).toBe('in_progress');
+    expect.soft(result.second.idempotent).toBe(false);
+    expect.soft(result.redelivery.idempotentReason).toBe('already_processed');
+    expect.soft(result.actions).toHaveLength(1);
+    expect.soft(result.dispatchCalls).toBe(0);
+    expect.soft(result.networkOrders).toHaveLength(0);
+    expect.soft(result.suspensionCalls).toBe(2);
+    expect.soft(result.suspensionEvents).toHaveLength(1);
+    expect.soft(result.timeline).toHaveLength(1);
+    expect.soft(result.alerts).toHaveLength(1);
+    expect.soft(result.closes).toBe(1);
+    expect.soft(result.progressAfterB).toEqual({
+      customerReactivated: true,
+      timelineAdded: true,
+      suspensionEventRecorded: true,
+      alertCreated: true,
+    });
+    expect.soft(result.finalProgress).toEqual(result.progressAfterB);
   });
 
   it('la reactivación manual sin claim conserva el comportamiento existente', async () => {
@@ -1060,13 +1341,13 @@ describe('PaymentService — ownership antes de efectos', () => {
       amount: 100, pendingAmount: 100, payments: [],
     };
     vi.spyOn(billing, 'findInvoiceById').mockImplementation(async () => invoice as never);
-    vi.spyOn(billing, 'recordPayment').mockImplementation(async () => {
+    vi.spyOn(billing, 'applyWebhookPayment').mockImplementation(async () => {
       counters.billing += 1;
       invoice.status = 'paid';
       invoice.pendingAmount = 0;
       invoice.payments.push({ transactionId: event.providerEventId } as never);
       currentOwner = 'owner-b';
-      return invoice as never;
+      return { outcome: 'created', invoice } as never;
     });
     const service = new PaymentService(fakeRepo);
     stubServiceEffects(service, counters);
@@ -1109,9 +1390,9 @@ describe('PaymentService — ownership antes de efectos', () => {
       id: 'INV', tenantId: TENANT_A, clientId: 'customer-1', status: 'paid',
       amount: 100, pendingAmount: 0, payments: [{ transactionId: 'manual-payment' }],
     } as never);
-    vi.spyOn(billing, 'recordPayment').mockImplementation(async () => {
+    vi.spyOn(billing, 'applyWebhookPayment').mockImplementation(async () => {
       counters.billing += 1;
-      return {} as never;
+      return { outcome: 'created', invoice: {} } as never;
     });
     const service = new PaymentService(fakeRepo);
     stubServiceEffects(service, counters);

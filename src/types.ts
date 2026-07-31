@@ -481,6 +481,9 @@ export interface NocAlert {
   message: string;
   timestamp: string;
   acknowledged: boolean;
+  /** WISP dueño de la alerta e identidad durable del efecto que la generó. */
+  tenantId?: string;
+  idempotencyKey?: string;
 }
 
 export interface NapPort {

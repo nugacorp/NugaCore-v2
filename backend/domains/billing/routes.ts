@@ -150,6 +150,9 @@ router.post(
           await getPaymentService().reactivateCustomerService(invoice.clientId, {
             triggeredBy: req.authContext?.userId,
             invoiceId: invoice.id,
+            // Sin tenant explícito la reactivación caía en `tenant-default` y
+            // podía crear la acción en el WISP equivocado.
+            tenantId,
           });
         }
       }

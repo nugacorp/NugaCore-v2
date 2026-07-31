@@ -14,7 +14,8 @@ import type { SupabaseClient } from '@supabase/supabase-js';
 import { Client } from '../../../src/types';
 import { ClientTimelineEvent, store } from '../../state/store';
 import { logger } from '../../common/logger';
-import { ConflictError } from '../../common/errors';
+import { ConflictError, IdempotencyConflictError } from '../../common/errors';
+import { tenantScopedIdempotencyId } from '../../common/idempotency';
 import {
   ClientRow,
   TimelineRow,
@@ -45,8 +46,26 @@ export interface CustomersRepository {
   /** Genera el siguiente id con formato slug `c-N`. */
   generateId(): Promise<string>;
   listTimeline(clientId: string): Promise<ClientTimelineEvent[]>;
-  addTimelineEvent(event: Omit<ClientTimelineEvent, 'id' | 'createdAt'>): Promise<void>;
+  addTimelineEvent(
+    event: Omit<ClientTimelineEvent, 'id' | 'createdAt'>,
+    options?: TimelineWriteOptions,
+  ): Promise<void>;
 }
+
+/**
+ * Identidad durable opcional (T5). Sin ella el método conserva exactamente el
+ * comportamiento histórico: cada llamada crea una entrada. Con ella, el
+ * reintento de otro owner recupera la entrada existente en vez de duplicarla.
+ */
+export interface TimelineWriteOptions {
+  tenantId?: string;
+  idempotencyKey?: string;
+}
+
+export const TIMELINE_IDEMPOTENCY_SCOPE = 'client_timeline';
+
+const isUniqueViolation = (error: { code?: string; message?: string }): boolean =>
+  String(error?.code) === '23505' || /duplicate key|already exists/i.test(String(error?.message ?? ''));
 
 // --------------------------------------------------------------------
 // Implementación MOCK (store en memoria). Replica la lógica que vivía
@@ -118,8 +137,34 @@ export class StoreCustomersRepository implements CustomersRepository {
     return store.CLIENT_TIMELINE.filter((e) => e.clientId === clientId);
   }
 
-  async addTimelineEvent(event: Omit<ClientTimelineEvent, 'id' | 'createdAt'>): Promise<void> {
-    store.addClientTimelineEvent(event);
+  async addTimelineEvent(
+    event: Omit<ClientTimelineEvent, 'id' | 'createdAt'>,
+    options?: TimelineWriteOptions,
+  ): Promise<void> {
+    if (!options?.idempotencyKey) {
+      store.addClientTimelineEvent(event);
+      return;
+    }
+    const tenantId = options.tenantId || 'tenant-default';
+    // Sin `await` entre la búsqueda y la escritura: create-or-return atómico.
+    const existing = store.CLIENT_TIMELINE.find(
+      (row) =>
+        (row.tenantId || 'tenant-default') === tenantId
+        && row.idempotencyKey === options.idempotencyKey,
+    );
+    if (existing) {
+      if (
+        existing.clientId !== event.clientId
+        || existing.eventType !== event.eventType
+        || existing.summary !== event.summary
+        || (existing.details ?? null) !== (event.details ?? null)
+        || (existing.createdBy ?? null) !== (event.createdBy ?? null)
+      ) {
+        throw new IdempotencyConflictError(TIMELINE_IDEMPOTENCY_SCOPE, options.idempotencyKey);
+      }
+      return;
+    }
+    store.addClientTimelineEvent({ ...event, tenantId, idempotencyKey: options.idempotencyKey });
   }
 }
 
@@ -320,10 +365,47 @@ export class SupabaseCustomersRepository implements CustomersRepository {
     return (data as TimelineRow[]).map(rowToTimeline);
   }
 
-  async addTimelineEvent(event: Omit<ClientTimelineEvent, 'id' | 'createdAt'>): Promise<void> {
-    const id = 'ct-' + Date.now() + '-' + Math.floor(Math.random() * 90 + 10);
+  async addTimelineEvent(
+    event: Omit<ClientTimelineEvent, 'id' | 'createdAt'>,
+    options?: TimelineWriteOptions,
+  ): Promise<void> {
     const createdAt = new Date().toISOString();
-    const { error } = await this.client.from(TIMELINE_TABLE).insert(timelineToRow(event, id, createdAt));
-    if (error) fail('addTimelineEvent', error);
+    if (!options?.idempotencyKey) {
+      const id = 'ct-' + Date.now() + '-' + Math.floor(Math.random() * 90 + 10);
+      const { error } = await this.client.from(TIMELINE_TABLE).insert(timelineToRow(event, id, createdAt));
+      if (error) fail('addTimelineEvent', error);
+      return;
+    }
+
+    const tenantId = options.tenantId || 'tenant-default';
+    const row = {
+      ...timelineToRow(
+        event,
+        tenantScopedIdempotencyId('ct', tenantId, options.idempotencyKey),
+        createdAt,
+      ),
+      tenant_id: tenantId,
+      idempotency_key: options.idempotencyKey,
+    };
+    const { error } = await this.client.from(TIMELINE_TABLE).insert(row);
+    if (!error) return;
+    if (!isUniqueViolation(error)) fail('addTimelineEvent', error);
+
+    const { data, error: readError } = await this.client
+      .from(TIMELINE_TABLE).select('id, client_id, event_type, summary, details, created_by')
+      .eq('tenant_id', tenantId)
+      .eq('idempotency_key', options.idempotencyKey)
+      .maybeSingle();
+    if (readError) fail('addTimelineEvent(read)', readError);
+    if (!data) fail('addTimelineEvent', new Error(`colisión sin fila visible (${options.idempotencyKey})`));
+    if (
+      data!.client_id !== event.clientId
+      || data!.event_type !== event.eventType
+      || data!.summary !== event.summary
+      || (data!.details ?? null) !== (event.details ?? null)
+      || (data!.created_by ?? null) !== (event.createdBy ?? null)
+    ) {
+      throw new IdempotencyConflictError(TIMELINE_IDEMPOTENCY_SCOPE, options.idempotencyKey);
+    }
   }
 }

@@ -83,6 +83,12 @@ export interface ClientTimelineEvent {
   details?: string;
   createdAt: string;
   createdBy?: string;
+  /**
+   * Identidad durable del efecto de webhook (T5). Nulas en el resto de
+   * llamadas y en filas históricas; su unicidad es un índice PARCIAL.
+   */
+  tenantId?: string;
+  idempotencyKey?: string;
 }
 
 export interface PlanMetadata {
@@ -99,6 +105,12 @@ export interface PaymentAllocation {
   paymentDate: string;
   transactionId?: string;
   remainingAfterPayment: number;
+  /**
+   * Identidad tenant-scoped del pago de webhook (T5). Nula en pagos manuales
+   * y en filas históricas: la unicidad del ledger es un índice PARCIAL.
+   */
+  tenantId?: string;
+  idempotencyKey?: string;
 }
 
 export interface InventoryItemState {
@@ -220,6 +232,8 @@ export interface PaymentOrderRecord {
 
 export interface PaymentEventRecord {
   id: string;
+  /** Tenant/lease fields used by the atomic webhook claim (T5). */
+  tenantId?: string;
   provider: string;
   providerEventId: string;
   eventType: string;
@@ -227,6 +241,8 @@ export interface PaymentEventRecord {
   paymentOrderId?: string;
   payload: Record<string, unknown>;
   receivedAt: string;
+  claimedAt?: string;
+  claimToken?: string;
   processedAt?: string;
 }
 

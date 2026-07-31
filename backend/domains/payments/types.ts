@@ -121,6 +121,18 @@ export interface MikrotikActionRecord {
   payload?: Record<string, unknown>;
   result?: Record<string, unknown>;
   triggeredBy?: string;
+  /**
+   * Vínculo durable con el evento que originó la acción. `triggered_by` es
+   * texto libre y no sirve como vínculo verificable por la base: la RPC de
+   * checkpoint valida ESTE campo antes de tocar el progreso.
+   * Nulo en acciones manuales.
+   */
+  paymentEventId?: string;
+  /**
+   * Identidad de la acción raíz, tenant-scoped. Nula en acciones manuales y en
+   * filas históricas: la unicidad es un índice PARCIAL.
+   */
+  idempotencyKey?: string;
   createdAt: string;
   updatedAt: string;
 }
@@ -167,9 +179,54 @@ export interface ReactivationResult {
 /**
  * Barrera que autoriza cada efecto mutante de una reactivación iniciada por
  * webhook. La ruta manual omite este campo y conserva su contrato sin claim.
+ *
+ * Lleva además la identidad del claim porque el checkpoint y la operación
+ * Billing ya no son escrituras "a ciegas": la base valida el owner vigente.
  */
 export interface WebhookMutationFence {
   beforeMutation(): Promise<void>;
+  /** Fila durable del evento; raíz de todas las identidades del flujo. */
+  eventId: string;
+  /** Epoch del owner actual; sin él no se autoriza ningún checkpoint. */
+  claimToken: string;
+}
+
+// ── Checkpoint de reactivación ────────────────────────────────────────
+
+/** Whitelist cerrada: la RPC rechaza cualquier paso fuera de esta lista. */
+export const WEBHOOK_REACTIVATION_STEPS = [
+  'customerReactivated',
+  'timelineAdded',
+  'networkDispatched',
+  'suspensionEventRecorded',
+  'alertCreated',
+] as const;
+
+export type WebhookReactivationStep = typeof WEBHOOK_REACTIVATION_STEPS[number];
+
+export type WebhookReactivationProgress = Partial<Record<WebhookReactivationStep, true>>;
+
+/** Clave bajo la que vive el progreso dentro de `mikrotik_actions.result`. */
+export const WEBHOOK_REACTIVATION_PROGRESS_KEY = '_webhookReactivationProgress';
+
+/**
+ * Estados exhaustivos del checkpoint. Cualquier otra cosa —RPC ausente, 0 o
+ * varias filas, error de base, respuesta desconocida— es un error retryable
+ * que nunca permite cerrar el evento.
+ */
+export type CheckpointStepOutcome = 'applied' | 'already_applied' | 'ownership_lost';
+
+export interface CheckpointStepInput {
+  tenantId: string;
+  eventId: string;
+  actionId: string;
+  claimToken: string;
+  step: WebhookReactivationStep;
+}
+
+export interface IdempotentActionResult {
+  outcome: 'created' | 'existing';
+  action: MikrotikActionRecord;
 }
 
 export interface ReactivationContext {

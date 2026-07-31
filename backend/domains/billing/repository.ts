@@ -17,6 +17,7 @@ import type { SupabaseClient } from '@supabase/supabase-js';
 import { Invoice } from '../../../src/types';
 import { store } from '../../state/store';
 import { logger } from '../../common/logger';
+import { IdempotencyConflictError } from '../../common/errors';
 import {
   AllocationEntry,
   EnrichedInvoice,
@@ -78,6 +79,36 @@ export interface PaymentRecordInput {
   transactionId: string;
 }
 
+// ── Pago de webhook: atómico, idempotente y condicionado al claim ──────
+//
+// El check en memoria sobre `invoice.payments[].transactionId` NO es el gate
+// de unicidad: entre la lectura y el `recordPayment` cabe otro owner. Esta
+// operación mueve la decisión al mismo lugar donde vive el ledger, de forma
+// que crear el pago, garantizar su aplicación y recalcular la factura ocurren
+// bajo el mismo lock, con el claim validado antes de escribir nada.
+
+export interface WebhookPaymentInput {
+  invoiceId: string;
+  tenantId: string;
+  amount: number;
+  method: string;
+  transactionId: string;
+  /** Identidad tenant-scoped del pago; estable entre owners y reentregas. */
+  idempotencyKey: string;
+  /** Claim vigente; sin él la operación no escribe. */
+  claim: { eventId: string; claimToken: string };
+}
+
+export type WebhookPaymentOutcome = 'created' | 'existing' | 'ownership_lost';
+
+export interface WebhookPaymentResult {
+  outcome: WebhookPaymentOutcome;
+  /** Factura resultante; `null` cuando el claim se perdió y no se escribió. */
+  invoice: EnrichedInvoice | null;
+}
+
+export const BILLING_IDEMPOTENCY_SCOPE = 'payments';
+
 // ── Contrato ──────────────────────────────────────────────────────────
 
 export interface BillingRepository {
@@ -90,6 +121,12 @@ export interface BillingRepository {
   updateInvoice(id: string, input: InvoiceUpdateInput, tenantId?: string): Promise<EnrichedInvoice | null>;
   cancelInvoice(id: string, reason?: string, tenantId?: string): Promise<EnrichedInvoice | null>;
   recordPayment(invoiceId: string, input: PaymentRecordInput, tenantId?: string): Promise<EnrichedInvoice>;
+  /**
+   * Ruta exclusiva del webhook: valida el claim, crea o recupera el pago por
+   * identidad y deja factura + aplicación consistentes en una sola operación.
+   * Los pagos manuales siguen usando `recordPayment` sin clave.
+   */
+  applyWebhookPayment(input: WebhookPaymentInput): Promise<WebhookPaymentResult>;
   generateInvoiceId(): Promise<string>;
 }
 
@@ -129,6 +166,8 @@ const syncStatus = (inv: Invoice): void => {
 
 const enrich = (inv: Invoice): EnrichedInvoice => ({
   ...inv,
+  items: inv.items.map((item) => ({ ...item })),
+  payments: inv.payments.map((payment) => ({ ...payment })),
   paidAmount: invoicePaidAmount(inv),
   pendingAmount: invoicePendingAmount(inv),
 });
@@ -303,6 +342,64 @@ export class StoreBillingRepository implements BillingRepository {
       remainingAfterPayment: pendingAfter,
     });
     return enrich(inv);
+  }
+
+  async applyWebhookPayment(input: WebhookPaymentInput): Promise<WebhookPaymentResult> {
+    // Toda la secuencia es síncrona tras esta línea: sin `await` intermedio el
+    // bucle de eventos no puede intercalar a otro owner, que es la propiedad
+    // que en Supabase da la transacción. Payments y Billing comparten Store
+    // porque el capability gate rechaza los tuples mixtos.
+    const invoice = store.INVOICES.find(
+      (i) => i.id === input.invoiceId && (i.tenantId || 'tenant-default') === input.tenantId,
+    );
+    if (!invoice) throw new Error(`Invoice not found: ${input.invoiceId}`);
+
+    const event = store.PAYMENT_EVENTS.find(
+      (e) => e.id === input.claim.eventId && (e.tenantId || 'tenant-default') === input.tenantId,
+    );
+    if (!event) throw new Error(`applyWebhookPayment: evento de pago inexistente (${input.claim.eventId})`);
+    // Ownership primero: un owner vencido no puede tocar el ledger.
+    if (event.processed || event.claimToken !== input.claim.claimToken) {
+      return { outcome: 'ownership_lost', invoice: null };
+    }
+
+    const existing = store.PAYMENT_ALLOCATIONS.find(
+      (a) =>
+        (a.tenantId || 'tenant-default') === input.tenantId
+        && a.idempotencyKey === input.idempotencyKey,
+    );
+    if (existing) {
+      if (
+        existing.invoiceId !== input.invoiceId
+        || existing.amount !== input.amount
+        || existing.method !== input.method
+        || (existing.transactionId ?? null) !== (input.transactionId ?? null)
+      ) {
+        throw new IdempotencyConflictError(BILLING_IDEMPOTENCY_SCOPE, input.idempotencyKey);
+      }
+      syncStatus(invoice);
+      return { outcome: 'existing', invoice: enrich(invoice) };
+    }
+
+    invoice.payments.push({
+      date: new Date().toISOString().replace('T', ' ').substring(0, 16),
+      amount: input.amount,
+      method: input.method,
+      transactionId: input.transactionId,
+    });
+    syncStatus(invoice);
+    store.PAYMENT_ALLOCATIONS.unshift({
+      id: store.getUniquePaymentAllocationId(),
+      invoiceId: input.invoiceId,
+      amount: input.amount,
+      method: input.method,
+      paymentDate: new Date().toISOString(),
+      transactionId: input.transactionId,
+      remainingAfterPayment: invoicePendingAmount(invoice),
+      tenantId: input.tenantId,
+      idempotencyKey: input.idempotencyKey,
+    });
+    return { outcome: 'created', invoice: enrich(invoice) };
   }
 
   async generateInvoiceId(): Promise<string> {
@@ -612,6 +709,36 @@ export class SupabaseBillingRepository implements BillingRepository {
 
     logger.info(`Payment recorded: ${paymentId} → ${invoiceId} (${newStatus})`);
     return (await this.findInvoiceById(invoiceId))!;
+  }
+
+  async applyWebhookPayment(input: WebhookPaymentInput): Promise<WebhookPaymentResult> {
+    // Una sola transacción Postgres: bloquea el evento, después la factura,
+    // crea o recupera el pago por identidad, garantiza UNA aplicación y
+    // recalcula totales desde la suma real. No hay fallback a la ruta
+    // multi-write: si la RPC no existe, el flujo falla cerrado y es retryable.
+    const { data, error } = await this.client.rpc('billing_apply_webhook_payment', {
+      p_tenant_id: input.tenantId,
+      p_event_id: input.claim.eventId,
+      p_claim_token: input.claim.claimToken,
+      p_invoice_id: input.invoiceId,
+      p_amount_cents: Math.round(input.amount * 100),
+      p_method: input.method,
+      p_transaction_id: input.transactionId,
+      p_idempotency_key: input.idempotencyKey,
+    });
+    if (error) {
+      if (/idempotency_conflict/i.test(error.message || '')) {
+        throw new IdempotencyConflictError(BILLING_IDEMPOTENCY_SCOPE, input.idempotencyKey);
+      }
+      throw new Error(`applyWebhookPayment: ${error.message}`);
+    }
+
+    const outcome = Array.isArray(data) ? data[0] : data;
+    if (outcome === 'ownership_lost') return { outcome, invoice: null };
+    if (outcome !== 'created' && outcome !== 'existing') {
+      throw new Error(`applyWebhookPayment: respuesta desconocida (${JSON.stringify(outcome)})`);
+    }
+    return { outcome, invoice: await this.findInvoiceById(input.invoiceId, input.tenantId) };
   }
 
   async generateInvoiceId(): Promise<string> {

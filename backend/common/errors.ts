@@ -63,6 +63,31 @@ export class ConflictError extends AppError {
   }
 }
 
+/**
+ * Misma clave de idempotencia con un payload/propietario distinto. Es un fallo
+ * DETERMINISTA de integridad, no una carrera: reintentarlo dentro del handler
+ * volvería a fallar, así que nunca debe confundirse con la pérdida de un claim
+ * ni con un error transitorio de base de datos. Requiere intervención.
+ */
+export class IdempotencyConflictError extends AppError {
+  constructor(
+    public readonly scope: string,
+    public readonly idempotencyKey: string,
+    message = `Conflicto de idempotencia en ${scope}: la clave ya existe con otro contenido.`,
+  ) {
+    super(409, message, 'IDEMPOTENCY_CONFLICT');
+    this.name = 'IdempotencyConflictError';
+  }
+}
+
+/** Dependencia o capacidad no disponible: el llamador debe reintentar. */
+export class ServiceUnavailableError extends AppError {
+  constructor(message = 'Service unavailable', code = 'SERVICE_UNAVAILABLE') {
+    super(503, message, code);
+    this.name = 'ServiceUnavailableError';
+  }
+}
+
 /** 404 JSON para endpoints /api no encontrados (se monta tras las rutas). */
 export const notFoundHandler = (req: Request, res: Response): void => {
   res.status(404).json({

@@ -28,6 +28,7 @@ import {
 } from '../../backend/domains/payments/repository';
 import { resetPaymentService } from '../../backend/domains/payments/service';
 import type { PaymentEventRecord, PaymentOrderRecord } from '../../backend/domains/payments/types';
+import { engineStore } from '../../backend/domains/suspension/engine-store';
 import { store } from '../../backend/state/store';
 
 const TENANT_A = 'tenant-a';
@@ -136,6 +137,14 @@ const reset = () => {
   store.PAYMENT_ORDERS.length = 0;
   store.PAYMENT_EVENTS.length = 0;
   store.MIKROTIK_ACTIONS.length = 0;
+  // T5 añade destinos durables derivados de actionId+step. Al reiniciar el
+  // contador de acciones también hay que limpiar esos destinos; de otro modo
+  // un caso posterior reutiliza `ma-1:*` y ve un conflicto ficticio.
+  store.CLIENT_TIMELINE.length = 0;
+  store.NOC_ALERTS.length = 0;
+  store.PAYMENT_ALLOCATIONS.length = 0;
+  engineStore.EVENTS.length = 0;
+  engineStore.ORDERS.length = 0;
   store.CLIENTS = store.CLIENTS.filter((c) => !c.id.startsWith('c-tenant-'));
   resetIntegrationsService();
   resetPaymentService();

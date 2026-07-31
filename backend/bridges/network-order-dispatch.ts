@@ -13,6 +13,9 @@ export async function dispatchNetworkOrder(input: {
   source: 'service-status' | 'provisioning-center' | 'payment-engine' | 'engine';
   reason: string;
   actor: string | null;
+  /** Identidad durable (T5): con ella la orden es create-or-return. */
+  tenantId?: string;
+  idempotencyKey?: string;
 }): Promise<void> {
   const repo = getSuspensionService().repo;
   await repo.createOrder({
@@ -20,7 +23,11 @@ export async function dispatchNetworkOrder(input: {
     orderType: input.orderType,
     source: input.source,
     reason: input.reason,
+    tenantId: input.tenantId,
+    idempotencyKey: input.idempotencyKey,
   });
+  // El worker puede procesar la MISMA fila más de una vez: la garantía de T5
+  // es una orden durable, no una única invocación ni exactly-once en RouterOS.
   if (productionGates.mikrotikWorkerCommit()) {
     await processPendingOrders(input.actor ?? input.source);
   }

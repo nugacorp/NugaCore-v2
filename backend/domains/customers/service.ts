@@ -22,6 +22,7 @@ import {
   CustomersRepository,
   StoreCustomersRepository,
   SupabaseCustomersRepository,
+  TimelineWriteOptions,
 } from './repository';
 
 const CLIENT_TYPES: Client['type'][] = ['residential', 'corporate', 'government', 'hotel', 'school'];
@@ -106,8 +107,11 @@ export class CustomersService {
     return this.repo.remove(id, tenantId);
   }
 
-  addTimelineEvent(event: Omit<ClientTimelineEvent, 'id' | 'createdAt'>): Promise<void> {
-    return this.repo.addTimelineEvent(event);
+  addTimelineEvent(
+    event: Omit<ClientTimelineEvent, 'id' | 'createdAt'>,
+    options?: TimelineWriteOptions,
+  ): Promise<void> {
+    return this.repo.addTimelineEvent(event, options);
   }
 }
 

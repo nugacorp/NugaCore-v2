@@ -82,6 +82,9 @@ export interface SuspensionEvent {
   actorId?: string;
   metadata?: Record<string, unknown>;
   createdAt: string;
+  /** Identidad durable del efecto de webhook (T5); nula fuera de ese flujo. */
+  tenantId?: string;
+  idempotencyKey?: string;
 }
 
 // ── Órdenes ────────────────────────────────────────────────────────────
@@ -96,6 +99,9 @@ export interface SuspensionOrder {
   scheduledFor?: string;
   executedAt?: string;
   createdAt: string;
+  /** Identidad durable del efecto de webhook (T5); nula fuera de ese flujo. */
+  tenantId?: string;
+  idempotencyKey?: string;
   // ── Worker dry-run (Fase 4.6) ─────────────────────────────────────
   dryRun?: boolean;
   workerRunId?: string;

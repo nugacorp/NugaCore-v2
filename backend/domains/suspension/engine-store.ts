@@ -17,8 +17,17 @@ import {
 } from './types';
 
 import { nowIso } from '../../common/time';
+import { IdempotencyConflictError } from '../../common/errors';
+import { idempotencyPayloadsEquivalent, tenantScopedIdempotencyId } from '../../common/idempotency';
 let eventSeq = 1;
 let orderSeq = 1;
+
+const copyDurableEvent = (event: SuspensionEvent): SuspensionEvent => ({
+  ...event,
+  metadata: event.metadata === undefined
+    ? undefined
+    : JSON.parse(JSON.stringify(event.metadata)) as Record<string, unknown>,
+});
 
 export const engineStore = {
   POLICY: { ...DEFAULT_SUSPENSION_POLICY } as SuspensionPolicyV2,
@@ -47,7 +56,39 @@ export const engineStore = {
     automatic: boolean;
     actorId?: string;
     metadata?: Record<string, unknown>;
+    tenantId?: string;
+    idempotencyKey?: string;
   }): SuspensionEvent {
+    // Con identidad durable el efecto es create-or-return: el reintento de
+    // otro owner recupera el evento existente en vez de registrar un segundo.
+    // La búsqueda y el unshift son síncronos, así que nadie se intercala.
+    if (input.idempotencyKey) {
+      const tenantId = input.tenantId || 'tenant-default';
+      const existing = this.EVENTS.find(
+        (e) => (e.tenantId || 'tenant-default') === tenantId && e.idempotencyKey === input.idempotencyKey,
+      );
+      if (existing) {
+        const equivalent = existing.customerId === input.customerId
+          && (existing.invoiceId ?? null) === (input.invoiceId ?? null)
+          && existing.eventType === input.eventType
+          && (existing.reason ?? null) === (input.reason ?? null)
+          && existing.automatic === input.automatic
+          && (existing.actorId ?? null) === (input.actorId ?? null)
+          && idempotencyPayloadsEquivalent(existing.metadata ?? {}, input.metadata ?? {});
+        if (!equivalent) {
+          throw new IdempotencyConflictError('suspension_events', input.idempotencyKey);
+        }
+        return copyDurableEvent(existing);
+      }
+      const ev = copyDurableEvent({
+        id: tenantScopedIdempotencyId('sev', tenantId, input.idempotencyKey),
+        createdAt: nowIso(),
+        ...input,
+        tenantId,
+      });
+      this.EVENTS.unshift(ev);
+      return copyDurableEvent(ev);
+    }
     const ev: SuspensionEvent = {
       id: `sev-${eventSeq++}`,
       createdAt: nowIso(),
@@ -73,7 +114,43 @@ export const engineStore = {
     orderType: SuspensionOrder['orderType'];
     source: 'engine' | 'manual' | 'payment-engine' | 'provisioning-center' | 'service-status';
     reason?: string;
+    tenantId?: string;
+    idempotencyKey?: string;
   }): SuspensionOrder {
+    // "Un dispatch" del contrato T5 significa UNA FILA durable por
+    // (tenant, key). El worker puede intentar esa fila más de una vez.
+    if (input.idempotencyKey) {
+      const tenantId = input.tenantId || 'tenant-default';
+      const existing = this.ORDERS.find(
+        (o) => (o.tenantId || 'tenant-default') === tenantId && o.idempotencyKey === input.idempotencyKey,
+      );
+      if (existing) {
+        const equivalent = existing.customerId === input.customerId
+          && (existing.invoiceId ?? null) === (input.invoiceId ?? null)
+          && existing.orderType === input.orderType
+          && existing.source === input.source
+          && (existing.reason ?? null) === (input.reason ?? null);
+        if (!equivalent) {
+          throw new IdempotencyConflictError('reactivation_orders', input.idempotencyKey);
+        }
+        return { ...existing };
+      }
+      const created: SuspensionOrder = {
+        id: tenantScopedIdempotencyId(
+          input.orderType === 'suspension' ? 'sord' : 'rord',
+          tenantId,
+          input.idempotencyKey,
+        ),
+        status: 'PENDING',
+        scheduledFor: undefined,
+        executedAt: undefined,
+        createdAt: nowIso(),
+        ...input,
+        tenantId,
+      };
+      this.ORDERS.unshift(created);
+      return { ...created };
+    }
     const order: SuspensionOrder = {
       id: input.orderType === 'suspension' ? `sord-${orderSeq++}` : `rord-${orderSeq++}`,
       status: 'PENDING',
