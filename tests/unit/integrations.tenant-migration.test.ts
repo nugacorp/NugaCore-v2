@@ -25,15 +25,23 @@ afterEach(async () => {
 
 const baseSchema = async (
   db: PGlite,
-  options: { withTenantColumn?: boolean } = {},
+  options: {
+    withTenantColumn?: boolean;
+    serviceRole?: 'bypassrls' | 'no-bypassrls' | 'missing';
+  } = {},
 ): Promise<void> => {
   const tenantColumn = options.withTenantColumn
     ? "tenant_id TEXT DEFAULT 'tenant-default',"
     : '';
+  const serviceRole = options.serviceRole === 'missing'
+    ? ''
+    : `CREATE ROLE service_role NOLOGIN ${
+      options.serviceRole === 'no-bypassrls' ? 'NOBYPASSRLS' : 'BYPASSRLS'
+    };`;
   await db.exec(`
     CREATE SCHEMA auth;
     CREATE ROLE authenticated NOLOGIN;
-    CREATE ROLE service_role NOLOGIN;
+    ${serviceRole}
     CREATE FUNCTION auth.role() RETURNS TEXT
       LANGUAGE sql STABLE
       AS $$ SELECT current_setting('request.jwt.claim.role', true) $$;
@@ -285,11 +293,30 @@ describe('MT-03 migration ejecutada en Postgres hermético', () => {
     expect(policies.rows).toEqual([{
       policyname: 'wisp_integration_settings_service_role',
       permissive: 'PERMISSIVE',
-      roles: ['public'],
+      roles: ['service_role'],
       cmd: 'ALL',
-      qual: "(( SELECT auth.role() AS role) = 'service_role'::text)",
-      with_check: "(( SELECT auth.role() AS role) = 'service_role'::text)",
+      qual: 'true',
+      with_check: 'true',
     }]);
+
+    const policyRole = await db.query<{
+      policy_roles: number[];
+      service_role_oid: number;
+      rolbypassrls: boolean;
+    }>(`
+      SELECT
+        p.polroles::oid[] AS policy_roles,
+        r.oid AS service_role_oid,
+        r.rolbypassrls
+      FROM pg_policy p
+      JOIN pg_roles r ON r.rolname = 'service_role'
+      WHERE p.polrelid = 'public.wisp_integration_settings'::regclass
+        AND p.polname = 'wisp_integration_settings_service_role'
+    `);
+    expect(policyRole.rows).toEqual([expect.objectContaining({ rolbypassrls: true })]);
+    expect(policyRole.rows[0]?.policy_roles).toEqual([
+      policyRole.rows[0]?.service_role_oid,
+    ]);
   });
 
   it('reconcilia el fixture previo y aplica la regla explícita id=default', async () => {
@@ -361,7 +388,7 @@ describe('MT-03 migration ejecutada en Postgres hermético', () => {
     `)).rows).toEqual([{ id: 'tenant-a', tenant_id: 'tenant-b', marker: 'B_SECRET' }]);
   });
 
-  it('RLS niega leer y escribir a un rol de aplicación sin la policy service_role', async () => {
+  it('liga acceso al rol real: authenticated no falsifica service_role y BYPASSRLS ignora claims', async () => {
     const db = await database();
     await baseSchema(db, { withTenantColumn: true });
     await db.exec(`
@@ -374,7 +401,7 @@ describe('MT-03 migration ejecutada en Postgres hermético', () => {
       GRANT USAGE ON SCHEMA public TO authenticated, service_role;
       GRANT SELECT, INSERT, UPDATE ON public.wisp_integration_settings TO authenticated, service_role;
       SET ROLE authenticated;
-      SELECT set_config('request.jwt.claim.role', 'authenticated', false);
+      SELECT set_config('request.jwt.claim.role', 'service_role', false);
     `);
 
     const visible = await db.query<{ count: number }>(`
@@ -387,11 +414,25 @@ describe('MT-03 migration ejecutada en Postgres hermético', () => {
         VALUES ('tenant-a', 'tenant-a', 'A_VALUE');
       `),
     ).rejects.toThrow(/row-level security policy/i);
+    const updated = await db.query(`
+      UPDATE public.wisp_integration_settings
+      SET marker = 'SPOOFED_UPDATE'
+      WHERE tenant_id = 'tenant-b'
+      RETURNING tenant_id
+    `);
+    expect(updated.rows).toEqual([]);
+    await expect(
+      db.exec(`
+        INSERT INTO public.wisp_integration_settings (id, tenant_id, marker)
+        VALUES ('tenant-b', 'tenant-b', 'SPOOFED_UPSERT')
+        ON CONFLICT (tenant_id) DO UPDATE SET marker = EXCLUDED.marker;
+      `),
+    ).rejects.toThrow(/row-level security policy/i);
     await db.exec('RESET ROLE;');
 
     await db.exec(`
       SET ROLE service_role;
-      SELECT set_config('request.jwt.claim.role', 'service_role', false);
+      SELECT set_config('request.jwt.claim.role', 'authenticated', false);
     `);
     expect(
       (await db.query<{ count: number }>(`
@@ -401,9 +442,33 @@ describe('MT-03 migration ejecutada en Postgres hermético', () => {
     await db.exec(`
       INSERT INTO public.wisp_integration_settings (id, tenant_id, marker)
       VALUES ('tenant-a', 'tenant-a', 'SERVICE_WRITE');
+      INSERT INTO public.wisp_integration_settings (id, tenant_id, marker)
+      VALUES ('tenant-a', 'tenant-a', 'SERVICE_UPSERT')
+      ON CONFLICT (tenant_id) DO UPDATE SET marker = EXCLUDED.marker;
       RESET ROLE;
     `);
+    expect((await db.query<{ marker: string }>(`
+      SELECT marker FROM public.wisp_integration_settings WHERE tenant_id = 'tenant-a'
+    `)).rows).toEqual([{ marker: 'SERVICE_UPSERT' }]);
   });
+
+  it.each(['missing', 'no-bypassrls'] as const)(
+    'preflight rechaza service_role %s antes de mutar',
+    async (serviceRole) => {
+      const db = await database();
+      await baseSchema(db, { serviceRole });
+      await db.exec(`
+        INSERT INTO public.tenants (id) VALUES ('tenant-default');
+        INSERT INTO public.wisp_integration_settings (id, marker)
+        VALUES ('default', 'ORIGINAL');
+      `);
+
+      await expectPreflightFailureWithoutMutation(
+        db,
+        /service_role.*(no existe|BYPASSRLS)/i,
+      );
+    },
+  );
 
   it.each([false, true])(
     'preflight rechaza índice homónimo incorrecto antes de mutar (tenant_id=%s)',
@@ -451,7 +516,7 @@ describe('MT-03 migration ejecutada en Postgres hermético', () => {
   );
 
   it.each([false, true])(
-    'preflight rechaza policy homónima USING(true) antes de mutar (tenant_id=%s)',
+    'preflight rechaza policy legacy PUBLIC/auth.role() antes de mutar (tenant_id=%s)',
     async (withTenantColumn) => {
     const db = await database();
     await baseSchema(db, { withTenantColumn });
@@ -462,7 +527,48 @@ describe('MT-03 migration ejecutada en Postgres hermético', () => {
       ALTER TABLE public.wisp_integration_settings ENABLE ROW LEVEL SECURITY;
       CREATE POLICY wisp_integration_settings_service_role
         ON public.wisp_integration_settings FOR ALL
-        USING (true) WITH CHECK (true);
+        TO public
+        USING ((select auth.role()) = 'service_role')
+        WITH CHECK ((select auth.role()) = 'service_role');
+    `);
+
+    await expectPreflightFailureWithoutMutation(db, /policy.*incompatible/i);
+    },
+  );
+
+  it.each([false, true])(
+    'preflight rechaza policy TO service_role con predicado incorrecto antes de mutar (tenant_id=%s)',
+    async (withTenantColumn) => {
+    const db = await database();
+    await baseSchema(db, { withTenantColumn });
+    await db.exec(`
+      INSERT INTO public.tenants (id) VALUES ('tenant-b');
+      INSERT INTO public.wisp_integration_settings (id, marker)
+      VALUES ('tenant-b', 'ORIGINAL');
+      ALTER TABLE public.wisp_integration_settings ENABLE ROW LEVEL SECURITY;
+      CREATE POLICY wisp_integration_settings_service_role
+        ON public.wisp_integration_settings FOR ALL
+        TO service_role
+        USING (false) WITH CHECK (false);
+    `);
+
+    await expectPreflightFailureWithoutMutation(db, /policy.*incompatible/i);
+    },
+  );
+
+  it.each([false, true])(
+    'preflight rechaza policy TO service_role sin predicados antes de mutar (tenant_id=%s)',
+    async (withTenantColumn) => {
+    const db = await database();
+    await baseSchema(db, { withTenantColumn });
+    await db.exec(`
+      INSERT INTO public.tenants (id) VALUES ('tenant-b');
+      INSERT INTO public.wisp_integration_settings (id, marker)
+      VALUES ('tenant-b', 'ORIGINAL');
+      ALTER TABLE public.wisp_integration_settings ENABLE ROW LEVEL SECURITY;
+      CREATE POLICY wisp_integration_settings_service_role
+        ON public.wisp_integration_settings FOR ALL
+        TO service_role;
     `);
 
     await expectPreflightFailureWithoutMutation(db, /policy.*incompatible/i);
@@ -481,8 +587,8 @@ describe('MT-03 migration ejecutada en Postgres hermético', () => {
       ALTER TABLE public.wisp_integration_settings ENABLE ROW LEVEL SECURITY;
       CREATE POLICY wisp_integration_settings_service_role
         ON public.wisp_integration_settings FOR ALL
-        USING ((select auth.role()) = 'service_role')
-        WITH CHECK ((select auth.role()) = 'service_role');
+        TO service_role
+        USING (true) WITH CHECK (true);
       CREATE POLICY authenticated_open
         ON public.wisp_integration_settings FOR ALL TO authenticated
         USING (true) WITH CHECK (true);

@@ -1,5 +1,5 @@
 -- ====================================================================
--- MT-03 / F1 — tenant_id canónico para wisp_integration_settings.
+-- MT-03 / F2 — tenant_id canónico y RLS ligada al rol service_role.
 --
 -- Relación legacy comprobable:
 --   id = 'default'  -> tenant-default
@@ -23,6 +23,8 @@ DECLARE
   table_oid              OID;
   tenants_oid            OID;
   tenants_id_attnum      SMALLINT;
+  service_role_oid       OID;
+  service_role_bypass    BOOLEAN;
   has_tenant_id          BOOLEAN;
   tenant_attnum          SMALLINT;
   tenant_type            TEXT;
@@ -55,6 +57,19 @@ BEGIN
   -- El lock queda retenido hasta COMMIT/ROLLBACK; ningún writer puede invalidar
   -- el inventario entre el preflight y el backfill.
   LOCK TABLE public.wisp_integration_settings IN ACCESS EXCLUSIVE MODE;
+
+  SELECT r.oid, r.rolbypassrls
+    INTO service_role_oid, service_role_bypass
+    FROM pg_roles r
+   WHERE r.rolname = 'service_role';
+  IF service_role_oid IS NULL THEN
+    RAISE EXCEPTION
+      'MT-03 abortada en preflight: rol service_role no existe';
+  END IF;
+  IF NOT service_role_bypass THEN
+    RAISE EXCEPTION
+      'MT-03 abortada en preflight: rol service_role no tiene BYPASSRLS';
+  END IF;
 
   SELECT to_regclass('public.tenants') INTO tenants_oid;
   IF tenants_oid IS NULL THEN
@@ -200,8 +215,8 @@ BEGIN
   END IF;
 
   -- Contrato RLS exacto: cero policies (se creará la canónica) o exactamente
-  -- una policy PERMISSIVE/FOR ALL/TO public cuyo USING y WITH CHECK sean el
-  -- initplan service-role. Cualquier policy extra abriría acceso por OR.
+  -- una policy PERMISSIVE/FOR ALL ligada sólo al OID real de service_role, con
+  -- USING/WITH CHECK true. Cualquier policy extra abriría acceso por OR.
   SELECT count(*) INTO policy_count
     FROM pg_policy p
    WHERE p.polrelid = table_oid;
@@ -230,12 +245,12 @@ BEGIN
     FROM pg_policy p
     WHERE p.polrelid = table_oid;
 
-    IF policy_name <> 'wisp_integration_settings_service_role'
-       OR NOT policy_permissive
-       OR policy_cmd <> '*'
-       OR policy_roles <> ARRAY[0]::OID[]
-       OR policy_using <> 'selectauth.roleasrole=''service_role''::text'
-       OR policy_check <> 'selectauth.roleasrole=''service_role''::text' THEN
+    IF policy_name IS DISTINCT FROM 'wisp_integration_settings_service_role'
+       OR policy_permissive IS DISTINCT FROM TRUE
+       OR policy_cmd IS DISTINCT FROM '*'
+       OR policy_roles IS DISTINCT FROM ARRAY[service_role_oid]::OID[]
+       OR policy_using IS DISTINCT FROM 'true'
+       OR policy_check IS DISTINCT FROM 'true' THEN
       RAISE EXCEPTION
         'MT-03 abortada en preflight: policy RLS incompatible (name %, cmd %, roles %, permissive %, using %, check %)',
         policy_name, policy_cmd, policy_roles, policy_permissive, policy_using, policy_check;
@@ -376,9 +391,9 @@ BEGIN
       ON public.wisp_integration_settings
       AS PERMISSIVE
       FOR ALL
-      TO public
-      USING ((select auth.role()) = 'service_role')
-      WITH CHECK ((select auth.role()) = 'service_role');
+      TO service_role
+      USING (true)
+      WITH CHECK (true);
   END IF;
 END $$;
 
@@ -390,6 +405,8 @@ DECLARE
   table_oid         OID;
   tenant_attnum     SMALLINT;
   tenants_id_attnum SMALLINT;
+  service_role_oid  OID;
+  service_role_bypass BOOLEAN;
   bad_state         TEXT;
 BEGIN
   SELECT to_regclass('public.wisp_integration_settings') INTO table_oid;
@@ -401,8 +418,14 @@ BEGIN
   SELECT a.attnum INTO tenants_id_attnum
     FROM pg_attribute a
    WHERE a.attrelid = 'public.tenants'::regclass AND a.attname = 'id' AND NOT a.attisdropped;
+  SELECT r.oid, r.rolbypassrls
+    INTO service_role_oid, service_role_bypass
+    FROM pg_roles r
+   WHERE r.rolname = 'service_role';
 
-  IF NOT EXISTS (
+  IF service_role_oid IS NULL OR NOT service_role_bypass THEN
+    bad_state := 'service_role no existe o no tiene BYPASSRLS';
+  ELSIF NOT EXISTS (
     SELECT 1 FROM pg_attribute a
     LEFT JOIN pg_attrdef d ON d.adrelid = a.attrelid AND d.adnum = a.attnum
     WHERE a.attrelid = table_oid
@@ -448,11 +471,11 @@ BEGIN
       AND p.polname = 'wisp_integration_settings_service_role'
       AND p.polpermissive
       AND p.polcmd = '*'
-      AND p.polroles = ARRAY[0]::OID[]
+      AND p.polroles = ARRAY[service_role_oid]::OID[]
       AND regexp_replace(lower(pg_get_expr(p.polqual, p.polrelid)), '[[:space:]()]', '', 'g')
-          = 'selectauth.roleasrole=''service_role''::text'
+          = 'true'
       AND regexp_replace(lower(pg_get_expr(p.polwithcheck, p.polrelid)), '[[:space:]()]', '', 'g')
-          = 'selectauth.roleasrole=''service_role''::text'
+          = 'true'
   ) THEN
     bad_state := 'policy RLS canónica no es exacta o hay policies adicionales';
   END IF;
