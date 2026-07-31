@@ -8,11 +8,25 @@
 // ====================================================================
 
 import { store, MikrotikRouterRegistryItem } from '../../../state/store';
+import { filterRoutersByTenant } from '../../mikrotik/tenant-filter';
+
+const requireTenantId = (tenantId: string): string => {
+  const scoped = (tenantId ?? '').trim();
+  if (!scoped) {
+    throw new Error('inventoryRoutersRepository.listForTenant: tenantId es obligatorio.');
+  }
+  return scoped;
+};
 
 export const inventoryRoutersRepository = {
   /** Todos los routers del registro (referencia de solo lectura). */
   list(): MikrotikRouterRegistryItem[] {
     return store.MIKROTIK_ROUTERS;
+  },
+
+  /** Routers del WISP solicitado; legacy sin stamp pertenece a tenant-default. */
+  listForTenant(tenantId: string): MikrotikRouterRegistryItem[] {
+    return filterRoutersByTenant(store.MIKROTIK_ROUTERS, requireTenantId(tenantId));
   },
 
   /** Un router por id, o undefined si no existe. */

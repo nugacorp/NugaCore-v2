@@ -101,6 +101,10 @@ describe('MT-04 — la llamada de negocio sin tenant no compila', () => {
     await repo.findOrderByProviderOrderId('openpay', 'chg-1');
     // @ts-expect-error MT-04: no existe update de order sin WISP.
     await repo.updateOrderStatus('po-1', 'completed');
+    // @ts-expect-error MT-04-F1: el patch no puede trasplantar ownership.
+    await repo.updateOrderStatus('po-1', TENANT_A, 'completed', { tenantId: TENANT_B });
+    // @ts-expect-error MT-04-F1: el patch no puede cambiar la identidad.
+    await repo.updateOrderStatus('po-1', TENANT_A, 'completed', { id: 'po-otra' });
     // @ts-expect-error MT-04: no se puede insertar una order sin WISP.
     await repo.createOrder({ ...orderOf(TENANT_A, 'po-1'), tenantId: undefined });
     // @ts-expect-error MT-04: listActions no admite filtro sin tenantId.
@@ -109,6 +113,10 @@ describe('MT-04 — la llamada de negocio sin tenant no compila', () => {
     await repo.findActionById('ma-1');
     // @ts-expect-error MT-04: no existe update de acción sin WISP.
     await repo.updateAction('ma-1', { status: 'completed' });
+    // @ts-expect-error MT-04-F1: el patch no puede trasplantar ownership.
+    await repo.updateAction('ma-1', TENANT_A, { tenantId: TENANT_B });
+    // @ts-expect-error MT-04-F1: el patch no puede cambiar la identidad.
+    await repo.updateAction('ma-1', TENANT_A, { id: 'ma-otra' });
     // @ts-expect-error MT-04: el claim exige el WISP del evento.
     await repo.claimEvent({ ...eventOf(TENANT_A, 'pe-1'), tenantId: undefined });
     // @ts-expect-error MT-04: renovar el lease exige el WISP del evento.
@@ -233,6 +241,47 @@ describe('MT-04 — aislamiento A/B (store en memoria)', () => {
 
     // Y el dueño legítimo sí puede.
     expect((await repo.updateOrderStatus('po-b', TENANT_B, 'completed'))?.status).toBe('completed');
+  });
+
+  it('un patch untyped no cambia id/tenantId y sólo aplica la allowlist', async () => {
+    await seedBoth();
+
+    await (repo.updateOrderStatus as unknown as (
+      id: string, tenantId: string, status: 'completed', patch: Record<string, unknown>,
+    ) => Promise<unknown>)('po-a', TENANT_A, 'completed', {
+      id: 'po-trasplantada',
+      tenantId: TENANT_B,
+      providerOrderId: 'chg-actualizado',
+      checkoutUrl: 'https://checkout.invalid/a',
+      invoiceId: 'fac-prohibida',
+    });
+    await (repo.updateAction as unknown as (
+      id: string, tenantId: string, patch: Record<string, unknown>,
+    ) => Promise<unknown>)('ma-a', TENANT_A, {
+      id: 'ma-trasplantada',
+      tenantId: TENANT_B,
+      status: 'completed',
+      result: { accepted: true },
+      customerId: 'c-prohibido',
+    });
+
+    const orderA = await repo.findOrderById('po-a', TENANT_A);
+    const actionA = await repo.findActionById('ma-a', TENANT_A);
+    expect(orderA).toMatchObject({
+      id: 'po-a', tenantId: TENANT_A, invoiceId: `fac-${TENANT_A}`,
+      status: 'completed', providerOrderId: 'chg-actualizado',
+      checkoutUrl: 'https://checkout.invalid/a',
+    });
+    expect(actionA).toMatchObject({
+      id: 'ma-a', tenantId: TENANT_A, customerId: `c-${TENANT_A}`,
+      status: 'completed', result: { accepted: true },
+    });
+    expect(await repo.listOrders({ tenantId: TENANT_B })).not.toContainEqual(
+      expect.objectContaining({ id: 'po-a' }),
+    );
+    expect(await repo.listActions({ tenantId: TENANT_B })).not.toContainEqual(
+      expect.objectContaining({ id: 'ma-a' }),
+    );
   });
 
   it('el claim de B no se renueva ni se cierra desde A', async () => {
@@ -361,6 +410,34 @@ describe('MT-04 — aislamiento A/B contra PostgREST con service role', () => {
     expect((await repo.updateAction('ma-b', TENANT_B, { status: 'completed' }))?.status).toBe('completed');
     expect(await repo.markEventProcessed('pe-b', TENANT_B, 'token-b')).toBe(true);
     expect(tables.payment_events.find((r) => r.id === 'pe-b')?.processed).toBe(true);
+  });
+
+  it('Supabase aplica la misma allowlist ante un patch untyped', async () => {
+    const { repo, tables } = build();
+
+    await (repo.updateOrderStatus as unknown as (
+      id: string, tenantId: string, status: 'completed', patch: Record<string, unknown>,
+    ) => Promise<unknown>)('po-a', TENANT_A, 'completed', {
+      id: 'po-trasplantada', tenantId: TENANT_B,
+      providerOrderId: 'chg-actualizado', checkoutUrl: 'https://checkout.invalid/a',
+      invoiceId: 'fac-prohibida',
+    });
+    await (repo.updateAction as unknown as (
+      id: string, tenantId: string, patch: Record<string, unknown>,
+    ) => Promise<unknown>)('ma-a', TENANT_A, {
+      id: 'ma-trasplantada', tenantId: TENANT_B,
+      status: 'completed', result: { accepted: true }, customerId: 'c-prohibido',
+    });
+
+    expect(tables.payment_orders.find((r) => r.id === 'po-a')).toMatchObject({
+      id: 'po-a', tenant_id: TENANT_A, invoice_id: 'fac-a',
+      status: 'completed', provider_order_id: 'chg-actualizado',
+      checkout_url: 'https://checkout.invalid/a',
+    });
+    expect(tables.mikrotik_actions.find((r) => r.id === 'ma-a')).toMatchObject({
+      id: 'ma-a', tenant_id: TENANT_A, customer_id: 'c-a',
+      status: 'completed', result: { accepted: true },
+    });
   });
 
   it('ninguna consulta llega a la base sin tenant_id', async () => {

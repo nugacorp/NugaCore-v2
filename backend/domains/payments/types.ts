@@ -148,6 +148,18 @@ export interface MikrotikActionRecord {
   updatedAt: string;
 }
 
+/** Campos de una order que pueden mutar después de crearla. */
+export type PaymentOrderMutablePatch = Partial<Pick<
+  PaymentOrderRecord,
+  'providerOrderId' | 'checkoutUrl'
+>>;
+
+/** Campos de una acción que pueden mutar sin cambiar identidad/ownership. */
+export type MikrotikActionMutablePatch = Partial<Pick<
+  MikrotikActionRecord,
+  'status' | 'result'
+>>;
+
 export interface MikrotikActionView {
   id: string;
   tenantId?: string;
