@@ -53,6 +53,10 @@ const USERS: Record<string, { id: string; tenantClaim?: string }> = {
   'token-b': { id: 'user-b' },
   'token-huerfano': { id: 'user-huerfano' },
   'token-suspendido': { id: 'user-suspendido' },
+  'token-a-claim': { id: 'user-a' },
+  'token-huerfano-claim': { id: 'user-huerfano-claim' },
+  'token-invitado-claim': { id: 'user-invitado-claim' },
+  'token-suspendido-claim': { id: 'user-suspendido-claim' },
 };
 
 const app = createApp();
@@ -101,9 +105,25 @@ describe('MT-02 · contrato fail-closed de resolución de tenant', () => {
     const svc = getTenancyService();
     tenantA = (await svc.createTenant({ name: 'WISP A', slug: 'wisp-a', ownerUserId: 'user-a' })).id;
     tenantB = (await svc.createTenant({ name: 'WISP B', slug: 'wisp-b', ownerUserId: 'user-b' })).id;
+    USERS['token-a-claim'].tenantClaim = tenantA;
+    USERS['token-huerfano-claim'].tenantClaim = tenantA;
+    USERS['token-invitado-claim'].tenantClaim = tenantA;
+    USERS['token-suspendido-claim'].tenantClaim = tenantA;
     await svc.ensureMembership({
       tenantId: tenantA,
       userId: 'user-suspendido',
+      role: 'member',
+      status: 'suspended',
+    });
+    await svc.ensureMembership({
+      tenantId: tenantA,
+      userId: 'user-invitado-claim',
+      role: 'member',
+      status: 'invited',
+    });
+    await svc.ensureMembership({
+      tenantId: tenantA,
+      userId: 'user-suspendido-claim',
       role: 'member',
       status: 'suspended',
     });
@@ -142,6 +162,51 @@ describe('MT-02 · contrato fail-closed de resolución de tenant', () => {
 
     expect(list.mock.calls[0][0].tenantId).toBe(tenantA);
     expect(list.mock.calls[1][0].tenantId).toBe(tenantB);
+  });
+
+  it('JWT claim A selecciona A sólo con membership A activa', async () => {
+    const svc = getTenancyService();
+    const ensureMembership = vi.spyOn(svc, 'ensureMembership');
+    const list = vi.spyOn(getCustomersService(), 'list').mockResolvedValue([]);
+
+    const res = await request(app).get('/api/clients').set('Authorization', 'Bearer token-a-claim');
+
+    expect(res.status).toBe(200);
+    expect(list).toHaveBeenCalledTimes(1);
+    expect(list.mock.calls[0][0].tenantId).toBe(tenantA);
+    expect(ensureMembership).not.toHaveBeenCalled();
+  });
+
+  it.each([
+    ['invited', 'token-invitado-claim'],
+    ['suspended', 'token-suspendido-claim'],
+  ] as const)('JWT claim con membership %s devuelve 403 y cero side effects', async (_status, token) => {
+    const svc = getTenancyService();
+    const ensureMembership = vi.spyOn(svc, 'ensureMembership');
+    const list = vi.spyOn(getCustomersService(), 'list').mockResolvedValue([]);
+
+    const res = await request(app).get('/api/clients').set('Authorization', `Bearer ${token}`);
+
+    expect(res.status).toBe(403);
+    expect(res.body.code).toBe('TENANT_MEMBERSHIP_INACTIVE');
+    expect(ensureMembership).not.toHaveBeenCalled();
+    expect(list).not.toHaveBeenCalled();
+  });
+
+  it('JWT claim con cero memberships devuelve 403 sin crear contexto ni filas', async () => {
+    const svc = getTenancyService();
+    const ensureMembership = vi.spyOn(svc, 'ensureMembership');
+    const list = vi.spyOn(getCustomersService(), 'list').mockResolvedValue([]);
+
+    const res = await request(app)
+      .get('/api/clients')
+      .set('Authorization', 'Bearer token-huerfano-claim');
+
+    expect(res.status).toBe(403);
+    expect(res.body.code).toBe('TENANT_MEMBERSHIP_REQUIRED');
+    expect(ensureMembership).not.toHaveBeenCalled();
+    expect(list).not.toHaveBeenCalled();
+    await expect(svc.listAllMembershipsForUser('user-huerfano-claim')).resolves.toEqual([]);
   });
 
   // ---------------- Header de tenant no autorizado ----------------

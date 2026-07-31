@@ -15,8 +15,8 @@ import { DEFAULT_TENANT_ID } from './types';
 //
 // Orden de concesión:
 //   1. Header/`x-tenant-id` si el usuario tiene membresía ACTIVA en él.
-//   2. Claim `app_metadata.tenant_id` del JWT (solo service_role puede
-//      escribirlo) si el tenant existe: repara la membresía huérfana.
+//   2. Claim `app_metadata.tenant_id` del JWT únicamente si selecciona una
+//      membresía ACTIVA ya existente. El claim nunca crea ownership.
 //   3. Primera membresía activa.
 //   4. `tenant-default` SOLO con el gate legacy single-WISP encendido.
 //
@@ -36,7 +36,6 @@ export type TenantDenialCode =
 export type TenantGrantVia =
   | 'requested-membership'
   | 'jwt-claim-membership'
-  | 'jwt-claim-repair'
   | 'primary-membership'
   | 'legacy-single-wisp';
 
@@ -183,30 +182,36 @@ export const resolveTenantForUser = async (
     return logDenial(deny('TENANT_NOT_AUTHORIZED'), params);
   }
 
-  // ---- 2. Claim del JWT (app_metadata, solo escribible por service_role) ----
+  // ---- 2. Claim del JWT: selector, nunca fuente de ownership ----
   if (claim && params.source === 'supabase-jwt') {
     if (activeTenantIds.has(claim)) return grant(claim, 'jwt-claim-membership');
 
-    let tenant;
+    let membership;
     try {
-      tenant = await service.getTenant(claim);
+      membership = await service.getMembership(claim, userId);
     } catch (err) {
       return logDenial(deny('TENANT_RESOLUTION_UNAVAILABLE'), params, err);
     }
-    if (tenant) {
-      try {
-        await service.ensureMembership({
-          tenantId: claim,
-          userId,
-          role: 'owner',
-          status: 'active',
-        });
-      } catch (err) {
-        // Sin membresía persistida no hay pertenencia demostrable: denegar.
-        return logDenial(deny('TENANT_RESOLUTION_UNAVAILABLE'), params, err);
-      }
-      return grant(claim, 'jwt-claim-repair');
+    if (membership) {
+      return logDenial(deny('TENANT_MEMBERSHIP_INACTIVE'), params);
     }
+
+    // Un claim obsoleto/arbitrario termina aquí: no cae a la membership
+    // primaria ni al fallback legacy. Sólo distinguimos una cuenta realmente
+    // huérfana para devolver el código estable TENANT_MEMBERSHIP_REQUIRED.
+    if (activeMemberships.length > 0) {
+      return logDenial(deny('TENANT_NOT_AUTHORIZED'), params);
+    }
+    let allMemberships;
+    try {
+      allMemberships = await service.listAllMembershipsForUser(userId);
+    } catch (err) {
+      return logDenial(deny('TENANT_RESOLUTION_UNAVAILABLE'), params, err);
+    }
+    if (allMemberships.length > 0) {
+      return logDenial(deny('TENANT_NOT_AUTHORIZED'), params);
+    }
+    return logDenial(deny('TENANT_MEMBERSHIP_REQUIRED'), params);
   }
 
   // ---- 3. Primera membresía activa ----

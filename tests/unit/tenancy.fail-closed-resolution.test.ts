@@ -181,9 +181,9 @@ describe('MT-02 · resolveTenantForUser fail-closed', () => {
     expect(result.code).toBe('TENANT_RESOLUTION_UNAVAILABLE');
   });
 
-  it('fallo de DB al reparar membership desde el claim JWT también deniega', async () => {
+  it('fallo de DB al validar la membership exacta del claim JWT también deniega', async () => {
     const { svc, a } = await seedTenants();
-    vi.spyOn(svc, 'ensureMembership').mockRejectedValue(new Error('insert failed'));
+    vi.spyOn(svc, 'getMembership').mockRejectedValue(new Error('select failed'));
 
     const result = await resolveTenantForUser({
       userId: 'user-nuevo',
@@ -197,15 +197,80 @@ describe('MT-02 · resolveTenantForUser fail-closed', () => {
 
   // ---------------- Claim JWT (app_metadata, service_role) ----------------
 
-  it('claim JWT de un tenant existente repara la membership y resuelve ese tenant', async () => {
-    const { a } = await seedTenants();
+  it('claim JWT selecciona el tenant cuando la membership exacta ya está activa', async () => {
+    const { svc, a } = await seedTenants();
+    const ensureMembership = vi.spyOn(svc, 'ensureMembership');
     const result = await resolveTenantForUser({
-      userId: 'owner-huerfano',
+      userId: 'user-a',
       jwtClaimTenantId: a.id,
       source: 'supabase-jwt',
     });
     expect(result.ok).toBe(true);
     expect(result.ok && result.tenantId).toBe(a.id);
+    expect(result.ok && result.via).toBe('jwt-claim-membership');
+    expect(ensureMembership).not.toHaveBeenCalled();
+  });
+
+  it.each(['invited', 'suspended'] as const)(
+    'claim JWT con membership %s devuelve 403 y no cambia su status',
+    async (status) => {
+      const { svc, a } = await seedTenants();
+      await svc.ensureMembership({
+        tenantId: a.id,
+        userId: `user-claim-${status}`,
+        role: 'member',
+        status,
+      });
+      const ensureMembership = vi.spyOn(svc, 'ensureMembership');
+
+      const result = await resolveTenantForUser({
+        userId: `user-claim-${status}`,
+        jwtClaimTenantId: a.id,
+        source: 'supabase-jwt',
+      });
+
+      expect(result.ok).toBe(false);
+      if (result.ok) throw new Error('unreachable');
+      expect(result.status).toBe(403);
+      expect(result.code).toBe('TENANT_MEMBERSHIP_INACTIVE');
+      expect(ensureMembership).not.toHaveBeenCalled();
+      await expect(svc.getMembership(a.id, `user-claim-${status}`)).resolves.toMatchObject({ status });
+    },
+  );
+
+  it('claim JWT con tenant existente y cero memberships devuelve 403 sin crear filas', async () => {
+    const { svc, a } = await seedTenants();
+    const ensureMembership = vi.spyOn(svc, 'ensureMembership');
+
+    const result = await resolveTenantForUser({
+      userId: 'owner-huerfano',
+      jwtClaimTenantId: a.id,
+      source: 'supabase-jwt',
+    });
+
+    expect(result.ok).toBe(false);
+    if (result.ok) throw new Error('unreachable');
+    expect(result.status).toBe(403);
+    expect(result.code).toBe('TENANT_MEMBERSHIP_REQUIRED');
+    expect(ensureMembership).not.toHaveBeenCalled();
+    await expect(svc.listAllMembershipsForUser('owner-huerfano')).resolves.toEqual([]);
+  });
+
+  it('claim arbitrario no activa tenant-default aunque el gate legacy esté encendido', async () => {
+    process.env[LEGACY_SINGLE_WISP_FALLBACK_ENV] = 'true';
+    const { svc } = await seedTenants();
+    const ensureMembership = vi.spyOn(svc, 'ensureMembership');
+
+    const result = await resolveTenantForUser({
+      userId: 'user-claim-obsoleto',
+      jwtClaimTenantId: 'tenant-obsoleto',
+      source: 'supabase-jwt',
+    });
+
+    expect(result.ok).toBe(false);
+    if (result.ok) throw new Error('unreachable');
+    expect(result.code).toBe('TENANT_MEMBERSHIP_REQUIRED');
+    expect(ensureMembership).not.toHaveBeenCalled();
   });
 
   it('claim JWT de un tenant inexistente NO concede acceso', async () => {

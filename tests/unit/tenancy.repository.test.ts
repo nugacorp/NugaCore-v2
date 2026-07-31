@@ -101,7 +101,7 @@ describe('TenancyService status + resolve', () => {
     ).rejects.toMatchObject({ statusCode: 403, code: 'TENANT_NOT_AUTHORIZED' });
   });
 
-  it('resolveTenantIdForUser repara membership desde jwtClaimTenantId', async () => {
+  it('resolveTenantIdForUser no crea membership desde jwtClaimTenantId', async () => {
     resetTenancyService();
     const { getTenancyService } = await import('../../backend/domains/tenancy/service');
     const svc = getTenancyService();
@@ -110,15 +110,15 @@ describe('TenancyService status + resolve', () => {
       slug: 'claim-wisp',
     });
 
-    const resolved = await resolveTenantIdForUser({
-      userId: 'owner-claim',
-      requestedTenantId: null,
-      jwtClaimTenantId: tenant.id,
-      source: 'supabase-jwt',
-    });
-    expect(resolved).toBe(tenant.id);
-    const memberships = await svc.listMembershipsForUser('owner-claim');
-    expect(memberships.some((m) => m.tenantId === tenant.id)).toBe(true);
+    await expect(
+      resolveTenantIdForUser({
+        userId: 'owner-claim',
+        requestedTenantId: null,
+        jwtClaimTenantId: tenant.id,
+        source: 'supabase-jwt',
+      }),
+    ).rejects.toMatchObject({ statusCode: 403, code: 'TENANT_MEMBERSHIP_REQUIRED' });
+    await expect(svc.listAllMembershipsForUser('owner-claim')).resolves.toEqual([]);
   });
 
   it('resolveTenantIdForUser no eleva por x-tenant-id sin membership', async () => {
