@@ -63,11 +63,32 @@ const sanitize = (value: string): string => value.replace(/["\n\r]/g, '').trim()
 const label = (payload: OnuActionPayload): string =>
   sanitize(payload.description || 'cliente-nugacore').slice(0, 32);
 
+const requiredCliValue = (
+  value: string | number | null | undefined,
+  placeholder: string,
+): string | number =>
+  value === undefined || value === null || value === '' ? placeholder : value;
+
+const serial = (payload: OnuActionPayload): string =>
+  sanitize(String(requiredCliValue(payload.serial, '<SERIE>')));
+
+const ponPort = (payload: OnuActionPayload): string =>
+  String(requiredCliValue(payload.ponPort, '<PON>'));
+
+const onuIndex = (payload: OnuActionPayload): string | number =>
+  requiredCliValue(payload.onuIndex, '<N>');
+
+const vlan = (payload: OnuActionPayload): string | number =>
+  requiredCliValue(payload.vlan, '<VLAN>');
+
 /**
  * Huawei separa el puerto PON como frame/slot/port; `ont add` recibe el port y
  * el índice por separado, por eso se parte la última componente.
  */
 const huaweiParts = (ponPort: string): { iface: string; port: string } => {
+  if (ponPort === '<PON>') {
+    return { iface: ponPort, port: ponPort };
+  }
   const parts = ponPort.split('/');
   if (parts.length >= 3) {
     return { iface: `${parts[0]}/${parts[1]}`, port: parts[2] };
@@ -79,36 +100,36 @@ type Builder = (payload: OnuActionPayload) => string[];
 
 const huaweiBuilders: Record<OltActionType, Builder> = {
   provision_onu: (p) => {
-    const { iface, port } = huaweiParts(p.ponPort ?? '0/1/0');
+    const { iface, port } = huaweiParts(ponPort(p));
     return [
       'enable',
       'config',
       `interface gpon ${iface}`,
-      ` ont add ${port} ${p.onuIndex} sn-auth "${sanitize(p.serial ?? '')}" omci` +
+      ` ont add ${port} ${onuIndex(p)} sn-auth "${serial(p)}" omci` +
         ` ont-lineprofile-id ${p.lineProfileId ?? 10} ont-srvprofile-id ${p.serviceProfileId ?? 10}` +
         ` desc "${label(p)}"`,
-      ` ont port native-vlan ${port} ${p.onuIndex} eth 1 vlan ${p.vlan} priority 0`,
+      ` ont port native-vlan ${port} ${onuIndex(p)} eth 1 vlan ${vlan(p)} priority 0`,
       ' quit',
-      `service-port vlan ${p.vlan} gpon ${iface}/${port} ont ${p.onuIndex} gemport 1` +
-        ` multi-service user-vlan ${p.vlan} tag-transform translate`,
+      `service-port vlan ${vlan(p)} gpon ${iface}/${port} ont ${onuIndex(p)} gemport 1` +
+        ` multi-service user-vlan ${vlan(p)} tag-transform translate`,
       'save',
     ];
   },
   deauthorize_onu: (p) => {
-    const { iface, port } = huaweiParts(p.ponPort ?? '0/1/0');
-    return ['enable', 'config', `interface gpon ${iface}`, ` ont delete ${port} ${p.onuIndex}`, ' quit', 'save'];
+    const { iface, port } = huaweiParts(ponPort(p));
+    return ['enable', 'config', `interface gpon ${iface}`, ` ont delete ${port} ${onuIndex(p)}`, ' quit', 'save'];
   },
   suspend_onu: (p) => {
-    const { iface, port } = huaweiParts(p.ponPort ?? '0/1/0');
-    return ['enable', 'config', `interface gpon ${iface}`, ` ont deactivate ${port} ${p.onuIndex}`, ' quit'];
+    const { iface, port } = huaweiParts(ponPort(p));
+    return ['enable', 'config', `interface gpon ${iface}`, ` ont deactivate ${port} ${onuIndex(p)}`, ' quit'];
   },
   restore_onu: (p) => {
-    const { iface, port } = huaweiParts(p.ponPort ?? '0/1/0');
-    return ['enable', 'config', `interface gpon ${iface}`, ` ont activate ${port} ${p.onuIndex}`, ' quit'];
+    const { iface, port } = huaweiParts(ponPort(p));
+    return ['enable', 'config', `interface gpon ${iface}`, ` ont activate ${port} ${onuIndex(p)}`, ' quit'];
   },
   reboot_onu: (p) => {
-    const { iface, port } = huaweiParts(p.ponPort ?? '0/1/0');
-    return ['enable', 'config', `interface gpon ${iface}`, ` ont reset ${port} ${p.onuIndex}`, ' quit'];
+    const { iface, port } = huaweiParts(ponPort(p));
+    return ['enable', 'config', `interface gpon ${iface}`, ` ont reset ${port} ${onuIndex(p)}`, ' quit'];
   },
   custom: (p) => p.rawCommands ?? [],
 };
@@ -116,39 +137,39 @@ const huaweiBuilders: Record<OltActionType, Builder> = {
 const zteBuilders: Record<OltActionType, Builder> = {
   provision_onu: (p) => [
     'configure terminal',
-    `interface gpon-olt_${p.ponPort}`,
-    ` onu ${p.onuIndex} type ${p.onuType ?? 'ALL'} sn ${sanitize(p.serial ?? '')}`,
+    `interface gpon-olt_${ponPort(p)}`,
+    ` onu ${onuIndex(p)} type ${p.onuType ?? 'ALL'} sn ${serial(p)}`,
     ' exit',
-    `interface gpon-onu_${p.ponPort}:${p.onuIndex}`,
+    `interface gpon-onu_${ponPort(p)}:${onuIndex(p)}`,
     ` name ${label(p)}`,
     ` tcont 1 profile ${p.lineProfileId ?? 'dba-nuga'}`,
     ' gemport 1 tcont 1',
-    ` service-port 1 vport 1 user-vlan ${p.vlan} vlan ${p.vlan}`,
+    ` service-port 1 vport 1 user-vlan ${vlan(p)} vlan ${vlan(p)}`,
     ' exit',
     'write',
   ],
   deauthorize_onu: (p) => [
     'configure terminal',
-    `interface gpon-olt_${p.ponPort}`,
-    ` no onu ${p.onuIndex}`,
+    `interface gpon-olt_${ponPort(p)}`,
+    ` no onu ${onuIndex(p)}`,
     ' exit',
     'write',
   ],
   suspend_onu: (p) => [
     'configure terminal',
-    `interface gpon-onu_${p.ponPort}:${p.onuIndex}`,
+    `interface gpon-onu_${ponPort(p)}:${onuIndex(p)}`,
     ' shutdown',
     ' exit',
   ],
   restore_onu: (p) => [
     'configure terminal',
-    `interface gpon-onu_${p.ponPort}:${p.onuIndex}`,
+    `interface gpon-onu_${ponPort(p)}:${onuIndex(p)}`,
     ' no shutdown',
     ' exit',
   ],
   reboot_onu: (p) => [
     'configure terminal',
-    `pon-onu-mng gpon-onu_${p.ponPort}:${p.onuIndex}`,
+    `pon-onu-mng gpon-onu_${ponPort(p)}:${onuIndex(p)}`,
     ' reboot',
     ' exit',
   ],
@@ -159,26 +180,26 @@ const vsolBdcomBuilders: Record<OltActionType, Builder> = {
   provision_onu: (p) => [
     'enable',
     'config',
-    `interface epon ${p.ponPort}`,
-    ` epon bind-onu sn ${sanitize(p.serial ?? '')} ${p.onuIndex}`,
+    `interface epon ${ponPort(p)}`,
+    ` epon bind-onu sn ${serial(p)} ${onuIndex(p)}`,
     ' exit',
-    `interface epon ${p.ponPort}:${p.onuIndex}`,
+    `interface epon ${ponPort(p)}:${onuIndex(p)}`,
     ` description ${label(p)}`,
-    ` epon onu port 1 ctc vlan mode tag ${p.vlan}`,
+    ` epon onu port 1 ctc vlan mode tag ${vlan(p)}`,
     ' exit',
     'write',
   ],
   deauthorize_onu: (p) => [
     'enable',
     'config',
-    `interface epon ${p.ponPort}`,
-    ` no epon bind-onu ${p.onuIndex}`,
+    `interface epon ${ponPort(p)}`,
+    ` no epon bind-onu ${onuIndex(p)}`,
     ' exit',
     'write',
   ],
-  suspend_onu: (p) => ['enable', 'config', `interface epon ${p.ponPort}:${p.onuIndex}`, ' shutdown', ' exit'],
-  restore_onu: (p) => ['enable', 'config', `interface epon ${p.ponPort}:${p.onuIndex}`, ' no shutdown', ' exit'],
-  reboot_onu: (p) => ['enable', 'config', `epon reboot-onu ${p.ponPort}:${p.onuIndex}`],
+  suspend_onu: (p) => ['enable', 'config', `interface epon ${ponPort(p)}:${onuIndex(p)}`, ' shutdown', ' exit'],
+  restore_onu: (p) => ['enable', 'config', `interface epon ${ponPort(p)}:${onuIndex(p)}`, ' no shutdown', ' exit'],
+  reboot_onu: (p) => ['enable', 'config', `epon reboot-onu ${ponPort(p)}:${onuIndex(p)}`],
   custom: (p) => p.rawCommands ?? [],
 };
 
@@ -186,41 +207,41 @@ const cdataBuilders: Record<OltActionType, Builder> = {
   provision_onu: (p) => [
     'enable',
     'configure terminal',
-    `interface gpon ${p.ponPort}`,
-    ` onu ${p.onuIndex} type ${p.onuType ?? 'auto'} sn ${sanitize(p.serial ?? '')}`,
-    ` onu ${p.onuIndex} description ${label(p)}`,
-    ` onu ${p.onuIndex} tcont 1 profile ${p.lineProfileId ?? 'dba-nuga'}`,
-    ` onu ${p.onuIndex} service 1 gemport 1 vlan ${p.vlan}`,
+    `interface gpon ${ponPort(p)}`,
+    ` onu ${onuIndex(p)} type ${p.onuType ?? 'auto'} sn ${serial(p)}`,
+    ` onu ${onuIndex(p)} description ${label(p)}`,
+    ` onu ${onuIndex(p)} tcont 1 profile ${p.lineProfileId ?? 'dba-nuga'}`,
+    ` onu ${onuIndex(p)} service 1 gemport 1 vlan ${vlan(p)}`,
     ' exit',
     'save',
   ],
   deauthorize_onu: (p) => [
     'enable',
     'configure terminal',
-    `interface gpon ${p.ponPort}`,
-    ` no onu ${p.onuIndex}`,
+    `interface gpon ${ponPort(p)}`,
+    ` no onu ${onuIndex(p)}`,
     ' exit',
     'save',
   ],
   suspend_onu: (p) => [
     'enable',
     'configure terminal',
-    `interface gpon ${p.ponPort}`,
-    ` onu ${p.onuIndex} deactivate`,
+    `interface gpon ${ponPort(p)}`,
+    ` onu ${onuIndex(p)} deactivate`,
     ' exit',
   ],
   restore_onu: (p) => [
     'enable',
     'configure terminal',
-    `interface gpon ${p.ponPort}`,
-    ` onu ${p.onuIndex} activate`,
+    `interface gpon ${ponPort(p)}`,
+    ` onu ${onuIndex(p)} activate`,
     ' exit',
   ],
   reboot_onu: (p) => [
     'enable',
     'configure terminal',
-    `interface gpon ${p.ponPort}`,
-    ` onu ${p.onuIndex} reboot`,
+    `interface gpon ${ponPort(p)}`,
+    ` onu ${onuIndex(p)} reboot`,
     ' exit',
   ],
   custom: (p) => p.rawCommands ?? [],
@@ -231,40 +252,40 @@ const fiberhomeBuilders: Record<OltActionType, Builder> = {
   provision_onu: (p) => [
     'enable',
     'cd onu',
-    `set whitelist phy_addr address ${sanitize(p.serial ?? '')} password null action add` +
-      ` slot ${p.ponPort} pon ${p.onuIndex} onuid ${p.onuIndex} type ${p.onuType ?? 'AN5506-04'}`,
+    `set whitelist phy_addr address ${serial(p)} password null action add` +
+      ` slot ${ponPort(p)} pon ${onuIndex(p)} onuid ${onuIndex(p)} type ${p.onuType ?? 'AN5506-04'}`,
     'cd ..',
     'cd service',
-    `add service_port ${p.onuIndex} vlan ${p.vlan} onuid ${p.onuIndex} desc ${label(p)}`,
+    `add service_port ${onuIndex(p)} vlan ${vlan(p)} onuid ${onuIndex(p)} desc ${label(p)}`,
     'cd ..',
     'save',
   ],
   deauthorize_onu: (p) => [
     'enable',
     'cd onu',
-    `set whitelist phy_addr address ${sanitize(p.serial ?? '')} action delete`,
+    `set whitelist phy_addr address ${serial(p)} action delete`,
     'cd ..',
     'save',
   ],
-  suspend_onu: (p) => ['enable', 'cd onu', `set onu status slot ${p.ponPort} pon ${p.onuIndex} disable`, 'cd ..'],
-  restore_onu: (p) => ['enable', 'cd onu', `set onu status slot ${p.ponPort} pon ${p.onuIndex} enable`, 'cd ..'],
-  reboot_onu: (p) => ['enable', 'cd onu', `reboot onu slot ${p.ponPort} pon ${p.onuIndex}`, 'cd ..'],
+  suspend_onu: (p) => ['enable', 'cd onu', `set onu status slot ${ponPort(p)} pon ${onuIndex(p)} disable`, 'cd ..'],
+  restore_onu: (p) => ['enable', 'cd onu', `set onu status slot ${ponPort(p)} pon ${onuIndex(p)} enable`, 'cd ..'],
+  reboot_onu: (p) => ['enable', 'cd onu', `reboot onu slot ${ponPort(p)} pon ${onuIndex(p)}`, 'cd ..'],
   custom: (p) => p.rawCommands ?? [],
 };
 
 const genericBuilders: Record<OltActionType, Builder> = {
   provision_onu: (p) => [
     '! Familia de CLI no catalogada — traducir a la sintaxis del equipo:',
-    `! 1) Autorizar ONU serie ${p.serial ?? '<SERIE>'} en PON ${p.ponPort ?? '<PON>'} índice ${p.onuIndex ?? '<N>'}`,
+    `! 1) Autorizar ONU serie ${requiredCliValue(p.serial, '<SERIE>')} en PON ${ponPort(p)} índice ${onuIndex(p)}`,
     `! 2) Asignar perfil de línea ${p.lineProfileId ?? '<LINE-PROFILE>'} y servicio ${p.serviceProfileId ?? '<SRV-PROFILE>'}`,
-    `! 3) Mapear VLAN ${p.vlan ?? '<VLAN>'} al puerto de usuario`,
+    `! 3) Mapear VLAN ${vlan(p)} al puerto de usuario`,
     `! 4) Descripción: ${label(p)}`,
     '! 5) Guardar configuración',
   ],
-  deauthorize_onu: (p) => [`! Eliminar ONU ${p.serial ?? '<SERIE>'} de PON ${p.ponPort ?? '<PON>'}`],
-  suspend_onu: (p) => [`! Desactivar ONU índice ${p.onuIndex ?? '<N>'} en PON ${p.ponPort ?? '<PON>'}`],
-  restore_onu: (p) => [`! Activar ONU índice ${p.onuIndex ?? '<N>'} en PON ${p.ponPort ?? '<PON>'}`],
-  reboot_onu: (p) => [`! Reiniciar ONU índice ${p.onuIndex ?? '<N>'} en PON ${p.ponPort ?? '<PON>'}`],
+  deauthorize_onu: (p) => [`! Eliminar ONU ${requiredCliValue(p.serial, '<SERIE>')} de PON ${ponPort(p)}`],
+  suspend_onu: (p) => [`! Desactivar ONU índice ${onuIndex(p)} en PON ${ponPort(p)}`],
+  restore_onu: (p) => [`! Activar ONU índice ${onuIndex(p)} en PON ${ponPort(p)}`],
+  reboot_onu: (p) => [`! Reiniciar ONU índice ${onuIndex(p)} en PON ${ponPort(p)}`],
   custom: (p) => p.rawCommands ?? [],
 };
 

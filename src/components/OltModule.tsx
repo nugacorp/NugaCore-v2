@@ -278,10 +278,10 @@ const OltModule: React.FC<Props> = ({ getAuthHeaders }) => {
                 : ' esta OLT todavía no tiene credencial cargada.'}
             </p>
             <div className="grid grid-cols-1 md:grid-cols-3 gap-3">
-              <input placeholder="Usuario SSH" value={credForm.username}
+              <input placeholder="Usuario SSH" aria-label="Usuario SSH" name="username" autoComplete="username" value={credForm.username}
                 onChange={(e) => setCredForm({ ...credForm, username: e.target.value })}
                 className="bg-slate-800 border border-slate-700 rounded px-3 py-2 text-sm" />
-              <input type="password" placeholder="Password (mínimo 8)" value={credForm.password}
+              <input type="password" placeholder="Password (mínimo 8)" aria-label="Password SSH" name="password" autoComplete="current-password" value={credForm.password}
                 onChange={(e) => setCredForm({ ...credForm, password: e.target.value })}
                 className="bg-slate-800 border border-slate-700 rounded px-3 py-2 text-sm" />
               <button onClick={() => void saveCredentials(credOlt)}

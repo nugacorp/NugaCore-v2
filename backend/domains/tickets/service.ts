@@ -242,6 +242,12 @@ export class SupportService {
     }
     const client = await getCustomersService().getById(clientId, tenantId);
     if (!client) throw new BadRequestError('Invalid clientId', 'INVALID_REFERENCE');
+    const technology = body.technology === undefined
+      ? undefined
+      : parseWorkOrderTechnology(body.technology);
+    if (body.technology !== undefined && !technology) {
+      throw new BadRequestError('Invalid work order technology', 'INVALID_ENUM');
+    }
     const input: WorkOrderCreateInput = {
       title,
       clientId,
@@ -262,7 +268,7 @@ export class SupportService {
           done: !!(item as { done: unknown }).done,
         }))
         : [],
-      technology: parseWorkOrderTechnology(body.technology) ?? undefined,
+      technology: technology ?? undefined,
       ftth: parseFtthFields(body.ftth),
       tenantId,
     };

@@ -126,7 +126,29 @@ describe('Checklist FTTH en órdenes de trabajo', () => {
     expect(viaCreate.status).toBe(422);
   });
 
-  it('rechaza tecnologías desconocidas', async () => {
+  it('rechaza tecnologías desconocidas al crear y no persiste la orden', async () => {
+    const before = await request(app).get('/api/workorders').set(DISPATCH);
+    expect(before.status).toBe(200);
+
+    const invalidCreate = await request(app)
+      .post('/api/workorders')
+      .set(DISPATCH)
+      .send({
+        title: 'Alta con tecnología inválida',
+        clientId: 'c-1',
+        date: '2026-07-30',
+        technology: 'satelital',
+      });
+
+    expect(invalidCreate.status).toBe(400);
+    expect(invalidCreate.body.code).toBe('INVALID_ENUM');
+
+    const after = await request(app).get('/api/workorders').set(DISPATCH);
+    expect(after.status).toBe(200);
+    expect(after.body).toHaveLength(before.body.length);
+  });
+
+  it('rechaza tecnologías desconocidas al actualizar', async () => {
     const order = await createOrder(app, {});
     await request(app)
       .put(`/api/workorders/${order.id}`)
