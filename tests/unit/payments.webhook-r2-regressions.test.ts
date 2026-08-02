@@ -1,6 +1,10 @@
 import type { SupabaseClient } from '@supabase/supabase-js';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
-import { BadRequestError, ServiceUnavailableError } from '../../backend/common/errors';
+import {
+  BadRequestError,
+  IdempotencyConflictError,
+  ServiceUnavailableError,
+} from '../../backend/common/errors';
 import { BillingService, getBillingService } from '../../backend/domains/billing/service';
 import {
   StoreBillingRepository,
@@ -227,6 +231,142 @@ describe('R2-01: el ledger decide la identidad tenant+provider+transaction', () 
       .toMatchObject({ status: 'paid', paidAmount: 100 });
     expect(store.PAYMENT_ALLOCATIONS.map((payment) => payment.provider).sort())
       .toEqual(['codi', 'openpay']);
+  });
+});
+
+describe('R3-01: Billing gobierna si el webhook puede reactivar', () => {
+  it('OpenPay parcial nuevo actualiza ledger pero mantiene suspendido al cliente', async () => {
+    store.CLIENTS.push(client());
+    store.INVOICES.push(invoice());
+    store.MIKROTIK_ROUTERS.push(router('router-a', TENANT_A));
+    store.PAYMENT_ORDERS.push({
+      id: 'po-r3-openpay-partial',
+      tenantId: TENANT_A,
+      customerId: CUSTOMER_ID,
+      invoiceId: INVOICE_ID,
+      provider: 'openpay',
+      providerOrderId: 'charge-r3-partial',
+      amountCents: 2_500,
+      status: 'pending',
+      createdAt: new Date().toISOString(),
+      updatedAt: new Date().toISOString(),
+    });
+
+    const result = await new PaymentService(new StorePaymentRepository()).processWebhook({
+      provider: 'openpay',
+      providerEventId: 'evt-r3-openpay-partial',
+      eventType: 'charge.succeeded',
+      tenantId: TENANT_A,
+      payload: {
+        type: 'charge.succeeded',
+        transaction: {
+          id: 'provider-charge-r3-partial',
+          order_id: 'charge-r3-partial',
+          status: 'completed',
+        },
+      },
+    });
+
+    expect(result).toMatchObject({ invoiceUpdated: true, reactivationTriggered: false });
+    expect(await getBillingService().findInvoiceById(INVOICE_ID, TENANT_A))
+      .toMatchObject({ status: 'unpaid', paidAmount: 25, pendingAmount: 75 });
+    expect(store.PAYMENT_ALLOCATIONS).toHaveLength(1);
+    expect(store.CLIENTS[0].status).toBe('suspended');
+    expect(store.MIKROTIK_ACTIONS).toHaveLength(0);
+  });
+
+  it('misma identidad OpenPay con otro importe llega al ledger y falla en conflicto', async () => {
+    store.CLIENTS.push(client());
+    store.INVOICES.push(invoice());
+    store.MIKROTIK_ROUTERS.push(router('router-a', TENANT_A));
+    seedClaim('evt-r3-openpay-seed');
+    await new StoreBillingRepository().applyWebhookPayment({
+      ...webhookPayment(25),
+      transactionId: 'shared-id',
+      idempotencyKey: 'charge:openpay:shared-id',
+      claim: { eventId: 'evt-r3-openpay-seed', claimToken: 'owner-r2' },
+    });
+    store.PAYMENT_ORDERS.push({
+      id: 'po-r3-openpay-conflict',
+      tenantId: TENANT_A,
+      customerId: CUSTOMER_ID,
+      invoiceId: INVOICE_ID,
+      provider: 'openpay',
+      providerOrderId: 'shared-id',
+      amountCents: 7_500,
+      status: 'pending',
+      createdAt: new Date().toISOString(),
+      updatedAt: new Date().toISOString(),
+    });
+
+    await expect(new PaymentService(new StorePaymentRepository()).processWebhook({
+      provider: 'openpay',
+      providerEventId: 'evt-r3-openpay-conflict',
+      eventType: 'charge.succeeded',
+      tenantId: TENANT_A,
+      payload: {
+        type: 'charge.succeeded',
+        transaction: {
+          id: 'provider-charge-r3-conflict',
+          order_id: 'shared-id',
+          status: 'completed',
+        },
+      },
+    })).rejects.toBeInstanceOf(IdempotencyConflictError);
+
+    expect(await getBillingService().findInvoiceById(INVOICE_ID, TENANT_A))
+      .toMatchObject({ status: 'unpaid', paidAmount: 25, pendingAmount: 75 });
+    expect(store.PAYMENT_ALLOCATIONS).toHaveLength(1);
+    expect(store.CLIENTS[0].status).toBe('suspended');
+    expect(store.MIKROTIK_ACTIONS).toHaveLength(0);
+  });
+
+  it('CoDi directo parcial actualiza ledger pero no reactiva', async () => {
+    store.CLIENTS.push(client());
+    store.INVOICES.push(invoice({ id: 'INV' }));
+    store.MIKROTIK_ROUTERS.push(router('router-a', TENANT_A));
+
+    const result = await new PaymentService(new StorePaymentRepository()).processWebhook({
+      provider: 'codi',
+      providerEventId: 'evt-r3-codi-partial',
+      eventType: 'payment.completed',
+      tenantId: TENANT_A,
+      payload: { status: 'paid', reference: 'INV-1', amount: 25 },
+    });
+
+    expect(result).toMatchObject({ invoiceUpdated: true, reactivationTriggered: false });
+    expect(await getBillingService().findInvoiceById('INV', TENANT_A))
+      .toMatchObject({ status: 'unpaid', paidAmount: 25, pendingAmount: 75 });
+    expect(store.PAYMENT_ALLOCATIONS).toHaveLength(1);
+    expect(store.CLIENTS[0].status).toBe('suspended');
+    expect(store.MIKROTIK_ACTIONS).toHaveLength(0);
+  });
+
+  it('el pago total conserva la reactivación después de saldar Billing', async () => {
+    store.CLIENTS.push(client());
+    store.INVOICES.push(invoice());
+    store.MIKROTIK_ROUTERS.push(router('router-a', TENANT_A));
+    store.PAYMENT_ORDERS.push({
+      id: 'po-r3-openpay-total', tenantId: TENANT_A, customerId: CUSTOMER_ID,
+      invoiceId: INVOICE_ID, provider: 'openpay', providerOrderId: 'charge-r3-total',
+      amountCents: 10_000, status: 'pending', createdAt: new Date().toISOString(),
+      updatedAt: new Date().toISOString(),
+    });
+
+    const result = await new PaymentService(new StorePaymentRepository()).processWebhook({
+      provider: 'openpay', providerEventId: 'evt-r3-openpay-total',
+      eventType: 'charge.succeeded', tenantId: TENANT_A,
+      payload: {
+        type: 'charge.succeeded',
+        transaction: { id: 'provider-charge-r3-total', order_id: 'charge-r3-total', status: 'completed' },
+      },
+    });
+
+    expect(result).toMatchObject({ invoiceUpdated: true, reactivationTriggered: true });
+    expect(await getBillingService().findInvoiceById(INVOICE_ID, TENANT_A))
+      .toMatchObject({ status: 'paid', paidAmount: 100, pendingAmount: 0 });
+    expect(store.CLIENTS[0].status).toBe('active');
+    expect(store.MIKROTIK_ACTIONS).toHaveLength(1);
   });
 });
 

@@ -131,6 +131,23 @@ const seedCustomer = (tenantId: string): string => {
   return id;
 };
 
+/** Factura pendiente que corresponde a las orders de este contrato. */
+const seedInvoice = (tenantId: string): void => {
+  store.INVOICES.push({
+    id: `fac-${tenantId}`,
+    tenantId,
+    clientId: `c-${tenantId}`,
+    clientName: `Cliente ${tenantId}`,
+    amount: 299,
+    dateStr: '2026-07-01',
+    dueDateStr: '2099-12-31',
+    status: 'unpaid',
+    cfdiStatus: 'pending',
+    items: [],
+    payments: [],
+  } as (typeof store.INVOICES)[number]);
+};
+
 let app: Express;
 
 const reset = () => {
@@ -148,6 +165,7 @@ const reset = () => {
   engineStore.EVENTS.length = 0;
   engineStore.ORDERS.length = 0;
   store.CLIENTS = store.CLIENTS.filter((c) => !c.id.startsWith('c-tenant-'));
+  store.INVOICES = store.INVOICES.filter((invoice) => !invoice.id.startsWith('fac-tenant-'));
   store.MIKROTIK_ROUTERS = store.MIKROTIK_ROUTERS.filter(
     (router) => !router.id.startsWith(TEST_ROUTER_PREFIX),
   );
@@ -648,6 +666,7 @@ describe('Webhook OpenPay — entregas simultáneas del mismo evento', () => {
   it('dos entregas en paralelo producen un solo evento y un solo efecto', async () => {
     const token = await seedOpenPay(TENANT_A, { webhookSecret: 'whsec_a' });
     seedCustomer(TENANT_A);
+    seedInvoice(TENANT_A);
     seedOrder(TENANT_A, 'chg-concurrente');
     const payload = {
       id: 'op-evt-concurrente',
@@ -773,6 +792,7 @@ describe('Webhook OpenPay — entregas simultáneas del mismo evento', () => {
   it('si B reclama durante updateOrderStatus, A responde 503 sin Billing/reactivación y B continúa', async () => {
     const token = await seedOpenPay(TENANT_A, { webhookSecret: 'whsec_a' });
     const customerId = seedCustomer(TENANT_A);
+    seedInvoice(TENANT_A);
     seedOrder(TENANT_A, 'chg-reclaim-entre-efectos');
     const payload = {
       id: 'op-evt-reclaim-entre-efectos',

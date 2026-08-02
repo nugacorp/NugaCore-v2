@@ -26,6 +26,7 @@ import { dispatchNetworkOrder } from '../../bridges/network-order-dispatch';
 import { isDomainOnDb } from '../../config/feature-flags';
 import { isSupabaseAdminConfigured, supabaseAdmin } from '../../services/supabase-admin';
 import { getBillingService } from '../billing/service';
+import type { EnrichedInvoice, WebhookPaymentResult } from '../billing/repository';
 import { getCustomersService } from '../customers/service';
 import { getSuspensionService } from '../suspension/service';
 import { inventoryRoutersRepository } from '../inventory/routers/repository';
@@ -86,6 +87,9 @@ class ClaimOwnershipLostError extends Error {
     this.name = 'ClaimOwnershipLostError';
   }
 }
+
+const isInvoiceSettled = (invoice: EnrichedInvoice | null | undefined): invoice is EnrichedInvoice =>
+  invoice?.status === 'paid' && invoice.pendingAmount <= 0;
 
 const readWebhookReactivationProgress = (
   action: MikrotikActionRecord,
@@ -298,15 +302,17 @@ export class PaymentService {
         const invoiceResult = await this.confirmPaymentOnInvoice(order, orderTenantId, webhookFence);
         invoiceUpdated = invoiceResult.updated;
 
-        await this.renewOrThrow(eventId, claimToken);
-        const reactivation = await this.reactivateCustomerService(order.customerId, {
-          triggeredBy: `webhook:${provider}:${providerEventId}`,
-          invoiceId: order.invoiceId,
-          tenantId: orderTenantId,
-          webhookFence,
-        });
-        reactivationTriggered = !reactivation.alreadyActive;
-        mikrotikActionId = reactivation.mikrotikAction?.id;
+        if (invoiceResult.shouldReactivate) {
+          await this.renewOrThrow(eventId, claimToken);
+          const reactivation = await this.reactivateCustomerService(order.customerId, {
+            triggeredBy: `webhook:${provider}:${providerEventId}`,
+            invoiceId: order.invoiceId,
+            tenantId: orderTenantId,
+            webhookFence,
+          });
+          reactivationTriggered = !reactivation.alreadyActive;
+          mikrotikActionId = reactivation.mikrotikAction?.id;
+        }
 
         await this.closeOrThrow(eventId, claimToken);
         logger.info('PaymentEngine: pago confirmado', {
@@ -330,15 +336,17 @@ export class PaymentService {
             };
             const invoiceResult = await this.confirmPaymentOnInvoice(order, orderTenantId, webhookFence);
             invoiceUpdated = invoiceResult.updated;
-            await this.renewOrThrow(eventId, claimToken);
-            const reactivation = await this.reactivateCustomerService(order.customerId, {
-              triggeredBy: `webhook:codi:${providerEventId}`,
-              invoiceId: order.invoiceId,
-              tenantId: orderTenantId,
-              webhookFence,
-            });
-            reactivationTriggered = !reactivation.alreadyActive;
-            mikrotikActionId = reactivation.mikrotikAction?.id;
+            if (invoiceResult.shouldReactivate) {
+              await this.renewOrThrow(eventId, claimToken);
+              const reactivation = await this.reactivateCustomerService(order.customerId, {
+                triggeredBy: `webhook:codi:${providerEventId}`,
+                invoiceId: order.invoiceId,
+                tenantId: orderTenantId,
+                webhookFence,
+              });
+              reactivationTriggered = !reactivation.alreadyActive;
+              mikrotikActionId = reactivation.mikrotikAction?.id;
+            }
             await this.closeOrThrow(eventId, claimToken);
             return {
               eventId,
@@ -346,7 +354,9 @@ export class PaymentService {
               invoiceUpdated,
               reactivationTriggered,
               mikrotikActionId,
-              message: 'Pago CoDi confirmado y cliente reactivado.',
+              message: reactivationTriggered
+                ? 'Pago CoDi confirmado y cliente reactivado.'
+                : 'Pago CoDi confirmado; la factura conserva saldo pendiente.',
             };
           }
           // Sin order previa: intentar factura directa por referencia (del WISP).
@@ -354,31 +364,34 @@ export class PaymentService {
           const invoice = await billing.findInvoiceById(invoiceId, tenantId);
           if (invoice) {
             const invoiceTenantId = invoice.tenantId || 'tenant-default';
-            const paymentAlreadyAppliedByProvider = invoice.payments.some(
+            const existingPayment = invoice.payments.find(
               (payment) => payment.provider === 'codi' && payment.transactionId === providerEventId,
             );
-            let shouldReactivate = paymentAlreadyAppliedByProvider;
+            const wasSettledBeforeWebhook = isInvoiceSettled(invoice);
+            const amount = Number(
+              claimedPayload.amount
+              ?? claimedPayload.monto
+              ?? existingPayment?.amount
+              ?? invoice.pendingAmount
+              ?? invoice.amount,
+            );
+            const paymentResult = await this.applyWebhookPaymentOrThrow(
+              { beforeMutation: () => this.renewOrThrow(eventId, claimToken), eventId, claimToken },
+              {
+                invoiceId: invoice.id,
+                tenantId: invoiceTenantId,
+                amount,
+                method: 'Transferencia',
+                provider: 'codi',
+                transactionId: providerEventId,
+              },
+            );
+            invoiceUpdated = true;
 
-            if (invoice.status !== 'paid' && !paymentAlreadyAppliedByProvider) {
-              const amount = Number(
-                claimedPayload.amount ?? claimedPayload.monto ?? invoice.pendingAmount ?? invoice.amount,
-              );
-              await this.applyWebhookPaymentOrThrow(
-                { beforeMutation: () => this.renewOrThrow(eventId, claimToken), eventId, claimToken },
-                {
-                  invoiceId: invoice.id,
-                  tenantId: invoiceTenantId,
-                  amount,
-                  method: 'Transferencia',
-                  provider: 'codi',
-                  transactionId: providerEventId,
-                },
-              );
-              shouldReactivate = true;
-            }
-
-            if (shouldReactivate) {
-              invoiceUpdated = true;
+            if (
+              isInvoiceSettled(paymentResult.invoice)
+              && (!wasSettledBeforeWebhook || Boolean(existingPayment))
+            ) {
               await this.renewOrThrow(eventId, claimToken);
               const reactivation = await this.reactivateCustomerService(invoice.clientId, {
                 triggeredBy: `webhook:codi:${providerEventId}`,
@@ -413,7 +426,9 @@ export class PaymentService {
       return {
         eventId, idempotent: false, invoiceUpdated, reactivationTriggered, mikrotikActionId,
         message: invoiceUpdated
-          ? 'Pago confirmado, factura actualizada y reactivación programada.'
+          ? reactivationTriggered
+            ? 'Pago confirmado, factura saldada y reactivación programada.'
+            : 'Pago confirmado; la factura conserva saldo pendiente.'
           : 'Evento procesado (sin order asociada o factura ya pagada).',
       };
     } catch (error) {
@@ -447,36 +462,27 @@ export class PaymentService {
     order: PaymentOrderRecord,
     tenantId?: string,
     webhookFence?: WebhookMutationFence,
-  ): Promise<{ updated: boolean }> {
+  ): Promise<{
+    updated: boolean;
+    invoice: EnrichedInvoice | null;
+    shouldReactivate: boolean;
+  }> {
     const billing = getBillingService();
     const effectiveTenantId = tenantId || order.tenantId || 'tenant-default';
     const invoice = await billing.findInvoiceById(order.invoiceId, effectiveTenantId);
     if (!invoice) {
       logger.warn('PaymentEngine: factura no encontrada para order', { invoiceId: order.invoiceId, tenantId: effectiveTenantId });
-      return { updated: false };
+      return { updated: false, invoice: null, shouldReactivate: false };
     }
 
     const transactionId = order.providerOrderId ?? order.id;
-    if (invoice.payments.some(
+    const matchingPaymentBeforeLedger = invoice.payments.some(
       (payment) => payment.provider === order.provider && payment.transactionId === transactionId,
-    )) {
-      logger.info('PaymentEngine: cobro del proveedor ya aplicado (idempotente)', {
-        invoiceId: order.invoiceId,
-        provider: order.provider,
-      });
-      return { updated: true };
-    }
-
-    // Idempotencia: si ya está pagada no duplicar
-    if (invoice.status === 'paid' || invoice.pendingAmount <= 0) {
-      logger.info('PaymentEngine: factura ya estaba pagada (idempotente)', { invoiceId: order.invoiceId });
-      return { updated: false };
-    }
-
-    // La ruta manual conserva `recordPayment`; la del webhook usa la operación
-    // atómica, porque la comprobación de arriba es una lectura y otro owner
-    // puede escribir entre ella y el registro del pago.
-    await this.applyWebhookPaymentOrThrow(webhookFence, {
+    );
+    const wasSettledBeforeWebhook = isInvoiceSettled(invoice);
+    // Billing valida identidad e importe dentro de su operación atómica. Una
+    // lectura previa nunca puede convertir una redelivery incompatible en éxito.
+    const paymentResult = await this.applyWebhookPaymentOrThrow(webhookFence, {
       invoiceId: order.invoiceId,
       tenantId: effectiveTenantId,
       amount: order.amountCents / 100,
@@ -485,8 +491,17 @@ export class PaymentService {
       transactionId,
     });
 
-    logger.info('PaymentEngine: factura marcada pagada', { invoiceId: order.invoiceId, tenantId: effectiveTenantId });
-    return { updated: true };
+    logger.info('PaymentEngine: cobro conciliado con Billing', {
+      invoiceId: order.invoiceId,
+      tenantId: effectiveTenantId,
+      invoiceSettled: isInvoiceSettled(paymentResult.invoice),
+    });
+    return {
+      updated: true,
+      invoice: paymentResult.invoice,
+      shouldReactivate: isInvoiceSettled(paymentResult.invoice)
+        && (!wasSettledBeforeWebhook || matchingPaymentBeforeLedger),
+    };
   }
 
   /**
@@ -497,15 +512,15 @@ export class PaymentService {
   private async applyWebhookPaymentOrThrow(
     webhookFence: WebhookMutationFence | undefined,
     payment: { invoiceId: string; tenantId: string; amount: number; method: string; provider: string; transactionId: string },
-  ): Promise<void> {
+  ): Promise<WebhookPaymentResult> {
     const billing = getBillingService();
     if (!webhookFence) {
-      await billing.recordPayment(payment.invoiceId, {
+      const invoice = await billing.recordPayment(payment.invoiceId, {
         amount: payment.amount,
         method: payment.method,
         transactionId: payment.transactionId,
       }, payment.tenantId);
-      return;
+      return { outcome: 'created', invoice };
     }
 
     await webhookFence.beforeMutation();
@@ -517,6 +532,7 @@ export class PaymentService {
     // El ledger es la autoridad del claim: si dice que el owner cambió, esta
     // entrega se detiene aquí y el nuevo owner recupera el mismo pago por key.
     if (result.outcome === 'ownership_lost') throw new ClaimOwnershipLostError();
+    return result;
   }
 
   // ── Reactivación lógica ───────────────────────────────────────────

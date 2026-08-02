@@ -897,8 +897,16 @@ describe('Billing webhook atómico e idempotente', () => {
       claim: { eventId: EVENT_ID, claimToken: 'owner-a' },
     };
 
-    expect((await repo.applyWebhookPayment(input)).outcome).toBe('created');
-    expect((await repo.applyWebhookPayment(input)).outcome).toBe('existing');
+    const created = await repo.applyWebhookPayment(input);
+    const existing = await repo.applyWebhookPayment(input);
+    expect(created).toMatchObject({
+      outcome: 'created',
+      invoice: { status: 'paid', pendingAmount: 0 },
+    });
+    expect(existing).toMatchObject({
+      outcome: 'existing',
+      invoice: { status: 'paid', pendingAmount: 0 },
+    });
     expect(db.rows('payments')).toHaveLength(1);
     expect(db.rows('payment_applications')).toHaveLength(1);
     expect(db.rows('invoices')[0].status).toBe('paid');

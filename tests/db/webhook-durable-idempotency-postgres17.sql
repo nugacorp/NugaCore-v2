@@ -47,7 +47,9 @@ VALUES
   ('evt-partial', 'tenant-a', 'owner-partial'),
   ('evt-overdue', 'tenant-a', 'owner-overdue'),
   ('evt-full', 'tenant-a', 'owner-full'),
-  ('evt-canceled', 'tenant-a', 'owner-canceled');
+  ('evt-canceled', 'tenant-a', 'owner-canceled'),
+  ('evt-conflict-seed', 'tenant-a', 'owner-conflict-seed'),
+  ('evt-conflict-redelivery', 'tenant-a', 'owner-conflict-redelivery');
 
 INSERT INTO public.invoices (
   id, tenant_id, client_id, client_name, total_cents, due_date,
@@ -57,7 +59,8 @@ INSERT INTO public.invoices (
   ('inv-partial', 'tenant-a', 'client-partial', 'Partial', 10000, CURRENT_DATE + 10, 'unpaid', 'generated', 'uuid-partial'),
   ('inv-overdue', 'tenant-a', 'client-overdue', 'Overdue', 10000, CURRENT_DATE - 10, 'overdue', 'generated', 'uuid-overdue'),
   ('inv-full', 'tenant-a', 'client-full', 'Full', 10000, CURRENT_DATE + 10, 'unpaid', 'pending', NULL),
-  ('inv-canceled', 'tenant-a', 'client-canceled', 'Canceled', 10000, CURRENT_DATE - 10, 'canceled', 'canceled', NULL);
+  ('inv-canceled', 'tenant-a', 'client-canceled', 'Canceled', 10000, CURRENT_DATE - 10, 'canceled', 'canceled', NULL),
+  ('inv-conflict', 'tenant-a', 'client-conflict', 'Conflict', 10000, CURRENT_DATE + 10, 'unpaid', 'pending', NULL);
 
 -- El borde PostgreSQL también falla cerrado: importes no positivos no llegan
 -- al ledger y un valor fuera de INTEGER ni siquiera puede cruzar la firma RPC.
@@ -128,6 +131,27 @@ SELECT public.billing_apply_webhook_payment(
   'tenant-a', 'evt-canceled', 'owner-canceled', 'inv-canceled', 2500,
   'openpay', 'openpay', 'tx-canceled', 'charge:openpay:tx-canceled'
 );
+
+SELECT public.billing_apply_webhook_payment(
+  'tenant-a', 'evt-conflict-seed', 'owner-conflict-seed', 'inv-conflict', 2500,
+  'openpay', 'openpay', 'tx-conflict', 'charge:openpay:tx-conflict'
+);
+DO $$
+BEGIN
+  BEGIN
+    PERFORM public.billing_apply_webhook_payment(
+      'tenant-a', 'evt-conflict-redelivery', 'owner-conflict-redelivery',
+      'inv-conflict', 7500, 'openpay', 'openpay', 'tx-conflict',
+      'charge:openpay:tx-conflict'
+    );
+    RAISE EXCEPTION 'incompatible redelivery accepted';
+  EXCEPTION WHEN OTHERS THEN
+    IF SQLERRM = 'incompatible redelivery accepted'
+       OR SQLERRM NOT LIKE 'idempotency_conflict:%' THEN
+      RAISE;
+    END IF;
+  END;
+END $$;
 RESET ROLE;
 
 DO $$
@@ -149,5 +173,20 @@ BEGIN
   END IF;
   IF NOT EXISTS (SELECT 1 FROM public.invoices WHERE id = 'inv-canceled' AND status = 'canceled' AND cfdi_status = 'canceled') THEN
     RAISE EXCEPTION 'canceled invoice was resurrected';
+  END IF;
+  IF NOT EXISTS (
+    SELECT 1 FROM public.invoices
+     WHERE id = 'inv-conflict' AND status = 'unpaid' AND applied_cents = 2500
+  ) THEN
+    RAISE EXCEPTION 'conflicting redelivery changed invoice totals';
+  END IF;
+  IF (SELECT count(*) FROM public.payments WHERE provider = 'openpay' AND transaction_id = 'tx-conflict') <> 1
+     OR (
+       SELECT count(*)
+         FROM public.payment_applications pa
+         JOIN public.payments p ON p.id = pa.payment_id
+        WHERE p.provider = 'openpay' AND p.transaction_id = 'tx-conflict'
+     ) <> 1 THEN
+    RAISE EXCEPTION 'conflicting redelivery changed billing ledger';
   END IF;
 END $$;

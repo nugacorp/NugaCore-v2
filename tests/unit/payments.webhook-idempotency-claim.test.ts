@@ -420,7 +420,11 @@ describe('PaymentService — ownership antes de efectos', () => {
     hooks: { afterBilling?: () => void; afterReactivation?: () => void } = {},
   ): void => {
     const effects = service as unknown as {
-      confirmPaymentOnInvoice: () => Promise<{ updated: boolean }>;
+      confirmPaymentOnInvoice: () => Promise<{
+        updated: boolean;
+        invoice: { status: 'paid'; pendingAmount: 0 };
+        shouldReactivate: true;
+      }>;
       reactivateCustomerService: () => Promise<{
         customerId: string;
         alreadyActive: boolean;
@@ -431,7 +435,11 @@ describe('PaymentService — ownership antes de efectos', () => {
     effects.confirmPaymentOnInvoice = async () => {
       counters.billing += 1;
       hooks.afterBilling?.();
-      return { updated: true };
+      return {
+        updated: true,
+        invoice: { status: 'paid', pendingAmount: 0 },
+        shouldReactivate: true,
+      };
     };
     effects.reactivateCustomerService = async () => {
       counters.reactivation += 1;
@@ -841,16 +849,20 @@ describe('PaymentService — ownership antes de efectos', () => {
         },
       } as unknown as PaymentRepository;
       const billing = getBillingService();
-      vi.spyOn(billing, 'findInvoiceById').mockResolvedValue({
+      const settledInvoice = {
         id: order.invoiceId,
         tenantId: TENANT_A,
         clientId: customerId,
         status: 'paid',
         amount: 100,
         pendingAmount: 0,
-        payments: [{ transactionId: order.providerOrderId }],
+        payments: [{ provider: order.provider, transactionId: order.providerOrderId }],
+      };
+      vi.spyOn(billing, 'findInvoiceById').mockResolvedValue(settledInvoice as never);
+      vi.spyOn(billing, 'applyWebhookPayment').mockResolvedValue({
+        outcome: 'existing',
+        invoice: settledInvoice,
       } as never);
-      vi.spyOn(billing, 'applyWebhookPayment').mockRejectedValue(new Error('no debe duplicar Billing'));
       const originalReactivate = StorePaymentDataProvider.prototype.reactivateCustomer;
       vi.spyOn(StorePaymentDataProvider.prototype, 'reactivateCustomer').mockImplementation(async function (
         this: StorePaymentDataProvider,
@@ -971,16 +983,20 @@ describe('PaymentService — ownership antes de efectos', () => {
       },
     } as unknown as PaymentRepository;
     const billing = getBillingService();
-    vi.spyOn(billing, 'findInvoiceById').mockResolvedValue({
+    const settledInvoice = {
       id: order.invoiceId,
       tenantId: TENANT_A,
       clientId: customerId,
       status: 'paid',
       amount: 100,
       pendingAmount: 0,
-      payments: [{ transactionId: order.providerOrderId }],
+      payments: [{ provider: order.provider, transactionId: order.providerOrderId }],
+    };
+    vi.spyOn(billing, 'findInvoiceById').mockResolvedValue(settledInvoice as never);
+    vi.spyOn(billing, 'applyWebhookPayment').mockResolvedValue({
+      outcome: 'existing',
+      invoice: settledInvoice,
     } as never);
-    vi.spyOn(billing, 'applyWebhookPayment').mockRejectedValue(new Error('no debe duplicar Billing'));
 
     const suspensionRepo = getSuspensionService().repo;
     const originalCreateOrder = suspensionRepo.createOrder.bind(suspensionRepo);
@@ -1147,16 +1163,20 @@ describe('PaymentService — ownership antes de efectos', () => {
     } as unknown as PaymentRepository;
 
     const billing = getBillingService();
-    vi.spyOn(billing, 'findInvoiceById').mockResolvedValue({
+    const settledInvoice = {
       id: order.invoiceId,
       tenantId: TENANT_A,
       clientId: customerId,
       status: 'paid',
       amount: 100,
       pendingAmount: 0,
-      payments: [{ transactionId: order.providerOrderId }],
+      payments: [{ provider: order.provider, transactionId: order.providerOrderId }],
+    };
+    vi.spyOn(billing, 'findInvoiceById').mockResolvedValue(settledInvoice as never);
+    vi.spyOn(billing, 'applyWebhookPayment').mockResolvedValue({
+      outcome: 'existing',
+      invoice: settledInvoice,
     } as never);
-    vi.spyOn(billing, 'applyWebhookPayment').mockRejectedValue(new Error('no debe duplicar Billing'));
 
     const suspensionRepo = getSuspensionService().repo;
     const originalCreateOrder = suspensionRepo.createOrder.bind(suspensionRepo);
@@ -1400,6 +1420,12 @@ describe('PaymentService — ownership antes de efectos', () => {
     };
     vi.spyOn(billing, 'findInvoiceById').mockImplementation(async () => invoice as never);
     vi.spyOn(billing, 'applyWebhookPayment').mockImplementation(async () => {
+      if (invoice.payments.some(
+        (payment: { provider?: string; transactionId?: string }) =>
+          payment.provider === 'codi' && payment.transactionId === event.providerEventId,
+      )) {
+        return { outcome: 'existing', invoice } as never;
+      }
       counters.billing += 1;
       invoice.status = 'paid';
       invoice.pendingAmount = 0;
@@ -1444,13 +1470,14 @@ describe('PaymentService — ownership antes de efectos', () => {
       markEventProcessed: async () => { closes += 1; return true; },
     } as unknown as PaymentRepository;
     const billing = getBillingService();
-    vi.spyOn(billing, 'findInvoiceById').mockResolvedValue({
+    const paidByOtherOrigin = {
       id: 'INV', tenantId: TENANT_A, clientId: 'customer-1', status: 'paid',
       amount: 100, pendingAmount: 0, payments: [{ transactionId: 'manual-payment' }],
-    } as never);
+    };
+    vi.spyOn(billing, 'findInvoiceById').mockResolvedValue(paidByOtherOrigin as never);
     vi.spyOn(billing, 'applyWebhookPayment').mockImplementation(async () => {
       counters.billing += 1;
-      return { outcome: 'created', invoice: {} } as never;
+      return { outcome: 'created', invoice: paidByOtherOrigin } as never;
     });
     const service = new PaymentService(fakeRepo);
     stubServiceEffects(service, counters);
@@ -1461,7 +1488,7 @@ describe('PaymentService — ownership antes de efectos', () => {
     });
 
     expect(result.idempotent).toBe(false);
-    expect(counters).toEqual({ billing: 0, reactivation: 0 });
+    expect(counters).toEqual({ billing: 1, reactivation: 0 });
     expect(closes).toBe(1);
   });
 });
