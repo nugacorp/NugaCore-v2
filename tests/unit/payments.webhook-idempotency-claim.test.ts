@@ -28,7 +28,7 @@ import type {
   PaymentOrderRecord,
   PaymentProvider,
 } from '../../backend/domains/payments/types';
-import { IdempotencyConflictError } from '../../backend/common/errors';
+import { IdempotencyConflictError, opaqueFingerprint } from '../../backend/common/errors';
 import { logger } from '../../backend/common/logger';
 import { getBillingService } from '../../backend/domains/billing/service';
 import { engineStore } from '../../backend/domains/suspension/engine-store';
@@ -486,13 +486,19 @@ describe('PaymentService — ownership antes de efectos', () => {
       'PaymentEngine: conflicto de idempotencia; requiere intervención',
       expect.objectContaining({
         eventId: event.id,
-        providerEventId: event.providerEventId,
         tenantId: TENANT_A,
         scope: 'payments',
         idempotencyKeyFingerprint: expect.stringMatching(/^[a-f0-9]{16}$/),
       }),
     );
-    expect(audit.mock.calls[0]?.[1]).not.toHaveProperty('idempotencyKey');
+    const serializedAudit = JSON.stringify(audit.mock.calls[0]?.[1]);
+    expect(serializedAudit).not.toContain(event.providerEventId);
+    expect(serializedAudit).not.toContain('payment-key');
+    expect(conflict).not.toHaveProperty('idempotencyKey');
+    expect(conflict).toMatchObject({
+      scope: 'payments',
+      fingerprint: expect.stringMatching(/^[a-f0-9]{16}$/),
+    });
   });
 
   it('ruta normal: reclaim durante updateOrderStatus aborta antes de Billing/reactivación y B continúa', async () => {
@@ -748,7 +754,7 @@ describe('PaymentService — ownership antes de efectos', () => {
         paymentCalls += 1;
         invoice.pendingAmount -= payment.amount;
         invoice.payments.push({ transactionId: payment.transactionId ?? '' });
-        return { outcome: 'created', invoice } as never;
+        return { outcome: 'created', invoice, settlementWinner: false } as never;
       });
       vi.spyOn(PaymentService.prototype, 'reactivateCustomerService').mockResolvedValue({
         customerId: order.customerId,
@@ -784,7 +790,7 @@ describe('PaymentService — ownership antes de efectos', () => {
       let closes = 0;
       let reactivationWrites = 0;
       const customerId = `${INTERNAL_FENCING_CUSTOMER_PREFIX}${provider}`;
-      const triggeredBy = `webhook:${provider}:evt-reactivation-fence`;
+      const triggeredBy = `webhook:${provider}:${opaqueFingerprint('evt-reactivation-fence')}`;
       const order: PaymentOrderRecord = {
         id: `po-reactivation-fence-${provider}`,
         tenantId: TENANT_A,
@@ -862,6 +868,7 @@ describe('PaymentService — ownership antes de efectos', () => {
       vi.spyOn(billing, 'applyWebhookPayment').mockResolvedValue({
         outcome: 'existing',
         invoice: settledInvoice,
+        settlementWinner: true,
       } as never);
       const originalReactivate = StorePaymentDataProvider.prototype.reactivateCustomer;
       vi.spyOn(StorePaymentDataProvider.prototype, 'reactivateCustomer').mockImplementation(async function (
@@ -996,6 +1003,7 @@ describe('PaymentService — ownership antes de efectos', () => {
     vi.spyOn(billing, 'applyWebhookPayment').mockResolvedValue({
       outcome: 'existing',
       invoice: settledInvoice,
+      settlementWinner: true,
     } as never);
 
     const suspensionRepo = getSuspensionService().repo;
@@ -1176,6 +1184,7 @@ describe('PaymentService — ownership antes de efectos', () => {
     vi.spyOn(billing, 'applyWebhookPayment').mockResolvedValue({
       outcome: 'existing',
       invoice: settledInvoice,
+      settlementWinner: true,
     } as never);
 
     const suspensionRepo = getSuspensionService().repo;
@@ -1424,14 +1433,14 @@ describe('PaymentService — ownership antes de efectos', () => {
         (payment: { provider?: string; transactionId?: string }) =>
           payment.provider === 'codi' && payment.transactionId === event.providerEventId,
       )) {
-        return { outcome: 'existing', invoice } as never;
+        return { outcome: 'existing', invoice, settlementWinner: true } as never;
       }
       counters.billing += 1;
       invoice.status = 'paid';
       invoice.pendingAmount = 0;
       invoice.payments.push({ provider: 'codi', transactionId: event.providerEventId } as never);
       currentOwner = 'owner-b';
-      return { outcome: 'created', invoice } as never;
+      return { outcome: 'created', invoice, settlementWinner: true } as never;
     });
     const service = new PaymentService(fakeRepo);
     stubServiceEffects(service, counters);
@@ -1477,7 +1486,7 @@ describe('PaymentService — ownership antes de efectos', () => {
     vi.spyOn(billing, 'findInvoiceById').mockResolvedValue(paidByOtherOrigin as never);
     vi.spyOn(billing, 'applyWebhookPayment').mockImplementation(async () => {
       counters.billing += 1;
-      return { outcome: 'created', invoice: paidByOtherOrigin } as never;
+      return { outcome: 'created', invoice: paidByOtherOrigin, settlementWinner: false } as never;
     });
     const service = new PaymentService(fakeRepo);
     stubServiceEffects(service, counters);

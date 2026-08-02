@@ -17,7 +17,11 @@ import type { SupabaseClient } from '@supabase/supabase-js';
 import { Invoice } from '../../../src/types';
 import { store } from '../../state/store';
 import { logger } from '../../common/logger';
-import { BadRequestError, IdempotencyConflictError } from '../../common/errors';
+import {
+  BadRequestError,
+  IdempotencyConflictError,
+  ServiceUnavailableError,
+} from '../../common/errors';
 import {
   AllocationEntry,
   EnrichedInvoice,
@@ -107,6 +111,11 @@ export interface WebhookPaymentResult {
   outcome: WebhookPaymentOutcome;
   /** Factura resultante; `null` cuando el claim se perdió y no se escribió. */
   invoice: EnrichedInvoice | null;
+  /** Transición calculada dentro del lock; nunca se deriva del reload posterior. */
+  wasSettledBefore: boolean;
+  isSettledAfter: boolean;
+  /** Identidad durable del único cargo autorizado a iniciar la raíz. */
+  settlementWinner: boolean;
 }
 
 export const BILLING_IDEMPOTENCY_SCOPE = 'payments';
@@ -391,7 +400,10 @@ export class StoreBillingRepository implements BillingRepository {
     if (!event) throw new Error(`applyWebhookPayment: evento de pago inexistente (${input.claim.eventId})`);
     // Ownership primero: un owner vencido no puede tocar el ledger.
     if (event.processed || event.claimToken !== input.claim.claimToken) {
-      return { outcome: 'ownership_lost', invoice: null };
+      return {
+        outcome: 'ownership_lost', invoice: null,
+        wasSettledBefore: false, isSettledAfter: false, settlementWinner: false,
+      };
     }
 
     const existingByCharge = store.PAYMENT_ALLOCATIONS.find(
@@ -420,9 +432,17 @@ export class StoreBillingRepository implements BillingRepository {
         throw new IdempotencyConflictError(BILLING_IDEMPOTENCY_SCOPE, input.idempotencyKey);
       }
       syncStatus(invoice);
-      return { outcome: 'existing', invoice: enrich(invoice) };
+      const settled = invoice.status === 'paid' && invoicePendingAmount(invoice) <= 0;
+      return {
+        outcome: 'existing',
+        invoice: enrich(invoice),
+        wasSettledBefore: settled,
+        isSettledAfter: settled,
+        settlementWinner: existing.settlementWinner === true,
+      };
     }
 
+    const wasSettledBefore = invoice.status === 'paid' && invoicePendingAmount(invoice) <= 0;
     invoice.payments.push({
       date: new Date().toISOString().replace('T', ' ').substring(0, 16),
       amount: input.amount,
@@ -431,6 +451,8 @@ export class StoreBillingRepository implements BillingRepository {
       transactionId: input.transactionId,
     });
     syncStatus(invoice);
+    const isSettledAfter = invoice.status === 'paid' && invoicePendingAmount(invoice) <= 0;
+    const settlementWinner = !wasSettledBefore && isSettledAfter;
     store.PAYMENT_ALLOCATIONS.unshift({
       id: store.getUniquePaymentAllocationId(),
       invoiceId: input.invoiceId,
@@ -442,8 +464,9 @@ export class StoreBillingRepository implements BillingRepository {
       remainingAfterPayment: invoicePendingAmount(invoice),
       tenantId: input.tenantId,
       idempotencyKey: input.idempotencyKey,
+      settlementWinner,
     });
-    return { outcome: 'created', invoice: enrich(invoice) };
+    return { outcome: 'created', invoice: enrich(invoice), wasSettledBefore, isSettledAfter, settlementWinner };
   }
 
   async generateInvoiceId(): Promise<string> {
@@ -524,7 +547,8 @@ export class SupabaseBillingRepository implements BillingRepository {
     let query = this.client.from('invoices').select('*').eq('id', id);
     if (tenantId) query = query.eq('tenant_id', tenantId);
     const { data, error } = await query.maybeSingle();
-    if (error || !data) return null;
+    if (error) throw new Error(`findInvoiceById: ${error.message}`);
+    if (!data) return null;
     const row = data as InvoiceRow;
     const [itemMap, appMap] = await Promise.all([
       this.loadItems([id]),
@@ -776,18 +800,39 @@ export class SupabaseBillingRepository implements BillingRepository {
       if (/idempotency_conflict/i.test(error.message || '')) {
         throw new IdempotencyConflictError(BILLING_IDEMPOTENCY_SCOPE, input.idempotencyKey);
       }
-      throw new Error(`applyWebhookPayment: ${error.message}`);
+      throw new ServiceUnavailableError(
+        'No fue posible aplicar el cobro de webhook de forma atómica.',
+        'WEBHOOK_LEDGER_UNAVAILABLE',
+      );
     }
 
     if (Array.isArray(data) && data.length !== 1) {
-      throw new Error(`applyWebhookPayment: cardinalidad inválida (${data.length})`);
+      throw new ServiceUnavailableError(
+        'Billing devolvió una cardinalidad inválida para el cobro.',
+        'WEBHOOK_LEDGER_INVALID_RESPONSE',
+      );
     }
-    const outcome = Array.isArray(data) ? data[0] : data;
-    if (outcome === 'ownership_lost') return { outcome, invoice: null };
+    const raw = (Array.isArray(data) ? data[0] : data) as Record<string, unknown> | null;
+    const outcome = raw?.outcome;
+    const wasSettledBefore = raw?.was_settled_before === true;
+    const isSettledAfter = raw?.is_settled_after === true;
+    const settlementWinner = raw?.settlement_winner === true;
+    if (outcome === 'ownership_lost') {
+      return { outcome, invoice: null, wasSettledBefore, isSettledAfter, settlementWinner };
+    }
     if (outcome !== 'created' && outcome !== 'existing') {
-      throw new Error(`applyWebhookPayment: respuesta desconocida (${JSON.stringify(outcome)})`);
+      throw new ServiceUnavailableError(
+        'Billing devolvió una respuesta desconocida para el cobro.',
+        'WEBHOOK_LEDGER_INVALID_RESPONSE',
+      );
     }
-    return { outcome, invoice: await this.findInvoiceById(input.invoiceId, input.tenantId) };
+    return {
+      outcome,
+      invoice: await this.findInvoiceById(input.invoiceId, input.tenantId),
+      wasSettledBefore,
+      isSettledAfter,
+      settlementWinner,
+    };
   }
 
   async generateInvoiceId(): Promise<string> {

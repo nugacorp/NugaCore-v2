@@ -9,7 +9,7 @@
 // ====================================================================
 
 import type { SupabaseClient } from '@supabase/supabase-js';
-import { IdempotencyConflictError } from '../../common/errors';
+import { IdempotencyConflictError, IdempotencyResolutionError } from '../../common/errors';
 import { idempotencyPayloadsEquivalent, tenantScopedIdempotencyId } from '../../common/idempotency';
 import {
   CustomerServiceState,
@@ -213,7 +213,7 @@ export class SupabaseSuspensionRepository implements SuspensionRepository {
       .eq('idempotency_key', input.idempotencyKey!)
       .maybeSingle();
     if (readError) throw new Error(`recordEvent(read): ${readError.message}`);
-    if (!data) throw new Error(`recordEvent: colisión sin fila visible (${input.idempotencyKey})`);
+    if (!data) throw new IdempotencyResolutionError('suspension_events', input.idempotencyKey!);
     const existing = rowToEvent(data as EventRow);
     if (!eventIsEquivalent(existing, input)) {
       throw new IdempotencyConflictError('suspension_events', input.idempotencyKey!);
@@ -280,7 +280,7 @@ export class SupabaseSuspensionRepository implements SuspensionRepository {
       .eq('idempotency_key', input.idempotencyKey!)
       .maybeSingle();
     if (readError) throw new Error(`createOrder(read): ${readError.message}`);
-    if (!data) throw new Error(`createOrder: colisión sin fila visible (${input.idempotencyKey})`);
+    if (!data) throw new IdempotencyResolutionError('reactivation_orders', input.idempotencyKey!);
     const existing = rowToOrder(data as OrderRow, input.orderType);
     if (!orderIsEquivalent(existing, input)) {
       throw new IdempotencyConflictError('reactivation_orders', input.idempotencyKey!);

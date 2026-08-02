@@ -185,6 +185,19 @@ describe('Migración de idempotencia durable — invariantes estáticas', () => 
     expect(body).toMatch(/cfdi_uuid\s*=\s*v_cfdi_uuid/i);
   });
 
+  it('Billing devuelve y persiste el único settlement winner bajo el lock', () => {
+    const body = sql.slice(positionOf(/CREATE OR REPLACE FUNCTION public\.billing_apply_webhook_payment/));
+    expect(body).toMatch(/RETURNS JSONB/i);
+    expect(sql).toMatch(/ADD COLUMN IF NOT EXISTS webhook_settlement_winner BOOLEAN/i);
+    expect(body).toMatch(/v_was_settled_before[\s\S]*?v_is_settled_after/i);
+    expect(body).toMatch(/SET webhook_settlement_winner = TRUE/i);
+    expect(body).toMatch(/'settlement_winner', v_settlement_winner/i);
+    expect(body).toMatch(/v_settlement_winner := COALESCE\(v_existing_winner, FALSE\)/i);
+    const capability = sql.slice(positionOf(/CREATE OR REPLACE FUNCTION public\.payments_webhook_schema_capability/));
+    expect(capability).toMatch(/payments\.webhook_settlement_winner/i);
+    expect(capability).toMatch(/p\.prorettype[\s\S]*?'jsonb'::regtype/i);
+  });
+
   it('los conflictos SQL no imprimen transaction/order ni la key derivada', () => {
     const body = sql.slice(positionOf(/CREATE OR REPLACE FUNCTION public\.billing_apply_webhook_payment/));
     for (const statement of body.match(/RAISE EXCEPTION[^;]*/gi) ?? []) {

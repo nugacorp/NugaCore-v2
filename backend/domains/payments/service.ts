@@ -13,12 +13,12 @@
 //   - Idempotente: el mismo webhook procesado 2 veces no duplica nada.
 // ====================================================================
 
-import { createHash } from 'node:crypto';
 import { logger } from '../../common/logger';
 import {
   BadRequestError,
   IdempotencyConflictError,
   NotFoundError,
+  opaqueFingerprint,
   ServiceUnavailableError,
 } from '../../common/errors';
 import { productionGates } from '../../config/production-gates';
@@ -223,7 +223,7 @@ export class PaymentService {
     if (claim.outcome !== 'claimed') {
       const alreadyProcessed = claim.outcome === 'already_processed';
       logger.info('PaymentEngine: webhook no reprocesado (idempotente)', {
-        provider, providerEventId, tenantId, reason: claim.outcome,
+        provider, eventFingerprint: opaqueFingerprint(providerEventId), tenantId, reason: claim.outcome,
       });
       return {
         eventId: claim.event.id,
@@ -305,7 +305,7 @@ export class PaymentService {
         if (invoiceResult.shouldReactivate) {
           await this.renewOrThrow(eventId, claimToken);
           const reactivation = await this.reactivateCustomerService(order.customerId, {
-            triggeredBy: `webhook:${provider}:${providerEventId}`,
+            triggeredBy: `webhook:${provider}:${opaqueFingerprint(providerEventId)}`,
             invoiceId: order.invoiceId,
             tenantId: orderTenantId,
             webhookFence,
@@ -339,7 +339,7 @@ export class PaymentService {
             if (invoiceResult.shouldReactivate) {
               await this.renewOrThrow(eventId, claimToken);
               const reactivation = await this.reactivateCustomerService(order.customerId, {
-                triggeredBy: `webhook:codi:${providerEventId}`,
+                triggeredBy: `webhook:codi:${opaqueFingerprint(providerEventId)}`,
                 invoiceId: order.invoiceId,
                 tenantId: orderTenantId,
                 webhookFence,
@@ -367,7 +367,6 @@ export class PaymentService {
             const existingPayment = invoice.payments.find(
               (payment) => payment.provider === 'codi' && payment.transactionId === providerEventId,
             );
-            const wasSettledBeforeWebhook = isInvoiceSettled(invoice);
             const amount = Number(
               claimedPayload.amount
               ?? claimedPayload.monto
@@ -389,12 +388,11 @@ export class PaymentService {
             invoiceUpdated = true;
 
             if (
-              isInvoiceSettled(paymentResult.invoice)
-              && (!wasSettledBeforeWebhook || Boolean(existingPayment))
+              paymentResult.settlementWinner
             ) {
               await this.renewOrThrow(eventId, claimToken);
               const reactivation = await this.reactivateCustomerService(invoice.clientId, {
-                triggeredBy: `webhook:codi:${providerEventId}`,
+                triggeredBy: `webhook:codi:${opaqueFingerprint(providerEventId)}`,
                 invoiceId: invoice.id,
                 tenantId: invoiceTenantId,
                 webhookFence: {
@@ -420,7 +418,11 @@ export class PaymentService {
       } else {
         // Webhook de proveedor sin order registrada — guardar y continuar
         await this.closeOrThrow(eventId, claimToken);
-        logger.warn('PaymentEngine: webhook sin payment_order asociada', { provider, providerOrderId, tenantId });
+        logger.warn('PaymentEngine: webhook sin payment_order asociada', {
+          provider,
+          orderFingerprint: providerOrderId ? opaqueFingerprint(providerOrderId) : undefined,
+          tenantId,
+        });
       }
 
       return {
@@ -438,19 +440,16 @@ export class PaymentService {
         logger.error('PaymentEngine: conflicto de idempotencia; requiere intervención', {
           eventId,
           provider,
-          providerEventId,
+          eventFingerprint: opaqueFingerprint(providerEventId),
           tenantId,
           scope: error.scope,
-          idempotencyKeyFingerprint: createHash('sha256')
-            .update(error.idempotencyKey)
-            .digest('hex')
-            .slice(0, 16),
+          idempotencyKeyFingerprint: error.fingerprint,
         });
         throw error;
       }
       if (!(error instanceof ClaimOwnershipLostError)) throw error;
       logger.warn('PaymentEngine: ownership del claim perdido; efectos posteriores abortados', {
-        eventId, provider, providerEventId, tenantId,
+        eventId, provider, eventFingerprint: opaqueFingerprint(providerEventId), tenantId,
       });
       return lostOwnershipResult();
     }
@@ -476,10 +475,6 @@ export class PaymentService {
     }
 
     const transactionId = order.providerOrderId ?? order.id;
-    const matchingPaymentBeforeLedger = invoice.payments.some(
-      (payment) => payment.provider === order.provider && payment.transactionId === transactionId,
-    );
-    const wasSettledBeforeWebhook = isInvoiceSettled(invoice);
     // Billing valida identidad e importe dentro de su operación atómica. Una
     // lectura previa nunca puede convertir una redelivery incompatible en éxito.
     const paymentResult = await this.applyWebhookPaymentOrThrow(webhookFence, {
@@ -499,8 +494,7 @@ export class PaymentService {
     return {
       updated: true,
       invoice: paymentResult.invoice,
-      shouldReactivate: isInvoiceSettled(paymentResult.invoice)
-        && (!wasSettledBeforeWebhook || matchingPaymentBeforeLedger),
+      shouldReactivate: paymentResult.settlementWinner,
     };
   }
 
@@ -520,7 +514,13 @@ export class PaymentService {
         method: payment.method,
         transactionId: payment.transactionId,
       }, payment.tenantId);
-      return { outcome: 'created', invoice };
+      return {
+        outcome: 'created',
+        invoice,
+        wasSettledBefore: false,
+        isSettledAfter: isInvoiceSettled(invoice),
+        settlementWinner: false,
+      };
     }
 
     await webhookFence.beforeMutation();
@@ -584,7 +584,7 @@ export class PaymentService {
     const router = requestedRouterId
       ? findRouterForTenant(routers, requestedRouterId, tenantId)
       : tenantRouters.find((r) => r.encryptedPassword || r.hasCredentials) ?? tenantRouters[0];
-    if (!router) {
+    if (!router && webhookFence) {
       throw new ServiceUnavailableError(
         'No hay un router disponible para el tenant del cliente.',
         'TENANT_ROUTER_UNAVAILABLE',
@@ -605,6 +605,17 @@ export class PaymentService {
         createdBy: triggeredBy,
       });
       manualProgress.timelineAdded = true;
+    }
+    // La ausencia de router no revierte la reactivación lógica manual ni debe
+    // convertir un pago ya confirmado en un 503. No se crea acción pending:
+    // la ejecución de red sigue fail-closed y puede planificarse por separado.
+    if (!router) {
+      return {
+        customerId,
+        alreadyActive: false,
+        mikrotikAction: null,
+        message: 'Cliente reactivado; no hay destino RouterOS disponible.',
+      };
     }
     let actionRec = existingAction;
     if (!actionRec) {

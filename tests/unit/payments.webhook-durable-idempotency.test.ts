@@ -19,7 +19,10 @@
 
 import type { SupabaseClient } from '@supabase/supabase-js';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
-import { IdempotencyConflictError } from '../../backend/common/errors';
+import {
+  IdempotencyConflictError,
+  IdempotencyResolutionError,
+} from '../../backend/common/errors';
 import {
   StorePaymentRepository,
   SupabasePaymentRepository,
@@ -234,6 +237,24 @@ describe('Acción raíz create-or-return por tenant + payment event', () => {
     await expect(
       repo.createActionIdempotent(rootAction({ id: 'ma-candidate-b', customerId: `${PREFIX}root`, dryRun: false })),
     ).rejects.toBeInstanceOf(IdempotencyConflictError);
+  });
+
+  it('Supabase: unique sin fila visible falla retryable sin exponer la key', async () => {
+    const db = supabaseWorld();
+    const repo = new SupabasePaymentRepository(asSupabaseClient<SupabaseClient>(db));
+    const first = rootAction();
+    await repo.createActionIdempotent(first);
+    db.hideNextRead('mikrotik_actions');
+
+    const error = await repo.createActionIdempotent(rootAction({ id: 'ma-candidate-hidden' }))
+      .catch((caught: unknown) => caught);
+
+    expect(error).toBeInstanceOf(IdempotencyResolutionError);
+    expect((error as Error).message).not.toContain(first.idempotencyKey!);
+    expect(error).toMatchObject({
+      scope: 'mikrotik_actions',
+      fingerprint: expect.stringMatching(/^[a-f0-9]{16}$/),
+    });
   });
 
   it('Store/Supabase: payloads JSON semánticamente iguales no producen falso conflicto', async () => {

@@ -68,12 +68,22 @@ export const registerWebhookRpcs = (db: FakePostgrest): void => {
       (row) => row.id === args.p_event_id && row.tenant_id === args.p_tenant_id,
     );
     if (!event) throw new Error('payment event not found for billing apply');
-    if (event.processed === true || event.claim_token !== args.p_claim_token) return 'ownership_lost';
+    if (event.processed === true || event.claim_token !== args.p_claim_token) {
+      return {
+        outcome: 'ownership_lost',
+        was_settled_before: false,
+        is_settled_after: false,
+        settlement_winner: false,
+      };
+    }
 
     const invoice = db.rows('invoices').find(
       (row) => row.id === args.p_invoice_id && row.tenant_id === args.p_tenant_id,
     );
     if (!invoice) throw new Error('invoice not found for billing apply');
+    const totalCents = Number(invoice.total_cents ?? Math.round(Number(invoice.amount ?? 0) * 100));
+    const wasSettledBefore = invoice.status === 'paid'
+      && Number(invoice.applied_cents ?? 0) >= totalCents;
 
     const amountCents = Number(args.p_amount_cents);
     const existingByCharge = db.rows('payments').find(
@@ -163,7 +173,6 @@ export const registerWebhookRpcs = (db: FakePostgrest): void => {
     const appliedCents = db.rows('payment_applications')
       .filter((row) => row.invoice_id === args.p_invoice_id)
       .reduce((sum, row) => sum + Number(row.applied_cents ?? 0), 0);
-    const totalCents = Number(invoice.total_cents ?? Math.round(Number(invoice.amount ?? 0) * 100));
     invoice.applied_cents = appliedCents;
     invoice.amount_paid = Math.round(appliedCents) / 100;
     if (invoice.status === 'canceled') {
@@ -178,7 +187,16 @@ export const registerWebhookRpcs = (db: FakePostgrest): void => {
         : 'unpaid';
       if (invoice.cfdi_status === 'generated') invoice.cfdi_status = 'pending';
     }
-    return outcome;
+    const isSettledAfter = invoice.status === 'paid' && appliedCents >= totalCents;
+    const settlementWinner = outcome === 'created' && !wasSettledBefore && isSettledAfter;
+    const payment = db.rows('payments').find((row) => row.id === paymentId)!;
+    if (settlementWinner) payment.settlement_winner = true;
+    return {
+      outcome,
+      was_settled_before: wasSettledBefore,
+      is_settled_after: isSettledAfter,
+      settlement_winner: payment.settlement_winner === true,
+    };
   });
 };
 

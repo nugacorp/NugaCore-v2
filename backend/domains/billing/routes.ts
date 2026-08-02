@@ -9,6 +9,7 @@ import { getCustomersService } from '../customers/service';
 import { getPaymentService } from '../payments/service';
 import { getSuspensionService } from '../suspension/service';
 import { tenantIdFromRequest } from '../tenancy/tenant-scope';
+import { logger } from '../../common/logger';
 
 const router = Router();
 
@@ -142,47 +143,58 @@ router.post(
     const paymentInput = service.validatePayment(invoice, req.body);
     const updated = await service.recordPayment(req.params.id, paymentInput, tenantId);
 
-    if (isDomainOnDb('billing')) {
-      const policy = await getSuspensionService().repo.getPolicy();
-      if (policy.reactivateOnPayment) {
-        const client = await getCustomersService().getById(invoice.clientId, tenantId);
-        if (client?.status === 'suspended') {
-          await getPaymentService().reactivateCustomerService(invoice.clientId, {
-            triggeredBy: req.authContext?.userId,
-            invoiceId: invoice.id,
-            // Sin tenant explícito la reactivación caía en `tenant-default` y
-            // podía crear la acción en el WISP equivocado.
-            tenantId,
+    // El pago ya está confirmado en este punto. Cualquier indisponibilidad de
+    // Customers/Suspension/RouterOS difiere la reactivación, pero no puede
+    // convertir la mutación financiera exitosa en un 5xx que invite a repetirla.
+    try {
+      if (isDomainOnDb('billing')) {
+        const policy = await getSuspensionService().repo.getPolicy();
+        if (policy.reactivateOnPayment) {
+          const client = await getCustomersService().getById(invoice.clientId, tenantId);
+          if (client?.status === 'suspended') {
+            await getPaymentService().reactivateCustomerService(invoice.clientId, {
+              triggeredBy: req.authContext?.userId,
+              invoiceId: invoice.id,
+              // Sin tenant explícito la reactivación caía en `tenant-default` y
+              // podía crear la acción en el WISP equivocado.
+              tenantId,
+            });
+          }
+        }
+      } else {
+        const client = store.CLIENTS.find(
+          (c) => c.id === invoice.clientId && (c.tenantId || 'tenant-default') === tenantId,
+        );
+        if (client && client.status === 'suspended' && store.SUSPENSION_POLICY.allowAutoReactivateOnPayment) {
+          client.status = 'active';
+          store.MIKROTIK_LOGS.push({
+            timestamp: new Date().toISOString().replace('T', ' ').substring(0, 19),
+            message: `script,info Automations Flow: billing payment success of ${invoice.id} triggers reactivate customer state for ${client.pppoeUser}`,
+          });
+          store.createAlert('client', 'info', client.name, `Pago recibido via ${paymentInput.method}. Cuenta reactivada automaticamente a velocidad completa.`);
+          store.logSuspensionAction({
+            clientId: client.id,
+            clientName: client.name,
+            action: 'reactivate',
+            reason: `Pago conciliado en factura ${invoice.id}.`,
+            source: 'automation',
+            actorId: req.authContext?.userId,
+          });
+          store.addClientTimelineEvent({
+            clientId: client.id,
+            eventType: 'status_change',
+            summary: 'Cambio de estatus suspended -> active',
+            details: `Reactivacion automatica posterior al pago de factura ${invoice.id}.`,
+            createdBy: req.authContext?.userId,
           });
         }
       }
-    } else if (!isDomainOnDb('billing')) {
-      const client = store.CLIENTS.find(
-        (c) => c.id === invoice.clientId && (c.tenantId || 'tenant-default') === tenantId,
-      );
-      if (client && client.status === 'suspended' && store.SUSPENSION_POLICY.allowAutoReactivateOnPayment) {
-        client.status = 'active';
-        store.MIKROTIK_LOGS.push({
-          timestamp: new Date().toISOString().replace('T', ' ').substring(0, 19),
-          message: `script,info Automations Flow: billing payment success of ${invoice.id} triggers reactivate customer state for ${client.pppoeUser}`,
-        });
-        store.createAlert('client', 'info', client.name, `Pago recibido via ${paymentInput.method}. Cuenta reactivada automaticamente a velocidad completa.`);
-        store.logSuspensionAction({
-          clientId: client.id,
-          clientName: client.name,
-          action: 'reactivate',
-          reason: `Pago conciliado en factura ${invoice.id}.`,
-          source: 'automation',
-          actorId: req.authContext?.userId,
-        });
-        store.addClientTimelineEvent({
-          clientId: client.id,
-          eventType: 'status_change',
-          summary: 'Cambio de estatus suspended -> active',
-          details: `Reactivacion automatica posterior al pago de factura ${invoice.id}.`,
-          createdBy: req.authContext?.userId,
-        });
-      }
+    } catch (error) {
+      logger.warn('Billing: pago confirmado; reactivación diferida', {
+        tenantId,
+        invoiceId: invoice.id,
+        reason: error instanceof Error ? error.name : 'UnknownError',
+      });
     }
 
     res.json(updated);

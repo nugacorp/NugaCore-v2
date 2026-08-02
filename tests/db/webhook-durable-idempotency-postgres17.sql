@@ -1,5 +1,7 @@
 \set ON_ERROR_STOP on
 
+CREATE EXTENSION IF NOT EXISTS dblink;
+
 DO $$
 DECLARE capability JSONB;
 BEGIN
@@ -49,7 +51,9 @@ VALUES
   ('evt-full', 'tenant-a', 'owner-full'),
   ('evt-canceled', 'tenant-a', 'owner-canceled'),
   ('evt-conflict-seed', 'tenant-a', 'owner-conflict-seed'),
-  ('evt-conflict-redelivery', 'tenant-a', 'owner-conflict-redelivery');
+  ('evt-conflict-redelivery', 'tenant-a', 'owner-conflict-redelivery'),
+  ('evt-settlement-40', 'tenant-a', 'owner-settlement-40'),
+  ('evt-settlement-60', 'tenant-a', 'owner-settlement-60');
 
 INSERT INTO public.invoices (
   id, tenant_id, client_id, client_name, total_cents, due_date,
@@ -60,7 +64,8 @@ INSERT INTO public.invoices (
   ('inv-overdue', 'tenant-a', 'client-overdue', 'Overdue', 10000, CURRENT_DATE - 10, 'overdue', 'generated', 'uuid-overdue'),
   ('inv-full', 'tenant-a', 'client-full', 'Full', 10000, CURRENT_DATE + 10, 'unpaid', 'pending', NULL),
   ('inv-canceled', 'tenant-a', 'client-canceled', 'Canceled', 10000, CURRENT_DATE - 10, 'canceled', 'canceled', NULL),
-  ('inv-conflict', 'tenant-a', 'client-conflict', 'Conflict', 10000, CURRENT_DATE + 10, 'unpaid', 'pending', NULL);
+  ('inv-conflict', 'tenant-a', 'client-conflict', 'Conflict', 10000, CURRENT_DATE + 10, 'unpaid', 'pending', NULL),
+  ('inv-settlement-race', 'tenant-a', 'client-settlement', 'Settlement', 10000, CURRENT_DATE + 10, 'unpaid', 'pending', NULL);
 
 -- El borde PostgreSQL también falla cerrado: importes no positivos no llegan
 -- al ledger y un valor fuera de INTEGER ni siquiera puede cruzar la firma RPC.
@@ -154,6 +159,51 @@ BEGIN
 END $$;
 RESET ROLE;
 
+-- Dos cargos legítimos distintos liquidan conjuntamente la misma factura.
+-- Las conexiones asíncronas fuerzan competencia real por el lock de invoice;
+-- el orden puede variar, pero exactamente un resultado queda como winner.
+DO $$
+DECLARE
+  result_40 JSONB;
+  result_60 JSONB;
+  winners INTEGER;
+  conn TEXT := 'dbname=' || current_database();
+BEGIN
+  PERFORM dblink_connect('settlement_40', conn);
+  PERFORM dblink_connect('settlement_60', conn);
+  PERFORM dblink_exec('settlement_40', 'SET ROLE service_role');
+  PERFORM dblink_exec('settlement_60', 'SET ROLE service_role');
+  PERFORM dblink_send_query('settlement_40', $q$
+    SELECT public.billing_apply_webhook_payment(
+      'tenant-a', 'evt-settlement-40', 'owner-settlement-40',
+      'inv-settlement-race', 4000, 'openpay', 'openpay',
+      'tx-settlement-40', 'charge:openpay:tx-settlement-40'
+    )
+  $q$);
+  PERFORM dblink_send_query('settlement_60', $q$
+    SELECT public.billing_apply_webhook_payment(
+      'tenant-a', 'evt-settlement-60', 'owner-settlement-60',
+      'inv-settlement-race', 6000, 'openpay', 'openpay',
+      'tx-settlement-60', 'charge:openpay:tx-settlement-60'
+    )
+  $q$);
+  SELECT value INTO result_40
+    FROM dblink_get_result('settlement_40') AS response(value JSONB);
+  SELECT value INTO result_60
+    FROM dblink_get_result('settlement_60') AS response(value JSONB);
+  PERFORM dblink_disconnect('settlement_40');
+  PERFORM dblink_disconnect('settlement_60');
+
+  IF result_40 ->> 'outcome' <> 'created' OR result_60 ->> 'outcome' <> 'created' THEN
+    RAISE EXCEPTION 'two-payment race did not create both ledger rows: %, %', result_40, result_60;
+  END IF;
+  winners := CASE WHEN (result_40 ->> 'settlement_winner')::BOOLEAN THEN 1 ELSE 0 END
+    + CASE WHEN (result_60 ->> 'settlement_winner')::BOOLEAN THEN 1 ELSE 0 END;
+  IF winners <> 1 THEN
+    RAISE EXCEPTION 'two-payment race produced % settlement winners: %, %', winners, result_40, result_60;
+  END IF;
+END $$;
+
 DO $$
 BEGIN
   IF (SELECT count(*) FROM public.payments WHERE provider = 'openpay' AND transaction_id = 'tx-shared') <> 1 THEN
@@ -188,5 +238,22 @@ BEGIN
         WHERE p.provider = 'openpay' AND p.transaction_id = 'tx-conflict'
      ) <> 1 THEN
     RAISE EXCEPTION 'conflicting redelivery changed billing ledger';
+  END IF;
+  IF NOT EXISTS (
+    SELECT 1 FROM public.invoices
+     WHERE id = 'inv-settlement-race' AND status = 'paid' AND applied_cents = 10000
+  ) OR (
+    SELECT count(*) FROM public.payments
+     WHERE transaction_id IN ('tx-settlement-40', 'tx-settlement-60')
+  ) <> 2 OR (
+    SELECT count(*) FROM public.payment_applications pa
+    JOIN public.payments p ON p.id = pa.payment_id
+     WHERE p.transaction_id IN ('tx-settlement-40', 'tx-settlement-60')
+  ) <> 2 OR (
+    SELECT count(*) FROM public.payments
+     WHERE transaction_id IN ('tx-settlement-40', 'tx-settlement-60')
+       AND webhook_settlement_winner IS TRUE
+  ) <> 1 THEN
+    RAISE EXCEPTION 'two-payment settlement race ledger/winner mismatch';
   END IF;
 END $$;

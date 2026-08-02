@@ -142,6 +142,11 @@ class FakeQuery implements PromiseLike<FakeResult<Row[]>> {
 
   private async run(): Promise<FakeResult<Row[]>> {
     const rows = this.db.rows(this.table);
+    const injectedError = this.db.takeTableError(this.table);
+    if (injectedError) return { data: null, error: injectedError };
+    if (this.mode === 'select' && this.db.takeInvisibleRead(this.table)) {
+      return { data: [], error: null };
+    }
     if (this.db.missingTables.has(this.table)) {
       return { data: null, error: { code: '42P01', message: `relation "${this.table}" does not exist` } };
     }
@@ -203,6 +208,35 @@ export class FakePostgrest {
   /** Columnas ausentes por tabla: simula un binario nuevo contra schema viejo. */
   readonly missingColumns = new Map<string, Set<string>>();
   readonly missingTables = new Set<string>();
+  private readonly queuedTableErrors = new Map<string, PostgrestError[]>();
+  private readonly queuedInvisibleReads = new Map<string, number>();
+
+  /** Inyecta un fallo transitorio en la próxima operación sobre una tabla. */
+  failNext(table: string, error: PostgrestError): void {
+    const queued = this.queuedTableErrors.get(table) ?? [];
+    queued.push(error);
+    this.queuedTableErrors.set(table, queued);
+  }
+
+  /** Simula una colisión cuyo winner aún no es visible al reread. */
+  hideNextRead(table: string): void {
+    this.queuedInvisibleReads.set(table, (this.queuedInvisibleReads.get(table) ?? 0) + 1);
+  }
+
+  takeTableError(table: string): PostgrestError | null {
+    const queued = this.queuedTableErrors.get(table);
+    const error = queued?.shift() ?? null;
+    if (queued?.length === 0) this.queuedTableErrors.delete(table);
+    return error;
+  }
+
+  takeInvisibleRead(table: string): boolean {
+    const queued = this.queuedInvisibleReads.get(table) ?? 0;
+    if (queued <= 0) return false;
+    if (queued === 1) this.queuedInvisibleReads.delete(table);
+    else this.queuedInvisibleReads.set(table, queued - 1);
+    return true;
+  }
 
   rows(table: string): Row[] {
     if (!this.tables.has(table)) this.tables.set(table, []);

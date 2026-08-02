@@ -113,6 +113,8 @@ export interface PaymentAllocation {
    */
   tenantId?: string;
   idempotencyKey?: string;
+  /** El cargo que cruzó pendiente→saldada bajo la exclusión del ledger. */
+  settlementWinner?: boolean;
 }
 
 export interface InventoryItemState {

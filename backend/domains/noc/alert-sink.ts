@@ -10,7 +10,7 @@
 
 import type { SupabaseClient } from '@supabase/supabase-js';
 import type { NocAlert } from '../../../src/types';
-import { IdempotencyConflictError } from '../../common/errors';
+import { IdempotencyConflictError, IdempotencyResolutionError } from '../../common/errors';
 import { tenantScopedIdempotencyId } from '../../common/idempotency';
 import { isDomainOnDb } from '../../config/feature-flags';
 import { isSupabaseAdminConfigured, supabaseAdmin } from '../../services/supabase-admin';
@@ -96,7 +96,7 @@ export class SupabaseAlertSink implements AlertSink {
       .eq('idempotency_key', input.idempotencyKey)
       .maybeSingle();
     if (readError) throw new Error(`createAlertIdempotent(read): ${readError.message}`);
-    if (!data) throw new Error(`createAlertIdempotent: colisión sin fila visible (${input.idempotencyKey})`);
+    if (!data) throw new IdempotencyResolutionError(ALERT_IDEMPOTENCY_SCOPE, input.idempotencyKey);
     if (
       data.message !== input.message
       || data.source !== input.source

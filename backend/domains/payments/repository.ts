@@ -7,7 +7,7 @@
 // ====================================================================
 
 import type { SupabaseClient } from '@supabase/supabase-js';
-import { IdempotencyConflictError } from '../../common/errors';
+import { IdempotencyConflictError, IdempotencyResolutionError } from '../../common/errors';
 import { idempotencyPayloadsEquivalent } from '../../common/idempotency';
 import { store } from '../../state/store';
 import {
@@ -424,7 +424,8 @@ export class SupabasePaymentRepository implements PaymentRepository {
   async findOrderById(id: string, tenantId?: string) {
     let q = this.client.from('payment_orders').select('*').eq('id', id);
     if (tenantId) q = q.eq('tenant_id', tenantId);
-    const { data } = await q.maybeSingle();
+    const { data, error } = await q.maybeSingle();
+    if (error) throw new Error(`findOrderById: ${error.message}`);
     return data ? rowToPaymentOrder(data as PaymentOrderRow) : null;
   }
 
@@ -433,7 +434,8 @@ export class SupabasePaymentRepository implements PaymentRepository {
       .from('payment_orders').select('*')
       .eq('provider', provider).eq('provider_order_id', providerOrderId);
     if (tenantId) q = q.eq('tenant_id', tenantId);
-    const { data } = await q.maybeSingle();
+    const { data, error } = await q.maybeSingle();
+    if (error) throw new Error(`findOrderByProviderOrderId: ${error.message}`);
     return data ? rowToPaymentOrder(data as PaymentOrderRow) : null;
   }
 
@@ -458,12 +460,13 @@ export class SupabasePaymentRepository implements PaymentRepository {
   async findEventByProviderId(provider: PaymentProvider, providerEventId: string, tenantId: string) {
     // El filtro por tenant es lo que garantiza como mucho una fila: es
     // exactamente la clave del índice único uq_payment_events_tenant_provider_event.
-    const { data } = await this.client
+    const { data, error } = await this.client
       .from('payment_events').select('*')
       .eq('provider', provider)
       .eq('provider_event_id', providerEventId)
       .eq('tenant_id', tenantId)
       .maybeSingle();
+    if (error) throw new Error(`findEventByProviderId: ${error.message}`);
     return data ? rowToPaymentEvent(data as PaymentEventRow) : null;
   }
 
@@ -596,7 +599,7 @@ export class SupabasePaymentRepository implements PaymentRepository {
     const existing = await this.findActionByIdempotencyKey(tenantId, key);
     // Perdimos el insert y no vemos la fila: fail-closed y retryable, nunca
     // seguir con una acción propia que duplicaría toda la familia de efectos.
-    if (!existing) throw new Error(`createActionIdempotent: colisión sin fila visible para ${key}`);
+    if (!existing) throw new IdempotencyResolutionError(ACTION_IDEMPOTENCY_SCOPE, key);
     if (!actionsAreEquivalent(existing, stamped)) {
       throw new IdempotencyConflictError(ACTION_IDEMPOTENCY_SCOPE, key);
     }

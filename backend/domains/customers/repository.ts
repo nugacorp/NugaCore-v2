@@ -14,7 +14,11 @@ import type { SupabaseClient } from '@supabase/supabase-js';
 import { Client } from '../../../src/types';
 import { ClientTimelineEvent, store } from '../../state/store';
 import { logger } from '../../common/logger';
-import { ConflictError, IdempotencyConflictError } from '../../common/errors';
+import {
+  ConflictError,
+  IdempotencyConflictError,
+  IdempotencyResolutionError,
+} from '../../common/errors';
 import { tenantScopedIdempotencyId } from '../../common/idempotency';
 import {
   ClientRow,
@@ -397,7 +401,9 @@ export class SupabaseCustomersRepository implements CustomersRepository {
       .eq('idempotency_key', options.idempotencyKey)
       .maybeSingle();
     if (readError) fail('addTimelineEvent(read)', readError);
-    if (!data) fail('addTimelineEvent', new Error(`colisión sin fila visible (${options.idempotencyKey})`));
+    if (!data) {
+      throw new IdempotencyResolutionError(TIMELINE_IDEMPOTENCY_SCOPE, options.idempotencyKey);
+    }
     if (
       data!.client_id !== event.clientId
       || data!.event_type !== event.eventType

@@ -88,7 +88,13 @@ class FakeRepo implements BillingRepository {
 
   async applyWebhookPayment(input: WebhookPaymentInput): Promise<WebhookPaymentResult> {
     const invoice = await this.recordPayment(input.invoiceId, input);
-    return { outcome: 'created', invoice };
+    return {
+      outcome: 'created',
+      invoice,
+      wasSettledBefore: false,
+      isSettledAfter: invoice.pendingAmount <= 0,
+      settlementWinner: invoice.pendingAmount <= 0,
+    };
   }
 
   async cancelInvoice(id: string): Promise<EnrichedInvoice | null> {

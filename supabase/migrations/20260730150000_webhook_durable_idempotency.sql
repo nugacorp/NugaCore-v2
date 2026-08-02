@@ -74,6 +74,8 @@ END $$;
 -- La identidad del cobro es independiente de la entrega/eventId. `provider`
 -- queda nullable para pagos manuales e históricos; sólo el webhook la estampa.
 ALTER TABLE public.payments ADD COLUMN IF NOT EXISTS provider TEXT;
+ALTER TABLE public.payments
+  ADD COLUMN IF NOT EXISTS webhook_settlement_winner BOOLEAN DEFAULT FALSE;
 CREATE UNIQUE INDEX IF NOT EXISTS uq_payments_tenant_provider_transaction
   ON public.payments (tenant_id, provider, transaction_id)
   WHERE provider IS NOT NULL AND transaction_id IS NOT NULL;
@@ -169,7 +171,7 @@ BEGIN
      FOR UPDATE;
 
   IF NOT FOUND THEN
-    RAISE EXCEPTION 'payment_event_not_found: %', p_event_id;
+    RAISE EXCEPTION 'payment_event_not_found';
   END IF;
 
   IF v_processed IS TRUE OR v_claim_token IS DISTINCT FROM p_claim_token THEN
@@ -183,11 +185,11 @@ BEGIN
      FOR UPDATE;
 
   IF NOT FOUND THEN
-    RAISE EXCEPTION 'mikrotik_action_not_found: %', p_action_id;
+    RAISE EXCEPTION 'mikrotik_action_not_found';
   END IF;
 
   IF v_event_link IS DISTINCT FROM p_event_id THEN
-    RAISE EXCEPTION 'action_event_link_mismatch: % <> %', v_event_link, p_event_id;
+    RAISE EXCEPTION 'action_event_link_mismatch';
   END IF;
 
   v_progress := COALESCE(v_result -> '_webhookReactivationProgress', '{}'::jsonb);
@@ -225,6 +227,10 @@ GRANT EXECUTE ON FUNCTION public.payments_checkpoint_reactivation_step(TEXT, TEX
 -- aplicación es única por (payment_id, invoice_id) y el total se RECALCULA
 -- desde la suma real, así que no hay lost update sobre applied_cents.
 
+DROP FUNCTION IF EXISTS public.billing_apply_webhook_payment(
+  TEXT, TEXT, TEXT, TEXT, INTEGER, TEXT, TEXT, TEXT, TEXT
+);
+
 CREATE OR REPLACE FUNCTION public.billing_apply_webhook_payment(
   p_tenant_id       TEXT,
   p_event_id        TEXT,
@@ -235,7 +241,7 @@ CREATE OR REPLACE FUNCTION public.billing_apply_webhook_payment(
   p_provider        TEXT,
   p_transaction_id  TEXT,
   p_idempotency_key TEXT
-) RETURNS TEXT
+) RETURNS JSONB
 LANGUAGE plpgsql
 SECURITY INVOKER
 SET search_path = public, pg_temp
@@ -265,6 +271,10 @@ DECLARE
   v_application_invoice TEXT;
   v_application_tenant  TEXT;
   v_application_amount  INTEGER;
+  v_was_settled_before BOOLEAN;
+  v_is_settled_after BOOLEAN;
+  v_settlement_winner BOOLEAN := FALSE;
+  v_existing_winner BOOLEAN := FALSE;
 BEGIN
   IF p_amount_cents IS NULL OR p_amount_cents <= 0 THEN
     RAISE EXCEPTION 'invalid_payment_amount: %', p_amount_cents;
@@ -285,23 +295,30 @@ BEGIN
      FOR UPDATE;
 
   IF NOT FOUND THEN
-    RAISE EXCEPTION 'payment_event_not_found: %', p_event_id;
+    RAISE EXCEPTION 'payment_event_not_found';
   END IF;
 
   IF v_processed IS TRUE OR v_claim_token IS DISTINCT FROM p_claim_token THEN
-    RETURN 'ownership_lost';
+    RETURN jsonb_build_object(
+      'outcome', 'ownership_lost',
+      'was_settled_before', false,
+      'is_settled_after', false,
+      'settlement_winner', false
+    );
   END IF;
 
-  SELECT client_id, client_name, total_cents, due_date, status, cfdi_status, cfdi_uuid
+  SELECT client_id, client_name, total_cents, due_date, status, cfdi_status, cfdi_uuid, applied_cents
     INTO v_client_id, v_client_name, v_total_cents, v_due_date,
-         v_current_status, v_current_cfdi_status, v_current_cfdi_uuid
+         v_current_status, v_current_cfdi_status, v_current_cfdi_uuid, v_applied_cents
     FROM public.invoices
    WHERE id = p_invoice_id AND tenant_id = p_tenant_id
      FOR UPDATE;
 
   IF NOT FOUND THEN
-    RAISE EXCEPTION 'invoice_not_found: %', p_invoice_id;
+    RAISE EXCEPTION 'invoice_not_found';
   END IF;
+  v_was_settled_before := v_current_status = 'paid'
+    AND COALESCE(v_applied_cents, 0) >= COALESCE(v_total_cents, 0);
 
   -- El INSERT resuelve también la carrera entre eventos distintos que por un
   -- bug upstream llegaran a compartir key: esos eventos no se serializan en
@@ -309,9 +326,11 @@ BEGIN
   -- luego valida la fila ganadora como `existing` o conflicto determinista.
   -- La key derivada también es un contrato: si un caller intenta reutilizarla
   -- para otra identidad/payload, devolver 409 determinista (sin exponer tx).
-  SELECT id, amount_cents, client_id, method, provider, transaction_id, status
+  SELECT id, amount_cents, client_id, method, provider, transaction_id, status,
+         COALESCE(webhook_settlement_winner, FALSE)
     INTO v_payment_id, v_existing_amt, v_existing_client,
-         v_existing_method, v_existing_provider, v_existing_tx, v_existing_status
+         v_existing_method, v_existing_provider, v_existing_tx, v_existing_status,
+         v_existing_winner
     FROM public.payments
    WHERE tenant_id = p_tenant_id AND idempotency_key = p_idempotency_key
      FOR UPDATE;
@@ -344,9 +363,11 @@ BEGIN
   IF FOUND THEN
     v_outcome := 'created';
   ELSE
-    SELECT id, amount_cents, client_id, method, provider, transaction_id, status
+    SELECT id, amount_cents, client_id, method, provider, transaction_id, status,
+           COALESCE(webhook_settlement_winner, FALSE)
       INTO v_payment_id, v_existing_amt, v_existing_client,
-           v_existing_method, v_existing_provider, v_existing_tx, v_existing_status
+           v_existing_method, v_existing_provider, v_existing_tx, v_existing_status,
+           v_existing_winner
       FROM public.payments
      WHERE tenant_id = p_tenant_id
        AND provider = p_provider
@@ -445,7 +466,23 @@ BEGIN
          cfdi_uuid     = v_cfdi_uuid
    WHERE id = p_invoice_id AND tenant_id = p_tenant_id;
 
-  RETURN v_outcome;
+  v_is_settled_after := v_status = 'paid'
+    AND v_applied_cents >= COALESCE(v_total_cents, 0);
+  IF v_outcome = 'created' AND NOT v_was_settled_before AND v_is_settled_after THEN
+    UPDATE public.payments
+       SET webhook_settlement_winner = TRUE
+     WHERE id = v_payment_id AND tenant_id = p_tenant_id;
+    v_settlement_winner := TRUE;
+  ELSE
+    v_settlement_winner := COALESCE(v_existing_winner, FALSE);
+  END IF;
+
+  RETURN jsonb_build_object(
+    'outcome', v_outcome,
+    'was_settled_before', v_was_settled_before,
+    'is_settled_after', v_is_settled_after,
+    'settlement_winner', v_settlement_winner
+  );
 END;
 $$;
 
@@ -557,6 +594,15 @@ BEGIN
     v_missing := v_missing || 'mikrotik_actions.payment_event_id';
   END IF;
 
+  IF NOT EXISTS (
+    SELECT 1 FROM information_schema.columns
+    WHERE table_schema = 'public' AND table_name = 'payments'
+      AND column_name = 'webhook_settlement_winner'
+      AND data_type = 'boolean'
+  ) THEN
+    v_missing := v_missing || 'payments.webhook_settlement_winner';
+  END IF;
+
   FOREACH v_rpc_signature IN ARRAY rpc_signatures LOOP
     v_rpc := to_regprocedure(v_rpc_signature);
     v_expected_volatility := CASE
@@ -569,6 +615,12 @@ BEGIN
       WHERE p.oid = v_rpc
         AND p.prosecdef IS FALSE
         AND p.provolatile = v_expected_volatility
+        AND p.prorettype = CASE
+          WHEN v_rpc_signature LIKE '%billing_apply_webhook_payment%'
+            OR v_rpc_signature LIKE '%schema_capability%'
+          THEN 'jsonb'::regtype
+          ELSE 'text'::regtype
+        END
         AND COALESCE(p.proconfig, ARRAY[]::TEXT[]) @> ARRAY['search_path=public, pg_temp']::TEXT[]
         AND has_function_privilege('service_role', p.oid, 'EXECUTE')
         AND NOT has_function_privilege('anon', p.oid, 'EXECUTE')
