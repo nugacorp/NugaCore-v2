@@ -1,9 +1,17 @@
 import React, { useCallback, useEffect, useMemo, useState } from 'react';
 import { Map as MapIcon, Sliders, Activity, Compass, Cable, Database, Info } from 'lucide-react';
-import { Client, FiberSegment, NapBox, OnuFTTH, OltFTTH } from '../types';
+import {
+  Client,
+  FiberSegment,
+  FtthFeasibilityResult,
+  NapBox,
+  OnuFTTH,
+  OltFTTH,
+} from '../types';
 import GisLeafletMap from './gis/GisLeafletMap';
 import FtthInfrastructurePanel from './gis/FtthInfrastructurePanel';
 import FtthImportPanel from './gis/FtthImportPanel';
+import FtthFeasibilityPanel from './gis/FtthFeasibilityPanel';
 
 interface GisModuleProps {
   towers?: unknown[];
@@ -32,6 +40,14 @@ export default function GisModule({
   const [showDropLines, setShowDropLines] = useState(true);
   const [localNaps, setLocalNaps] = useState<NapBox[]>(napsProp);
   const [segments, setSegments] = useState<FiberSegment[]>([]);
+
+  // Preventa: prospecto marcado en el mapa + resultado de factibilidad.
+  const [prospect, setProspect] = useState<{ lat: number; lng: number } | null>(null);
+  const [pickMode, setPickMode] = useState(false);
+  const [maxDropMeters, setMaxDropMeters] = useState(250);
+  const [feasibility, setFeasibility] = useState<FtthFeasibilityResult | null>(null);
+  const [feasibilityLoading, setFeasibilityLoading] = useState(false);
+  const [feasibilityError, setFeasibilityError] = useState<string | null>(null);
 
   useEffect(() => {
     setLocalNaps(napsProp);
@@ -108,6 +124,42 @@ export default function GisModule({
       bboxLabel: `Lat ${minLat.toFixed(3)}…${maxLat.toFixed(3)} · Lng ${minLng.toFixed(3)}…${maxLng.toFixed(3)}`,
     };
   }, [ftthClients, naps, olts, segments]);
+
+  const checkFeasibility = useCallback(
+    async (point: { lat: number; lng: number }, radius: number) => {
+      setFeasibilityLoading(true);
+      setFeasibilityError(null);
+      try {
+        const params = new URLSearchParams({
+          lat: String(point.lat),
+          lng: String(point.lng),
+          maxDropMeters: String(radius),
+        });
+        const res = await fetch(`/api/ftth/feasibility?${params.toString()}`);
+        if (!res.ok) {
+          const body = (await res.json().catch(() => null)) as { error?: string } | null;
+          throw new Error(body?.error || `HTTP ${res.status}`);
+        }
+        setFeasibility((await res.json()) as FtthFeasibilityResult);
+      } catch (err) {
+        setFeasibility(null);
+        setFeasibilityError(err instanceof Error ? err.message : 'No se pudo consultar factibilidad');
+      } finally {
+        setFeasibilityLoading(false);
+      }
+    },
+    [],
+  );
+
+  /** Click en el mapa: reubica el prospecto y consulta de inmediato. */
+  const handleProspectPick = useCallback(
+    (lat: number, lng: number) => {
+      setProspect({ lat, lng });
+      setPickMode(false);
+      void checkFeasibility({ lat, lng }, maxDropMeters);
+    },
+    [checkFeasibility, maxDropMeters],
+  );
 
   const handlePortUpdate = useCallback(
     async (
@@ -234,11 +286,34 @@ export default function GisModule({
             highAttenuationSim={false}
             centralOffice={centralOffice}
             splices={splices}
+            prospect={prospect}
+            feasibility={feasibility}
+            prospectPickMode={pickMode}
+            onProspectPick={handleProspectPick}
             onPortUpdate={handlePortUpdate}
           />
         </div>
 
         <div className="xl:col-span-3 space-y-6">
+          <FtthFeasibilityPanel
+            prospect={prospect}
+            result={feasibility}
+            loading={feasibilityLoading}
+            error={feasibilityError}
+            pickMode={pickMode}
+            maxDropMeters={maxDropMeters}
+            onTogglePickMode={() => setPickMode((v) => !v)}
+            onProspectChange={(lat, lng) => setProspect({ lat, lng })}
+            onMaxDropChange={setMaxDropMeters}
+            onCheck={() => prospect && void checkFeasibility(prospect, maxDropMeters)}
+            onClear={() => {
+              setProspect(null);
+              setFeasibility(null);
+              setFeasibilityError(null);
+              setPickMode(false);
+            }}
+          />
+
           <div className="bg-slate-950 border border-slate-800 rounded-3xl p-5 space-y-4">
             <h3 className="text-xs font-bold text-slate-300 font-mono uppercase flex items-center gap-2 border-b border-slate-900 pb-3">
               <Database className="w-4 h-4 text-emerald-400" />

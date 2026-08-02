@@ -6,12 +6,14 @@ import {
   Marker,
   Polyline,
   Popup,
+  Tooltip,
   useMap,
+  useMapEvents,
   ZoomControl,
 } from 'react-leaflet';
 import L, { type LatLngExpression, type LatLngTuple } from 'leaflet';
 import { AlertTriangle, Cpu, Users, X } from 'lucide-react';
-import type { Client, FiberSegment, NapBox, OnuFTTH } from '../../types';
+import type { Client, FiberSegment, FtthFeasibilityResult, NapBox, OnuFTTH } from '../../types';
 import NapInternalView from './NapInternalView';
 import 'leaflet/dist/leaflet.css';
 
@@ -32,6 +34,13 @@ interface GisLeafletMapProps {
   highAttenuationSim: boolean;
   centralOffice: { id: string; name: string; lat: number; lng: number; capacity: string };
   splices: Array<{ id: string; name: string; lat: number; lng: number }>;
+  /** Prospecto de preventa marcado en el mapa. */
+  prospect?: { lat: number; lng: number } | null;
+  /** Resultado de factibilidad para dibujar el drop tentativo. */
+  feasibility?: FtthFeasibilityResult | null;
+  /** Cuando está activo, el click en el mapa reubica el prospecto. */
+  prospectPickMode?: boolean;
+  onProspectPick?: (lat: number, lng: number) => void;
   onPortUpdate?: (
     napId: string,
     portNum: number,
@@ -73,6 +82,24 @@ const oltIcon = () =>
 
 const spliceIcon = () => divIcon(`<span class="nc-ftth-pin nc-ftth-pin--splice"></span>`, 16);
 
+const prospectIcon = () =>
+  divIcon(`<span class="nc-ftth-pin nc-ftth-pin--prospect"><span class="nc-ftth-pin__core"></span></span>`, 24);
+
+function ProspectPicker({
+  enabled,
+  onPick,
+}: {
+  enabled: boolean;
+  onPick?: (lat: number, lng: number) => void;
+}) {
+  useMapEvents({
+    click(e) {
+      if (enabled && onPick) onPick(e.latlng.lat, e.latlng.lng);
+    },
+  });
+  return null;
+}
+
 function FitDataBounds({ points }: { points: LatLngTuple[] }) {
   const map = useMap();
   useEffect(() => {
@@ -104,6 +131,10 @@ export default function GisLeafletMap({
   highAttenuationSim,
   centralOffice,
   splices,
+  prospect = null,
+  feasibility = null,
+  prospectPickMode = false,
+  onProspectPick,
   onPortUpdate,
 }: GisLeafletMapProps) {
   const [selection, setSelection] = useState<FtthSelection>(null);
@@ -131,9 +162,24 @@ export default function GisLeafletMap({
         if (validPoint(lat, lng)) pts.push([lat, lng]);
       }
     }
+    if (prospect && validPoint(prospect.lat, prospect.lng)) pts.push([prospect.lat, prospect.lng]);
     if (pts.length === 0) pts.push([19.4326, -99.1332]);
     return pts;
-  }, [naps, ftthClients, splices, centralOffice, fiberSegments]);
+  }, [naps, ftthClients, splices, centralOffice, fiberSegments, prospect]);
+
+  /** Drop tentativo entre el prospecto y la NAP factible. */
+  const feasibilityDrop = useMemo(() => {
+    const best = feasibility?.best;
+    if (!best || !prospect || !validPoint(prospect.lat, prospect.lng)) return null;
+    if (!validPoint(best.lat, best.lng)) return null;
+    return {
+      positions: [
+        [prospect.lat, prospect.lng],
+        [best.lat, best.lng],
+      ] as LatLngTuple[],
+      label: `${best.napName} · ${best.distanceMeters} m · ${best.freePorts} libre${best.freePorts === 1 ? '' : 's'}`,
+    };
+  }, [feasibility, prospect]);
 
   const dropLines = useMemo(() => {
     if (!showDropLines) return [] as Array<{ key: string; positions: LatLngTuple[]; offline: boolean }>;
@@ -179,6 +225,7 @@ export default function GisLeafletMap({
         <ZoomControl position="bottomright" />
         <FitDataBounds points={boundsPoints} />
         <InvalidateOnResize />
+        <ProspectPicker enabled={prospectPickMode} onPick={onProspectPick} />
 
         {fiberSegments.map((seg) => {
           const positions = seg.coordinates
@@ -308,6 +355,33 @@ export default function GisLeafletMap({
             />
           );
         })}
+
+        {feasibilityDrop && (
+          <Polyline
+            positions={feasibilityDrop.positions}
+            pathOptions={{ color: '#f59e0b', weight: 2.5, opacity: 0.95, dashArray: '6 4' }}
+          >
+            <Tooltip permanent direction="center" className="nc-ftth-drop-tip">
+              {feasibilityDrop.label}
+            </Tooltip>
+          </Polyline>
+        )}
+
+        {prospect && validPoint(prospect.lat, prospect.lng) && (
+          <Marker position={[prospect.lat, prospect.lng]} icon={prospectIcon()}>
+            <Popup>
+              <strong>Prospecto</strong>
+              <br />
+              {prospect.lat.toFixed(5)}, {prospect.lng.toFixed(5)}
+              {feasibility && (
+                <>
+                  <br />
+                  {feasibility.eligible ? 'Cobertura disponible' : feasibility.message}
+                </>
+              )}
+            </Popup>
+          </Marker>
+        )}
       </MapContainer>
 
       <div className="absolute top-3 left-3 z-[500] bg-white/95 border border-emerald-100 p-3 rounded-xl text-[10px] space-y-1.5 font-mono text-slate-600 shadow-md max-w-[210px]">
@@ -317,7 +391,16 @@ export default function GisLeafletMap({
         <div className="flex items-center gap-2"><span className="w-4 h-0.5 bg-violet-600 inline-block" /> Feeder / backbone</div>
         <div className="flex items-center gap-2"><span className="w-4 h-0.5 bg-emerald-600 inline-block" /> Distribución</div>
         <div className="flex items-center gap-2"><span className="w-4 h-0.5 border-t border-dashed border-sky-500 inline-block" /> Drop ONU</div>
+        {prospect && (
+          <div className="flex items-center gap-2"><span className="w-2.5 h-2.5 rounded-full bg-amber-500 inline-block" /> Prospecto</div>
+        )}
       </div>
+
+      {prospectPickMode && (
+        <div className="absolute bottom-3 left-3 z-[500] bg-amber-500 text-slate-900 px-3 py-2 rounded-xl text-[11px] font-mono font-bold shadow-lg">
+          Click en el mapa para ubicar al prospecto
+        </div>
+      )}
 
       {dynamicFiberCut && (
         <div className="absolute top-3 right-3 z-[500] bg-rose-600 text-white px-3 py-2 rounded-xl text-[11px] font-mono flex items-center gap-1.5 shadow-lg animate-pulse">
@@ -388,7 +471,14 @@ export default function GisLeafletMap({
         .nc-ftth-pin--onu { background: #0ea5e9; border-width: 1.5px; }
         .nc-ftth-pin--onu.is-down { background: #e11d48; }
         .nc-ftth-pin--splice { background: #1e293b; border-color: #a78bfa; }
+        .nc-ftth-pin--prospect { background: #f59e0b; border-color: #fff; }
+        .nc-ftth-drop-tip {
+          background: #f59e0b; color: #0f172a; border: 0; font-weight: 700;
+          font-size: 10px; box-shadow: 0 2px 6px rgba(15, 23, 42, 0.25);
+        }
+        .nc-ftth-drop-tip::before { display: none; }
         .leaflet-container { font: inherit; background: #eef6f2; }
+        ${prospectPickMode ? '.leaflet-container { cursor: crosshair; }' : ''}
         .leaflet-control-zoom a {
           background: #fff !important; color: #0f172a !important; border-color: #d1fae5 !important;
         }

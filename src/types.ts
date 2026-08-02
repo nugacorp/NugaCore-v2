@@ -512,6 +512,36 @@ export interface FiberSegment {
   threads?: FiberThread[];
 }
 
+/** Contrato de GET /api/ftth/feasibility (preventa). */
+export type FtthFeasibilityReason =
+  | 'ELIGIBLE'
+  | 'NO_NAP_IN_RANGE'
+  | 'NO_FREE_PORT_IN_RANGE';
+
+export interface FtthFeasibilityCandidate {
+  napId: string;
+  napName: string;
+  /** Distancia en línea recta al prospecto. El drop real siempre es mayor. */
+  distanceMeters: number;
+  freePorts: number;
+  totalPorts: number;
+  splitRatio: string;
+  ponPort: string;
+  lat: number;
+  lng: number;
+  hasFreePort: boolean;
+  withinCoverage: boolean;
+}
+
+export interface FtthFeasibilityResult {
+  eligible: boolean;
+  reason: FtthFeasibilityReason;
+  message: string;
+  searchRadiusMeters: number;
+  best: FtthFeasibilityCandidate | null;
+  candidates: FtthFeasibilityCandidate[];
+}
+
 export interface FtthImportPreview {
   naps: NapBox[];
   segments: FiberSegment[];
