@@ -26,7 +26,11 @@ import { dispatchNetworkOrder } from '../../bridges/network-order-dispatch';
 import { isDomainOnDb } from '../../config/feature-flags';
 import { isSupabaseAdminConfigured, supabaseAdmin } from '../../services/supabase-admin';
 import { getBillingService } from '../billing/service';
-import type { EnrichedInvoice, WebhookPaymentResult } from '../billing/repository';
+import {
+  webhookPaymentAmountCents,
+  type EnrichedInvoice,
+  type WebhookPaymentResult,
+} from '../billing/repository';
 import { getCustomersService } from '../customers/service';
 import { getSuspensionService } from '../suspension/service';
 import { inventoryRoutersRepository } from '../inventory/routers/repository';
@@ -275,12 +279,40 @@ export class PaymentService {
         };
       }
 
+      // CoDi entrega el importe en el propio webhook. Si viene presente debe
+      // validarse antes de cualquier lookup/adapter; los valores ausentes se
+      // resuelven despues contra order/factura y se vuelven a validar en Billing.
+      if (provider === 'codi') {
+        const rawAmount = claimedPayload.amount ?? claimedPayload.monto;
+        if (rawAmount !== undefined && rawAmount !== null) {
+          webhookPaymentAmountCents(Number(rawAmount));
+        }
+      }
+
       // Buscar payment_order por providerOrderId DENTRO del WISP del evento: un
       // provider_order_id de otro merchant nunca puede completar esta order.
       const providerOrderId = this.extractProviderOrderId(provider, claimedPayload);
-      const order = providerOrderId
+      let order = providerOrderId
         ? await this.repo.findOrderByProviderOrderId(provider, providerOrderId, tenantId)
         : null;
+      if (!order && provider === 'codi' && providerOrderId) {
+        const normalizedReference = providerOrderId.trim().toUpperCase();
+        const matchingOrders = (await this.repo.listOrders({ tenantId })).filter(
+          (candidate) => candidate.provider === 'codi'
+            && (
+              candidate.providerOrderId?.trim().toUpperCase() === normalizedReference
+              || `${candidate.invoiceId}-${candidate.customerId}`.trim().toUpperCase()
+                === normalizedReference
+            ),
+        );
+        if (matchingOrders.length > 1) {
+          throw new ServiceUnavailableError(
+            'La referencia CoDi coincide con multiples ordenes.',
+            'CODI_REFERENCE_AMBIGUOUS',
+          );
+        }
+        order = matchingOrders[0] ?? null;
+      }
 
       let invoiceUpdated = false;
       let reactivationTriggered = false;
@@ -308,7 +340,10 @@ export class PaymentService {
             triggeredBy: `webhook:${provider}:${opaqueFingerprint(providerEventId)}`,
             invoiceId: order.invoiceId,
             tenantId: orderTenantId,
-            webhookFence,
+            webhookFence: {
+              ...webhookFence,
+              canonicalPaymentId: invoiceResult.canonicalPaymentId,
+            },
           });
           reactivationTriggered = !reactivation.alreadyActive;
           mikrotikActionId = reactivation.mikrotikAction?.id;
@@ -319,92 +354,69 @@ export class PaymentService {
           orderId: order.id, invoiceId: order.invoiceId, customerId: order.customerId, tenantId: orderTenantId,
         });
       } else if (provider === 'codi') {
-        const reference = String(claimedPayload.reference ?? claimedPayload.referencia ?? '').toUpperCase();
-        if (reference) {
-          const invoiceId = reference.split('-')[0];
-          const orders = await this.repo.listOrders({ invoiceId, tenantId });
-          const order = orders.find((o) => o.provider === 'codi') ?? orders[0];
-          if (order) {
-            const orderTenantId = order.tenantId || 'tenant-default';
-            await this.renewOrThrow(eventId, claimToken);
-            await this.repo.updateOrderStatus(order.id, 'completed', undefined, orderTenantId);
-            await this.renewOrThrow(eventId, claimToken);
-            const webhookFence: WebhookMutationFence = {
+        const reference = String(claimedPayload.reference ?? claimedPayload.referencia ?? '')
+          .trim()
+          .toUpperCase();
+        if (!reference) {
+          throw new ServiceUnavailableError(
+            'El webhook CoDi no contiene una referencia resoluble.',
+            'CODI_REFERENCE_UNRESOLVED',
+          );
+        }
+        const billing = getBillingService();
+        const matchingInvoices = (await billing.listInvoices(tenantId)).filter(
+          (candidate) => `${candidate.id}-${candidate.clientId}`.trim().toUpperCase() === reference,
+        );
+        if (matchingInvoices.length !== 1) {
+          throw new ServiceUnavailableError(
+            matchingInvoices.length === 0
+              ? 'La referencia CoDi no corresponde a una factura unica.'
+              : 'La referencia CoDi coincide con multiples facturas.',
+            matchingInvoices.length === 0
+              ? 'CODI_REFERENCE_UNRESOLVED'
+              : 'CODI_REFERENCE_AMBIGUOUS',
+          );
+        }
+        const invoice = matchingInvoices[0];
+        const invoiceTenantId = invoice.tenantId || 'tenant-default';
+        const existingPayment = invoice.payments.find(
+          (payment) => payment.provider === 'codi' && payment.transactionId === reference,
+        );
+        const amount = Number(
+          claimedPayload.amount
+          ?? claimedPayload.monto
+          ?? existingPayment?.amount
+          ?? invoice.pendingAmount
+          ?? invoice.amount,
+        );
+        const paymentResult = await this.applyWebhookPaymentOrThrow(
+          { beforeMutation: () => this.renewOrThrow(eventId, claimToken), eventId, claimToken },
+          {
+            invoiceId: invoice.id,
+            tenantId: invoiceTenantId,
+            amount,
+            method: 'Transferencia',
+            provider: 'codi',
+            transactionId: reference,
+          },
+        );
+        invoiceUpdated = true;
+
+        if (paymentResult.settlementWinner) {
+          await this.renewOrThrow(eventId, claimToken);
+          const reactivation = await this.reactivateCustomerService(invoice.clientId, {
+            triggeredBy: `webhook:codi:${opaqueFingerprint(providerEventId)}`,
+            invoiceId: invoice.id,
+            tenantId: invoiceTenantId,
+            webhookFence: {
               beforeMutation: () => this.renewOrThrow(eventId, claimToken),
               eventId,
               claimToken,
-            };
-            const invoiceResult = await this.confirmPaymentOnInvoice(order, orderTenantId, webhookFence);
-            invoiceUpdated = invoiceResult.updated;
-            if (invoiceResult.shouldReactivate) {
-              await this.renewOrThrow(eventId, claimToken);
-              const reactivation = await this.reactivateCustomerService(order.customerId, {
-                triggeredBy: `webhook:codi:${opaqueFingerprint(providerEventId)}`,
-                invoiceId: order.invoiceId,
-                tenantId: orderTenantId,
-                webhookFence,
-              });
-              reactivationTriggered = !reactivation.alreadyActive;
-              mikrotikActionId = reactivation.mikrotikAction?.id;
-            }
-            await this.closeOrThrow(eventId, claimToken);
-            return {
-              eventId,
-              idempotent: false,
-              invoiceUpdated,
-              reactivationTriggered,
-              mikrotikActionId,
-              message: reactivationTriggered
-                ? 'Pago CoDi confirmado y cliente reactivado.'
-                : 'Pago CoDi confirmado; la factura conserva saldo pendiente.',
-            };
-          }
-          // Sin order previa: intentar factura directa por referencia (del WISP).
-          const billing = getBillingService();
-          const invoice = await billing.findInvoiceById(invoiceId, tenantId);
-          if (invoice) {
-            const invoiceTenantId = invoice.tenantId || 'tenant-default';
-            const existingPayment = invoice.payments.find(
-              (payment) => payment.provider === 'codi' && payment.transactionId === providerEventId,
-            );
-            const amount = Number(
-              claimedPayload.amount
-              ?? claimedPayload.monto
-              ?? existingPayment?.amount
-              ?? invoice.pendingAmount
-              ?? invoice.amount,
-            );
-            const paymentResult = await this.applyWebhookPaymentOrThrow(
-              { beforeMutation: () => this.renewOrThrow(eventId, claimToken), eventId, claimToken },
-              {
-                invoiceId: invoice.id,
-                tenantId: invoiceTenantId,
-                amount,
-                method: 'Transferencia',
-                provider: 'codi',
-                transactionId: providerEventId,
-              },
-            );
-            invoiceUpdated = true;
-
-            if (
-              paymentResult.settlementWinner
-            ) {
-              await this.renewOrThrow(eventId, claimToken);
-              const reactivation = await this.reactivateCustomerService(invoice.clientId, {
-                triggeredBy: `webhook:codi:${opaqueFingerprint(providerEventId)}`,
-                invoiceId: invoice.id,
-                tenantId: invoiceTenantId,
-                webhookFence: {
-                  beforeMutation: () => this.renewOrThrow(eventId, claimToken),
-                  eventId,
-                  claimToken,
-                },
-              });
-              reactivationTriggered = !reactivation.alreadyActive;
-              mikrotikActionId = reactivation.mikrotikAction?.id;
-            }
-          }
+              canonicalPaymentId: paymentResult.canonicalPaymentId ?? undefined,
+            },
+          });
+          reactivationTriggered = !reactivation.alreadyActive;
+          mikrotikActionId = reactivation.mikrotikAction?.id;
         }
         await this.closeOrThrow(eventId, claimToken);
         return {
@@ -465,6 +477,7 @@ export class PaymentService {
     updated: boolean;
     invoice: EnrichedInvoice | null;
     shouldReactivate: boolean;
+    canonicalPaymentId?: string;
   }> {
     const billing = getBillingService();
     const effectiveTenantId = tenantId || order.tenantId || 'tenant-default';
@@ -495,6 +508,7 @@ export class PaymentService {
       updated: true,
       invoice: paymentResult.invoice,
       shouldReactivate: paymentResult.settlementWinner,
+      canonicalPaymentId: paymentResult.canonicalPaymentId ?? undefined,
     };
   }
 
@@ -520,6 +534,7 @@ export class PaymentService {
         wasSettledBefore: false,
         isSettledAfter: isInvoiceSettled(invoice),
         settlementWinner: false,
+        canonicalPaymentId: null,
       };
     }
 
@@ -545,6 +560,13 @@ export class PaymentService {
     const tenantId = context?.tenantId || 'tenant-default';
     const triggeredBy = context?.triggeredBy ?? 'payment-engine';
     const webhookFence = context?.webhookFence;
+    const canonicalPaymentId = webhookFence?.canonicalPaymentId;
+    if (webhookFence && !canonicalPaymentId) {
+      throw new ServiceUnavailableError(
+        'Billing no resolviÃ³ la identidad canÃ³nica de la reactivaciÃ³n.',
+        'WEBHOOK_CANONICAL_PAYMENT_UNAVAILABLE',
+      );
+    }
 
     const dataProvider = buildPaymentDataProvider();
     const client = await dataProvider.getCustomer(customerId, tenantId);
@@ -554,7 +576,7 @@ export class PaymentService {
     // lectura es intencionalmente exclusiva de esta ruta: una llamada manual
     // conserva la semántica histórica de "activo => no-op".
     const rootKey = webhookFence
-      ? rootActionIdempotencyKey(webhookFence.eventId, customerId)
+      ? rootActionIdempotencyKey(canonicalPaymentId!, customerId)
       : undefined;
     const existingAction = rootKey
       ? await this.repo.findActionByIdempotencyKey(tenantId, rootKey) ?? undefined
@@ -646,6 +668,7 @@ export class PaymentService {
         const created = await this.repo.createActionIdempotent({
           ...candidate,
           paymentEventId: webhookFence.eventId,
+          webhookPaymentId: canonicalPaymentId,
           idempotencyKey: rootKey,
         });
         actionRec = created.action;
@@ -658,6 +681,7 @@ export class PaymentService {
     // La acción conserva el modo del primer intento aunque cambien los gates
     // entre A y B. Sus checkpoints hacen reanudable cada paso independiente.
     const durableAction: MikrotikActionRecord = actionRec;
+    const durableTriggeredBy = durableAction.triggeredBy ?? triggeredBy;
     const dryRun = durableAction.dryRun;
     const routerLive = !dryRun;
     let progress = webhookFence
@@ -707,7 +731,7 @@ export class PaymentService {
           ? `Cambio de estado ${prevStatus} → active`
           : 'Reactivación reanudada para cliente activo',
         details: `Reactivación por pago confirmado. ${context?.invoiceId ? `Factura: ${context.invoiceId}.` : ''}${dryRun ? ' Pendiente ejecución en router (dry_run).' : ' Orden de reactivación encolada.'}`,
-        createdBy: triggeredBy,
+        createdBy: durableTriggeredBy,
       }, webhookFence ? { tenantId, idempotencyKey: effectKey('timelineAdded') } : undefined);
       await checkpoint('timelineAdded');
     }
@@ -719,7 +743,7 @@ export class PaymentService {
         orderType: 'reactivation',
         source: 'payment-engine',
         reason: `Pago confirmado. Factura: ${context?.invoiceId ?? 'N/A'}`,
-        actor: triggeredBy,
+        actor: durableTriggeredBy,
         tenantId: webhookFence ? tenantId : undefined,
         idempotencyKey: webhookFence ? effectKey('networkDispatched') : undefined,
       });
@@ -733,7 +757,7 @@ export class PaymentService {
         eventType: 'reactivation_order_created',
         reason: `Pago confirmado vía Payment Engine. Factura: ${context?.invoiceId ?? 'N/A'}.`,
         automatic: true,
-        actorId: triggeredBy,
+        actorId: durableTriggeredBy,
         metadata: { dryRun, routerLive },
         tenantId: webhookFence ? tenantId : undefined,
         idempotencyKey: webhookFence ? effectKey('suspensionEventRecorded') : undefined,

@@ -84,6 +84,7 @@ const claimedEvent = (
   receivedAt: new Date().toISOString(),
   claimedAt: new Date().toISOString(),
   claimToken,
+  webhookPaymentId: `payment:${id}`,
 });
 
 const rootAction = (
@@ -91,6 +92,7 @@ const rootAction = (
 ): MikrotikActionRecord => {
   const customerId = overrides.customerId ?? `${PREFIX}root`;
   const paymentEventId = overrides.paymentEventId ?? EVENT_ID;
+  const webhookPaymentId = overrides.webhookPaymentId ?? `payment:${paymentEventId}`;
   const tenantId = overrides.tenantId ?? TENANT_A;
   return {
     id: 'ma-candidate-a',
@@ -100,7 +102,8 @@ const rootAction = (
     status: 'pending',
     dryRun: true,
     paymentEventId,
-    idempotencyKey: rootActionIdempotencyKey(paymentEventId, customerId),
+    webhookPaymentId,
+    idempotencyKey: rootActionIdempotencyKey(webhookPaymentId, customerId),
     payload: { previousStatus: 'suspended', reason: 'payment_confirmed' },
     triggeredBy: 'webhook:openpay:evt-1',
     createdAt: new Date().toISOString(),
@@ -128,6 +131,7 @@ const seedClaim = (db: FakePostgrest, event = claimedEvent()) => {
     received_at: event.receivedAt,
     claimed_at: event.claimedAt,
     claim_token: event.claimToken,
+    webhook_payment_id: event.webhookPaymentId,
   }]);
   return event;
 };
@@ -171,7 +175,10 @@ describe('Acción raíz create-or-return por tenant + payment event', () => {
     await repo.createActionIdempotent(rootAction());
 
     await expect(
-      repo.createActionIdempotent(rootAction({ id: 'ma-candidate-b', triggeredBy: 'webhook:openpay:otro' })),
+      repo.createActionIdempotent(rootAction({
+        id: 'ma-candidate-b',
+        payload: { previousStatus: 'active', reason: 'different-effect' },
+      })),
     ).rejects.toBeInstanceOf(IdempotencyConflictError);
   });
 
@@ -369,7 +376,7 @@ describe('Checkpoint set-only condicionado al claim vigente', () => {
       repo.checkpointReactivationStep({
         tenantId: TENANT_A, eventId: OTHER_EVENT_ID, actionId, claimToken: 'owner-x', step: 'timelineAdded',
       }),
-    ).rejects.toThrow(/vínculo|link/i);
+    ).rejects.toThrow(/identidad can|canonical/i);
   });
 
   it('Supabase: mapea los tres estados de la RPC', async () => {

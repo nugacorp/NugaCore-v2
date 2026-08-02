@@ -439,6 +439,7 @@ describe('PaymentService — ownership antes de efectos', () => {
         updated: true,
         invoice: { status: 'paid', pendingAmount: 0 },
         shouldReactivate: true,
+        canonicalPaymentId: 'payment:stubbed-charge',
       };
     };
     effects.reactivateCustomerService = async () => {
@@ -607,7 +608,7 @@ describe('PaymentService — ownership antes de efectos', () => {
       provider: 'codi' as const,
       eventType: 'payment.completed',
       claimToken: 'owner-a',
-      payload: { status: 'paid', reference: 'INV-1', amount: 100 },
+      payload: { status: 'paid', reference: 'INV-customer-1', amount: 100 },
     };
     const fakeRepo = {
       nextEventId: async () => 'pe-codi-candidate',
@@ -644,7 +645,7 @@ describe('PaymentService — ownership antes de efectos', () => {
       provider: 'codi' as const,
       eventType: 'payment.completed',
       claimToken: 'owner-a',
-      payload: { status: 'paid', reference: 'INV-1', amount: 100 },
+      payload: { status: 'paid', reference: 'INV-customer-1', amount: 100 },
     };
     const fakeRepo = {
       nextEventId: async () => 'pe-codi-billing-candidate',
@@ -687,7 +688,11 @@ describe('PaymentService — ownership antes de efectos', () => {
       label: 'CoDi con order',
       provider: 'codi',
       eventType: 'payment.completed',
-      payload: { status: 'paid', reference: 'INV-INTERNAL-FENCE-1', amount: 100 },
+      payload: {
+        status: 'paid',
+        reference: `INV-INTERNAL-FENCE-${INTERNAL_FENCING_CUSTOMER_PREFIX}billing`,
+        amount: 100,
+      },
     },
   ];
 
@@ -754,7 +759,10 @@ describe('PaymentService — ownership antes de efectos', () => {
         paymentCalls += 1;
         invoice.pendingAmount -= payment.amount;
         invoice.payments.push({ transactionId: payment.transactionId ?? '' });
-        return { outcome: 'created', invoice, settlementWinner: false } as never;
+        return {
+          outcome: 'created', invoice, settlementWinner: false,
+          canonicalPaymentId: `payment:${order.invoiceId}`,
+        } as never;
       });
       vi.spyOn(PaymentService.prototype, 'reactivateCustomerService').mockResolvedValue({
         customerId: order.customerId,
@@ -803,11 +811,14 @@ describe('PaymentService — ownership antes de efectos', () => {
         createdAt: new Date().toISOString(),
         updatedAt: new Date().toISOString(),
       };
+      const effectivePayload = provider === 'codi'
+        ? { ...payload, reference: `${order.invoiceId}-${customerId}` }
+        : payload;
       const persisted = {
         ...candidate(`pe-reactivation-fence-${provider}`, 'evt-reactivation-fence'),
         provider,
         eventType,
-        payload,
+        payload: effectivePayload,
       };
       const customer: Client = {
         id: customerId,
@@ -827,7 +838,11 @@ describe('PaymentService — ownership antes de efectos', () => {
       };
       store.CLIENTS.push(customer);
       const actionRepo = new StorePaymentRepository();
-      const persistedStoreEvent = { ...persisted, claimToken: 'owner-a' };
+      const persistedStoreEvent = {
+        ...persisted,
+        claimToken: 'owner-a',
+        webhookPaymentId: `payment:${order.invoiceId}`,
+      };
       store.PAYMENT_EVENTS.push(persistedStoreEvent);
       const fakeRepo = {
         nextEventId: async () => `pe-reactivation-candidate-${claimCount}`,
@@ -869,6 +884,7 @@ describe('PaymentService — ownership antes de efectos', () => {
         outcome: 'existing',
         invoice: settledInvoice,
         settlementWinner: true,
+        canonicalPaymentId: `payment:${order.invoiceId}`,
       } as never);
       const originalReactivate = StorePaymentDataProvider.prototype.reactivateCustomer;
       vi.spyOn(StorePaymentDataProvider.prototype, 'reactivateCustomer').mockImplementation(async function (
@@ -887,7 +903,7 @@ describe('PaymentService — ownership antes de efectos', () => {
         provider,
         providerEventId: persisted.providerEventId,
         eventType,
-        payload,
+        payload: effectivePayload,
         tenantId: TENANT_A,
       };
 
@@ -963,7 +979,11 @@ describe('PaymentService — ownership antes de efectos', () => {
     };
     store.CLIENTS.push(customer);
     const actionRepo = new StorePaymentRepository();
-    const persistedStoreEvent = { ...persisted, claimToken: 'owner-a' };
+    const persistedStoreEvent = {
+      ...persisted,
+      claimToken: 'owner-a',
+      webhookPaymentId: `payment:${order.invoiceId}`,
+    };
     store.PAYMENT_EVENTS.push(persistedStoreEvent);
     const fakeRepo = {
       nextEventId: async () => `pe-checkpoint-candidate-${claimCount}`,
@@ -1004,6 +1024,7 @@ describe('PaymentService — ownership antes de efectos', () => {
       outcome: 'existing',
       invoice: settledInvoice,
       settlementWinner: true,
+      canonicalPaymentId: `payment:${order.invoiceId}`,
     } as never);
 
     const suspensionRepo = getSuspensionService().repo;
@@ -1123,7 +1144,11 @@ describe('PaymentService — ownership antes de efectos', () => {
     store.CLIENTS.push(customer);
 
     const actionRepo = new StorePaymentRepository();
-    const persistedStoreEvent = { ...persisted, claimToken: 'owner-a' };
+    const persistedStoreEvent = {
+      ...persisted,
+      claimToken: 'owner-a',
+      webhookPaymentId: `payment:${order.invoiceId}`,
+    };
     store.PAYMENT_EVENTS.push(persistedStoreEvent);
     const fakeRepo = {
       nextEventId: async () => `pe-checkpoint-concurrent-candidate-${claimCount}`,
@@ -1185,6 +1210,7 @@ describe('PaymentService — ownership antes de efectos', () => {
       outcome: 'existing',
       invoice: settledInvoice,
       settlementWinner: true,
+      canonicalPaymentId: `payment:${order.invoiceId}`,
     } as never);
 
     const suspensionRepo = getSuspensionService().repo;
@@ -1403,7 +1429,7 @@ describe('PaymentService — ownership antes de efectos', () => {
       provider: 'codi' as const,
       eventType: 'payment.completed',
       claimToken: 'owner-a',
-      payload: { status: 'paid', reference: 'INV-1', amount: 100 },
+      payload: { status: 'paid', reference: 'INV-customer-1', amount: 100 },
     };
     const fakeRepo = {
       nextEventId: async () => 'pe-codi-direct-candidate',
@@ -1427,20 +1453,27 @@ describe('PaymentService — ownership antes de efectos', () => {
       id: 'INV', tenantId: TENANT_A, clientId: 'customer-1', status: 'pending',
       amount: 100, pendingAmount: 100, payments: [],
     };
+    vi.spyOn(billing, 'listInvoices').mockResolvedValue([invoice as never]);
     vi.spyOn(billing, 'findInvoiceById').mockImplementation(async () => invoice as never);
     vi.spyOn(billing, 'applyWebhookPayment').mockImplementation(async () => {
       if (invoice.payments.some(
         (payment: { provider?: string; transactionId?: string }) =>
-          payment.provider === 'codi' && payment.transactionId === event.providerEventId,
+          payment.provider === 'codi' && payment.transactionId === event.payload.reference,
       )) {
-        return { outcome: 'existing', invoice, settlementWinner: true } as never;
+        return {
+          outcome: 'existing', invoice, settlementWinner: true,
+          canonicalPaymentId: 'payment:codi-direct',
+        } as never;
       }
       counters.billing += 1;
       invoice.status = 'paid';
       invoice.pendingAmount = 0;
-      invoice.payments.push({ provider: 'codi', transactionId: event.providerEventId } as never);
+      invoice.payments.push({ provider: 'codi', transactionId: event.payload.reference } as never);
       currentOwner = 'owner-b';
-      return { outcome: 'created', invoice, settlementWinner: true } as never;
+      return {
+        outcome: 'created', invoice, settlementWinner: true,
+        canonicalPaymentId: 'payment:codi-direct',
+      } as never;
     });
     const service = new PaymentService(fakeRepo);
     stubServiceEffects(service, counters);
@@ -1468,7 +1501,7 @@ describe('PaymentService — ownership antes de efectos', () => {
       provider: 'codi' as const,
       eventType: 'payment.completed',
       claimToken: 'owner-a',
-      payload: { status: 'paid', reference: 'INV-1', amount: 100 },
+      payload: { status: 'paid', reference: 'INV-customer-1', amount: 100 },
     };
     const fakeRepo = {
       nextEventId: async () => 'pe-codi-other-payment-candidate',
@@ -1483,10 +1516,14 @@ describe('PaymentService — ownership antes de efectos', () => {
       id: 'INV', tenantId: TENANT_A, clientId: 'customer-1', status: 'paid',
       amount: 100, pendingAmount: 0, payments: [{ transactionId: 'manual-payment' }],
     };
+    vi.spyOn(billing, 'listInvoices').mockResolvedValue([paidByOtherOrigin as never]);
     vi.spyOn(billing, 'findInvoiceById').mockResolvedValue(paidByOtherOrigin as never);
     vi.spyOn(billing, 'applyWebhookPayment').mockImplementation(async () => {
       counters.billing += 1;
-      return { outcome: 'created', invoice: paidByOtherOrigin, settlementWinner: false } as never;
+      return {
+        outcome: 'created', invoice: paidByOtherOrigin, settlementWinner: false,
+        canonicalPaymentId: 'payment:codi-other-origin',
+      } as never;
     });
     const service = new PaymentService(fakeRepo);
     stubServiceEffects(service, counters);

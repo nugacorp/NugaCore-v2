@@ -94,6 +94,7 @@ class FakeRepo implements BillingRepository {
       wasSettledBefore: false,
       isSettledAfter: invoice.pendingAmount <= 0,
       settlementWinner: invoice.pendingAmount <= 0,
+      canonicalPaymentId: `payment:${input.invoiceId}:${input.transactionId}`,
     };
   }
 

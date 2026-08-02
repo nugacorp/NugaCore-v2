@@ -250,6 +250,8 @@ export interface PaymentEventRecord {
   claimedAt?: string;
   claimToken?: string;
   processedAt?: string;
+  /** Durable internal payment/allocation identity resolved by Billing. */
+  webhookPaymentId?: string;
 }
 
 export interface MikrotikActionRecord {
@@ -262,6 +264,8 @@ export interface MikrotikActionRecord {
   payload?: Record<string, unknown>;
   result?: Record<string, unknown>;
   triggeredBy?: string;
+  /** Durable internal payment/allocation identity that owns this family. */
+  webhookPaymentId?: string;
   createdAt: string;
   updatedAt: string;
 }
@@ -912,12 +916,7 @@ export const store: {
     return `pe-${nextNum}`;
   },
   getUniqueMikrotikActionId() {
-    let nextNum = this.MIKROTIK_ACTIONS.length + 1;
-    const ids = new Set(this.MIKROTIK_ACTIONS.map((a) => a.id));
-    while (ids.has(`ma-${nextNum}`)) {
-      nextNum++;
-    }
-    return `ma-${nextNum}`;
+    return `ma-${crypto.randomUUID().replace(/-/g, '').slice(0, 12)}`;
   },
 };
 

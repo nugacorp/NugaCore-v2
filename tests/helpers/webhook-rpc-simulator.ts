@@ -50,8 +50,8 @@ export const registerWebhookRpcs = (db: FakePostgrest): void => {
       (row) => row.id === args.p_action_id && row.tenant_id === args.p_tenant_id,
     );
     if (!action) throw new Error('mikrotik action not found for checkpoint');
-    if (action.payment_event_id !== args.p_event_id) {
-      throw new Error('mikrotik action is not linked to the payment event');
+    if (!event.webhook_payment_id || event.webhook_payment_id !== action.webhook_payment_id) {
+      throw new Error('mikrotik action is not linked to the canonical payment');
     }
 
     const result = asObject(action.result);
@@ -74,6 +74,7 @@ export const registerWebhookRpcs = (db: FakePostgrest): void => {
         was_settled_before: false,
         is_settled_after: false,
         settlement_winner: false,
+        canonical_payment_id: null,
       };
     }
 
@@ -191,11 +192,13 @@ export const registerWebhookRpcs = (db: FakePostgrest): void => {
     const settlementWinner = outcome === 'created' && !wasSettledBefore && isSettledAfter;
     const payment = db.rows('payments').find((row) => row.id === paymentId)!;
     if (settlementWinner) payment.settlement_winner = true;
+    event.webhook_payment_id = paymentId;
     return {
       outcome,
       was_settled_before: wasSettledBefore,
       is_settled_after: isSettledAfter,
       settlement_winner: payment.settlement_winner === true,
+      canonical_payment_id: paymentId,
     };
   });
 };

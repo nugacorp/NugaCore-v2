@@ -44,6 +44,7 @@ export interface PaymentEventRow {
   event_type: string;
   processed: boolean;
   payment_order_id?: string | null;
+  webhook_payment_id?: string | null;
   payload: Record<string, unknown>;
   received_at?: string | null;
   processed_at?: string | null;
@@ -63,6 +64,7 @@ export interface MikrotikActionRow {
   result?: Record<string, unknown> | null;
   triggered_by?: string | null;
   payment_event_id?: string | null;
+  webhook_payment_id?: string | null;
   idempotency_key?: string | null;
   created_at?: string | null;
   updated_at?: string | null;
@@ -128,6 +130,7 @@ export const rowToPaymentEvent = (r: PaymentEventRow): PaymentEventRecord => ({
   eventType: r.event_type,
   processed: r.processed,
   paymentOrderId: r.payment_order_id ?? undefined,
+  webhookPaymentId: r.webhook_payment_id ?? undefined,
   payload: r.payload,
   receivedAt: r.received_at ?? new Date().toISOString(),
   processedAt: r.processed_at ?? undefined,
@@ -160,6 +163,7 @@ export const rowToMikrotikAction = (r: MikrotikActionRow): MikrotikActionRecord 
   result: r.result ?? undefined,
   triggeredBy: r.triggered_by ?? undefined,
   paymentEventId: r.payment_event_id ?? undefined,
+  webhookPaymentId: r.webhook_payment_id ?? undefined,
   idempotencyKey: r.idempotency_key ?? undefined,
   createdAt: r.created_at ?? new Date().toISOString(),
   updatedAt: r.updated_at ?? new Date().toISOString(),
@@ -184,6 +188,7 @@ export const mikrotikActionToRow = (rec: MikrotikActionRecord): Record<string, u
   // Una acción manual sobre un schema todavía sin migrar debe seguir
   // insertándose: es el mismo requisito que hace posible el rollback.
   if (rec.paymentEventId !== undefined) row.payment_event_id = rec.paymentEventId;
+  if (rec.webhookPaymentId !== undefined) row.webhook_payment_id = rec.webhookPaymentId;
   if (rec.idempotencyKey !== undefined) row.idempotency_key = rec.idempotencyKey;
   return row;
 };

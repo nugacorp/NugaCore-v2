@@ -11,6 +11,68 @@ BEGIN
   END IF;
 END $$;
 
+-- Cada permiso de tabla que requieren las RPC SECURITY INVOKER forma parte
+-- del tuple de capability. Revocarlo debe producir ready=false, nunca una
+-- excepcion ni un write parcial; restaurarlo debe recuperar ready=true.
+DO $$
+DECLARE
+  required_access TEXT[] := ARRAY[
+    'payment_events:SELECT', 'payment_events:INSERT', 'payment_events:UPDATE',
+    'mikrotik_actions:SELECT', 'mikrotik_actions:INSERT', 'mikrotik_actions:UPDATE',
+    'client_timeline:SELECT', 'client_timeline:INSERT',
+    'reactivation_orders:SELECT', 'reactivation_orders:INSERT',
+    'suspension_events:SELECT', 'suspension_events:INSERT',
+    'noc_alerts:SELECT', 'noc_alerts:INSERT',
+    'payments:SELECT', 'payments:INSERT', 'payments:UPDATE',
+    'payment_applications:SELECT', 'payment_applications:INSERT',
+    'invoices:SELECT', 'invoices:UPDATE'
+  ];
+  item TEXT;
+  table_name TEXT;
+  privilege_name TEXT;
+  expected_missing TEXT;
+  capability JSONB;
+BEGIN
+  FOREACH item IN ARRAY required_access LOOP
+    table_name := split_part(item, ':', 1);
+    privilege_name := split_part(item, ':', 2);
+    expected_missing := 'privilege:' || table_name || ':' || lower(privilege_name);
+    EXECUTE format('REVOKE %s ON TABLE public.%I FROM service_role', privilege_name, table_name);
+    capability := public.payments_webhook_schema_capability();
+    IF capability ->> 'ready' <> 'false'
+       OR NOT (capability -> 'missing' ? expected_missing) THEN
+      RAISE EXCEPTION 'revoked table privilege was accepted (%): %', item, capability;
+    END IF;
+    EXECUTE format('GRANT %s ON TABLE public.%I TO service_role', privilege_name, table_name);
+    capability := public.payments_webhook_schema_capability();
+    IF capability ->> 'ready' <> 'true' THEN
+      RAISE EXCEPTION 'restored table privilege did not recover capability (%): %', item, capability;
+    END IF;
+  END LOOP;
+
+  IF EXISTS (SELECT 1 FROM public.payment_events)
+     OR EXISTS (SELECT 1 FROM public.payments)
+     OR EXISTS (SELECT 1 FROM public.payment_applications)
+     OR EXISTS (SELECT 1 FROM public.mikrotik_actions) THEN
+    RAISE EXCEPTION 'capability privilege audit produced data effects';
+  END IF;
+END $$;
+
+-- La inspeccion de catalogo no depende de visibilidad de information_schema.
+REVOKE SELECT ON TABLE public.payment_events FROM service_role;
+SET ROLE service_role;
+DO $$
+DECLARE capability JSONB;
+BEGIN
+  capability := public.payments_webhook_schema_capability();
+  IF capability ->> 'ready' <> 'false'
+     OR NOT (capability -> 'missing' ? 'privilege:payment_events:select') THEN
+    RAISE EXCEPTION 'service_role could not inspect its missing ACL: %', capability;
+  END IF;
+END $$;
+RESET ROLE;
+GRANT SELECT ON TABLE public.payment_events TO service_role;
+
 -- Un homónimo no-unique sobre columnas incorrectas no satisface capability.
 DROP INDEX public.uq_noc_alerts_tenant_idempotency;
 CREATE INDEX uq_noc_alerts_tenant_idempotency ON public.noc_alerts (tenant_id);
@@ -153,6 +215,62 @@ BEGIN
   EXCEPTION WHEN OTHERS THEN
     IF SQLERRM = 'incompatible redelivery accepted'
        OR SQLERRM NOT LIKE 'idempotency_conflict:%' THEN
+      RAISE;
+    END IF;
+  END;
+END $$;
+RESET ROLE;
+
+-- Dos deliveries distintas de la misma identidad canonica quedan enlazadas
+-- al mismo payment. Cualquiera de sus claims vigentes puede reanudar la unica
+-- raiz; un evento de otro charge no puede usarla.
+DO $$
+DECLARE canonical_id TEXT;
+BEGIN
+  SELECT min(webhook_payment_id)
+    INTO canonical_id
+    FROM public.payment_events
+   WHERE id IN ('evt-a', 'evt-b');
+  IF canonical_id IS NULL OR (
+    SELECT count(DISTINCT webhook_payment_id)
+      FROM public.payment_events
+     WHERE id IN ('evt-a', 'evt-b')
+  ) <> 1 THEN
+    RAISE EXCEPTION 'same charge deliveries were not canonically linked';
+  END IF;
+
+  INSERT INTO public.mikrotik_actions (
+    id, tenant_id, payment_event_id, webhook_payment_id, idempotency_key, result
+  ) VALUES (
+    'action-shared-charge', 'tenant-a', 'evt-a', canonical_id,
+    'payment:' || canonical_id || ':reactivate:client-race', '{}'::jsonb
+  );
+END $$;
+
+SET ROLE service_role;
+DO $$
+DECLARE
+  first_outcome TEXT;
+  second_outcome TEXT;
+BEGIN
+  first_outcome := public.payments_checkpoint_reactivation_step(
+    'tenant-a', 'evt-a', 'action-shared-charge', 'owner-a', 'timelineAdded'
+  );
+  second_outcome := public.payments_checkpoint_reactivation_step(
+    'tenant-a', 'evt-b', 'action-shared-charge', 'owner-b', 'timelineAdded'
+  );
+  IF first_outcome <> 'applied' OR second_outcome <> 'already_applied' THEN
+    RAISE EXCEPTION 'canonical delivery resume mismatch: %, %', first_outcome, second_outcome;
+  END IF;
+
+  BEGIN
+    PERFORM public.payments_checkpoint_reactivation_step(
+      'tenant-a', 'evt-partial', 'action-shared-charge', 'owner-partial', 'timelineAdded'
+    );
+    RAISE EXCEPTION 'foreign charge event reached canonical root';
+  EXCEPTION WHEN OTHERS THEN
+    IF SQLERRM = 'foreign charge event reached canonical root'
+       OR SQLERRM NOT LIKE 'action_canonical_payment_mismatch%' THEN
       RAISE;
     END IF;
   END;

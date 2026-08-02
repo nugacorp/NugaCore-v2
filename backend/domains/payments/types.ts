@@ -82,6 +82,8 @@ export interface PaymentEventRecord {
   eventType: string;
   processed: boolean;
   paymentOrderId?: string;
+  /** Canonical Billing payment used to authorize checkpoints across deliveries. */
+  webhookPaymentId?: string;
   payload: Record<string, unknown>;
   receivedAt: string;
   processedAt?: string;
@@ -128,6 +130,8 @@ export interface MikrotikActionRecord {
    * Nulo en acciones manuales.
    */
   paymentEventId?: string;
+  /** Canonical Billing payment that owns this durable reactivation family. */
+  webhookPaymentId?: string;
   /**
    * Identidad de la acción raíz, tenant-scoped. Nula en acciones manuales y en
    * filas históricas: la unicidad es un índice PARCIAL.
@@ -189,6 +193,8 @@ export interface WebhookMutationFence {
   eventId: string;
   /** Epoch del owner actual; sin él no se autoriza ningún checkpoint. */
   claimToken: string;
+  /** Filled after Billing resolves the canonical charge and before reactivation. */
+  canonicalPaymentId?: string;
 }
 
 // ── Checkpoint de reactivación ────────────────────────────────────────

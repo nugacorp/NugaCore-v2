@@ -76,6 +76,8 @@ END $$;
 ALTER TABLE public.payments ADD COLUMN IF NOT EXISTS provider TEXT;
 ALTER TABLE public.payments
   ADD COLUMN IF NOT EXISTS webhook_settlement_winner BOOLEAN DEFAULT FALSE;
+ALTER TABLE public.payment_events
+  ADD COLUMN IF NOT EXISTS webhook_payment_id TEXT;
 CREATE UNIQUE INDEX IF NOT EXISTS uq_payments_tenant_provider_transaction
   ON public.payments (tenant_id, provider, transaction_id)
   WHERE provider IS NOT NULL AND transaction_id IS NOT NULL;
@@ -90,9 +92,17 @@ BEGIN
   ) THEN
     ALTER TABLE public.mikrotik_actions
       ADD COLUMN IF NOT EXISTS payment_event_id TEXT;
+    ALTER TABLE public.mikrotik_actions
+      ADD COLUMN IF NOT EXISTS webhook_payment_id TEXT;
     CREATE INDEX IF NOT EXISTS idx_mikrotik_actions_payment_event
       ON public.mikrotik_actions (payment_event_id)
       WHERE payment_event_id IS NOT NULL;
+    CREATE INDEX IF NOT EXISTS idx_mikrotik_actions_webhook_payment
+      ON public.mikrotik_actions (webhook_payment_id)
+      WHERE webhook_payment_id IS NOT NULL;
+    CREATE INDEX IF NOT EXISTS idx_payment_events_webhook_payment
+      ON public.payment_events (webhook_payment_id)
+      WHERE webhook_payment_id IS NOT NULL;
   END IF;
 END $$;
 
@@ -149,7 +159,8 @@ AS $$
 DECLARE
   v_processed    BOOLEAN;
   v_claim_token  TEXT;
-  v_event_link   TEXT;
+  v_event_payment_id TEXT;
+  v_action_payment_id TEXT;
   v_result       JSONB;
   v_progress     JSONB;
 BEGIN
@@ -164,8 +175,8 @@ BEGIN
     RAISE EXCEPTION 'invalid_checkpoint_step: %', p_step;
   END IF;
 
-  SELECT processed, claim_token
-    INTO v_processed, v_claim_token
+  SELECT processed, claim_token, webhook_payment_id
+    INTO v_processed, v_claim_token, v_event_payment_id
     FROM public.payment_events
    WHERE id = p_event_id AND tenant_id = p_tenant_id
      FOR UPDATE;
@@ -178,8 +189,8 @@ BEGIN
     RETURN 'ownership_lost';
   END IF;
 
-  SELECT payment_event_id, COALESCE(result, '{}'::jsonb)
-    INTO v_event_link, v_result
+  SELECT webhook_payment_id, COALESCE(result, '{}'::jsonb)
+    INTO v_action_payment_id, v_result
     FROM public.mikrotik_actions
    WHERE id = p_action_id AND tenant_id = p_tenant_id
      FOR UPDATE;
@@ -188,8 +199,9 @@ BEGIN
     RAISE EXCEPTION 'mikrotik_action_not_found';
   END IF;
 
-  IF v_event_link IS DISTINCT FROM p_event_id THEN
-    RAISE EXCEPTION 'action_event_link_mismatch';
+  IF v_event_payment_id IS NULL
+     OR v_event_payment_id IS DISTINCT FROM v_action_payment_id THEN
+    RAISE EXCEPTION 'action_canonical_payment_mismatch';
   END IF;
 
   v_progress := COALESCE(v_result -> '_webhookReactivationProgress', '{}'::jsonb);
@@ -303,7 +315,8 @@ BEGIN
       'outcome', 'ownership_lost',
       'was_settled_before', false,
       'is_settled_after', false,
-      'settlement_winner', false
+      'settlement_winner', false,
+      'canonical_payment_id', NULL
     );
   END IF;
 
@@ -389,6 +402,15 @@ BEGIN
     END IF;
     v_outcome := 'existing';
   END IF;
+
+  -- Cada delivery conserva su propio claim, pero resuelve a la misma identidad
+  -- canÃ³nica del ledger. El checkpoint compara esta identidad con la root.
+  UPDATE public.payment_events
+     SET webhook_payment_id = v_payment_id
+   WHERE id = p_event_id
+     AND tenant_id = p_tenant_id
+     AND claim_token = p_claim_token
+     AND processed IS FALSE;
 
   -- El pago idempotente de webhook representa una aplicación concreta. Una
   -- aplicación previa a otra factura/tenant o con otro importe es conflicto,
@@ -481,7 +503,8 @@ BEGIN
     'outcome', v_outcome,
     'was_settled_before', v_was_settled_before,
     'is_settled_after', v_is_settled_after,
-    'settlement_winner', v_settlement_winner
+    'settlement_winner', v_settlement_winner,
+    'canonical_payment_id', v_payment_id
   );
 END;
 $$;
@@ -490,6 +513,36 @@ REVOKE ALL ON FUNCTION public.billing_apply_webhook_payment(TEXT, TEXT, TEXT, TE
   FROM PUBLIC, anon, authenticated;
 GRANT EXECUTE ON FUNCTION public.billing_apply_webhook_payment(TEXT, TEXT, TEXT, TEXT, INTEGER, TEXT, TEXT, TEXT, TEXT)
   TO service_role;
+
+-- SECURITY INVOKER needs real table privileges; never rely on bootstrap-wide grants.
+GRANT USAGE ON SCHEMA public TO service_role;
+DO $$
+DECLARE
+  grant_spec TEXT;
+  table_name TEXT;
+  privileges TEXT;
+  grants TEXT[] := ARRAY[
+    'payment_events:SELECT, INSERT, UPDATE',
+    'mikrotik_actions:SELECT, INSERT, UPDATE',
+    'client_timeline:SELECT, INSERT',
+    'reactivation_orders:SELECT, INSERT',
+    'suspension_events:SELECT, INSERT',
+    'noc_alerts:SELECT, INSERT',
+    'payments:SELECT, INSERT, UPDATE',
+    'payment_applications:SELECT, INSERT',
+    'invoices:SELECT, UPDATE'
+  ];
+BEGIN
+  FOREACH grant_spec IN ARRAY grants LOOP
+    table_name := split_part(grant_spec, ':', 1);
+    privileges := split_part(grant_spec, ':', 2);
+    IF to_regclass(format('public.%I', table_name)) IS NOT NULL THEN
+      EXECUTE format(
+        'GRANT %s ON TABLE public.%I TO service_role', privileges, table_name
+      );
+    END IF;
+  END LOOP;
+END $$;
 
 -- ── 5. Capability de schema (pre-efecto) ──────────────────────────────
 --
@@ -511,6 +564,9 @@ DECLARE
   v_rpc REGPROCEDURE;
   v_rpc_signature TEXT;
   v_expected_volatility "char";
+  v_required_access TEXT;
+  v_required_table TEXT;
+  v_required_privilege TEXT;
   targets TEXT[] := ARRAY[
     'mikrotik_actions',
     'client_timeline',
@@ -524,24 +580,37 @@ DECLARE
     'public.billing_apply_webhook_payment(text,text,text,text,integer,text,text,text,text)',
     'public.payments_webhook_schema_capability()'
   ];
+  required_access TEXT[] := ARRAY[
+    'payment_events:SELECT', 'payment_events:INSERT', 'payment_events:UPDATE',
+    'mikrotik_actions:SELECT', 'mikrotik_actions:INSERT', 'mikrotik_actions:UPDATE',
+    'client_timeline:SELECT', 'client_timeline:INSERT',
+    'reactivation_orders:SELECT', 'reactivation_orders:INSERT',
+    'suspension_events:SELECT', 'suspension_events:INSERT',
+    'noc_alerts:SELECT', 'noc_alerts:INSERT',
+    'payments:SELECT', 'payments:INSERT', 'payments:UPDATE',
+    'payment_applications:SELECT', 'payment_applications:INSERT',
+    'invoices:SELECT', 'invoices:UPDATE'
+  ];
 BEGIN
   FOREACH t IN ARRAY targets LOOP
     v_rel_oid := to_regclass(format('public.%I', t));
     IF v_rel_oid IS NULL THEN
-      v_missing := v_missing || ('table:' || t);
+      v_missing := array_append(v_missing, 'table:' || t);
       CONTINUE;
     END IF;
     IF NOT EXISTS (
-      SELECT 1 FROM information_schema.columns
-      WHERE table_schema = 'public' AND table_name = t AND column_name = 'idempotency_key'
+      SELECT 1 FROM pg_attribute
+      WHERE attrelid = v_rel_oid AND attname = 'idempotency_key'
+        AND attnum > 0 AND NOT attisdropped
     ) THEN
-      v_missing := v_missing || (t || '.idempotency_key');
+      v_missing := array_append(v_missing, t || '.idempotency_key');
     END IF;
     IF NOT EXISTS (
-      SELECT 1 FROM information_schema.columns
-      WHERE table_schema = 'public' AND table_name = t AND column_name = 'tenant_id'
+      SELECT 1 FROM pg_attribute
+      WHERE attrelid = v_rel_oid AND attname = 'tenant_id'
+        AND attnum > 0 AND NOT attisdropped
     ) THEN
-      v_missing := v_missing || (t || '.tenant_id');
+      v_missing := array_append(v_missing, t || '.tenant_id');
     END IF;
     IF NOT EXISTS (
       SELECT 1
@@ -561,7 +630,7 @@ BEGIN
           '[()[:space:]]', '', 'g'
         ) = 'idempotency_keyISNOTNULL'
     ) THEN
-      v_missing := v_missing || ('index:uq_' || t || '_tenant_idempotency');
+      v_missing := array_append(v_missing, 'index:uq_' || t || '_tenant_idempotency');
     END IF;
   END LOOP;
 
@@ -583,25 +652,57 @@ BEGIN
         '[()[:space:]]', '', 'g'
       ) = 'providerISNOTNULLANDtransaction_idISNOTNULL'
   ) THEN
-    v_missing := v_missing || 'index:uq_payments_tenant_provider_transaction';
+    v_missing := array_append(v_missing, 'index:uq_payments_tenant_provider_transaction');
+  END IF;
+
+  v_rel_oid := to_regclass('public.mikrotik_actions');
+  IF NOT EXISTS (
+    SELECT 1 FROM pg_attribute
+    WHERE attrelid = v_rel_oid AND attname = 'payment_event_id'
+      AND attnum > 0 AND NOT attisdropped
+  ) THEN
+    v_missing := array_append(v_missing, 'mikrotik_actions.payment_event_id');
   END IF;
 
   IF NOT EXISTS (
-    SELECT 1 FROM information_schema.columns
-    WHERE table_schema = 'public' AND table_name = 'mikrotik_actions'
-      AND column_name = 'payment_event_id'
+    SELECT 1 FROM pg_attribute
+    WHERE attrelid = v_rel_oid AND attname = 'webhook_payment_id'
+      AND attnum > 0 AND NOT attisdropped
   ) THEN
-    v_missing := v_missing || 'mikrotik_actions.payment_event_id';
+    v_missing := array_append(v_missing, 'mikrotik_actions.webhook_payment_id');
   END IF;
 
+  v_rel_oid := to_regclass('public.payment_events');
   IF NOT EXISTS (
-    SELECT 1 FROM information_schema.columns
-    WHERE table_schema = 'public' AND table_name = 'payments'
-      AND column_name = 'webhook_settlement_winner'
-      AND data_type = 'boolean'
+    SELECT 1 FROM pg_attribute
+    WHERE attrelid = v_rel_oid AND attname = 'webhook_payment_id'
+      AND attnum > 0 AND NOT attisdropped
   ) THEN
-    v_missing := v_missing || 'payments.webhook_settlement_winner';
+    v_missing := array_append(v_missing, 'payment_events.webhook_payment_id');
   END IF;
+
+  v_rel_oid := to_regclass('public.payments');
+  IF NOT EXISTS (
+    SELECT 1 FROM pg_attribute
+    WHERE attrelid = v_rel_oid AND attname = 'webhook_settlement_winner'
+      AND atttypid = 'boolean'::regtype
+      AND attnum > 0 AND NOT attisdropped
+  ) THEN
+    v_missing := array_append(v_missing, 'payments.webhook_settlement_winner');
+  END IF;
+
+  FOREACH v_required_access IN ARRAY required_access LOOP
+    v_required_table := split_part(v_required_access, ':', 1);
+    v_required_privilege := split_part(v_required_access, ':', 2);
+    v_rel_oid := to_regclass(format('public.%I', v_required_table));
+    IF v_rel_oid IS NULL
+       OR NOT has_table_privilege('service_role', v_rel_oid, v_required_privilege) THEN
+      v_missing := array_append(
+        v_missing,
+        'privilege:' || v_required_table || ':' || lower(v_required_privilege)
+      );
+    END IF;
+  END LOOP;
 
   FOREACH v_rpc_signature IN ARRAY rpc_signatures LOOP
     v_rpc := to_regprocedure(v_rpc_signature);
@@ -631,17 +732,18 @@ BEGIN
           WHERE acl.grantee = 0 AND acl.privilege_type = 'EXECUTE'
         )
     ) THEN
-      v_missing := v_missing || ('rpc:' || v_rpc_signature);
+      v_missing := array_append(v_missing, 'rpc:' || v_rpc_signature);
     END IF;
   END LOOP;
 
-  IF NOT EXISTS (
+  v_rel_oid := to_regclass('public.reactivation_orders');
+  IF v_rel_oid IS NULL OR NOT EXISTS (
     SELECT 1 FROM pg_constraint
-    WHERE conrelid = 'public.reactivation_orders'::regclass
+    WHERE conrelid = v_rel_oid
       AND contype = 'c'
       AND pg_get_constraintdef(oid) ILIKE '%payment-engine%'
   ) THEN
-    v_missing := v_missing || 'check:reactivation_orders_source';
+    v_missing := array_append(v_missing, 'check:reactivation_orders_source');
   END IF;
 
   RETURN jsonb_build_object(

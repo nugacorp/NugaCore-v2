@@ -229,6 +229,22 @@ describe('Migración de idempotencia durable — invariantes estáticas', () => 
     expect(body).toMatch(/grantee\s*=\s*0/i);
   });
 
+  it('declara y verifica grants minimos de tablas sin depender de information_schema', () => {
+    const capability = sql.slice(positionOf(/CREATE OR REPLACE FUNCTION public\.payments_webhook_schema_capability/));
+
+    expect(sql).toMatch(/'payment_events:SELECT, INSERT, UPDATE'/i);
+    expect(sql).toMatch(/'invoices:SELECT, UPDATE'/i);
+    expect(sql).toMatch(/'payments:SELECT, INSERT, UPDATE'/i);
+    expect(sql).toMatch(/'payment_applications:SELECT, INSERT'/i);
+    expect(sql).toMatch(/'mikrotik_actions:SELECT, INSERT, UPDATE'/i);
+    expect(sql).toMatch(/GRANT %s ON TABLE public\.%I TO service_role/i);
+    expect(sql).toMatch(/IF to_regclass\(format\('public\.%I', table_name\)\) IS NOT NULL/i);
+    expect(capability).toMatch(/has_table_privilege\('service_role',\s*v_rel_oid,\s*v_required_privilege\)/i);
+    expect(capability).toMatch(/array_append\(v_missing/i);
+    expect(capability).toMatch(/FROM pg_attribute/i);
+    expect(capability).not.toMatch(/information_schema\.columns/i);
+  });
+
   it('es reejecutable: índices con guarda y funciones CREATE OR REPLACE', () => {
     for (const stmt of sql.match(/CREATE (UNIQUE )?INDEX[^;]*/gi) ?? []) {
       expect(stmt, stmt).toMatch(/IF NOT EXISTS/i);

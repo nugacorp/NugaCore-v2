@@ -164,8 +164,13 @@ describe('Fixup final: lecturas Supabase fail-closed', () => {
       updateOrderStatus,
       markEventProcessed,
     } as unknown as PaymentRepository;
-    const billingRead = vi.spyOn(getBillingService(), 'findInvoiceById');
-    if (provider === 'codi') billingRead.mockRejectedValue(new Error('transient CoDi invoice lookup'));
+    const billing = getBillingService();
+    const billingRead = provider === 'codi'
+      ? vi.spyOn(billing, 'listInvoices')
+      : vi.spyOn(billing, 'findInvoiceById');
+    if (provider === 'codi') {
+      billingRead.mockRejectedValue(new Error('transient CoDi invoice lookup'));
+    }
 
     await expect(new PaymentService(repo).processWebhook({
       provider,

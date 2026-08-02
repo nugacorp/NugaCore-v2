@@ -95,6 +95,7 @@ const seedClaim = (eventId: string, claimToken = 'owner-r2') => {
     receivedAt: new Date().toISOString(),
     claimedAt: new Date().toISOString(),
     claimToken,
+    webhookPaymentId: `payment:${eventId}`,
   });
 };
 
@@ -223,7 +224,9 @@ describe('R2-01: el ledger decide la identidad tenant+provider+transaction', () 
     const result = await new PaymentService(new StorePaymentRepository()).processWebhook({
       provider: 'codi', providerEventId: 'shared-id', eventType: 'payment.completed',
       tenantId: TENANT_A,
-      payload: { status: 'paid', reference: directInvoiceId, amount: 75 },
+      payload: {
+        status: 'paid', reference: `${directInvoiceId}-${CUSTOMER_ID}`, amount: 75,
+      },
     });
 
     expect(result).toMatchObject({ invoiceUpdated: true, reactivationTriggered: true });
@@ -331,7 +334,7 @@ describe('R3-01: Billing gobierna si el webhook puede reactivar', () => {
       providerEventId: 'evt-r3-codi-partial',
       eventType: 'payment.completed',
       tenantId: TENANT_A,
-      payload: { status: 'paid', reference: 'INV-1', amount: 25 },
+      payload: { status: 'paid', reference: `INV-${CUSTOMER_ID}`, amount: 25 },
     });
 
     expect(result).toMatchObject({ invoiceUpdated: true, reactivationTriggered: false });
@@ -419,7 +422,7 @@ describe('R2-02: importe webhook válido antes de cualquier adapter o efecto', (
       providerEventId: 'evt-r2-codi-invalid',
       eventType: 'payment.completed',
       tenantId: TENANT_A,
-      payload: { status: 'paid', reference: 'INV-1', amount: -5 },
+      payload: { status: 'paid', reference: `INV-${CUSTOMER_ID}`, amount: -5 },
     })).rejects.toBeInstanceOf(BadRequestError);
 
     expect(store.INVOICES[0].payments).toHaveLength(0);
@@ -439,6 +442,7 @@ describe('R2-03: la acción durable sólo referencia routers del tenant', () => 
       webhookFence: {
         eventId,
         claimToken: 'owner-r2',
+        canonicalPaymentId: `payment:${eventId}`,
         beforeMutation: async () => undefined,
       },
     });

@@ -97,10 +97,9 @@ export const ACTION_IDEMPOTENCY_SCOPE = 'mikrotik_actions';
  */
 const actionsAreEquivalent = (a: MikrotikActionRecord, b: MikrotikActionRecord): boolean =>
   (a.tenantId || 'tenant-default') === (b.tenantId || 'tenant-default')
-  && (a.paymentEventId ?? null) === (b.paymentEventId ?? null)
+  && (a.webhookPaymentId ?? null) === (b.webhookPaymentId ?? null)
   && a.customerId === b.customerId
   && a.actionType === b.actionType
-  && (a.triggeredBy ?? null) === (b.triggeredBy ?? null)
   && a.dryRun === b.dryRun
   && idempotencyPayloadsEquivalent(a.payload ?? {}, b.payload ?? {});
 
@@ -109,8 +108,8 @@ const requireIdempotentAction = (rec: MikrotikActionRecord): { tenantId: string;
   if (!rec.idempotencyKey) {
     throw new Error('createActionIdempotent requiere idempotencyKey (las acciones manuales usan createAction).');
   }
-  if (!rec.paymentEventId) {
-    throw new Error('createActionIdempotent requiere paymentEventId: el vínculo evento→acción es verificable.');
+  if (!rec.webhookPaymentId) {
+    throw new Error('createActionIdempotent requiere webhookPaymentId canónico.');
   }
   return { tenantId, key: rec.idempotencyKey };
 };
@@ -385,8 +384,8 @@ export class StorePaymentRepository implements PaymentRepository {
       (a) => a.id === input.actionId && matchesTenant(a.tenantId, input.tenantId),
     );
     if (!action) throw new Error(`Checkpoint sin acción durable: ${input.actionId}`);
-    if (action.paymentEventId !== input.eventId) {
-      throw new Error(`Checkpoint con vínculo evento→acción inválido: ${input.actionId}`);
+    if (!event.webhookPaymentId || event.webhookPaymentId !== action.webhookPaymentId) {
+      throw new Error(`Checkpoint con identidad canónica inválida: ${input.actionId}`);
     }
 
     const progress = readProgress(action.result);

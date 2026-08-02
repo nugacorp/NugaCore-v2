@@ -116,6 +116,8 @@ export interface WebhookPaymentResult {
   isSettledAfter: boolean;
   /** Identidad durable del único cargo autorizado a iniciar la raíz. */
   settlementWinner: boolean;
+  /** Internal ledger identity shared by every delivery of the same charge. */
+  canonicalPaymentId: string | null;
 }
 
 export const BILLING_IDEMPOTENCY_SCOPE = 'payments';
@@ -403,6 +405,7 @@ export class StoreBillingRepository implements BillingRepository {
       return {
         outcome: 'ownership_lost', invoice: null,
         wasSettledBefore: false, isSettledAfter: false, settlementWinner: false,
+        canonicalPaymentId: null,
       };
     }
 
@@ -432,6 +435,7 @@ export class StoreBillingRepository implements BillingRepository {
         throw new IdempotencyConflictError(BILLING_IDEMPOTENCY_SCOPE, input.idempotencyKey);
       }
       syncStatus(invoice);
+      event.webhookPaymentId = existing.id;
       const settled = invoice.status === 'paid' && invoicePendingAmount(invoice) <= 0;
       return {
         outcome: 'existing',
@@ -439,6 +443,7 @@ export class StoreBillingRepository implements BillingRepository {
         wasSettledBefore: settled,
         isSettledAfter: settled,
         settlementWinner: existing.settlementWinner === true,
+        canonicalPaymentId: existing.id,
       };
     }
 
@@ -453,8 +458,9 @@ export class StoreBillingRepository implements BillingRepository {
     syncStatus(invoice);
     const isSettledAfter = invoice.status === 'paid' && invoicePendingAmount(invoice) <= 0;
     const settlementWinner = !wasSettledBefore && isSettledAfter;
+    const canonicalPaymentId = store.getUniquePaymentAllocationId();
     store.PAYMENT_ALLOCATIONS.unshift({
-      id: store.getUniquePaymentAllocationId(),
+      id: canonicalPaymentId,
       invoiceId: input.invoiceId,
       amount: input.amount,
       method: input.method,
@@ -466,7 +472,11 @@ export class StoreBillingRepository implements BillingRepository {
       idempotencyKey: input.idempotencyKey,
       settlementWinner,
     });
-    return { outcome: 'created', invoice: enrich(invoice), wasSettledBefore, isSettledAfter, settlementWinner };
+    event.webhookPaymentId = canonicalPaymentId;
+    return {
+      outcome: 'created', invoice: enrich(invoice), wasSettledBefore, isSettledAfter,
+      settlementWinner, canonicalPaymentId,
+    };
   }
 
   async generateInvoiceId(): Promise<string> {
@@ -817,12 +827,24 @@ export class SupabaseBillingRepository implements BillingRepository {
     const wasSettledBefore = raw?.was_settled_before === true;
     const isSettledAfter = raw?.is_settled_after === true;
     const settlementWinner = raw?.settlement_winner === true;
+    const canonicalPaymentId = typeof raw?.canonical_payment_id === 'string'
+      ? raw.canonical_payment_id
+      : null;
     if (outcome === 'ownership_lost') {
-      return { outcome, invoice: null, wasSettledBefore, isSettledAfter, settlementWinner };
+      return {
+        outcome, invoice: null, wasSettledBefore, isSettledAfter, settlementWinner,
+        canonicalPaymentId,
+      };
     }
     if (outcome !== 'created' && outcome !== 'existing') {
       throw new ServiceUnavailableError(
         'Billing devolvió una respuesta desconocida para el cobro.',
+        'WEBHOOK_LEDGER_INVALID_RESPONSE',
+      );
+    }
+    if (!canonicalPaymentId) {
+      throw new ServiceUnavailableError(
+        'Billing no devolviÃ³ la identidad canÃ³nica del cobro.',
         'WEBHOOK_LEDGER_INVALID_RESPONSE',
       );
     }
@@ -832,6 +854,7 @@ export class SupabaseBillingRepository implements BillingRepository {
       wasSettledBefore,
       isSettledAfter,
       settlementWinner,
+      canonicalPaymentId,
     };
   }
 
