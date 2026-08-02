@@ -139,6 +139,24 @@ export interface Ticket {
   }[];
 }
 
+/** Tecnología de la orden: decide qué campos de campo son obligatorios. */
+export type WorkOrderTechnology = 'radio' | 'fiber';
+
+/** Captura de campo específica de FTTH (obligatoria para cerrar una orden de fibra). */
+export interface FtthWorkOrderFields {
+  /** Número de serie de la ONU (escaneado del código de barras). */
+  onuSerial?: string;
+  napId?: string;
+  napPort?: number;
+  /** Potencia óptica de recepción medida en el domicilio (dBm, negativa). */
+  rxPowerDbm?: number;
+  /** Potencia de transmisión de la ONU (dBm), opcional. */
+  txPowerDbm?: number;
+  /** Pérdida medida en la fusión (dB), opcional. */
+  spliceLossDb?: number;
+  measuredAt?: string;
+}
+
 export interface TaskOrder {
   id: string;
   title: string;
@@ -146,6 +164,9 @@ export interface TaskOrder {
   clientName: string;
   clientId: string;
   tenantId?: string;
+  /** Ausente ⇒ 'radio' (compatibilidad con órdenes previas al módulo FTTH). */
+  technology?: WorkOrderTechnology;
+  ftth?: FtthWorkOrderFields;
   address: string;
   phone: string;
   notes: string;

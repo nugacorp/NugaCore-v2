@@ -7,7 +7,11 @@ import { asyncHandler, BadRequestError } from '../../common/errors';
 import { READ_ROLES, requireRoles } from '../../common/rbac';
 import { resolveTenantIdForUser, readRequestedTenantId } from '../tenancy/resolve-tenant';
 import { getOltService } from './service';
+import { getOltActionsService, OltNotFoundError, OLT_EXECUTION_ENABLED } from './actions/service';
+import { isOltActionType, type OnuActionPayload } from './command-builder';
+import { getOltCredentialsService } from './credentials';
 import type { PonType } from './types';
+import type { OltActionStatus } from './actions/types';
 
 const router = Router();
 
@@ -104,6 +108,91 @@ router.post('/api/olts/:id/script', requireRoles([...WRITE_ROLES]), asyncHandler
   });
   if (!result) return res.status(404).json({ error: 'OLT no encontrada' });
   res.json(result);
+}));
+
+// ── Cola de acciones ──────────────────────────────────────────────────
+
+router.get('/api/olt-actions', requireRoles(READ_ROLES), asyncHandler(async (req, res) => {
+  const tenantId = await resolveTenant(req);
+  const actions = await getOltActionsService().list(tenantId, {
+    oltId: req.query.oltId ? String(req.query.oltId) : undefined,
+    customerId: req.query.customerId ? String(req.query.customerId) : undefined,
+    status: req.query.status ? (String(req.query.status) as OltActionStatus) : undefined,
+  });
+  res.json({ executionEnabled: OLT_EXECUTION_ENABLED, actions });
+}));
+
+router.get('/api/olt-actions/:id', requireRoles(READ_ROLES), asyncHandler(async (req, res) => {
+  const tenantId = await resolveTenant(req);
+  const action = await getOltActionsService().get(tenantId, req.params.id);
+  if (!action) return res.status(404).json({ error: 'Acción no encontrada' });
+  res.json(action);
+}));
+
+/**
+ * Encola una acción hacia la OLT. Siempre dry-run: se registra el plan de
+ * comandos para revisión, nadie lo ejecuta (OLT_EXECUTION_ENABLED = false).
+ */
+router.post('/api/olt-actions', requireRoles([...WRITE_ROLES]), asyncHandler(async (req, res) => {
+  const tenantId = await resolveTenant(req);
+  const b = req.body || {};
+  const oltId = String(b.oltId || '').trim();
+  if (!oltId) throw new BadRequestError('oltId es requerido');
+  if (!isOltActionType(b.actionType)) {
+    throw new BadRequestError('actionType inválido');
+  }
+
+  try {
+    const action = await getOltActionsService().enqueue(tenantId, {
+      oltId,
+      actionType: b.actionType,
+      payload: (b.payload as OnuActionPayload) ?? {},
+      customerId: b.customerId ? String(b.customerId) : undefined,
+      onuId: b.onuId ? String(b.onuId) : undefined,
+      triggeredBy: req.authContext?.userId,
+    });
+    res.status(201).json(action);
+  } catch (error) {
+    if (error instanceof OltNotFoundError) {
+      return res.status(404).json({ error: error.message, code: 'OLT_NOT_FOUND' });
+    }
+    throw error;
+  }
+}));
+
+router.post('/api/olt-actions/:id/cancel', requireRoles([...WRITE_ROLES]), asyncHandler(async (req, res) => {
+  const tenantId = await resolveTenant(req);
+  const reason = req.body?.reason ? String(req.body.reason) : undefined;
+  const action = await getOltActionsService().cancel(tenantId, req.params.id, reason);
+  if (!action) return res.status(404).json({ error: 'Acción no encontrada' });
+  res.json(action);
+}));
+
+// ── Credenciales SSH (cifradas; el password nunca se devuelve) ─────────
+
+router.get('/api/olts/:id/credentials', requireRoles([...WRITE_ROLES]), asyncHandler(async (req, res) => {
+  const tenantId = await resolveTenant(req);
+  const olt = await getOltService().get(tenantId, req.params.id);
+  if (!olt) return res.status(404).json({ error: 'OLT no encontrada' });
+  const meta = await getOltCredentialsService().getMeta(tenantId, req.params.id);
+  res.json(meta ?? { oltId: req.params.id, hasPassword: false });
+}));
+
+router.put('/api/olts/:id/credentials', requireRoles([...WRITE_ROLES]), asyncHandler(async (req, res) => {
+  const tenantId = await resolveTenant(req);
+  const olt = await getOltService().get(tenantId, req.params.id);
+  if (!olt) return res.status(404).json({ error: 'OLT no encontrada' });
+
+  const b = req.body || {};
+  const username = String(b.username || '').trim();
+  const password = String(b.password || '');
+  if (!username) throw new BadRequestError('username es requerido');
+  if (password.length < 8) {
+    throw new BadRequestError('password es requerido (mínimo 8 caracteres)');
+  }
+
+  const meta = await getOltCredentialsService().set(tenantId, req.params.id, username, password);
+  res.status(201).json(meta);
 }));
 
 export default router;

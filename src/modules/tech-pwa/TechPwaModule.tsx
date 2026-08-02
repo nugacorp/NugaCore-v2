@@ -19,6 +19,8 @@ import {
 import { fetchWithRateLimitBackoff } from '../../lib/apiBackoff';
 import { getAppScope } from '../../lib/appScope';
 import { buildTechAppShareUrl } from '../../lib/techAppLinks';
+import { classifyRxPower, RX_POWER_LABELS } from '../../lib/ftthOptical';
+import type { FtthWorkOrderFields } from '../../types';
 
 const OFFLINE_KEY = 'nugacore.tech-pwa.queue';
 
@@ -36,7 +38,32 @@ type WorkOrder = {
   date?: string;
   address?: string;
   technicianName?: string;
+  technology?: 'radio' | 'fiber';
+  ftth?: FtthWorkOrderFields;
 };
+
+/** Captura FTTH en edición, por orden. */
+type FtthDraft = {
+  onuSerial: string;
+  napId: string;
+  napPort: string;
+  rxPowerDbm: string;
+};
+
+const draftFrom = (order: WorkOrder): FtthDraft => ({
+  onuSerial: order.ftth?.onuSerial ?? '',
+  napId: order.ftth?.napId ?? '',
+  napPort: order.ftth?.napPort != null ? String(order.ftth.napPort) : '',
+  rxPowerDbm: order.ftth?.rxPowerDbm != null ? String(order.ftth.rxPowerDbm) : '',
+});
+
+const draftToPayload = (draft: FtthDraft): Record<string, unknown> => ({
+  onuSerial: draft.onuSerial.trim(),
+  napId: draft.napId.trim(),
+  napPort: draft.napPort,
+  rxPowerDbm: draft.rxPowerDbm,
+  measuredAt: new Date().toISOString(),
+});
 
 type AgendaItem = {
   id: string;
@@ -107,6 +134,9 @@ export default function TechPwaModule({ getAuthHeaders }: TechPwaModuleProps) {
   const [error, setError] = useState('');
   const [actionMsg, setActionMsg] = useState('');
   const [copied, setCopied] = useState(false);
+  const [ftthDrafts, setFtthDrafts] = useState<Record<string, FtthDraft>>({});
+  /** Motivos por los que el servidor rechazó cerrar una orden de fibra. */
+  const [blockers, setBlockers] = useState<Record<string, string[]>>({});
 
   const techLink = useMemo(() => {
     try {
@@ -180,10 +210,27 @@ export default function TechPwaModule({ getAuthHeaders }: TechPwaModuleProps) {
         body: JSON.stringify(payload),
       });
       if (!res.ok) {
+        // 4xx = el servidor rechazó la acción (p. ej. checklist FTTH incompleto).
+        // Reintentarla desde la cola offline nunca funcionaría: se muestra el motivo.
+        if (res.status >= 400 && res.status < 500 && res.status !== 429) {
+          const body = (await res.json().catch(() => null)) as
+            | { error?: string; details?: { errors?: string[] } }
+            | null;
+          const reasons = body?.details?.errors ?? (body?.error ? [body.error] : []);
+          setBlockers((prev) => ({ ...prev, [orderId]: reasons }));
+          setActionMsg(reasons[0] ?? 'El servidor rechazó la acción.');
+          return;
+        }
         setActionMsg('No se pudo aplicar la acción en el servidor.');
         queueOffline(orderId, action, payload);
         return;
       }
+      setBlockers((prev) => {
+        if (!prev[orderId]) return prev;
+        const next = { ...prev };
+        delete next[orderId];
+        return next;
+      });
       setActionMsg(
         action === 'status' && payload.status === 'completed'
           ? 'Orden marcada como completada.'
@@ -193,6 +240,26 @@ export default function TechPwaModule({ getAuthHeaders }: TechPwaModuleProps) {
     } catch {
       queueOffline(orderId, action, payload);
     }
+  };
+
+  const setDraftField = (order: WorkOrder, field: keyof FtthDraft, value: string) => {
+    setFtthDrafts((prev) => ({
+      ...prev,
+      [order.id]: { ...(prev[order.id] ?? draftFrom(order)), [field]: value },
+    }));
+  };
+
+  /** Cierra la orden enviando la captura FTTH cuando la tecnología es fibra. */
+  const completeOrder = (order: WorkOrder) => {
+    if (order.technology !== 'fiber') {
+      void runOrderAction(order.id, 'status', { status: 'completed' });
+      return;
+    }
+    const draft = ftthDrafts[order.id] ?? draftFrom(order);
+    void runOrderAction(order.id, 'status', {
+      status: 'completed',
+      ftth: draftToPayload(draft),
+    });
   };
 
   const syncOffline = async () => {
@@ -433,6 +500,82 @@ export default function TechPwaModule({ getAuthHeaders }: TechPwaModuleProps) {
                   {statusLabel(o.status)}
                 </span>
               </div>
+              {o.technology === 'fiber' && (() => {
+                const draft = ftthDrafts[o.id] ?? draftFrom(o);
+                const rx = draft.rxPowerDbm.trim() === '' ? null : Number(draft.rxPowerDbm);
+                const rxClass = rx !== null && Number.isFinite(rx) ? classifyRxPower(rx) : null;
+                const rxTone =
+                  rxClass === 'good'
+                    ? 'border-emerald-700/60 text-emerald-300'
+                    : rxClass === 'degraded'
+                      ? 'border-amber-700/60 text-amber-300'
+                      : rxClass
+                        ? 'border-rose-700/60 text-rose-300'
+                        : 'border-slate-800 text-slate-200';
+                return (
+                  <div className="rounded-xl border border-sky-900/50 bg-slate-950/60 p-3 space-y-2">
+                    <p className="text-[10px] font-mono uppercase tracking-wide text-sky-300">
+                      Entrega FTTH · obligatoria para cerrar
+                    </p>
+                    <div className="grid grid-cols-2 gap-2">
+                      <label className="col-span-2 space-y-1">
+                        <span className="text-[9px] uppercase text-slate-500 block">Serie de ONU</span>
+                        <input
+                          value={draft.onuSerial}
+                          onChange={(e) => setDraftField(o, 'onuSerial', e.target.value)}
+                          placeholder="48575443…"
+                          className="w-full bg-slate-900 border border-slate-800 rounded-lg px-2 py-1.5 text-xs font-mono text-slate-200 focus:border-sky-700 focus:outline-none"
+                        />
+                      </label>
+                      <label className="space-y-1">
+                        <span className="text-[9px] uppercase text-slate-500 block">Caja NAP</span>
+                        <input
+                          value={draft.napId}
+                          onChange={(e) => setDraftField(o, 'napId', e.target.value)}
+                          placeholder="NAP-01"
+                          className="w-full bg-slate-900 border border-slate-800 rounded-lg px-2 py-1.5 text-xs font-mono text-slate-200 focus:border-sky-700 focus:outline-none"
+                        />
+                      </label>
+                      <label className="space-y-1">
+                        <span className="text-[9px] uppercase text-slate-500 block">Puerto</span>
+                        <input
+                          type="number"
+                          min={1}
+                          value={draft.napPort}
+                          onChange={(e) => setDraftField(o, 'napPort', e.target.value)}
+                          className="w-full bg-slate-900 border border-slate-800 rounded-lg px-2 py-1.5 text-xs font-mono text-slate-200 focus:border-sky-700 focus:outline-none"
+                        />
+                      </label>
+                      <label className="col-span-2 space-y-1">
+                        <span className="text-[9px] uppercase text-slate-500 block">Potencia Rx (dBm)</span>
+                        <input
+                          type="number"
+                          step="0.1"
+                          value={draft.rxPowerDbm}
+                          onChange={(e) => setDraftField(o, 'rxPowerDbm', e.target.value)}
+                          placeholder="-21.4"
+                          className={`w-full bg-slate-900 border rounded-lg px-2 py-1.5 text-xs font-mono focus:outline-none ${rxTone}`}
+                        />
+                      </label>
+                    </div>
+                    {rxClass && (
+                      <p className={`text-[10px] font-mono ${rxClass === 'good' ? 'text-emerald-400' : rxClass === 'degraded' ? 'text-amber-400' : 'text-rose-400'}`}>
+                        {RX_POWER_LABELS[rxClass]}
+                      </p>
+                    )}
+                    {blockers[o.id]?.length > 0 && (
+                      <ul className="space-y-1 border-t border-slate-800 pt-2">
+                        {blockers[o.id].map((reason) => (
+                          <li key={reason} className="flex items-start gap-1.5 text-[10px] text-rose-300">
+                            <AlertTriangle className="w-3 h-3 shrink-0 mt-px" />
+                            <span>{reason}</span>
+                          </li>
+                        ))}
+                      </ul>
+                    )}
+                  </div>
+                );
+              })()}
               <div className="flex flex-wrap gap-2">
                 <button
                   type="button"
@@ -457,7 +600,7 @@ export default function TechPwaModule({ getAuthHeaders }: TechPwaModuleProps) {
                 </button>
                 <button
                   type="button"
-                  onClick={() => void runOrderAction(o.id, 'status', { status: 'completed' })}
+                  onClick={() => completeOrder(o)}
                   className="inline-flex items-center gap-1.5 px-3 py-2 rounded-xl bg-emerald-950/50 border border-emerald-800/40 text-emerald-300 text-xs font-semibold hover:bg-emerald-900/40 transition"
                 >
                   <CheckCircle className="w-3.5 h-3.5" /> Completar

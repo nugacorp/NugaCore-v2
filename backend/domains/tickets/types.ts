@@ -1,4 +1,4 @@
-import { TaskOrder, Ticket } from '../../../src/types';
+import { FtthWorkOrderFields, TaskOrder, Ticket, WorkOrderTechnology } from '../../../src/types';
 
 export interface SupportFilters {
   status?: Ticket['status'] | TaskOrder['status'];
@@ -51,6 +51,8 @@ export interface WorkOrderCreateInput {
   technicianName?: string;
   status: TaskOrder['status'];
   checklist?: { item: string; done: boolean }[];
+  technology?: WorkOrderTechnology;
+  ftth?: FtthWorkOrderFields;
   tenantId?: string;
 }
 
@@ -67,4 +69,6 @@ export interface WorkOrderUpdateInput {
   technicianName?: string;
   status?: TaskOrder['status'];
   checklist?: { item: string; done: boolean }[];
+  technology?: WorkOrderTechnology;
+  ftth?: FtthWorkOrderFields;
 }

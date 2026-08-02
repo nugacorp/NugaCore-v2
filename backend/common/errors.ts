@@ -20,6 +20,8 @@ export class AppError extends Error {
     public statusCode: number,
     message: string,
     public code: string = 'APP_ERROR',
+    /** Contexto estructurado para el cliente (motivos, avisos). Nunca secretos. */
+    public details?: Record<string, unknown>,
   ) {
     super(message);
     this.name = 'AppError';
@@ -96,7 +98,11 @@ export const errorHandler = (
         requestId: req.requestId,
       });
     }
-    res.status(err.statusCode).json({ error: err.message, code: err.code });
+    res.status(err.statusCode).json({
+      error: err.message,
+      code: err.code,
+      ...(err.details ? { details: err.details } : {}),
+    });
     return;
   }
 
