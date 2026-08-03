@@ -404,7 +404,7 @@ BEGIN
   END IF;
 
   -- Cada delivery conserva su propio claim, pero resuelve a la misma identidad
-  -- canÃ³nica del ledger. El checkpoint compara esta identidad con la root.
+  -- canónica del ledger. El checkpoint compara esta identidad con la root.
   UPDATE public.payment_events
      SET webhook_payment_id = v_payment_id
    WHERE id = p_event_id
@@ -529,7 +529,10 @@ DECLARE
     'suspension_events:SELECT, INSERT',
     'noc_alerts:SELECT, INSERT',
     'payments:SELECT, INSERT, UPDATE',
-    'payment_applications:SELECT, INSERT',
+    -- payment_applications se bloquea con SELECT ... FOR UPDATE al recuperar la
+    -- aplicación de un pago existente, y un row lock exige privilegio UPDATE
+    -- aunque la fila nunca se modifique.
+    'payment_applications:SELECT, INSERT, UPDATE',
     'invoices:SELECT, UPDATE'
   ];
 BEGIN
@@ -588,7 +591,8 @@ DECLARE
     'suspension_events:SELECT', 'suspension_events:INSERT',
     'noc_alerts:SELECT', 'noc_alerts:INSERT',
     'payments:SELECT', 'payments:INSERT', 'payments:UPDATE',
-    'payment_applications:SELECT', 'payment_applications:INSERT',
+    -- UPDATE por el row lock de payment_applications (SELECT ... FOR UPDATE).
+    'payment_applications:SELECT', 'payment_applications:INSERT', 'payment_applications:UPDATE',
     'invoices:SELECT', 'invoices:UPDATE'
   ];
 BEGIN

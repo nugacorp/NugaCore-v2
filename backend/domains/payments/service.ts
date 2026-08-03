@@ -382,13 +382,26 @@ export class PaymentService {
         const existingPayment = invoice.payments.find(
           (payment) => payment.provider === 'codi' && payment.transactionId === reference,
         );
+        // `??` no salta el 0: una factura ya saldada por otro medio dejaba un
+        // `pendingAmount` de 0 como importe del cobro y Billing respondía 400.
+        // Un 400 le dice al proveedor que no reintente, así que el evento
+        // quedaba sin procesar y el cobro se perdía en silencio. Sin importe
+        // declarado sólo el cobro CoDi ya registrado o un saldo pendiente real
+        // pueden resolverlo; cobrar el total facturado sería inventarlo. Esta
+        // ruta falla cerrada y retryable, como el resto del resolver CoDi.
+        const declaredAmount = claimedPayload.amount ?? claimedPayload.monto;
+        const hasDeclaredAmount = declaredAmount !== undefined && declaredAmount !== null;
         const amount = Number(
-          claimedPayload.amount
-          ?? claimedPayload.monto
-          ?? existingPayment?.amount
-          ?? invoice.pendingAmount
-          ?? invoice.amount,
+          hasDeclaredAmount
+            ? declaredAmount
+            : (existingPayment?.amount ?? invoice.pendingAmount),
         );
+        if (!hasDeclaredAmount && (!Number.isFinite(amount) || amount <= 0)) {
+          throw new ServiceUnavailableError(
+            'El webhook CoDi no declara importe y la factura no tiene saldo pendiente resoluble.',
+            'CODI_AMOUNT_UNRESOLVED',
+          );
+        }
         const paymentResult = await this.applyWebhookPaymentOrThrow(
           { beforeMutation: () => this.renewOrThrow(eventId, claimToken), eventId, claimToken },
           {
@@ -563,7 +576,7 @@ export class PaymentService {
     const canonicalPaymentId = webhookFence?.canonicalPaymentId;
     if (webhookFence && !canonicalPaymentId) {
       throw new ServiceUnavailableError(
-        'Billing no resolviÃ³ la identidad canÃ³nica de la reactivaciÃ³n.',
+        'Billing no resolvió la identidad canónica de la reactivación.',
         'WEBHOOK_CANONICAL_PAYMENT_UNAVAILABLE',
       );
     }

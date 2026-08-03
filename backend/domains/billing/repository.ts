@@ -844,7 +844,7 @@ export class SupabaseBillingRepository implements BillingRepository {
     }
     if (!canonicalPaymentId) {
       throw new ServiceUnavailableError(
-        'Billing no devolviÃ³ la identidad canÃ³nica del cobro.',
+        'Billing no devolvió la identidad canónica del cobro.',
         'WEBHOOK_LEDGER_INVALID_RESPONSE',
       );
     }

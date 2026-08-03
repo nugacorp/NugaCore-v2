@@ -2,6 +2,49 @@
 
 CREATE EXTENSION IF NOT EXISTS dblink;
 
+-- La migración T5 es la ÚNICA fuente de los privilegios de tabla de
+-- service_role: el bootstrap parte sin ninguno y lo verifica. Estas dos
+-- comprobaciones son el gate del finding de grants — si la sección de GRANT de
+-- T5 se retirara, la primera falla; si concediera de más, falla la segunda.
+DO $$
+DECLARE
+  granted TEXT[] := ARRAY[
+    'payment_events:SELECT', 'payment_events:INSERT', 'payment_events:UPDATE',
+    'mikrotik_actions:SELECT', 'mikrotik_actions:INSERT', 'mikrotik_actions:UPDATE',
+    'client_timeline:SELECT', 'client_timeline:INSERT',
+    'reactivation_orders:SELECT', 'reactivation_orders:INSERT',
+    'suspension_events:SELECT', 'suspension_events:INSERT',
+    'noc_alerts:SELECT', 'noc_alerts:INSERT',
+    'payments:SELECT', 'payments:INSERT', 'payments:UPDATE',
+    'payment_applications:SELECT', 'payment_applications:INSERT', 'payment_applications:UPDATE',
+    'invoices:SELECT', 'invoices:UPDATE'
+  ];
+  targets TEXT[] := ARRAY[
+    'payment_events', 'mikrotik_actions', 'client_timeline', 'reactivation_orders',
+    'suspension_events', 'noc_alerts', 'payments', 'payment_applications', 'invoices'
+  ];
+  item TEXT;
+  t TEXT;
+  p TEXT;
+BEGIN
+  FOREACH item IN ARRAY granted LOOP
+    IF NOT has_table_privilege(
+      'service_role', format('public.%I', split_part(item, ':', 1)), split_part(item, ':', 2)
+    ) THEN
+      RAISE EXCEPTION 'la migración T5 no concedió el privilegio requerido: %', item;
+    END IF;
+  END LOOP;
+
+  FOREACH t IN ARRAY targets LOOP
+    FOREACH p IN ARRAY ARRAY['SELECT', 'INSERT', 'UPDATE', 'DELETE', 'TRUNCATE'] LOOP
+      IF has_table_privilege('service_role', format('public.%I', t), p)
+         AND NOT (granted @> ARRAY[t || ':' || p]) THEN
+        RAISE EXCEPTION 'service_role tiene un privilegio no mínimo: % sobre %', p, t;
+      END IF;
+    END LOOP;
+  END LOOP;
+END $$;
+
 DO $$
 DECLARE capability JSONB;
 BEGIN
@@ -24,7 +67,7 @@ DECLARE
     'suspension_events:SELECT', 'suspension_events:INSERT',
     'noc_alerts:SELECT', 'noc_alerts:INSERT',
     'payments:SELECT', 'payments:INSERT', 'payments:UPDATE',
-    'payment_applications:SELECT', 'payment_applications:INSERT',
+    'payment_applications:SELECT', 'payment_applications:INSERT', 'payment_applications:UPDATE',
     'invoices:SELECT', 'invoices:UPDATE'
   ];
   item TEXT;

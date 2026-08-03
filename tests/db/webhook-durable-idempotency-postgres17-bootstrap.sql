@@ -96,5 +96,27 @@ CREATE TABLE public.payment_applications (
   applied_at TIMESTAMPTZ NOT NULL DEFAULT now()
 );
 
+-- USAGE sobre el schema es baseline de plataforma en Supabase; los privilegios
+-- de TABLA no lo son. El fixture no concede ninguno sobre los destinos de T5:
+-- concederlos aquí haría pasar el gate aunque la sección de grants de la
+-- migración se borrara entera, que es justo lo que el finding pedía demostrar.
 GRANT USAGE ON SCHEMA public TO service_role;
-GRANT SELECT, INSERT, UPDATE ON ALL TABLES IN SCHEMA public TO service_role;
+
+DO $$
+DECLARE
+  t TEXT;
+  p TEXT;
+  targets TEXT[] := ARRAY[
+    'payment_events', 'mikrotik_actions', 'client_timeline', 'reactivation_orders',
+    'suspension_events', 'noc_alerts', 'payments', 'payment_applications', 'invoices'
+  ];
+BEGIN
+  FOREACH t IN ARRAY targets LOOP
+    FOREACH p IN ARRAY ARRAY['SELECT', 'INSERT', 'UPDATE', 'DELETE'] LOOP
+      IF has_table_privilege('service_role', format('public.%I', t), p) THEN
+        RAISE EXCEPTION
+          'el fixture ya concede % sobre %: T5 no podría demostrar sus grants', p, t;
+      END IF;
+    END LOOP;
+  END LOOP;
+END $$;

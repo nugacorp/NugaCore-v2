@@ -235,7 +235,7 @@ describe('Migración de idempotencia durable — invariantes estáticas', () => 
     expect(sql).toMatch(/'payment_events:SELECT, INSERT, UPDATE'/i);
     expect(sql).toMatch(/'invoices:SELECT, UPDATE'/i);
     expect(sql).toMatch(/'payments:SELECT, INSERT, UPDATE'/i);
-    expect(sql).toMatch(/'payment_applications:SELECT, INSERT'/i);
+    expect(sql).toMatch(/'payment_applications:SELECT, INSERT, UPDATE'/i);
     expect(sql).toMatch(/'mikrotik_actions:SELECT, INSERT, UPDATE'/i);
     expect(sql).toMatch(/GRANT %s ON TABLE public\.%I TO service_role/i);
     expect(sql).toMatch(/IF to_regclass\(format\('public\.%I', table_name\)\) IS NOT NULL/i);
@@ -243,6 +243,37 @@ describe('Migración de idempotencia durable — invariantes estáticas', () => 
     expect(capability).toMatch(/array_append\(v_missing/i);
     expect(capability).toMatch(/FROM pg_attribute/i);
     expect(capability).not.toMatch(/information_schema\.columns/i);
+  });
+
+  it('concede UPDATE a toda tabla que las RPC bloquean con FOR UPDATE', () => {
+    // Un row lock exige privilegio UPDATE aunque la fila nunca se modifique.
+    // Enumerar los grants por operación de escritura deja fuera esos bloqueos:
+    // la capability responde `ready` y la RPC muere con permission denied en
+    // cuanto service_role no arrastra un GRANT amplio de plataforma.
+    const grantBlock = sql.slice(
+      positionOf(/-- SECURITY INVOKER needs real table privileges/),
+      positionOf(/CREATE OR REPLACE FUNCTION public\.payments_webhook_schema_capability/),
+    );
+    const grants = new Map(
+      [...grantBlock.matchAll(/'(\w+):([A-Z][A-Z, ]*)'/g)].map(
+        (match) => [match[1], match[2].split(',').map((privilege) => privilege.trim())],
+      ),
+    );
+
+    const lockedTables = new Set<string>();
+    for (const statement of sql.split(';')) {
+      const lock = statement.search(/FOR\s+UPDATE/i);
+      if (lock < 0) continue;
+      const sources = [...statement.matchAll(/FROM\s+public\.(\w+)/gi)]
+        .filter((match) => match.index !== undefined && match.index < lock);
+      const source = sources.at(-1);
+      if (source) lockedTables.add(source[1]);
+    }
+
+    expect(lockedTables.size).toBeGreaterThan(0);
+    for (const table of lockedTables) {
+      expect(grants.get(table), `${table} se bloquea con FOR UPDATE`).toContain('UPDATE');
+    }
   });
 
   it('es reejecutable: índices con guarda y funciones CREATE OR REPLACE', () => {
