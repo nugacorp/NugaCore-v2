@@ -28,7 +28,7 @@ La solución **no** cambia el runtime de la app: solo el entorno de pruebas.
 
 ---
 
-## 2. Los tres comandos
+## 2. Los comandos
 
 | Comando | Qué corre | Red / Supabase | Cuándo |
 |---|---|---|---|
@@ -36,6 +36,7 @@ La solución **no** cambia el runtime de la app: solo el entorno de pruebas.
 | `npm run test:db` | Gate **global** DB (customers, plans, billing, router-enrollment, inventory) contra Supabase real | ✅ Sí | Validar persistencia DB de todos los dominios |
 | `npm run test:db:billing` | Gate **enfocado** de Billing Foundation (billing + customers + plans) | ✅ Sí | Validar/aprobar Billing sin depender de dominios ajenos |
 | `npm run test:auth` | `auth.db.contract.test.ts` contra Supabase Auth real | ✅ Sí | Validar auth/JWT/RBAC de staging |
+| `npm run test:db:postgres17` | Fixture SQL del webhook durablemente idempotente contra un **PostgreSQL 17 desechable** | ❌ Supabase no; ✅ Docker local | Automático en CI (`Production Gates`) y a mano al tocar la migración del webhook |
 
 `npm run test:watch` es el modo interactivo de la suite hermética.
 
@@ -44,6 +45,20 @@ La solución **no** cambia el runtime de la app: solo el entorno de pruebas.
 > `router-enrollment.db.contract.test.ts` exige `AUTH_TRUST_HEADERS`,
 > `inventory.db.contract.test.ts` con errores propios). El gate enfocado permite
 > aprobar la Billing & Collections Foundation sin arrastrar esos pendientes.
+
+> **Por qué existe `test:db:postgres17`:** la migración
+> `20260730150000_webhook_durable_idempotency.sql` apoya su corrección en cosas
+> que ningún test hermético puede observar — privilegios mínimos de
+> `service_role`, el `UPDATE` que Postgres exige para bloquear filas con
+> `SELECT … FOR UPDATE`, el arbiter del `ON CONFLICT` y el *settlement winner*
+> único bajo carrera real. La suite hermética sólo comprueba que ciertos textos
+> estén presentes en el SQL. Este gate levanta un contenedor `postgres:17`
+> efímero, aplica el bootstrap (que arranca con `service_role` **sin** ningún
+> privilegio de tabla y lo verifica), aplica la migración **dos veces** para
+> probar idempotencia y ejecuta el fixture completo, incluidas dos conexiones
+> `dblink` concurrentes. El contenedor se elimina siempre. Verificado por
+> mutación: al retirar `payment_applications:UPDATE` de la migración, el gate
+> falla con `revoked table privilege was accepted`.
 
 ### `npm test` — hermético (default)
 - Un `setupFile` (`tests/setup/test-env.ts`) fuerza, **antes** de cargar el
@@ -111,6 +126,8 @@ defecto no lee secretos reales ni puede hacer llamadas a red.
 ## 6. Archivos clave
 - `tests/setup/test-env.ts` — fuerza el modo (hermético / DB / Auth real).
 - `scripts/run-tests.mjs` — runner multiplataforma de las suites reales.
+- `scripts/run-postgres17-fixture.mjs` — runner del contenedor PostgreSQL 17 desechable.
+- `tests/db/webhook-durable-idempotency-postgres17*.sql` — bootstrap + fixture del webhook.
 - `vitest.config.ts` — registra el `setupFile`.
 - `tests/contract/customers.db.contract.test.ts` — gate `RUN_DB_TESTS`.
 - `tests/contract/auth.db.contract.test.ts` — gate `RUN_AUTH_TESTS`.
@@ -123,6 +140,9 @@ defecto no lee secretos reales ni puede hacer llamadas a red.
 npm run typecheck      # tipos
 npm test               # hermético: verde aunque .env tenga USE_DB_CUSTOMERS=true
 npm run build          # build cliente + servidor
+
+# Solo si Docker está corriendo:
+npm run test:db:postgres17   # migración del webhook contra PostgreSQL 17 real
 
 # Solo si Supabase está configurado:
 npm run test:db        # contra Supabase real

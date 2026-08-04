@@ -15,6 +15,7 @@
     "test:watch": "vitest",
     "test:db": "node scripts/run-tests.mjs db",
     "test:db:billing": "node scripts/run-tests.mjs db:billing",
+    "test:db:postgres17": "node scripts/run-postgres17-fixture.mjs",
     "test:auth": "node scripts/run-tests.mjs auth",
     "ftth:export-samples": "node scripts/ftth/export-import-samples.mjs",
     "lint:fix": "eslint . --fix"

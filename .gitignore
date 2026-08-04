@@ -6,6 +6,10 @@ coverage/
 !backend/domains/coverage/**
 .DS_Store
 
+# Bytecode de Python (los scripts de VPS generan __pycache__ al ejecutarse)
+__pycache__/
+*.py[cod]
+
 # Logs y temporales (incluye el log de depuración y su symlink)
 *.log
 .tmp_claude_debug.log

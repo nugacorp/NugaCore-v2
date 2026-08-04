@@ -43,6 +43,26 @@ jobs:
       - name: Local readiness (expects failures without prod env)
         run: node scripts/validate-production-readiness.mjs || true
 
+  # `npm test` es hermético y sobre la migración del webhook sólo puede afirmar
+  # presencia de texto. Los invariantes que importan —privilegios mínimos de
+  # service_role, el UPDATE que exige `SELECT … FOR UPDATE`, el arbiter del
+  # ON CONFLICT y el winner único bajo carrera real— sólo se observan en un
+  # PostgreSQL de verdad. Sin este job, retirar un GRANT o reordenar los locks
+  # pasaría CI en verde.
+  webhook-postgres17:
+    name: Webhook idempotency · PostgreSQL 17 real
+    runs-on: ubuntu-latest
+    needs: quality
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+      # El runner ya trae Docker; el script levanta y elimina su propio
+      # contenedor desechable, así que no hace falta un `services:` compartido
+      # (el fixture necesita dblink sobre el socket local del propio servidor).
+      - run: npm run test:db:postgres17
+
   security-smoke:
     name: Security contract tests
     runs-on: ubuntu-latest
