@@ -18,6 +18,7 @@ export interface CustomerLite {
   id: string;
   name: string;
   status: string;
+  routerId?: string;
   pppoeUser?: string;
 }
 
@@ -30,6 +31,7 @@ const toLite = (c: Client): CustomerLite => ({
   id: c.id,
   name: c.name,
   status: c.status,
+  routerId: c.routerId,
   pppoeUser: c.pppoeUser,
 });
 

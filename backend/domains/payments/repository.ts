@@ -7,13 +7,22 @@
 // ====================================================================
 
 import type { SupabaseClient } from '@supabase/supabase-js';
+import { IdempotencyConflictError, IdempotencyResolutionError } from '../../common/errors';
+import { idempotencyPayloadsEquivalent } from '../../common/idempotency';
 import { store } from '../../state/store';
 import {
+  CheckpointStepInput,
+  CheckpointStepOutcome,
+  IdempotentActionResult,
   MikrotikActionRecord,
   PaymentEventRecord,
   PaymentOrderRecord,
   PaymentOrderStatus,
   PaymentProvider,
+  WEBHOOK_REACTIVATION_PROGRESS_KEY,
+  WEBHOOK_REACTIVATION_STEPS,
+  WebhookReactivationProgress,
+  WebhookReactivationStep,
 } from './types';
 import {
   MikrotikActionRow,
@@ -71,6 +80,72 @@ export interface EventClaimResult {
 const isUniqueViolation = (error: { code?: string; message?: string }): boolean =>
   String(error?.code) === '23505' || /duplicate key|already exists/i.test(String(error?.message ?? ''));
 
+// ── Identidad durable de la acción raíz ───────────────────────────────
+//
+// La acción es el PRIMER destino idempotente del flujo: si dos owners
+// crearan acciones distintas, cada uno derivaría su propia familia de claves
+// `actionId + step` y ninguna constraint aguas abajo podría impedir que se
+// duplicara todo. Por eso se crea con create-or-return, no con
+// "listar → generar id → insertar".
+
+export const ACTION_IDEMPOTENCY_SCOPE = 'mikrotik_actions';
+
+/**
+ * Dos acciones son "la misma" sólo si coinciden tenant, evento, cliente, tipo,
+ * disparador, modo y payload semántico. Cualquier otra colisión de clave es un
+ * conflicto: devolver la fila existente como equivalente ocultaría un bug.
+ */
+const actionsAreEquivalent = (a: MikrotikActionRecord, b: MikrotikActionRecord): boolean =>
+  (a.tenantId || 'tenant-default') === (b.tenantId || 'tenant-default')
+  && (a.webhookPaymentId ?? null) === (b.webhookPaymentId ?? null)
+  && a.customerId === b.customerId
+  && a.actionType === b.actionType
+  && a.dryRun === b.dryRun
+  && idempotencyPayloadsEquivalent(a.payload ?? {}, b.payload ?? {});
+
+const requireIdempotentAction = (rec: MikrotikActionRecord): { tenantId: string; key: string } => {
+  const tenantId = rec.tenantId || 'tenant-default';
+  if (!rec.idempotencyKey) {
+    throw new Error('createActionIdempotent requiere idempotencyKey (las acciones manuales usan createAction).');
+  }
+  if (!rec.webhookPaymentId) {
+    throw new Error('createActionIdempotent requiere webhookPaymentId canónico.');
+  }
+  return { tenantId, key: rec.idempotencyKey };
+};
+
+const assertKnownStep = (step: WebhookReactivationStep): void => {
+  if (!(WEBHOOK_REACTIVATION_STEPS as readonly string[]).includes(step)) {
+    throw new Error(`Checkpoint step no permitido: ${String(step)}`);
+  }
+};
+
+const readProgress = (result: Record<string, unknown> | undefined): WebhookReactivationProgress => {
+  const raw = result?.[WEBHOOK_REACTIVATION_PROGRESS_KEY];
+  if (!raw || typeof raw !== 'object' || Array.isArray(raw)) return {};
+  const record = raw as Record<string, unknown>;
+  const progress: WebhookReactivationProgress = {};
+  for (const step of WEBHOOK_REACTIVATION_STEPS) {
+    if (record[step] === true) progress[step] = true;
+  }
+  return progress;
+};
+
+const copyJsonRecord = (
+  value: Record<string, unknown> | undefined,
+): Record<string, unknown> | undefined => (
+  value === undefined
+    ? undefined
+    : JSON.parse(JSON.stringify(value)) as Record<string, unknown>
+);
+
+/** Copia profunda: el Store nunca entrega referencias que otro owner pueda mutar. */
+const copyAction = (rec: MikrotikActionRecord): MikrotikActionRecord => ({
+  ...rec,
+  payload: copyJsonRecord(rec.payload),
+  result: copyJsonRecord(rec.result),
+});
+
 // ── Contrato ──────────────────────────────────────────────────────────
 
 export interface PaymentRepository {
@@ -99,8 +174,22 @@ export interface PaymentRepository {
 
   // Mikrotik Actions
   listActions(filter?: { customerId?: string; status?: string; tenantId?: string }): Promise<MikrotikActionRecord[]>;
+  /** Ruta manual/legacy: inserta sin identidad durable, como siempre. */
   createAction(rec: MikrotikActionRecord): Promise<MikrotikActionRecord>;
   updateAction(id: string, patch: Partial<MikrotikActionRecord>, tenantId?: string): Promise<MikrotikActionRecord | null>;
+  /** Lectura por identidad durable; `null` significa "no existe", no "error". */
+  findActionByIdempotencyKey(tenantId: string, idempotencyKey: string): Promise<MikrotikActionRecord | null>;
+  /**
+   * Create-or-return atómico de la acción raíz. Todos los owners del mismo
+   * evento reciben el MISMO `actionId`. Una clave repetida con contenido
+   * distinto lanza `IdempotencyConflictError` (fail-closed).
+   */
+  createActionIdempotent(rec: MikrotikActionRecord): Promise<IdempotentActionResult>;
+  /**
+   * Marca un paso `ausente → true` en una sola operación atómica condicionada
+   * al claim vigente. Nunca reemplaza el progreso ni permite regresiones.
+   */
+  checkpointReactivationStep(input: CheckpointStepInput): Promise<CheckpointStepOutcome>;
 
   // ID generators
   nextOrderId(): Promise<string>;
@@ -226,13 +315,17 @@ export class StorePaymentRepository implements PaymentRepository {
     if (filter?.tenantId) actions = actions.filter((a) => matchesTenant(a.tenantId, filter.tenantId!));
     if (filter?.customerId) actions = actions.filter((a) => a.customerId === filter.customerId);
     if (filter?.status) actions = actions.filter((a) => a.status === filter.status);
-    return actions.slice().sort((a, b) => b.createdAt.localeCompare(a.createdAt));
+    // Copias: un lector no puede ver mutaciones a medias de otro owner ni
+    // escribir progreso saltándose el checkpoint condicionado.
+    return actions
+      .map(copyAction)
+      .sort((a, b) => b.createdAt.localeCompare(a.createdAt));
   }
 
   async createAction(rec: MikrotikActionRecord) {
-    const stamped = { ...rec, tenantId: rec.tenantId || 'tenant-default' };
+    const stamped = copyAction({ ...rec, tenantId: rec.tenantId || 'tenant-default' });
     store.MIKROTIK_ACTIONS.push(stamped);
-    return stamped;
+    return copyAction(stamped);
   }
 
   async updateAction(id: string, patch: Partial<MikrotikActionRecord>, tenantId?: string) {
@@ -243,7 +336,67 @@ export class StorePaymentRepository implements PaymentRepository {
     });
     if (!action) return null;
     Object.assign(action, patch, { updatedAt: new Date().toISOString() });
-    return action;
+    return copyAction(action);
+  }
+
+  /** Resolución síncrona por (tenant, key): es el índice único del Store. */
+  private locate(tenantId: string, idempotencyKey: string): MikrotikActionRecord | undefined {
+    return (store.MIKROTIK_ACTIONS as MikrotikActionRecord[]).find(
+      (a) => matchesTenant(a.tenantId, tenantId) && a.idempotencyKey === idempotencyKey,
+    );
+  }
+
+  async findActionByIdempotencyKey(tenantId: string, idempotencyKey: string) {
+    const found = this.locate(tenantId, idempotencyKey);
+    return found ? copyAction(found) : null;
+  }
+
+  async createActionIdempotent(rec: MikrotikActionRecord): Promise<IdempotentActionResult> {
+    // Atómico por construcción: no hay `await` entre la búsqueda y el push, así
+    // que el bucle de eventos no puede intercalar a otro owner.
+    const { tenantId, key } = requireIdempotentAction(rec);
+    const existing = this.locate(tenantId, key);
+    if (existing) {
+      if (!actionsAreEquivalent(existing, { ...rec, tenantId })) {
+        throw new IdempotencyConflictError(ACTION_IDEMPOTENCY_SCOPE, key);
+      }
+      return { outcome: 'existing', action: copyAction(existing) };
+    }
+    const stamped = copyAction({ ...rec, tenantId });
+    store.MIKROTIK_ACTIONS.push(stamped);
+    return { outcome: 'created', action: copyAction(stamped) };
+  }
+
+  async checkpointReactivationStep(input: CheckpointStepInput): Promise<CheckpointStepOutcome> {
+    assertKnownStep(input.step);
+
+    // Mismo orden que la RPC: primero el evento (autoridad del claim), después
+    // la acción. Toda la sección es síncrona: equivale a la transacción SQL.
+    const event = (store.PAYMENT_EVENTS as PaymentEventRecord[]).find(
+      (e) => e.id === input.eventId && matchesTenant(e.tenantId, input.tenantId),
+    );
+    if (!event) throw new Error(`Checkpoint sin evento de pago: ${input.eventId}`);
+    // Ownership ANTES que el bit: si se mirara primero el progreso, un owner
+    // vencido leería `already_applied` y seguiría ejecutando efectos.
+    if (event.processed || event.claimToken !== input.claimToken) return 'ownership_lost';
+
+    const action = (store.MIKROTIK_ACTIONS as MikrotikActionRecord[]).find(
+      (a) => a.id === input.actionId && matchesTenant(a.tenantId, input.tenantId),
+    );
+    if (!action) throw new Error(`Checkpoint sin acción durable: ${input.actionId}`);
+    if (!event.webhookPaymentId || event.webhookPaymentId !== action.webhookPaymentId) {
+      throw new Error(`Checkpoint con identidad canónica inválida: ${input.actionId}`);
+    }
+
+    const progress = readProgress(action.result);
+    if (progress[input.step]) return 'already_applied';
+
+    action.result = {
+      ...(action.result ?? {}),
+      [WEBHOOK_REACTIVATION_PROGRESS_KEY]: { ...progress, [input.step]: true },
+    };
+    action.updatedAt = new Date().toISOString();
+    return 'applied';
   }
 
   async nextOrderId() { return store.getUniquePaymentOrderId(); }
@@ -270,7 +423,8 @@ export class SupabasePaymentRepository implements PaymentRepository {
   async findOrderById(id: string, tenantId?: string) {
     let q = this.client.from('payment_orders').select('*').eq('id', id);
     if (tenantId) q = q.eq('tenant_id', tenantId);
-    const { data } = await q.maybeSingle();
+    const { data, error } = await q.maybeSingle();
+    if (error) throw new Error(`findOrderById: ${error.message}`);
     return data ? rowToPaymentOrder(data as PaymentOrderRow) : null;
   }
 
@@ -279,7 +433,8 @@ export class SupabasePaymentRepository implements PaymentRepository {
       .from('payment_orders').select('*')
       .eq('provider', provider).eq('provider_order_id', providerOrderId);
     if (tenantId) q = q.eq('tenant_id', tenantId);
-    const { data } = await q.maybeSingle();
+    const { data, error } = await q.maybeSingle();
+    if (error) throw new Error(`findOrderByProviderOrderId: ${error.message}`);
     return data ? rowToPaymentOrder(data as PaymentOrderRow) : null;
   }
 
@@ -304,12 +459,13 @@ export class SupabasePaymentRepository implements PaymentRepository {
   async findEventByProviderId(provider: PaymentProvider, providerEventId: string, tenantId: string) {
     // El filtro por tenant es lo que garantiza como mucho una fila: es
     // exactamente la clave del índice único uq_payment_events_tenant_provider_event.
-    const { data } = await this.client
+    const { data, error } = await this.client
       .from('payment_events').select('*')
       .eq('provider', provider)
       .eq('provider_event_id', providerEventId)
       .eq('tenant_id', tenantId)
       .maybeSingle();
+    if (error) throw new Error(`findEventByProviderId: ${error.message}`);
     return data ? rowToPaymentEvent(data as PaymentEventRow) : null;
   }
 
@@ -416,6 +572,59 @@ export class SupabasePaymentRepository implements PaymentRepository {
     const { error } = await q;
     if (error) throw new Error(`updateAction: ${error.message}`);
     return this.listActions({ tenantId }).then((all) => all.find((a) => a.id === id) ?? null);
+  }
+
+  async findActionByIdempotencyKey(tenantId: string, idempotencyKey: string) {
+    const { data, error } = await this.client
+      .from('mikrotik_actions').select('*')
+      .eq('tenant_id', tenantId)
+      .eq('idempotency_key', idempotencyKey)
+      .maybeSingle();
+    // Un error de lectura NO es ausencia: tratarlo así reabriría la duplicación.
+    if (error) throw new Error(`findActionByIdempotencyKey: ${error.message}`);
+    return data ? rowToMikrotikAction(data as MikrotikActionRow) : null;
+  }
+
+  async createActionIdempotent(rec: MikrotikActionRecord): Promise<IdempotentActionResult> {
+    const { tenantId, key } = requireIdempotentAction(rec);
+    const stamped = { ...rec, tenantId };
+
+    // El insert ES el claim de identidad: el índice único parcial
+    // (tenant_id, idempotency_key) deja pasar exactamente a un owner.
+    const { error } = await this.client.from('mikrotik_actions').insert(mikrotikActionToRow(stamped));
+    if (!error) return { outcome: 'created', action: stamped };
+    if (!isUniqueViolation(error)) throw new Error(`createActionIdempotent: ${error.message}`);
+
+    const existing = await this.findActionByIdempotencyKey(tenantId, key);
+    // Perdimos el insert y no vemos la fila: fail-closed y retryable, nunca
+    // seguir con una acción propia que duplicaría toda la familia de efectos.
+    if (!existing) throw new IdempotencyResolutionError(ACTION_IDEMPOTENCY_SCOPE, key);
+    if (!actionsAreEquivalent(existing, stamped)) {
+      throw new IdempotencyConflictError(ACTION_IDEMPOTENCY_SCOPE, key);
+    }
+    return { outcome: 'existing', action: existing };
+  }
+
+  async checkpointReactivationStep(input: CheckpointStepInput): Promise<CheckpointStepOutcome> {
+    assertKnownStep(input.step);
+    const { data, error } = await this.client.rpc('payments_checkpoint_reactivation_step', {
+      p_tenant_id: input.tenantId,
+      p_event_id: input.eventId,
+      p_action_id: input.actionId,
+      p_claim_token: input.claimToken,
+      p_step: input.step,
+    });
+    // RPC ausente, deadlock, error de serialización o cualquier fallo de base
+    // se propagan como retryable: nunca se traducen a "no hay progreso".
+    if (error) throw new Error(`checkpointReactivationStep: ${error.message}`);
+    if (Array.isArray(data) && data.length !== 1) {
+      throw new Error(`checkpointReactivationStep: cardinalidad inválida (${data.length})`);
+    }
+    const outcome = Array.isArray(data) ? data[0] : data;
+    if (outcome === 'applied' || outcome === 'already_applied' || outcome === 'ownership_lost') {
+      return outcome;
+    }
+    throw new Error(`checkpointReactivationStep: respuesta desconocida (${JSON.stringify(outcome)})`);
   }
 
   async nextOrderId() { return 'po-' + crypto.randomUUID().replace(/-/g, '').slice(0, 12); }

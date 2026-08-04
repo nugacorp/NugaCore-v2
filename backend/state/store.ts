@@ -83,6 +83,12 @@ export interface ClientTimelineEvent {
   details?: string;
   createdAt: string;
   createdBy?: string;
+  /**
+   * Identidad durable del efecto de webhook (T5). Nulas en el resto de
+   * llamadas y en filas históricas; su unicidad es un índice PARCIAL.
+   */
+  tenantId?: string;
+  idempotencyKey?: string;
 }
 
 export interface PlanMetadata {
@@ -98,7 +104,17 @@ export interface PaymentAllocation {
   method: string;
   paymentDate: string;
   transactionId?: string;
+  /** Proveedor del cobro durable; ausente en pagos manuales/históricos. */
+  provider?: string;
   remainingAfterPayment: number;
+  /**
+   * Identidad tenant-scoped del pago de webhook (T5). Nula en pagos manuales
+   * y en filas históricas: la unicidad del ledger es un índice PARCIAL.
+   */
+  tenantId?: string;
+  idempotencyKey?: string;
+  /** El cargo que cruzó pendiente→saldada bajo la exclusión del ledger. */
+  settlementWinner?: boolean;
 }
 
 export interface InventoryItemState {
@@ -205,6 +221,8 @@ export type MikrotikActionStatus = 'pending' | 'executing' | 'completed' | 'fail
 
 export interface PaymentOrderRecord {
   id: string;
+  /** WISP dueño de la orden; ausente en filas legacy => tenant-default. */
+  tenantId?: string;
   customerId: string;
   invoiceId: string;
   provider: string;
@@ -220,6 +238,8 @@ export interface PaymentOrderRecord {
 
 export interface PaymentEventRecord {
   id: string;
+  /** Tenant/lease fields used by the atomic webhook claim (T5). */
+  tenantId?: string;
   provider: string;
   providerEventId: string;
   eventType: string;
@@ -227,7 +247,11 @@ export interface PaymentEventRecord {
   paymentOrderId?: string;
   payload: Record<string, unknown>;
   receivedAt: string;
+  claimedAt?: string;
+  claimToken?: string;
   processedAt?: string;
+  /** Durable internal payment/allocation identity resolved by Billing. */
+  webhookPaymentId?: string;
 }
 
 export interface MikrotikActionRecord {
@@ -240,6 +264,8 @@ export interface MikrotikActionRecord {
   payload?: Record<string, unknown>;
   result?: Record<string, unknown>;
   triggeredBy?: string;
+  /** Durable internal payment/allocation identity that owns this family. */
+  webhookPaymentId?: string;
   createdAt: string;
   updatedAt: string;
 }
@@ -890,12 +916,7 @@ export const store: {
     return `pe-${nextNum}`;
   },
   getUniqueMikrotikActionId() {
-    let nextNum = this.MIKROTIK_ACTIONS.length + 1;
-    const ids = new Set(this.MIKROTIK_ACTIONS.map((a) => a.id));
-    while (ids.has(`ma-${nextNum}`)) {
-      nextNum++;
-    }
-    return `ma-${nextNum}`;
+    return `ma-${crypto.randomUUID().replace(/-/g, '').slice(0, 12)}`;
   },
 };
 

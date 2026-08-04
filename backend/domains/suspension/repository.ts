@@ -9,6 +9,8 @@
 // ====================================================================
 
 import type { SupabaseClient } from '@supabase/supabase-js';
+import { IdempotencyConflictError, IdempotencyResolutionError } from '../../common/errors';
+import { idempotencyPayloadsEquivalent, tenantScopedIdempotencyId } from '../../common/idempotency';
 import {
   CustomerServiceState,
   OrderUpdate,
@@ -33,6 +35,12 @@ import {
   stateToRow,
 } from './mappers';
 
+/**
+ * `tenantId`/`idempotencyKey` son OPCIONALES a propósito: los callers
+ * históricos (motor, rutas manuales) siguen sin identidad durable y conservan
+ * su comportamiento. Sólo el flujo de webhook los envía, y sólo entonces el
+ * destino hace create-or-return.
+ */
 export interface RecordEventInput {
   customerId: string;
   invoiceId?: string;
@@ -41,6 +49,8 @@ export interface RecordEventInput {
   automatic: boolean;
   actorId?: string;
   metadata?: Record<string, unknown>;
+  tenantId?: string;
+  idempotencyKey?: string;
 }
 
 export interface CreateOrderInput {
@@ -49,7 +59,35 @@ export interface CreateOrderInput {
   orderType: SuspensionOrder['orderType'];
   source: 'engine' | 'manual' | 'payment-engine' | 'provisioning-center' | 'service-status';
   reason?: string;
+  tenantId?: string;
+  idempotencyKey?: string;
 }
+
+export interface OrderListFilter {
+  customerId?: string;
+  status?: string;
+  tenantId?: string;
+  orderId?: string;
+}
+
+const isUniqueViolation = (error: { code?: string; message?: string }): boolean =>
+  String(error?.code) === '23505' || /duplicate key|already exists/i.test(String(error?.message ?? ''));
+
+const eventIsEquivalent = (existing: SuspensionEvent, input: RecordEventInput): boolean =>
+  existing.customerId === input.customerId
+  && (existing.invoiceId ?? null) === (input.invoiceId ?? null)
+  && existing.eventType === input.eventType
+  && (existing.reason ?? null) === (input.reason ?? null)
+  && existing.automatic === input.automatic
+  && (existing.actorId ?? null) === (input.actorId ?? null)
+  && idempotencyPayloadsEquivalent(existing.metadata ?? {}, input.metadata ?? {});
+
+const orderIsEquivalent = (existing: SuspensionOrder, input: CreateOrderInput): boolean =>
+  existing.customerId === input.customerId
+  && (existing.invoiceId ?? null) === (input.invoiceId ?? null)
+  && existing.orderType === input.orderType
+  && existing.source === input.source
+  && (existing.reason ?? null) === (input.reason ?? null);
 
 export interface SuspensionRepository {
   getPolicy(): Promise<SuspensionPolicyV2>;
@@ -62,7 +100,7 @@ export interface SuspensionRepository {
   recordEvent(input: RecordEventInput): Promise<SuspensionEvent>;
   listEvents(customerId?: string): Promise<SuspensionEvent[]>;
 
-  listOrders(filter?: { customerId?: string; status?: string }): Promise<SuspensionOrder[]>;
+  listOrders(filter?: OrderListFilter): Promise<SuspensionOrder[]>;
   openOrders(customerId: string, orderType?: SuspensionOrder['orderType']): Promise<SuspensionOrder[]>;
   createOrder(input: CreateOrderInput): Promise<SuspensionOrder>;
   cancelOpenOrders(customerId: string, orderType: SuspensionOrder['orderType'], reason: string, actorId?: string): Promise<number>;
@@ -90,10 +128,12 @@ export class StoreSuspensionRepository implements SuspensionRepository {
     return customerId ? engineStore.EVENTS.filter((e) => e.customerId === customerId) : engineStore.EVENTS;
   }
 
-  async listOrders(filter?: { customerId?: string; status?: string }) {
+  async listOrders(filter?: OrderListFilter) {
     let rows = engineStore.ORDERS;
     if (filter?.customerId) rows = rows.filter((o) => o.customerId === filter.customerId);
     if (filter?.status) rows = rows.filter((o) => o.status === filter.status);
+    if (filter?.tenantId) rows = rows.filter((o) => (o.tenantId || 'tenant-default') === filter.tenantId);
+    if (filter?.orderId) rows = rows.filter((o) => o.id === filter.orderId);
     return rows;
   }
   async openOrders(customerId: string, orderType?: SuspensionOrder['orderType']) {
@@ -152,10 +192,33 @@ export class SupabaseSuspensionRepository implements SuspensionRepository {
   }
 
   async recordEvent(input: RecordEventInput): Promise<SuspensionEvent> {
-    const ev: SuspensionEvent = { id: `sev-${this.eventSeq++}`, createdAt: new Date().toISOString(), ...input };
+    const durable = Boolean(input.idempotencyKey);
+    const tenantId = durable ? (input.tenantId || 'tenant-default') : input.tenantId;
+    const ev: SuspensionEvent = {
+      id: durable
+        ? tenantScopedIdempotencyId('sev', tenantId!, input.idempotencyKey!)
+        : `sev-${this.eventSeq++}`,
+      createdAt: new Date().toISOString(),
+      ...input,
+      tenantId,
+    };
     const { error } = await this.client.from('suspension_events').insert(eventToRow(ev));
-    if (error) throw new Error(`recordEvent: ${error.message}`);
-    return ev;
+    if (!error) return ev;
+    // Sin identidad durable no hay create-or-return posible: el error es real.
+    if (!durable || !isUniqueViolation(error)) throw new Error(`recordEvent: ${error.message}`);
+
+    const { data, error: readError } = await this.client
+      .from('suspension_events').select('*')
+      .eq('tenant_id', tenantId!)
+      .eq('idempotency_key', input.idempotencyKey!)
+      .maybeSingle();
+    if (readError) throw new Error(`recordEvent(read): ${readError.message}`);
+    if (!data) throw new IdempotencyResolutionError('suspension_events', input.idempotencyKey!);
+    const existing = rowToEvent(data as EventRow);
+    if (!eventIsEquivalent(existing, input)) {
+      throw new IdempotencyConflictError('suspension_events', input.idempotencyKey!);
+    }
+    return existing;
   }
 
   async listEvents(customerId?: string): Promise<SuspensionEvent[]> {
@@ -166,16 +229,18 @@ export class SupabaseSuspensionRepository implements SuspensionRepository {
     return (data || []).map((r) => rowToEvent(r as EventRow));
   }
 
-  private async loadOrders(table: 'suspension_orders' | 'reactivation_orders', orderType: SuspensionOrder['orderType'], filter?: { customerId?: string; status?: string }) {
+  private async loadOrders(table: 'suspension_orders' | 'reactivation_orders', orderType: SuspensionOrder['orderType'], filter?: OrderListFilter) {
     let q = this.client.from(table).select('*').order('created_at', { ascending: false });
     if (filter?.customerId) q = q.eq('customer_id', filter.customerId);
     if (filter?.status) q = q.eq('status', filter.status);
+    if (filter?.tenantId) q = q.eq('tenant_id', filter.tenantId);
+    if (filter?.orderId) q = q.eq('id', filter.orderId);
     const { data, error } = await q;
     if (error) throw new Error(`loadOrders(${table}): ${error.message}`);
     return (data || []).map((r) => rowToOrder(r as OrderRow, orderType));
   }
 
-  async listOrders(filter?: { customerId?: string; status?: string }): Promise<SuspensionOrder[]> {
+  async listOrders(filter?: OrderListFilter): Promise<SuspensionOrder[]> {
     const [susp, react] = await Promise.all([
       this.loadOrders('suspension_orders', 'suspension', filter),
       this.loadOrders('reactivation_orders', 'reactivation', filter),
@@ -190,18 +255,37 @@ export class SupabaseSuspensionRepository implements SuspensionRepository {
 
   async createOrder(input: CreateOrderInput): Promise<SuspensionOrder> {
     const isSusp = input.orderType === 'suspension';
+    const durable = Boolean(input.idempotencyKey);
+    const tenantId = durable ? (input.tenantId || 'tenant-default') : input.tenantId;
     const order: SuspensionOrder = {
-      id: `${isSusp ? 'sord' : 'rord'}-${this.orderSeq++}`,
+      id: durable
+        ? tenantScopedIdempotencyId(isSusp ? 'sord' : 'rord', tenantId!, input.idempotencyKey!)
+        : `${isSusp ? 'sord' : 'rord'}-${this.orderSeq++}`,
       status: 'PENDING',
       createdAt: new Date().toISOString(),
       ...input,
+      tenantId,
     };
     const table = isSusp ? 'suspension_orders' : 'reactivation_orders';
     const row = orderToRow(order);
     if (isSusp) (row as Record<string, unknown>).order_type = 'suspension';
     const { error } = await this.client.from(table).insert(row);
-    if (error) throw new Error(`createOrder: ${error.message}`);
-    return order;
+    if (!error) return order;
+    if (!durable || !isUniqueViolation(error)) throw new Error(`createOrder: ${error.message}`);
+
+    // Una sola fila durable por (tenant, key): el segundo owner la recupera.
+    const { data, error: readError } = await this.client
+      .from(table).select('*')
+      .eq('tenant_id', tenantId!)
+      .eq('idempotency_key', input.idempotencyKey!)
+      .maybeSingle();
+    if (readError) throw new Error(`createOrder(read): ${readError.message}`);
+    if (!data) throw new IdempotencyResolutionError('reactivation_orders', input.idempotencyKey!);
+    const existing = rowToOrder(data as OrderRow, input.orderType);
+    if (!orderIsEquivalent(existing, input)) {
+      throw new IdempotencyConflictError('reactivation_orders', input.idempotencyKey!);
+    }
+    return existing;
   }
 
   async cancelOpenOrders(customerId: string, orderType: SuspensionOrder['orderType'], reason: string, actorId?: string): Promise<number> {

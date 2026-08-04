@@ -18,6 +18,11 @@ import { Invoice } from '../../../src/types';
 import { store } from '../../state/store';
 import { logger } from '../../common/logger';
 import {
+  BadRequestError,
+  IdempotencyConflictError,
+  ServiceUnavailableError,
+} from '../../common/errors';
+import {
   AllocationEntry,
   EnrichedInvoice,
   InvoiceItem,
@@ -78,6 +83,73 @@ export interface PaymentRecordInput {
   transactionId: string;
 }
 
+// ── Pago de webhook: atómico, idempotente y condicionado al claim ──────
+//
+// El check en memoria sobre `invoice.payments[].transactionId` NO es el gate
+// de unicidad: entre la lectura y el `recordPayment` cabe otro owner. Esta
+// operación mueve la decisión al mismo lugar donde vive el ledger, de forma
+// que crear el pago, garantizar su aplicación y recalcular la factura ocurren
+// bajo el mismo lock, con el claim validado antes de escribir nada.
+
+export interface WebhookPaymentInput {
+  invoiceId: string;
+  tenantId: string;
+  amount: number;
+  method: string;
+  /** Proveedor que asignó transactionId/orderId. */
+  provider: string;
+  transactionId: string;
+  /** Identidad tenant-scoped del pago; estable entre owners y reentregas. */
+  idempotencyKey: string;
+  /** Claim vigente; sin él la operación no escribe. */
+  claim: { eventId: string; claimToken: string };
+}
+
+export type WebhookPaymentOutcome = 'created' | 'existing' | 'ownership_lost';
+
+export interface WebhookPaymentResult {
+  outcome: WebhookPaymentOutcome;
+  /** Factura resultante; `null` cuando el claim se perdió y no se escribió. */
+  invoice: EnrichedInvoice | null;
+  /** Transición calculada dentro del lock; nunca se deriva del reload posterior. */
+  wasSettledBefore: boolean;
+  isSettledAfter: boolean;
+  /** Identidad durable del único cargo autorizado a iniciar la raíz. */
+  settlementWinner: boolean;
+  /** Internal ledger identity shared by every delivery of the same charge. */
+  canonicalPaymentId: string | null;
+}
+
+export const BILLING_IDEMPOTENCY_SCOPE = 'payments';
+
+const POSTGRES_INTEGER_MAX = 2_147_483_647;
+
+/**
+ * Normaliza el importe del webhook al mismo dominio que acepta la RPC
+ * (`INTEGER` de centavos). Validar antes de consultar adapters evita que
+ * NaN/Infinity, importes no positivos, sub-centavo u overflow produzcan
+ * efectos distintos entre Store y PostgreSQL.
+ */
+export const webhookPaymentAmountCents = (amount: number): number => {
+  const cents = Math.round(amount * 100);
+  const normalizedAmount = cents / 100;
+  const centTolerance = Number.EPSILON * Math.max(1, Math.abs(amount)) * 4;
+  if (
+    !Number.isFinite(amount)
+    || amount <= 0
+    || !Number.isSafeInteger(cents)
+    || cents <= 0
+    || cents > POSTGRES_INTEGER_MAX
+    || Math.abs(amount - normalizedAmount) > centTolerance
+  ) {
+    throw new BadRequestError(
+      'El importe del webhook debe ser finito, positivo y representable en centavos.',
+      'INVALID_AMOUNT',
+    );
+  }
+  return cents;
+};
+
 // ── Contrato ──────────────────────────────────────────────────────────
 
 export interface BillingRepository {
@@ -90,6 +162,12 @@ export interface BillingRepository {
   updateInvoice(id: string, input: InvoiceUpdateInput, tenantId?: string): Promise<EnrichedInvoice | null>;
   cancelInvoice(id: string, reason?: string, tenantId?: string): Promise<EnrichedInvoice | null>;
   recordPayment(invoiceId: string, input: PaymentRecordInput, tenantId?: string): Promise<EnrichedInvoice>;
+  /**
+   * Ruta exclusiva del webhook: valida el claim, crea o recupera el pago por
+   * identidad y deja factura + aplicación consistentes en una sola operación.
+   * Los pagos manuales siguen usando `recordPayment` sin clave.
+   */
+  applyWebhookPayment(input: WebhookPaymentInput): Promise<WebhookPaymentResult>;
   generateInvoiceId(): Promise<string>;
 }
 
@@ -129,6 +207,8 @@ const syncStatus = (inv: Invoice): void => {
 
 const enrich = (inv: Invoice): EnrichedInvoice => ({
   ...inv,
+  items: inv.items.map((item) => ({ ...item })),
+  payments: inv.payments.map((payment) => ({ ...payment })),
   paidAmount: invoicePaidAmount(inv),
   pendingAmount: invoicePendingAmount(inv),
 });
@@ -305,6 +385,100 @@ export class StoreBillingRepository implements BillingRepository {
     return enrich(inv);
   }
 
+  async applyWebhookPayment(input: WebhookPaymentInput): Promise<WebhookPaymentResult> {
+    webhookPaymentAmountCents(input.amount);
+    // Toda la secuencia es síncrona tras esta línea: sin `await` intermedio el
+    // bucle de eventos no puede intercalar a otro owner, que es la propiedad
+    // que en Supabase da la transacción. Payments y Billing comparten Store
+    // porque el capability gate rechaza los tuples mixtos.
+    const invoice = store.INVOICES.find(
+      (i) => i.id === input.invoiceId && (i.tenantId || 'tenant-default') === input.tenantId,
+    );
+    if (!invoice) throw new Error(`Invoice not found: ${input.invoiceId}`);
+
+    const event = store.PAYMENT_EVENTS.find(
+      (e) => e.id === input.claim.eventId && (e.tenantId || 'tenant-default') === input.tenantId,
+    );
+    if (!event) throw new Error(`applyWebhookPayment: evento de pago inexistente (${input.claim.eventId})`);
+    // Ownership primero: un owner vencido no puede tocar el ledger.
+    if (event.processed || event.claimToken !== input.claim.claimToken) {
+      return {
+        outcome: 'ownership_lost', invoice: null,
+        wasSettledBefore: false, isSettledAfter: false, settlementWinner: false,
+        canonicalPaymentId: null,
+      };
+    }
+
+    const existingByCharge = store.PAYMENT_ALLOCATIONS.find(
+      (a) =>
+        (a.tenantId || 'tenant-default') === input.tenantId
+        && a.provider === input.provider
+        && a.transactionId === input.transactionId,
+    );
+    const existingByKey = store.PAYMENT_ALLOCATIONS.find(
+      (a) =>
+        (a.tenantId || 'tenant-default') === input.tenantId
+        && a.idempotencyKey === input.idempotencyKey,
+    );
+    if (existingByKey && existingByCharge && existingByKey.id !== existingByCharge.id) {
+      throw new IdempotencyConflictError(BILLING_IDEMPOTENCY_SCOPE, input.idempotencyKey);
+    }
+    const existing = existingByCharge ?? existingByKey;
+    if (existing) {
+      if (
+        existing.invoiceId !== input.invoiceId
+        || existing.amount !== input.amount
+        || existing.method !== input.method
+        || existing.provider !== input.provider
+        || (existing.transactionId ?? null) !== (input.transactionId ?? null)
+      ) {
+        throw new IdempotencyConflictError(BILLING_IDEMPOTENCY_SCOPE, input.idempotencyKey);
+      }
+      syncStatus(invoice);
+      event.webhookPaymentId = existing.id;
+      const settled = invoice.status === 'paid' && invoicePendingAmount(invoice) <= 0;
+      return {
+        outcome: 'existing',
+        invoice: enrich(invoice),
+        wasSettledBefore: settled,
+        isSettledAfter: settled,
+        settlementWinner: existing.settlementWinner === true,
+        canonicalPaymentId: existing.id,
+      };
+    }
+
+    const wasSettledBefore = invoice.status === 'paid' && invoicePendingAmount(invoice) <= 0;
+    invoice.payments.push({
+      date: new Date().toISOString().replace('T', ' ').substring(0, 16),
+      amount: input.amount,
+      method: input.method,
+      provider: input.provider,
+      transactionId: input.transactionId,
+    });
+    syncStatus(invoice);
+    const isSettledAfter = invoice.status === 'paid' && invoicePendingAmount(invoice) <= 0;
+    const settlementWinner = !wasSettledBefore && isSettledAfter;
+    const canonicalPaymentId = store.getUniquePaymentAllocationId();
+    store.PAYMENT_ALLOCATIONS.unshift({
+      id: canonicalPaymentId,
+      invoiceId: input.invoiceId,
+      amount: input.amount,
+      method: input.method,
+      paymentDate: new Date().toISOString(),
+      transactionId: input.transactionId,
+      provider: input.provider,
+      remainingAfterPayment: invoicePendingAmount(invoice),
+      tenantId: input.tenantId,
+      idempotencyKey: input.idempotencyKey,
+      settlementWinner,
+    });
+    event.webhookPaymentId = canonicalPaymentId;
+    return {
+      outcome: 'created', invoice: enrich(invoice), wasSettledBefore, isSettledAfter,
+      settlementWinner, canonicalPaymentId,
+    };
+  }
+
   async generateInvoiceId(): Promise<string> {
     return store.getUniqueInvoiceId();
   }
@@ -337,7 +511,7 @@ export class SupabaseBillingRepository implements BillingRepository {
     if (invoiceIds.length === 0) return new Map();
     const { data, error } = await this.client
       .from('payment_applications')
-      .select('id, payment_id, invoice_id, applied_cents, applied_at, applied_by, payments(id, method, transaction_id, amount_cents, payment_date, status)')
+      .select('id, payment_id, invoice_id, applied_cents, applied_at, applied_by, payments(id, method, provider, transaction_id, amount_cents, payment_date, status)')
       .in('invoice_id', invoiceIds)
       .order('applied_at', { ascending: true });
     if (error) throw new Error(`payment_applications: ${error.message}`);
@@ -383,7 +557,8 @@ export class SupabaseBillingRepository implements BillingRepository {
     let query = this.client.from('invoices').select('*').eq('id', id);
     if (tenantId) query = query.eq('tenant_id', tenantId);
     const { data, error } = await query.maybeSingle();
-    if (error || !data) return null;
+    if (error) throw new Error(`findInvoiceById: ${error.message}`);
+    if (!data) return null;
     const row = data as InvoiceRow;
     const [itemMap, appMap] = await Promise.all([
       this.loadItems([id]),
@@ -612,6 +787,75 @@ export class SupabaseBillingRepository implements BillingRepository {
 
     logger.info(`Payment recorded: ${paymentId} → ${invoiceId} (${newStatus})`);
     return (await this.findInvoiceById(invoiceId))!;
+  }
+
+  async applyWebhookPayment(input: WebhookPaymentInput): Promise<WebhookPaymentResult> {
+    const amountCents = webhookPaymentAmountCents(input.amount);
+    // Una sola transacción Postgres: bloquea el evento, después la factura,
+    // crea o recupera el pago por identidad, garantiza UNA aplicación y
+    // recalcula totales desde la suma real. No hay fallback a la ruta
+    // multi-write: si la RPC no existe, el flujo falla cerrado y es retryable.
+    const { data, error } = await this.client.rpc('billing_apply_webhook_payment', {
+      p_tenant_id: input.tenantId,
+      p_event_id: input.claim.eventId,
+      p_claim_token: input.claim.claimToken,
+      p_invoice_id: input.invoiceId,
+      p_amount_cents: amountCents,
+      p_method: input.method,
+      p_provider: input.provider,
+      p_transaction_id: input.transactionId,
+      p_idempotency_key: input.idempotencyKey,
+    });
+    if (error) {
+      if (/idempotency_conflict/i.test(error.message || '')) {
+        throw new IdempotencyConflictError(BILLING_IDEMPOTENCY_SCOPE, input.idempotencyKey);
+      }
+      throw new ServiceUnavailableError(
+        'No fue posible aplicar el cobro de webhook de forma atómica.',
+        'WEBHOOK_LEDGER_UNAVAILABLE',
+      );
+    }
+
+    if (Array.isArray(data) && data.length !== 1) {
+      throw new ServiceUnavailableError(
+        'Billing devolvió una cardinalidad inválida para el cobro.',
+        'WEBHOOK_LEDGER_INVALID_RESPONSE',
+      );
+    }
+    const raw = (Array.isArray(data) ? data[0] : data) as Record<string, unknown> | null;
+    const outcome = raw?.outcome;
+    const wasSettledBefore = raw?.was_settled_before === true;
+    const isSettledAfter = raw?.is_settled_after === true;
+    const settlementWinner = raw?.settlement_winner === true;
+    const canonicalPaymentId = typeof raw?.canonical_payment_id === 'string'
+      ? raw.canonical_payment_id
+      : null;
+    if (outcome === 'ownership_lost') {
+      return {
+        outcome, invoice: null, wasSettledBefore, isSettledAfter, settlementWinner,
+        canonicalPaymentId,
+      };
+    }
+    if (outcome !== 'created' && outcome !== 'existing') {
+      throw new ServiceUnavailableError(
+        'Billing devolvió una respuesta desconocida para el cobro.',
+        'WEBHOOK_LEDGER_INVALID_RESPONSE',
+      );
+    }
+    if (!canonicalPaymentId) {
+      throw new ServiceUnavailableError(
+        'Billing no devolvió la identidad canónica del cobro.',
+        'WEBHOOK_LEDGER_INVALID_RESPONSE',
+      );
+    }
+    return {
+      outcome,
+      invoice: await this.findInvoiceById(input.invoiceId, input.tenantId),
+      wasSettledBefore,
+      isSettledAfter,
+      settlementWinner,
+      canonicalPaymentId,
+    };
   }
 
   async generateInvoiceId(): Promise<string> {

@@ -218,7 +218,14 @@ export interface Invoice {
   cfdiStatus: 'pending' | 'generated' | 'canceled';
   cfdiUuid?: string;
   items: { description: string; price: number; qty: number }[];
-  payments: { date: string; amount: number; method: string; transactionId?: string }[];
+  payments: {
+    date: string;
+    amount: number;
+    method: string;
+    /** Proveedor que asignó transactionId; ausente para cobros manuales/legacy. */
+    provider?: string;
+    transactionId?: string;
+  }[];
   /** Tenant WISP (multi-tenant). Ausente ⇒ tenant-default. */
   tenantId?: string;
   // Campos enriquecidos por el backend (EnrichedInvoice). Opcionales y aditivos:
@@ -481,6 +488,9 @@ export interface NocAlert {
   message: string;
   timestamp: string;
   acknowledged: boolean;
+  /** WISP dueño de la alerta e identidad durable del efecto que la generó. */
+  tenantId?: string;
+  idempotencyKey?: string;
 }
 
 export interface NapPort {

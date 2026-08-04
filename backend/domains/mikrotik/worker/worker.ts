@@ -29,31 +29,53 @@ const planFor = (
   return buildReactivateCommands(ctx, { hardCutPpp: true });
 };
 
-const resolveRouterForCustomer = (routerId?: string) => {
+const resolveRouterForCustomer = (tenantId: string, routerId?: string) => {
   if (routerId) {
     const direct = inventoryRoutersRepository.getById(routerId);
-    if (direct) return direct;
+    // Un router explícito de otro WISP no habilita fallback: falla cerrado.
+    if (!direct || (direct.tenantId || 'tenant-default') !== tenantId) return undefined;
+    return direct;
   }
-  const routers = inventoryRoutersRepository.list();
+  const routers = inventoryRoutersRepository.list()
+    .filter((router) => (router.tenantId || 'tenant-default') === tenantId);
   return routers.find((r) => r.encryptedPassword || r.hasCredentials) ?? routers[0];
 };
 
-export async function processPendingOrders(actorId?: string): Promise<WorkerRun> {
+export async function processPendingOrders(
+  actorId?: string,
+  scope?: { tenantId: string; orderId: string },
+): Promise<WorkerRun> {
   const startedAt = nowIso();
   const runId = workerStore.nextRunId();
   const repo = getSuspensionService().repo;
   const customers = getCustomersService();
   const commitEnabled = productionGates.mikrotikWorkerCommit();
 
-  const pending = await repo.listOrders({ status: 'PENDING' });
+  const pending = await repo.listOrders({
+    status: 'PENDING',
+    tenantId: scope?.tenantId,
+    orderId: scope?.orderId,
+  });
   const results: OrderProcessResult[] = [];
 
   for (const order of pending) {
-    const client = await customers.getById(order.customerId);
+    const tenantId = order.tenantId || 'tenant-default';
+    const client = await customers.getById(order.customerId, tenantId);
+    if (!client) {
+      const note = `COMMIT falló: cliente no encontrado dentro del tenant para ${order.customerId}.`;
+      await repo.updateOrder(order, {
+        status: 'FAILED', executedAt: nowIso(), dryRun: !commitEnabled, workerRunId: runId, workerNote: note,
+      });
+      results.push({
+        orderId: order.id, orderType: order.orderType, customerId: order.customerId,
+        dryRun: !commitEnabled, outcome: 'failed', plannedCommands: [], note,
+      });
+      continue;
+    }
     const pppoeUser = client?.pppoeUser || order.customerId;
     const ip = client?.ip || '0.0.0.0';
     const plannedCommands = planFor(order.orderType, pppoeUser, ip, order.customerId);
-    const router = resolveRouterForCustomer(client?.routerId);
+    const router = resolveRouterForCustomer(tenantId, client.routerId);
 
     if (!commitEnabled) {
       const note = `DRY-RUN: ${order.orderType} simulada para ${order.customerId}. No se ejecutó ninguna acción en el router.`;
@@ -101,7 +123,7 @@ export async function processPendingOrders(actorId?: string): Promise<WorkerRun>
     const exec = await executePlannedCommands(router, plannedCommands);
     if (exec.ok) {
       const nextStatus = order.orderType === 'suspension' ? 'suspended' : 'active';
-      if (client) await customers.update(order.customerId, { status: nextStatus });
+      await customers.update(order.customerId, { status: nextStatus }, tenantId);
       const note = `COMMIT OK: ${order.orderType} ejecutada en router ${router.name} (${exec.executed} comandos).`;
       await repo.updateOrder(order, {
         status: 'EXECUTED',

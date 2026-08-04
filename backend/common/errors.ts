@@ -11,6 +11,7 @@
 // Los logs 5xx incluyen requestId (correlation) cuando está disponible.
 // ====================================================================
 
+import { createHash } from 'node:crypto';
 import { NextFunction, Request, RequestHandler, Response } from 'express';
 import { logger } from './logger';
 import { redactSensitivePath } from './log-redaction';
@@ -60,6 +61,52 @@ export class ConflictError extends AppError {
   constructor(message = 'Conflict', code = 'CONFLICT') {
     super(409, message, code);
     this.name = 'ConflictError';
+  }
+}
+
+/**
+ * Misma clave de idempotencia con un payload/propietario distinto. Es un fallo
+ * DETERMINISTA de integridad, no una carrera: reintentarlo dentro del handler
+ * volvería a fallar, así que nunca debe confundirse con la pérdida de un claim
+ * ni con un error transitorio de base de datos. Requiere intervención.
+ */
+export class IdempotencyConflictError extends AppError {
+  public readonly fingerprint: string;
+
+  constructor(
+    public readonly scope: string,
+    idempotencyKey: string,
+    message = `Conflicto de idempotencia en ${scope}: la clave ya existe con otro contenido.`,
+  ) {
+    super(409, message, 'IDEMPOTENCY_CONFLICT');
+    this.name = 'IdempotencyConflictError';
+    this.fingerprint = opaqueFingerprint(idempotencyKey);
+  }
+}
+
+/** Fingerprint correlacionable que no conserva ni expone la identidad original. */
+export const opaqueFingerprint = (identity: string): string =>
+  createHash('sha256').update(identity).digest('hex').slice(0, 16);
+
+/** Dependencia o capacidad no disponible: el llamador debe reintentar. */
+export class ServiceUnavailableError extends AppError {
+  constructor(message = 'Service unavailable', code = 'SERVICE_UNAVAILABLE') {
+    super(503, message, code);
+    this.name = 'ServiceUnavailableError';
+  }
+}
+
+/** Una colisión unique no pudo releerse de forma segura; es retryable y redactada. */
+export class IdempotencyResolutionError extends ServiceUnavailableError {
+  public readonly fingerprint: string;
+
+  constructor(public readonly scope: string, idempotencyKey: string) {
+    super(
+      `No fue posible resolver de forma segura una escritura idempotente en ${scope}.`,
+      'IDEMPOTENCY_RESOLUTION_UNAVAILABLE',
+    );
+    this.name = 'IdempotencyResolutionError';
+    this.fingerprint = opaqueFingerprint(idempotencyKey);
   }
 }
 

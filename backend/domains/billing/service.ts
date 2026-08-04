@@ -27,6 +27,9 @@ import {
   RevenueReportResult,
   StoreBillingRepository,
   SupabaseBillingRepository,
+  WebhookPaymentInput,
+  WebhookPaymentResult,
+  webhookPaymentAmountCents,
 } from './repository';
 import { AccountBalance, CreatePaymentBody, PaymentRecord } from './types';
 
@@ -226,6 +229,12 @@ export class BillingService {
     tenantId?: string,
   ): Promise<EnrichedInvoice> {
     return this.repo.recordPayment(invoiceId, input, tenantId);
+  }
+
+  /** Ruta del webhook: atómica, idempotente y condicionada al claim vigente. */
+  async applyWebhookPayment(input: WebhookPaymentInput): Promise<WebhookPaymentResult> {
+    webhookPaymentAmountCents(input.amount);
+    return this.repo.applyWebhookPayment(input);
   }
 
   cancelInvoice(

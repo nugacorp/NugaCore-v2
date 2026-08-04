@@ -28,10 +28,12 @@ import {
 } from '../../backend/domains/payments/repository';
 import { resetPaymentService } from '../../backend/domains/payments/service';
 import type { PaymentEventRecord, PaymentOrderRecord } from '../../backend/domains/payments/types';
+import { engineStore } from '../../backend/domains/suspension/engine-store';
 import { store } from '../../backend/state/store';
 
 const TENANT_A = 'tenant-a';
 const TENANT_B = 'tenant-b';
+const TEST_ROUTER_PREFIX = 'router-openpay-contract-';
 
 /** Cuerpo único de rechazo: no distingue token inexistente de secreto ausente. */
 const REJECTED = { error: 'Webhook no disponible.', code: 'WEBHOOK_REJECTED' };
@@ -124,8 +126,26 @@ const seedCustomer = (tenantId: string): string => {
     planId: 'plan-basic',
     ip: '10.100.0.1',
     connectionType: 'WISP',
+    routerId: `${TEST_ROUTER_PREFIX}${tenantId}`,
   } as (typeof store.CLIENTS)[number]);
   return id;
+};
+
+/** Factura pendiente que corresponde a las orders de este contrato. */
+const seedInvoice = (tenantId: string): void => {
+  store.INVOICES.push({
+    id: `fac-${tenantId}`,
+    tenantId,
+    clientId: `c-${tenantId}`,
+    clientName: `Cliente ${tenantId}`,
+    amount: 299,
+    dateStr: '2026-07-01',
+    dueDateStr: '2099-12-31',
+    status: 'unpaid',
+    cfdiStatus: 'pending',
+    items: [],
+    payments: [],
+  } as (typeof store.INVOICES)[number]);
 };
 
 let app: Express;
@@ -136,7 +156,19 @@ const reset = () => {
   store.PAYMENT_ORDERS.length = 0;
   store.PAYMENT_EVENTS.length = 0;
   store.MIKROTIK_ACTIONS.length = 0;
+  // T5 añade destinos durables derivados de actionId+step. Al reiniciar el
+  // contador de acciones también hay que limpiar esos destinos; de otro modo
+  // un caso posterior reutiliza `ma-1:*` y ve un conflicto ficticio.
+  store.CLIENT_TIMELINE.length = 0;
+  store.NOC_ALERTS.length = 0;
+  store.PAYMENT_ALLOCATIONS.length = 0;
+  engineStore.EVENTS.length = 0;
+  engineStore.ORDERS.length = 0;
   store.CLIENTS = store.CLIENTS.filter((c) => !c.id.startsWith('c-tenant-'));
+  store.INVOICES = store.INVOICES.filter((invoice) => !invoice.id.startsWith('fac-tenant-'));
+  store.MIKROTIK_ROUTERS = store.MIKROTIK_ROUTERS.filter(
+    (router) => !router.id.startsWith(TEST_ROUTER_PREFIX),
+  );
   resetIntegrationsService();
   resetPaymentService();
   vi.unstubAllEnvs();
@@ -145,6 +177,22 @@ const reset = () => {
 
 beforeEach(() => {
   reset();
+  for (const tenantId of [TENANT_A, TENANT_B]) {
+    store.MIKROTIK_ROUTERS.push({
+      id: `${TEST_ROUTER_PREFIX}${tenantId}`,
+      tenantId,
+      name: `Router ${tenantId}`,
+      ipAddress: tenantId === TENANT_A ? '192.0.2.10' : '192.0.2.20',
+      apiPort: 8728,
+      username: 'fixture',
+      encryptedPassword: 'x',
+      isOnline: true,
+      cpuUsagePct: 0,
+      memoryUsagePct: 0,
+      routerOsVersion: '7.15',
+      lastHealthCheckAt: new Date().toISOString(),
+    });
+  }
   app = createApp();
 });
 
@@ -618,6 +666,7 @@ describe('Webhook OpenPay — entregas simultáneas del mismo evento', () => {
   it('dos entregas en paralelo producen un solo evento y un solo efecto', async () => {
     const token = await seedOpenPay(TENANT_A, { webhookSecret: 'whsec_a' });
     seedCustomer(TENANT_A);
+    seedInvoice(TENANT_A);
     seedOrder(TENANT_A, 'chg-concurrente');
     const payload = {
       id: 'op-evt-concurrente',
@@ -743,6 +792,7 @@ describe('Webhook OpenPay — entregas simultáneas del mismo evento', () => {
   it('si B reclama durante updateOrderStatus, A responde 503 sin Billing/reactivación y B continúa', async () => {
     const token = await seedOpenPay(TENANT_A, { webhookSecret: 'whsec_a' });
     const customerId = seedCustomer(TENANT_A);
+    seedInvoice(TENANT_A);
     seedOrder(TENANT_A, 'chg-reclaim-entre-efectos');
     const payload = {
       id: 'op-evt-reclaim-entre-efectos',

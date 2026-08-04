@@ -5,8 +5,9 @@ describe('SupabaseCustomersRepository.remove — limpieza de dependencias FK', (
   const source = readFileSync('backend/domains/customers/repository.ts', 'utf8');
 
   it('importa ConflictError', () => {
-    expect(source).toContain("import { ConflictError }");
-    expect(source).toContain('../../common/errors');
+    expect(source).toMatch(
+      /import\s*\{[^}]*\bConflictError\b[^}]*\}\s*from\s*['"]\.\.\/\.\.\/common\/errors['"]/,
+    );
   });
 
   it('limpia tablas dependientes antes del DELETE del cliente', () => {

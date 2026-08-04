@@ -9,6 +9,8 @@ import {
   InvoiceUpdateInput,
   PaymentRecordInput,
   RevenueReportResult,
+  WebhookPaymentInput,
+  WebhookPaymentResult,
 } from '../../backend/domains/billing/repository';
 
 // ── Repositorio falso (in-memory, aislado del store) ─────────────────
@@ -82,6 +84,18 @@ class FakeRepo implements BillingRepository {
     inv.pendingAmount = Math.max(inv.amount - inv.paidAmount, 0);
     if (inv.pendingAmount <= 0) inv.status = 'paid';
     return inv;
+  }
+
+  async applyWebhookPayment(input: WebhookPaymentInput): Promise<WebhookPaymentResult> {
+    const invoice = await this.recordPayment(input.invoiceId, input);
+    return {
+      outcome: 'created',
+      invoice,
+      wasSettledBefore: false,
+      isSettledAfter: invoice.pendingAmount <= 0,
+      settlementWinner: invoice.pendingAmount <= 0,
+      canonicalPaymentId: `payment:${input.invoiceId}:${input.transactionId}`,
+    };
   }
 
   async cancelInvoice(id: string): Promise<EnrichedInvoice | null> {

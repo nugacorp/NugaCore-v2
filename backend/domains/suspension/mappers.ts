@@ -101,6 +101,8 @@ export interface EventRow {
   actor_id: string | null;
   metadata: Record<string, unknown> | null;
   created_at: string;
+  tenant_id?: string | null;
+  idempotency_key?: string | null;
 }
 
 export const rowToEvent = (r: EventRow): SuspensionEvent => ({
@@ -113,18 +115,27 @@ export const rowToEvent = (r: EventRow): SuspensionEvent => ({
   actorId: r.actor_id || undefined,
   metadata: r.metadata || undefined,
   createdAt: r.created_at,
+  tenantId: r.tenant_id || undefined,
+  idempotencyKey: r.idempotency_key || undefined,
 });
 
-export const eventToRow = (e: SuspensionEvent): Record<string, unknown> => ({
-  id: e.id,
-  customer_id: e.customerId,
-  invoice_id: e.invoiceId || null,
-  event_type: e.eventType,
-  reason: e.reason || null,
-  automatic: e.automatic,
-  actor_id: e.actorId || null,
-  metadata: e.metadata || null,
-});
+export const eventToRow = (e: SuspensionEvent): Record<string, unknown> => {
+  const row: Record<string, unknown> = {
+    id: e.id,
+    customer_id: e.customerId,
+    invoice_id: e.invoiceId || null,
+    event_type: e.eventType,
+    reason: e.reason || null,
+    automatic: e.automatic,
+    actor_id: e.actorId || null,
+    metadata: e.metadata || null,
+  };
+  // Sólo viajan cuando el efecto tiene identidad durable, para que el motor y
+  // las rutas manuales sigan insertando contra un schema sin migrar.
+  if (e.tenantId !== undefined) row.tenant_id = e.tenantId;
+  if (e.idempotencyKey !== undefined) row.idempotency_key = e.idempotencyKey;
+  return row;
+};
 
 // ── Orden ───────────────────────────────────────────────────────────────
 export interface OrderRow {
@@ -137,6 +148,8 @@ export interface OrderRow {
   scheduled_for: string | null;
   executed_at: string | null;
   created_at: string;
+  tenant_id?: string | null;
+  idempotency_key?: string | null;
 }
 
 export const rowToOrder = (r: OrderRow, orderType: SuspensionOrder['orderType']): SuspensionOrder => ({
@@ -150,15 +163,22 @@ export const rowToOrder = (r: OrderRow, orderType: SuspensionOrder['orderType'])
   scheduledFor: r.scheduled_for || undefined,
   executedAt: r.executed_at || undefined,
   createdAt: r.created_at,
+  tenantId: r.tenant_id || undefined,
+  idempotencyKey: r.idempotency_key || undefined,
 });
 
-export const orderToRow = (o: SuspensionOrder): Record<string, unknown> => ({
-  id: o.id,
-  customer_id: o.customerId,
-  invoice_id: o.invoiceId || null,
-  status: o.status,
-  source: o.source,
-  reason: o.reason || null,
-  scheduled_for: o.scheduledFor || null,
-  executed_at: o.executedAt || null,
-});
+export const orderToRow = (o: SuspensionOrder): Record<string, unknown> => {
+  const row: Record<string, unknown> = {
+    id: o.id,
+    customer_id: o.customerId,
+    invoice_id: o.invoiceId || null,
+    status: o.status,
+    source: o.source,
+    reason: o.reason || null,
+    scheduled_for: o.scheduledFor || null,
+    executed_at: o.executedAt || null,
+  };
+  if (o.tenantId !== undefined) row.tenant_id = o.tenantId;
+  if (o.idempotencyKey !== undefined) row.idempotency_key = o.idempotencyKey;
+  return row;
+};
