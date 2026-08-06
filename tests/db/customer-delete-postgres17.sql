@@ -1,20 +1,18 @@
 -- ====================================================================
--- Fixture: LÍNEA BASE del borrado de clientes contra PostgreSQL 17 real.
+-- Fixture: borrado de clientes contra PostgreSQL 17 real.
 --
--- Fija el comportamiento de HOY, no el deseado. T2 (RPC de borrado
--- transaccional) se contrasta contra este fichero: cualquier cambio de una
--- acción referencial tiene que aparecer aquí como una edición deliberada,
--- no como un efecto colateral.
+-- T1 fijó aquí la línea base de HOY. T2 la SUSTITUYE donde toca: la sección
+-- que afirmaba "no existe ninguna RPC de borrado" ahora afirma lo contrario,
+-- y la que reproducía el defecto vivo —arrasar el historial y luego fallar—
+-- pasa a exigir que la RPC NO lo tenga.
 --
 -- Qué comprueba:
 --   1. El grafo de claves foráneas del caso, entero y exacto (67 FK).
---      Cambiar un ON DELETE en el esquema y no aquí = fallo inmediato.
---   2. Comportamiento observado con filas reales: qué bloquea, qué arrasa y
---      qué desliga.
---   3. Que `service_role` sigue sin privilegios de tabla sobre las 31 tablas
---      del caso: la RPC de T2 tendrá que concederlos ella misma.
---
--- NO implementa ninguna RPC de borrado. Eso es T2.
+--   2. Lo que PostgreSQL hace por sí solo: qué bloquea, qué arrasa, qué
+--      desliga. Es el contrato sobre el que se apoya la RPC.
+--   3. Los privilegios EXACTOS que la migración concede, ni uno más.
+--   4. Que `customers_delete_cascade` existe con la forma declarada.
+--   5. La RPC ejercitada: transaccionalidad, matriz, tenant y storage_path.
 -- ====================================================================
 
 \set ON_ERROR_STOP on
@@ -57,8 +55,8 @@ INSERT INTO expected_fks (child, col, parent, on_delete) VALUES
   ('tickets',                   'client_id',   'clients', 'SET NULL'),
   ('work_orders',               'client_id',   'clients', 'SET NULL'),
   -- SET NULL que `remove()` NO recorre: hoy funcionan bien precisamente
-  -- porque el código no las toca y PostgreSQL las desliga solo. T2 tiene que
-  -- preservar ese comportamiento cuando el borrado pase a SQL explícito.
+  -- porque el código no las toca y PostgreSQL las desliga solo. La RPC tiene
+  -- que preservar ese comportamiento ahora que el borrado es SQL explícito.
   ('cash_register_entries',     'client_id',   'clients', 'SET NULL'),
   ('commercial_appointments',   'client_id',   'clients', 'SET NULL'),
   ('commercial_quotes',         'client_id',   'clients', 'SET NULL'),
@@ -180,10 +178,60 @@ BEGIN
 END $$;
 
 -- ====================================================================
--- 2. COMPORTAMIENTO OBSERVADO CON FILAS REALES
+-- CENSO — cuántas filas cuelgan de un cliente, tabla por tabla.
+--
+-- Se usa para la afirmación central del ticket: tras un borrado bloqueado,
+-- el censo tiene que ser EXACTAMENTE el mismo que antes.
+-- ====================================================================
+CREATE FUNCTION pg_temp.fx_census(p_client TEXT) RETURNS JSONB
+LANGUAGE plpgsql AS $$
+DECLARE
+  spec TEXT;
+  t TEXT; c TEXT;
+  n BIGINT;
+  out JSONB := '{}'::JSONB;
+  specs TEXT[] := ARRAY[
+    'clients:id',
+    'payments:client_id', 'payment_receipts:client_id', 'credit_notes:client_id',
+    'adjustments:client_id', 'invoices:client_id', 'service_subscriptions:client_id',
+    'client_documents:client_id', 'client_timeline:client_id', 'client_tags:client_id',
+    'client_alternate_contacts:client_id', 'client_activity_log:client_id',
+    'payment_promises:client_id', 'portal_user_bindings:client_id',
+    'customer_service_state:customer_id', 'suspension_events:customer_id',
+    'suspension_orders:customer_id', 'reactivation_orders:customer_id',
+    'onus:client_id', 'tickets:client_id', 'work_orders:client_id',
+    'cash_register_entries:client_id', 'commercial_quotes:client_id',
+    'commercial_appointments:client_id', 'inventory_serial_units:client_id',
+    'radius_accounting:client_id', 'suspension_action_logs:client_id',
+    'invoice_items:@invoice', 'invoice_payments:@invoice',
+    'payment_applications:@invoice', 'credit_applications:@invoice'
+  ];
+BEGIN
+  FOREACH spec IN ARRAY specs LOOP
+    t := split_part(spec, ':', 1);
+    c := split_part(spec, ':', 2);
+    IF c = '@invoice' THEN
+      EXECUTE format(
+        'SELECT count(*) FROM public.%I x WHERE x.invoice_id IN '
+        '(SELECT i.id FROM public.invoices i WHERE i.client_id = $1)', t
+      ) INTO n USING p_client;
+    ELSE
+      EXECUTE format('SELECT count(*) FROM public.%I x WHERE x.%I = $1', t, c)
+        INTO n USING p_client;
+    END IF;
+    out := out || jsonb_build_object(t, n);
+  END LOOP;
+  RETURN out;
+END $$;
+
+-- ====================================================================
+-- 2. LO QUE POSTGRESQL HACE POR SÍ SOLO
+--
+-- Es el contrato sobre el que se apoya la RPC: la función no reimplementa la
+-- cascada, deja que el esquema la ejecute. Si esto cambia, la RPC cambia de
+-- comportamiento sin que su código se toque.
 -- ====================================================================
 
--- Cliente con historial completo: una fila en cada tabla del caso.
 INSERT INTO public.clients (id, full_name, address, city, plan_id)
 VALUES ('c-full', 'Cliente con historial', 'Calle 1', 'Mérida', 'plan-basic');
 
@@ -216,8 +264,6 @@ INSERT INTO public.tickets (id, client_id, client_name, title, description, cate
 VALUES ('tk-1', 'c-full', 'Cliente con historial', 'Sin señal', 'Reporta corte', 'soporte');
 INSERT INTO public.work_orders (id, title, client_id, client_name) VALUES ('wo-1', 'Instalación', 'c-full', 'Cliente con historial');
 
--- Las seis que `remove()` no recorre. Hoy nadie las limpia a mano: al borrar
--- el cliente sólo actúa el SET NULL de PostgreSQL, y eso es lo correcto.
 INSERT INTO public.commercial_prospects (id, name, plan_id) VALUES ('pros-1', 'Prospecto', 'plan-basic');
 INSERT INTO public.cash_register_entries (id, client_id, amount_cents) VALUES ('cre-1', 'c-full', 50000);
 INSERT INTO public.commercial_quotes (id, prospect_id, client_id, plan_id, title)
@@ -236,8 +282,6 @@ INSERT INTO public.suspension_orders (id, customer_id) VALUES ('sord-1', 'c-full
 INSERT INTO public.reactivation_orders (id, customer_id) VALUES ('rord-1', 'c-full');
 
 -- ── 2.1 El historial financiero BLOQUEA el borrado ──────────────────
--- Hoy `remove()` recibe un 23503 aquí y lo traduce a ConflictError… pero sólo
--- DESPUÉS de haber borrado las dependientes una a una y sin transacción.
 DO $$
 DECLARE
   sqlstate_got TEXT;
@@ -251,28 +295,22 @@ BEGIN
   END;
 END $$;
 
--- ── 2.2 EL DEFECTO VIVO: arrasa primero, falla después ──────────────
+-- ── 2.2 El modo de fallo que la RPC viene a eliminar ────────────────
 -- Reproduce el orden de `remove()` a medio camino: las CASCADE ya se llevaron
 -- el historial de facturación y el último DELETE sigue fallando. Sin
 -- transacción —que es como corre hoy por PostgREST— eso no se deshace.
--- Aquí sí hay transacción, y por eso el ROLLBACK devuelve el estado: el
--- fixture demuestra el modo de fallo sin dejarlo escrito en la base.
+-- La sección 5.2 exige que la RPC NO tenga este modo de fallo.
 DO $$
 DECLARE
   invoices_left INTEGER;
   client_left INTEGER;
 BEGIN
   BEGIN
-    -- El orden real: primero los hijos M:N, luego las entidades RESTRICT.
     DELETE FROM public.payment_applications WHERE payment_id = 'pay-1';
     DELETE FROM public.payment_receipts WHERE payment_id = 'pay-1';
     DELETE FROM public.credit_applications WHERE credit_note_id = 'cn-1';
     DELETE FROM public.adjustments WHERE client_id = 'c-full';
     DELETE FROM public.invoices WHERE client_id = 'c-full';   -- arrasa items y pagos embebidos
-
-    -- …y aquí `remove()` se traga un fallo: `payments` sigue siendo RESTRICT
-    -- porque su DELETE falló (RLS, privilegios, lo que sea) y se registró con
-    -- `warn` en vez de `throw`.
     DELETE FROM public.clients WHERE id = 'c-full';
     RAISE EXCEPTION 'se esperaba que payments RESTRICT bloqueara el borrado';
   EXCEPTION WHEN foreign_key_violation THEN
@@ -284,7 +322,7 @@ BEGIN
   IF invoices_left <> 1 OR client_left <> 1 THEN
     RAISE EXCEPTION 'estado inesperado tras el rollback: % facturas, % clientes', invoices_left, client_left;
   END IF;
-  RAISE NOTICE 'defecto reproducido: sin transacción, el historial se pierde y el cliente sobrevive';
+  RAISE NOTICE 'defecto de remove() reproducido: sin transacción, el historial se pierde y el cliente sobrevive';
 END $$;
 
 -- ── 2.3 Con las RESTRICT retiradas en orden, CASCADE y SET NULL ─────
@@ -301,7 +339,6 @@ DO $$
 DECLARE
   t TEXT;
   n INTEGER;
-  -- Todo esto desaparece por CASCADE, sin una sola línea de código.
   cascaded TEXT[] := ARRAY[
     'invoices', 'invoice_items', 'invoice_payments', 'service_subscriptions',
     'client_documents', 'client_timeline', 'client_tags',
@@ -319,79 +356,37 @@ BEGIN
   RAISE NOTICE 'CASCADE verificado sobre % tablas', array_length(cascaded, 1);
 END $$;
 
--- Los tres que el esquema DESLIGA en vez de borrar. Éste es el assert que
--- T2 tiene que seguir cumpliendo: la ONU es un equipo físico que sigue en el
--- poste, y tickets/work_orders son historial operativo.
-DO $$
-DECLARE
-  n INTEGER;
-BEGIN
-  SELECT count(*) INTO n FROM public.onus WHERE id = 'onu-1' AND client_id IS NULL;
-  IF n <> 1 THEN RAISE EXCEPTION 'onus debía sobrevivir desligada (SET NULL), n=%', n; END IF;
-
-  SELECT count(*) INTO n FROM public.tickets WHERE id = 'tk-1' AND client_id IS NULL;
-  IF n <> 1 THEN RAISE EXCEPTION 'tickets debía sobrevivir desligado (SET NULL), n=%', n; END IF;
-
-  SELECT count(*) INTO n FROM public.work_orders WHERE id = 'wo-1' AND client_id IS NULL;
-  IF n <> 1 THEN RAISE EXCEPTION 'work_orders debía sobrevivir desligada (SET NULL), n=%', n; END IF;
-
-  -- Y conservan la denormalización: el nombre del cliente sigue ahí.
-  SELECT count(*) INTO n FROM public.tickets WHERE id = 'tk-1' AND client_name = 'Cliente con historial';
-  IF n <> 1 THEN RAISE EXCEPTION 'tickets perdió client_name al desligarse'; END IF;
-
-  RAISE NOTICE 'SET NULL verificado: onus, tickets y work_orders sobreviven desligados';
-END $$;
-
--- Las seis invisibles desde `remove()`. Hoy funcionan BIEN: el código no las
--- toca y el SET NULL de PostgreSQL actúa solo. Éste es el assert que impide
--- que T2, al pasar el borrado a SQL explícito, las convierta en hard-borrado
--- por olvidarse de que existen.
 DO $$
 DECLARE
   t TEXT;
   n INTEGER;
-  untouched TEXT[] := ARRAY[
-    'cash_register_entries', 'commercial_quotes', 'commercial_appointments',
-    'inventory_serial_units', 'radius_accounting', 'suspension_action_logs'
+  detached TEXT[] := ARRAY[
+    'onus', 'tickets', 'work_orders', 'cash_register_entries',
+    'commercial_quotes', 'commercial_appointments', 'inventory_serial_units',
+    'radius_accounting', 'suspension_action_logs'
   ];
 BEGIN
-  FOREACH t IN ARRAY untouched LOOP
-    -- Sobreviven…
-    EXECUTE format('SELECT count(*) FROM public.%I', t) INTO n;
+  FOREACH t IN ARRAY detached LOOP
+    EXECUTE format('SELECT count(*) FROM public.%I WHERE client_id IS NULL', t) INTO n;
     IF n <> 1 THEN
-      RAISE EXCEPTION '% debía sobrevivir al borrado del cliente, quedan % fila(s)', t, n;
-    END IF;
-    -- …y quedan desligadas, no colgando de un cliente inexistente.
-    EXECUTE format('SELECT count(*) FROM public.%I WHERE client_id IS NOT NULL', t) INTO n;
-    IF n <> 0 THEN
-      RAISE EXCEPTION '% conservó client_id tras el borrado: SET NULL no actuó', t;
+      RAISE EXCEPTION '% debía sobrevivir desligada (SET NULL), n=%', t, n;
     END IF;
   END LOOP;
 
-  -- El resto de sus vínculos NO se toca: la cita sigue colgada de su
-  -- prospecto y de su orden de trabajo, y la cotización de su plan.
   SELECT count(*) INTO n FROM public.commercial_appointments
    WHERE id = 'cap-1' AND prospect_id = 'pros-1' AND work_order_id = 'wo-1';
   IF n <> 1 THEN RAISE EXCEPTION 'commercial_appointments perdió vínculos ajenos al cliente'; END IF;
 
-  SELECT count(*) INTO n FROM public.commercial_quotes
-   WHERE id = 'cq-1' AND prospect_id = 'pros-1' AND plan_id = 'plan-basic';
-  IF n <> 1 THEN RAISE EXCEPTION 'commercial_quotes perdió vínculos ajenos al cliente'; END IF;
+  SELECT count(*) INTO n FROM public.tickets WHERE id = 'tk-1' AND client_name = 'Cliente con historial';
+  IF n <> 1 THEN RAISE EXCEPTION 'tickets perdió client_name al desligarse'; END IF;
 
-  -- suspension_action_logs conserva el nombre denormalizado: es la única
-  -- huella de a quién se suspendió.
-  SELECT count(*) INTO n FROM public.suspension_action_logs
-   WHERE id = 'sal-1' AND client_name = 'Cliente con historial';
-  IF n <> 1 THEN RAISE EXCEPTION 'suspension_action_logs perdió la huella del cliente'; END IF;
-
-  RAISE NOTICE 'las 6 tablas que remove() no recorre sobreviven desligadas, como hoy';
+  RAISE NOTICE 'SET NULL verificado sobre % tablas, con sus vínculos ajenos intactos', array_length(detached, 1);
 END $$;
 
 -- ── 2.4 Los objetos de Storage quedan huérfanos ─────────────────────
 -- El CASCADE se llevó la fila de client_documents con su storage_path, y
 -- nada tocó el objeto del bucket. PL/pgSQL no puede: no habla con la Storage
--- API. Por eso T2 devuelve los storage_path y T3 barre después del commit
--- (ver H1 de la cuarta ronda en el artifact padre).
+-- API. Por eso la RPC devuelve los storage_path y T3 barre post-commit.
 DO $$
 DECLARE
   n INTEGER;
@@ -402,8 +397,6 @@ BEGIN
 END $$;
 
 -- ── 2.5 payment_applications no se alcanza desde clients ────────────
--- No tiene client_id ni customer_id: sólo se llega por payment_id/invoice_id,
--- y bloquea ambos con RESTRICT. Es la razón de que `remove()` empiece por ahí.
 DO $$
 DECLARE
   n INTEGER;
@@ -417,75 +410,435 @@ BEGIN
   END IF;
 END $$;
 
--- Un cliente cuya única atadura es una aplicación de pago: sigue bloqueado.
-INSERT INTO public.clients (id, full_name, address, city) VALUES ('c-min', 'Mínimo', 'Calle 2', 'Mérida');
-INSERT INTO public.invoices (id, client_id, client_name, amount, due_date) VALUES ('fac-2', 'c-min', 'Mínimo', 100, CURRENT_DATE);
-INSERT INTO public.payments (id, client_id, client_name, amount_cents) VALUES ('pay-2', 'c-min', 'Mínimo', 10000);
-INSERT INTO public.payment_applications (id, payment_id, invoice_id, applied_cents) VALUES ('pa-2', 'pay-2', 'fac-2', 10000);
-
-DO $$
-BEGIN
-  BEGIN
-    DELETE FROM public.invoices WHERE id = 'fac-2';
-    RAISE EXCEPTION 'payment_applications debía bloquear el borrado de la factura';
-  EXCEPTION WHEN foreign_key_violation THEN
-    RAISE NOTICE 'payment_applications bloquea invoices como se esperaba';
-  END;
-END $$;
+-- Limpieza del escenario de la sección 2: la 5 monta el suyo desde cero.
+DELETE FROM public.commercial_appointments;
+DELETE FROM public.commercial_quotes;
+DELETE FROM public.cash_register_entries;
+DELETE FROM public.inventory_serial_units;
+DELETE FROM public.radius_accounting;
+DELETE FROM public.suspension_action_logs;
+DELETE FROM public.onus;
+DELETE FROM public.tickets;
+DELETE FROM public.work_orders;
+DELETE FROM public.commercial_prospects;
+DELETE FROM public.clients WHERE id = 'c-min';
 
 -- ====================================================================
--- 3. PRIVILEGIOS: service_role sigue sin nada de tabla
+-- 3. PRIVILEGIOS EXACTOS
 --
--- Es la línea base contra la que T2 demostrará sus GRANT. Si esto empieza a
--- pasar por accidente, el gate de T2 dejaría de significar nada.
+-- El bootstrap arranca sin ningún privilegio de tabla para service_role. Todo
+-- lo que haya aquí lo concedió la migración, y tiene que ser exactamente lo
+-- que declara: ni de menos (la RPC no funcionaría como SECURITY INVOKER) ni
+-- de más (una cascada no comprueba privilegios, así que conceder DELETE sobre
+-- las dependientes sería regalar poder que la función no usa).
 -- ====================================================================
+CREATE TEMP TABLE expected_grants (tbl TEXT, priv TEXT);
+-- UPDATE sobre clients no es para escribir: lo exige el `SELECT … FOR UPDATE`
+-- del paso 1 de la RPC. Es la única tabla que lo tiene.
+INSERT INTO expected_grants (tbl, priv) VALUES
+  ('clients', 'SELECT'), ('clients', 'UPDATE'), ('clients', 'DELETE');
+
+INSERT INTO expected_grants (tbl, priv)
+SELECT t, 'SELECT' FROM unnest(ARRAY[
+  'payments', 'payment_receipts', 'credit_notes', 'adjustments',
+  'payment_applications', 'credit_applications',
+  'invoices', 'invoice_items', 'invoice_payments', 'service_subscriptions',
+  'client_documents', 'client_timeline', 'client_tags',
+  'client_alternate_contacts', 'client_activity_log', 'payment_promises',
+  'portal_user_bindings', 'customer_service_state', 'suspension_events',
+  'suspension_orders', 'reactivation_orders',
+  'onus', 'tickets', 'work_orders', 'cash_register_entries',
+  'commercial_quotes', 'commercial_appointments', 'inventory_serial_units',
+  'radius_accounting', 'suspension_action_logs'
+]) AS t;
+
 DO $$
 DECLARE
-  t TEXT;
-  p TEXT;
-  targets TEXT[] := ARRAY[
-    'clients', 'invoices', 'invoice_items', 'invoice_payments',
-    'payments', 'payment_applications', 'payment_receipts',
-    'credit_notes', 'credit_applications', 'adjustments',
-    'service_subscriptions', 'client_documents', 'client_timeline',
-    'client_tags', 'client_alternate_contacts', 'client_activity_log',
-    'payment_promises', 'portal_user_bindings', 'onus', 'tickets',
-    'work_orders', 'customer_service_state', 'suspension_events',
+  diff TEXT;
+  n INTEGER;
+  all_tables TEXT[] := ARRAY[
+    'clients', 'payments', 'payment_receipts', 'credit_notes', 'adjustments',
+    'payment_applications', 'credit_applications',
+    'invoices', 'invoice_items', 'invoice_payments', 'service_subscriptions',
+    'client_documents', 'client_timeline', 'client_tags',
+    'client_alternate_contacts', 'client_activity_log', 'payment_promises',
+    'portal_user_bindings', 'customer_service_state', 'suspension_events',
     'suspension_orders', 'reactivation_orders',
-    -- Las seis que `remove()` no recorre
-    'cash_register_entries', 'commercial_quotes', 'commercial_appointments',
-    'inventory_serial_units', 'radius_accounting', 'suspension_action_logs'
+    'onus', 'tickets', 'work_orders', 'cash_register_entries',
+    'commercial_quotes', 'commercial_appointments', 'inventory_serial_units',
+    'radius_accounting', 'suspension_action_logs'
   ];
 BEGIN
-  IF array_length(targets, 1) <> 31 THEN
-    RAISE EXCEPTION 'el caso debía cubrir 31 tablas, cubre %', array_length(targets, 1);
+  SELECT count(*), string_agg(msg, E'\n  ' ORDER BY msg) INTO n, diff
+  FROM (
+    SELECT CASE
+             WHEN e.tbl IS NULL THEN format('PRIVILEGIO NO DECLARADO: service_role tiene %s sobre %s', a.priv, a.tbl)
+             ELSE format('PRIVILEGIO AUSENTE: la migración debía conceder %s sobre %s', e.priv, e.tbl)
+           END AS msg
+    FROM expected_grants e
+    FULL OUTER JOIN (
+      SELECT t AS tbl, p AS priv
+      FROM unnest(all_tables) AS t,
+           unnest(ARRAY['SELECT', 'INSERT', 'UPDATE', 'DELETE']) AS p
+      WHERE has_table_privilege('service_role', format('public.%I', t), p)
+    ) a ON a.tbl = e.tbl AND a.priv = e.priv
+    WHERE e.tbl IS NULL OR a.tbl IS NULL
+  ) d;
+
+  IF n > 0 THEN
+    RAISE EXCEPTION E'los privilegios de service_role no son los declarados (%):\n  %', n, diff;
   END IF;
-  FOREACH t IN ARRAY targets LOOP
-    FOREACH p IN ARRAY ARRAY['SELECT', 'INSERT', 'UPDATE', 'DELETE'] LOOP
-      IF has_table_privilege('service_role', format('public.%I', t), p) THEN
-        RAISE EXCEPTION 'service_role tiene % sobre %: la línea base de privilegios cambió', p, t;
-      END IF;
-    END LOOP;
-  END LOOP;
-  RAISE NOTICE 'service_role sin privilegios de tabla sobre las 31 tablas del caso';
+  RAISE NOTICE 'privilegios exactos: SELECT sobre 31 tablas; UPDATE y DELETE sólo sobre clients';
 END $$;
 
 -- ====================================================================
--- 4. NO HAY RPC DE BORRADO TODAVÍA
+-- 4. LA RPC EXISTE CON LA FORMA DECLARADA
 --
--- Guardarraíl de alcance: si esto empieza a fallar es que T2 aterrizó, y su
--- fixture debe sustituir a esta línea base en vez de convivir con ella.
+-- Sustituye al assert de T1, que afirmaba lo contrario mientras la RPC no
+-- existía.
 -- ====================================================================
 DO $$
 DECLARE
-  n INTEGER;
+  r RECORD;
 BEGIN
-  SELECT count(*) INTO n
-  FROM pg_proc p JOIN pg_namespace ns ON ns.oid = p.pronamespace
-  WHERE ns.nspname = 'public' AND p.proname ILIKE '%delete_client%';
-  IF n <> 0 THEN
-    RAISE EXCEPTION 'apareció una RPC de borrado (%): T1 fija la línea base ANTERIOR a T2', n;
+  SELECT p.prosecdef, p.proconfig, pg_get_function_identity_arguments(p.oid) AS args,
+         pg_get_function_result(p.oid) AS result
+    INTO r
+    FROM pg_proc p JOIN pg_namespace ns ON ns.oid = p.pronamespace
+   WHERE ns.nspname = 'public' AND p.proname = 'customers_delete_cascade';
+
+  IF NOT FOUND THEN
+    RAISE EXCEPTION 'customers_delete_cascade no existe: la migración no se aplicó';
   END IF;
+  IF r.prosecdef THEN
+    RAISE EXCEPTION 'customers_delete_cascade es SECURITY DEFINER; debe ser INVOKER';
+  END IF;
+  IF r.proconfig IS NULL OR NOT ('search_path=public, pg_temp' = ANY (r.proconfig)) THEN
+    RAISE EXCEPTION 'customers_delete_cascade sin search_path fijo: %', r.proconfig;
+  END IF;
+  IF r.args <> 'p_client_id text, p_tenant_id text' THEN
+    RAISE EXCEPTION 'firma inesperada: %', r.args;
+  END IF;
+  IF r.result <> 'jsonb' THEN
+    RAISE EXCEPTION 'tipo de retorno inesperado: %', r.result;
+  END IF;
+
+  IF has_function_privilege('anon', 'public.customers_delete_cascade(text, text)', 'EXECUTE')
+     OR has_function_privilege('authenticated', 'public.customers_delete_cascade(text, text)', 'EXECUTE') THEN
+    RAISE EXCEPTION 'anon o authenticated pueden ejecutar el borrado de clientes';
+  END IF;
+  IF NOT has_function_privilege('service_role', 'public.customers_delete_cascade(text, text)', 'EXECUTE') THEN
+    RAISE EXCEPTION 'service_role no puede ejecutar la RPC';
+  END IF;
+
+  RAISE NOTICE 'RPC verificada: SECURITY INVOKER, search_path fijo, sólo service_role';
 END $$;
 
-SELECT 'línea base del borrado de clientes fijada contra PostgreSQL 17' AS resultado;
+-- ====================================================================
+-- 5. LA RPC EJERCITADA
+-- ====================================================================
+
+-- Escenario: dos clientes en tenant-default —uno limpio, uno con historial
+-- financiero— y uno en tenant-b para el aislamiento.
+INSERT INTO public.clients (id, full_name, address, city, tenant_id) VALUES
+  ('c-clean', 'Cliente limpio',   'Calle 3', 'Mérida', 'tenant-default'),
+  ('c-block', 'Cliente con pago', 'Calle 4', 'Mérida', 'tenant-default'),
+  ('c-other', 'Cliente ajeno',    'Calle 5', 'Mérida', 'tenant-b');
+
+-- c-clean: todo lo que se borra y todo lo que se desliga, nada que bloquee.
+INSERT INTO public.invoices (id, client_id, client_name, amount, due_date, total_cents)
+VALUES ('fac-c1', 'c-clean', 'Cliente limpio', 100, CURRENT_DATE, 10000);
+INSERT INTO public.invoice_items (id, invoice_id, description, price) VALUES ('it-c1', 'fac-c1', 'Alta', 100);
+INSERT INTO public.invoice_payments (id, invoice_id, amount) VALUES ('ip-c1', 'fac-c1', 100);
+INSERT INTO public.service_subscriptions (id, client_id, plan_id) VALUES ('sub-c1', 'c-clean', 'plan-basic');
+INSERT INTO public.client_documents (id, client_id, doc_type, file_name, storage_path) VALUES
+  ('doc-c1', 'c-clean', 'ine',     'ine.pdf',     'tenant-default/c-clean/ine.pdf'),
+  ('doc-c2', 'c-clean', 'receipt', 'recibo.pdf',  'tenant-default/c-clean/recibo.pdf'),
+  ('doc-c3', 'c-clean', 'other',   'sin-objeto',  NULL);   -- fila fantasma, sin ruta
+INSERT INTO public.client_timeline (id, client_id, event_type, summary) VALUES ('tl-c1', 'c-clean', 'created', 'Alta');
+INSERT INTO public.client_tags (id, client_id, label) VALUES ('tag-c1', 'c-clean', 'nuevo');
+INSERT INTO public.client_alternate_contacts (id, client_id, name) VALUES ('cc-c1', 'c-clean', 'Contacto');
+INSERT INTO public.client_activity_log (id, client_id, action) VALUES ('al-c1', 'c-clean', 'create');
+INSERT INTO public.payment_promises (id, client_id, promised_date) VALUES ('pp-c1', 'c-clean', CURRENT_DATE);
+INSERT INTO public.portal_user_bindings (user_id, client_id) VALUES ('22222222-2222-2222-2222-222222222222', 'c-clean');
+INSERT INTO public.customer_service_state (customer_id) VALUES ('c-clean');
+INSERT INTO public.suspension_events (id, customer_id, event_type) VALUES ('sev-c1', 'c-clean', 'evaluated');
+INSERT INTO public.suspension_orders (id, customer_id) VALUES ('sord-c1', 'c-clean');
+INSERT INTO public.reactivation_orders (id, customer_id) VALUES ('rord-c1', 'c-clean');
+
+INSERT INTO public.olts (id, name) VALUES ('olt-2', 'OLT 2') ON CONFLICT (id) DO NOTHING;
+INSERT INTO public.commercial_prospects (id, name) VALUES ('pros-c1', 'Prospecto limpio');
+INSERT INTO public.work_orders (id, title, client_id, client_name) VALUES ('wo-c1', 'Instalación', 'c-clean', 'Cliente limpio');
+INSERT INTO public.onus (id, client_id, client_name, olt_id) VALUES ('onu-c1', 'c-clean', 'Cliente limpio', 'olt-2');
+INSERT INTO public.tickets (id, client_id, client_name, title, description, category)
+VALUES ('tk-c1', 'c-clean', 'Cliente limpio', 'Alta', 'Solicita alta', 'comercial');
+INSERT INTO public.cash_register_entries (id, client_id, amount_cents) VALUES ('cre-c1', 'c-clean', 10000);
+INSERT INTO public.commercial_quotes (id, prospect_id, client_id, plan_id, title)
+VALUES ('cq-c1', 'pros-c1', 'c-clean', 'plan-basic', 'Cotización');
+INSERT INTO public.commercial_appointments (id, prospect_id, client_id, work_order_id, title, scheduled_at)
+VALUES ('cap-c1', 'pros-c1', 'c-clean', 'wo-c1', 'Visita', NOW());
+INSERT INTO public.inventory_serial_units (id, item_id, serial, client_id) VALUES ('isu-c1', 'inv-1', 'SN-C1', 'c-clean');
+INSERT INTO public.radius_accounting (id, username, client_id) VALUES ('ra-c1', 'c-clean@wisp', 'c-clean');
+INSERT INTO public.suspension_action_logs (id, client_id, client_name, action)
+VALUES ('sal-c1', 'c-clean', 'Cliente limpio', 'suspend');
+
+-- c-block: mismo perfil, MÁS un pago con su comprobante y su aplicación.
+INSERT INTO public.invoices (id, client_id, client_name, amount, due_date, total_cents)
+VALUES ('fac-b1', 'c-block', 'Cliente con pago', 200, CURRENT_DATE, 20000);
+INSERT INTO public.invoice_items (id, invoice_id, description, price) VALUES ('it-b1', 'fac-b1', 'Mensualidad', 200);
+INSERT INTO public.client_documents (id, client_id, doc_type, file_name, storage_path)
+VALUES ('doc-b1', 'c-block', 'ine', 'ine.pdf', 'tenant-default/c-block/ine.pdf');
+INSERT INTO public.client_timeline (id, client_id, event_type, summary) VALUES ('tl-b1', 'c-block', 'created', 'Alta');
+INSERT INTO public.client_tags (id, client_id, label) VALUES ('tag-b1', 'c-block', 'moroso');
+INSERT INTO public.customer_service_state (customer_id) VALUES ('c-block');
+INSERT INTO public.payments (id, client_id, client_name, amount_cents) VALUES ('pay-b1', 'c-block', 'Cliente con pago', 20000);
+INSERT INTO public.payment_applications (id, payment_id, invoice_id, applied_cents) VALUES ('pa-b1', 'pay-b1', 'fac-b1', 20000);
+INSERT INTO public.payment_receipts (id, payment_id, client_id, receipt_number) VALUES ('rec-b1', 'pay-b1', 'c-block', 'REC-2026-B01');
+INSERT INTO public.onus (id, client_id, client_name) VALUES ('onu-b1', 'c-block', 'Cliente con pago');
+INSERT INTO public.tickets (id, client_id, client_name, title, description, category)
+VALUES ('tk-b1', 'c-block', 'Cliente con pago', 'Corte', 'Sin servicio', 'soporte');
+
+-- c-other: en tenant-b, con dependencias propias.
+INSERT INTO public.invoices (id, client_id, client_name, amount, due_date, total_cents, tenant_id)
+VALUES ('fac-o1', 'c-other', 'Cliente ajeno', 300, CURRENT_DATE, 30000, 'tenant-b');
+INSERT INTO public.client_documents (id, client_id, doc_type, file_name, storage_path, tenant_id)
+VALUES ('doc-o1', 'c-other', 'ine', 'ine.pdf', 'tenant-b/c-other/ine.pdf', 'tenant-b');
+INSERT INTO public.tickets (id, client_id, client_name, title, description, category, tenant_id)
+VALUES ('tk-o1', 'c-other', 'Cliente ajeno', 'Consulta', 'Pregunta', 'comercial', 'tenant-b');
+
+-- ── 5.1 Cliente sin dependencias bloqueantes: se borra entero ───────
+-- Se ejecuta COMO service_role, para que los grants de la migración sean lo
+-- que la sostiene. Si faltara uno, esto falla con permission denied.
+SET ROLE service_role;
+CREATE TEMP TABLE rpc_clean AS
+  SELECT public.customers_delete_cascade('c-clean', 'tenant-default') AS r;
+RESET ROLE;
+
+DO $$
+DECLARE
+  res JSONB;
+  t TEXT;
+  n INTEGER;
+  -- invoice_items e invoice_payments van aparte: cuelgan de la factura, no
+  -- del cliente, y se comprueban por invoice_id más abajo.
+  cascaded TEXT[] := ARRAY[
+    'invoices', 'service_subscriptions',
+    'client_documents', 'client_timeline', 'client_tags',
+    'client_alternate_contacts', 'client_activity_log', 'payment_promises',
+    'portal_user_bindings', 'customer_service_state', 'suspension_events',
+    'suspension_orders', 'reactivation_orders'
+  ];
+  detached TEXT[] := ARRAY[
+    'onus', 'tickets', 'work_orders', 'cash_register_entries',
+    'commercial_quotes', 'commercial_appointments', 'inventory_serial_units',
+    'radius_accounting', 'suspension_action_logs'
+  ];
+BEGIN
+  SELECT r INTO res FROM rpc_clean;
+
+  IF EXISTS (SELECT 1 FROM public.clients WHERE id = 'c-clean') THEN
+    RAISE EXCEPTION 'c-clean debía borrarse y sigue ahí';
+  END IF;
+
+  -- Lo que declara BORRAR se fue.
+  FOREACH t IN ARRAY cascaded LOOP
+    EXECUTE format('SELECT count(*) FROM public.%I WHERE %I = ''c-clean''', t,
+                   CASE WHEN t IN ('customer_service_state','suspension_events',
+                                   'suspension_orders','reactivation_orders')
+                        THEN 'customer_id' ELSE 'client_id' END) INTO n;
+    IF n <> 0 THEN RAISE EXCEPTION 'la RPC dejó % fila(s) en %', n, t; END IF;
+  END LOOP;
+  IF EXISTS (SELECT 1 FROM public.invoice_items WHERE invoice_id = 'fac-c1')
+     OR EXISTS (SELECT 1 FROM public.invoice_payments WHERE invoice_id = 'fac-c1') THEN
+    RAISE EXCEPTION 'la cascada de segundo nivel no llegó a invoice_items/invoice_payments';
+  END IF;
+
+  -- Lo que declara DESLIGAR sigue ahí, sin cliente.
+  FOREACH t IN ARRAY detached LOOP
+    EXECUTE format('SELECT count(*) FROM public.%I WHERE client_id IS NULL', t) INTO n;
+    IF n <> 1 THEN RAISE EXCEPTION '% debía quedar desligada, n=%', t, n; END IF;
+  END LOOP;
+
+  -- …y conserva sus vínculos ajenos al cliente.
+  IF NOT EXISTS (SELECT 1 FROM public.commercial_appointments
+                  WHERE id = 'cap-c1' AND prospect_id = 'pros-c1' AND work_order_id = 'wo-c1') THEN
+    RAISE EXCEPTION 'commercial_appointments perdió vínculos ajenos al cliente';
+  END IF;
+  IF NOT EXISTS (SELECT 1 FROM public.onus WHERE id = 'onu-c1' AND olt_id = 'olt-2') THEN
+    RAISE EXCEPTION 'onus perdió su OLT al desligarse del cliente';
+  END IF;
+
+  -- El censo de auditoría refleja lo que había, no lo que quedó.
+  IF (res -> 'deleted' ->> 'invoices')::INT <> 1
+     OR (res -> 'deleted' ->> 'client_documents')::INT <> 3
+     OR (res -> 'deleted' ->> 'suspension_orders')::INT <> 1 THEN
+    RAISE EXCEPTION 'censo de borrado inesperado: %', res -> 'deleted';
+  END IF;
+  IF (res -> 'detached' ->> 'onus')::INT <> 1
+     OR (res -> 'detached' ->> 'work_orders')::INT <> 1
+     OR (res -> 'detached' ->> 'radius_accounting')::INT <> 1 THEN
+    RAISE EXCEPTION 'censo de desligado inesperado: %', res -> 'detached';
+  END IF;
+
+  RAISE NOTICE 'RPC sobre cliente limpio: borrado entero, 9 tablas desligadas, censo correcto';
+END $$;
+
+-- ── 5.1b Los storage_path devueltos son EXACTAMENTE los borrados ────
+-- Es lo único que T3 tendrá para barrer el bucket: si falta uno, ese objeto
+-- se queda ahí para siempre; si sobra uno, T3 borraría un objeto vivo.
+DO $$
+DECLARE
+  got TEXT[];
+BEGIN
+  SELECT array(SELECT jsonb_array_elements_text(r -> 'storage_paths') ORDER BY 1)
+    INTO got FROM rpc_clean;
+
+  IF got <> ARRAY['tenant-default/c-clean/ine.pdf', 'tenant-default/c-clean/recibo.pdf'] THEN
+    RAISE EXCEPTION 'storage_paths inesperados: %', got;
+  END IF;
+  -- doc-c3 tenía storage_path NULL (fila fantasma de las que el slice viene a
+  -- limpiar): no debe aparecer, no hay objeto que barrer.
+  RAISE NOTICE 'storage_paths exactos: 2 rutas reales, la fila sin objeto excluida';
+END $$;
+
+-- ── 5.2 EL TEST QUE JUSTIFICA EL TICKET ─────────────────────────────
+-- Cliente con una dependencia bloqueante: la RPC falla y NO SE BORRA NADA,
+-- ni siquiera las tablas que se procesan antes. El censo antes y después
+-- tiene que ser idéntico, tabla por tabla.
+CREATE TEMP TABLE census_before AS SELECT pg_temp.fx_census('c-block') AS c;
+
+DO $$
+DECLARE
+  before JSONB;
+  after JSONB;
+  msg TEXT;
+  detail TEXT;
+  divergences TEXT;
+  completed BOOLEAN := FALSE;
+BEGIN
+  SELECT c INTO before FROM census_before;
+
+  BEGIN
+    PERFORM public.customers_delete_cascade('c-block', 'tenant-default');
+    completed := TRUE;
+  EXCEPTION WHEN raise_exception THEN
+    GET STACKED DIAGNOSTICS msg = MESSAGE_TEXT, detail = PG_EXCEPTION_DETAIL;
+    IF position('client_delete_blocked' IN msg) = 0 THEN
+      RAISE EXCEPTION 'error no identificable: %', msg;
+    END IF;
+    IF position('baja comercial' IN lower(detail)) = 0 THEN
+      RAISE EXCEPTION 'el error no orienta hacia la baja comercial: %', detail;
+    END IF;
+    RAISE NOTICE 'la RPC bloqueó con error identificable: %', msg;
+  END;
+
+  IF completed THEN
+    RAISE EXCEPTION 'la RPC borró un cliente con historial financiero en vez de bloquear';
+  END IF;
+
+  after := pg_temp.fx_census('c-block');
+
+  SELECT string_agg(format('%s: antes %s, después %s', k, before ->> k, after ->> k), E'\n  ' ORDER BY k)
+    INTO divergences
+    FROM jsonb_object_keys(before) AS k
+   WHERE (before ->> k) IS DISTINCT FROM (after ->> k);
+
+  IF divergences IS NOT NULL THEN
+    RAISE EXCEPTION E'el borrado bloqueado SÍ destruyó datos:\n  %', divergences;
+  END IF;
+
+  -- Y el cliente sigue vivo, no medio borrado.
+  IF NOT EXISTS (SELECT 1 FROM public.clients WHERE id = 'c-block') THEN
+    RAISE EXCEPTION 'c-block desapareció pese a estar bloqueado';
+  END IF;
+
+  RAISE NOTICE 'borrado bloqueado: censo idéntico en las 31 tablas, nada se perdió';
+END $$;
+
+-- ── 5.3 Aislamiento por tenant ──────────────────────────────────────
+DO $$
+DECLARE
+  msg TEXT;
+  census JSONB;
+  completed BOOLEAN := FALSE;
+BEGIN
+  census := pg_temp.fx_census('c-other');
+
+  BEGIN
+    PERFORM public.customers_delete_cascade('c-other', 'tenant-default');
+    completed := TRUE;
+  EXCEPTION WHEN raise_exception THEN
+    GET STACKED DIAGNOSTICS msg = MESSAGE_TEXT;
+    IF position('client_not_found' IN msg) = 0 THEN
+      RAISE EXCEPTION 'error inesperado al cruzar tenant: %', msg;
+    END IF;
+  END;
+
+  IF completed THEN
+    RAISE EXCEPTION 'la RPC aceptó borrar un cliente de otro tenant';
+  END IF;
+
+  IF pg_temp.fx_census('c-other') <> census THEN
+    RAISE EXCEPTION 'el cliente de otro tenant fue tocado';
+  END IF;
+  IF NOT EXISTS (SELECT 1 FROM public.clients WHERE id = 'c-other')
+     OR NOT EXISTS (SELECT 1 FROM public.invoices WHERE id = 'fac-o1')
+     OR NOT EXISTS (SELECT 1 FROM public.client_documents WHERE id = 'doc-o1') THEN
+    RAISE EXCEPTION 'c-other perdió filas pese a ser de otro tenant';
+  END IF;
+
+  RAISE NOTICE 'aislamiento por tenant: c-other intacto, error indistinguible de inexistente';
+END $$;
+
+-- ── 5.4 Sin tenant, la RPC sigue exigiendo que el cliente exista ────
+DO $$
+DECLARE
+  msg TEXT;
+  completed BOOLEAN := FALSE;
+BEGIN
+  BEGIN
+    PERFORM public.customers_delete_cascade('c-inexistente', NULL);
+    completed := TRUE;
+  EXCEPTION WHEN raise_exception THEN
+    GET STACKED DIAGNOSTICS msg = MESSAGE_TEXT;
+    IF position('client_not_found' IN msg) = 0 THEN
+      RAISE EXCEPTION 'error inesperado: %', msg;
+    END IF;
+  END;
+
+  IF completed THEN
+    RAISE EXCEPTION 'la RPC no falló con un cliente inexistente';
+  END IF;
+  RAISE NOTICE 'cliente inexistente: client_not_found';
+END $$;
+
+-- ── 5.5 Retirado el bloqueante, el mismo cliente se borra entero ────
+-- Cierra el círculo: el bloqueo era el historial, no un defecto de la RPC.
+DELETE FROM public.payment_applications WHERE payment_id = 'pay-b1';
+DELETE FROM public.payment_receipts WHERE payment_id = 'pay-b1';
+DELETE FROM public.payments WHERE client_id = 'c-block';
+
+DO $$
+DECLARE
+  res JSONB;
+BEGIN
+  res := public.customers_delete_cascade('c-block', 'tenant-default');
+
+  IF EXISTS (SELECT 1 FROM public.clients WHERE id = 'c-block') THEN
+    RAISE EXCEPTION 'c-block debía borrarse una vez retirado el bloqueante';
+  END IF;
+  IF EXISTS (SELECT 1 FROM public.invoices WHERE client_id = 'c-block') THEN
+    RAISE EXCEPTION 'quedaron facturas de c-block';
+  END IF;
+  IF (res -> 'storage_paths') <> '["tenant-default/c-block/ine.pdf"]'::JSONB THEN
+    RAISE EXCEPTION 'storage_paths de c-block inesperados: %', res -> 'storage_paths';
+  END IF;
+  IF NOT EXISTS (SELECT 1 FROM public.onus WHERE id = 'onu-b1' AND client_id IS NULL)
+     OR NOT EXISTS (SELECT 1 FROM public.tickets WHERE id = 'tk-b1' AND client_id IS NULL) THEN
+    RAISE EXCEPTION 'onus/tickets de c-block no quedaron desligados';
+  END IF;
+
+  RAISE NOTICE 'retirado el bloqueante, el mismo cliente se borra entero';
+END $$;
+
+SELECT 'borrado transaccional de clientes verificado contra PostgreSQL 17' AS resultado;

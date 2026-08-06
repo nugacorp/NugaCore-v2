@@ -52,12 +52,9 @@ const CASES = {
     fixtureLabel: 'fixture: grants, capability, contrato y carreras',
   },
   'customer-delete': {
-    label: 'Borrado de clientes · línea base referencial',
+    label: 'Borrado de clientes · grafo referencial y RPC transaccional',
     db: 'custdel',
-    // Sin migración propia todavía: T1 sólo fija el comportamiento de HOY.
-    // La RPC de borrado transaccional (T2) añadirá la suya a esta lista y
-    // heredará gratis la doble aplicación.
-    migrations: [],
+    migrations: ['supabase/migrations/20260806120000_customers_delete_cascade.sql'],
     bootstrap: 'tests/db/customer-delete-postgres17-bootstrap.sql',
     fixture: 'tests/db/customer-delete-postgres17.sql',
     fixtureLabel: 'fixture: grafo de FK y comportamiento del borrado',
