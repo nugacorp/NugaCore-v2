@@ -1,3 +1,4 @@
+import { randomBytes } from 'node:crypto';
 import { isDomainOnDb } from '../../../config/feature-flags';
 import { BadRequestError, NotFoundError } from '../../../common/errors';
 import { isSupabaseAdminConfigured, supabaseAdmin } from '../../../services/supabase-admin';
@@ -19,7 +20,8 @@ export interface SerialUnit {
 }
 
 const memory: SerialUnit[] = [];
-const uid = () => `ser-${Date.now()}`;
+/** Sufijo aleatorio: `Date.now()` solo colisiona al generar ids en ráfaga. */
+const uid = () => `ser-${Date.now()}-${randomBytes(4).toString('hex')}`;
 const stamp = () => new Date().toISOString();
 
 export class SerialUnitsService {

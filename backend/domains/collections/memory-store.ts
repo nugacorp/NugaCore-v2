@@ -1,3 +1,5 @@
+import { randomBytes } from 'node:crypto';
+
 export interface PaymentPromise {
   id: string;
   tenantId?: string;
@@ -34,6 +36,7 @@ export const collectionsMemory = {
   cashEntries: [] as CashRegisterEntry[],
 };
 
-export const uid = (p: string) => `${p}-${Date.now()}`;
+/** Sufijo aleatorio: `Date.now()` solo colisiona al generar ids en ráfaga. */
+export const uid = (p: string) => `${p}-${Date.now()}-${randomBytes(4).toString('hex')}`;
 export const today = () => new Date().toISOString().substring(0, 10);
 export const stamp = () => new Date().toISOString();

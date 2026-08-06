@@ -1,3 +1,4 @@
+import { randomBytes } from 'node:crypto';
 import { isDomainOnDb } from '../../config/feature-flags';
 import { BadRequestError } from '../../common/errors';
 import { isSupabaseAdminConfigured, supabaseAdmin } from '../../services/supabase-admin';
@@ -19,7 +20,8 @@ export interface OperationalExpense {
 }
 
 const memory: OperationalExpense[] = [];
-const uid = () => `exp-${Date.now()}`;
+/** Sufijo aleatorio: `Date.now()` solo colisiona al generar ids en ráfaga. */
+const uid = () => `exp-${Date.now()}-${randomBytes(4).toString('hex')}`;
 const today = () => new Date().toISOString().substring(0, 10);
 
 const matchesTenant = (recordTenantId: string | undefined, tenantId: string): boolean =>

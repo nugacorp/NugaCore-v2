@@ -1,3 +1,4 @@
+import { randomBytes } from 'node:crypto';
 import { isDomainOnDb } from '../../config/feature-flags';
 import { BadRequestError, NotFoundError } from '../../common/errors';
 import { isSupabaseAdminConfigured, supabaseAdmin } from '../../services/supabase-admin';
@@ -39,7 +40,8 @@ const memory = {
   orders: [] as PurchaseOrder[],
 };
 
-const uid = (p: string) => `${p}-${Date.now()}`;
+/** Sufijo aleatorio: `Date.now()` solo colisiona al generar ids en ráfaga. */
+const uid = (p: string) => `${p}-${Date.now()}-${randomBytes(4).toString('hex')}`;
 const now = () => new Date().toISOString();
 
 export class PurchasesService {
