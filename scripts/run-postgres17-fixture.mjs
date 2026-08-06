@@ -25,6 +25,7 @@
 // ====================================================================
 
 import { spawnSync } from 'node:child_process';
+import { randomBytes } from 'node:crypto';
 import { existsSync } from 'node:fs';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
@@ -33,6 +34,11 @@ const repoRoot = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..'
 
 const IMAGE = process.env.PG17_IMAGE ?? 'postgres:17';
 const READY_TIMEOUT_MS = 120_000;
+
+// El PID solo NO basta: el sistema los reutiliza, y con ejecuciones seguidas
+// `docker run --name` choca con el contenedor de la anterior y el gate sale 1
+// sin dejar rastro útil. Es el mismo defecto que el repo ya arregló en `uid()`.
+const RUN_ID = `${process.pid}-${randomBytes(4).toString('hex')}`;
 
 // ── Casos ───────────────────────────────────────────────────────────
 // Añadir un caso es añadir una entrada aquí: nada más del runner cambia.
@@ -109,14 +115,26 @@ function step(label, result) {
   return false;
 }
 
-async function waitForReady(container) {
+// La imagen de postgres arranca un servidor TEMPORAL para correr initdb y los
+// scripts de inicio, lo apaga y levanta el definitivo. Durante ese relevo el
+// socket desaparece, así que una sola sonda afortunada no significa nada: el
+// primer psql se estrella con "No such file or directory". Se exige que la
+// sonda —una consulta real contra la base del caso, no `pg_isready`— acierte
+// varias veces seguidas; el corte del relevo pone el contador a cero.
+const READY_STREAK = 3;
+
+async function waitForReady(container, db) {
   const deadline = Date.now() + READY_TIMEOUT_MS;
+  let streak = 0;
   while (Date.now() < deadline) {
-    const probe = docker(['exec', container, 'pg_isready', '--username=postgres', '--quiet'], {
-      capture: true,
-    });
-    if (probe.status === 0) return true;
-    await new Promise((resolve) => setTimeout(resolve, 1000));
+    const probe = docker(
+      ['exec', container, 'psql', '-X', '-q', '-t', '--username=postgres', `--dbname=${db}`,
+       '-c', 'SELECT 1'],
+      { capture: true },
+    );
+    streak = probe.status === 0 ? streak + 1 : 0;
+    if (streak >= READY_STREAK) return true;
+    await new Promise((resolve) => setTimeout(resolve, 500));
   }
   return false;
 }
@@ -145,7 +163,7 @@ async function runCase(name, testCase) {
     }
   }
 
-  const container = `nugacore-${name}-pg17-${process.pid}`;
+  const container = `nugacore-${name}-pg17-${RUN_ID}`;
 
   // POSTGRES_HOST_AUTH_METHOD=trust habilita las conexiones locales de dblink
   // sin credenciales. Es aceptable porque el contenedor no publica ningún
@@ -172,7 +190,7 @@ async function runCase(name, testCase) {
   }
 
   try {
-    if (!(await waitForReady(container))) {
+    if (!(await waitForReady(container, testCase.db))) {
       fail('el contenedor no aceptó conexiones dentro del tiempo límite');
       return false;
     }
@@ -233,7 +251,7 @@ async function main() {
 
 for (const signal of ['SIGINT', 'SIGTERM']) {
   process.on(signal, () => {
-    for (const name of Object.keys(CASES)) removeContainer(`nugacore-${name}-pg17-${process.pid}`);
+    for (const name of Object.keys(CASES)) removeContainer(`nugacore-${name}-pg17-${RUN_ID}`);
     process.exit(1);
   });
 }
