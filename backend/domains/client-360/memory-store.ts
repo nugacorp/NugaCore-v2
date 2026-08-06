@@ -1,3 +1,5 @@
+import { randomBytes } from 'node:crypto';
+
 export interface ClientTag {
   id: string;
   clientId: string;
@@ -52,7 +54,17 @@ export const client360Memory = {
   activity: [] as ActivityLogEntry[],
 };
 
-export const uid = (p: string) => `${p}-${Date.now()}`;
+/**
+ * Id único con sufijo aleatorio. La marca de tiempo sola NO basta: dos llamadas
+ * dentro del mismo milisegundo devolvían el MISMO id, y `documentId` gobierna la
+ * ruta del objeto en Storage (`buildDocumentPath`). Dos subidas simultáneas
+ * compartían ruta: la segunda sobrescribía los bytes de la primera y el borrado
+ * de una se llevaba el archivo de la otra.
+ *
+ * El repo ya aplicaba este patrón donde se generan ids en ráfaga —`inventory`,
+ * `commercial`, y el id de timeline en `customers/repository.ts`—; aquí faltaba.
+ */
+export const uid = (p: string) => `${p}-${Date.now()}-${randomBytes(4).toString('hex')}`;
 export const stamp = () => new Date().toISOString();
 
 /** Legacy rows without stamp belong to tenant-default. */
