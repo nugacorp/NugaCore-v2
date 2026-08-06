@@ -1,10 +1,11 @@
 -- ====================================================================
 -- Bootstrap del caso "borrado de clientes" — PostgreSQL 17 desechable.
 --
--- Replica `clients` y las 24 tablas que recorre
--- `backend/domains/customers/repository.ts::remove()`, con sus claves
--- foráneas y acciones referenciales REALES, más los tres destinos de FK que
--- esas tablas necesitan (`tenants`, `plans`, `olts`).
+-- Replica `clients`, las 24 tablas que recorre
+-- `backend/domains/customers/repository.ts::remove()` y las 6 que referencian
+-- `clients` sin que `remove()` las toque nunca, con sus claves foráneas y
+-- acciones referenciales REALES, más los cuatro destinos de FK que esas
+-- tablas necesitan (`tenants`, `plans`, `olts`, `commercial_prospects`).
 --
 -- PROCEDENCIA — no está escrito de memoria. Cada FK y cada acción
 -- referencial sale de:
@@ -419,6 +420,105 @@ CREATE TABLE IF NOT EXISTS public.reactivation_orders (
     REFERENCES public.tenants(id) ON DELETE RESTRICT
 );
 
+-- ── Las seis que `remove()` NO recorre ──────────────────────────────
+-- Referencian `clients` y el código nunca las toca: hoy el SET NULL de
+-- PostgreSQL actúa solo al borrar el cliente, y funciona bien. Son invisibles
+-- desde `remove()`, así que sin fijarlas aquí la matriz *borrar | desligar |
+-- bloquear* de T2 quedaría incompleta por omisión — el mismo modo de fallo
+-- que este gate existe para impedir.
+--   crm_erp_wisp_schema:30/46/75  commercial_quotes, commercial_appointments,
+--                                 inventory_serial_units
+--   wisp_os_schema:74             cash_register_entries
+--   ola6_radius_tenancy:21        radius_accounting
+--   init_schema:519               suspension_action_logs
+
+-- Destino de FK que las dos tablas comerciales necesitan.
+CREATE TABLE IF NOT EXISTS public.commercial_prospects (
+  id TEXT PRIMARY KEY,
+  name TEXT NOT NULL,
+  stage TEXT NOT NULL DEFAULT 'lead',
+  plan_id TEXT REFERENCES public.plans(id) ON DELETE SET NULL,
+  tenant_id TEXT NOT NULL DEFAULT 'tenant-default'
+    REFERENCES public.tenants(id) ON DELETE RESTRICT
+);
+
+CREATE TABLE IF NOT EXISTS public.cash_register_entries (
+  id TEXT PRIMARY KEY,
+  collector_id TEXT,
+  client_id TEXT REFERENCES public.clients(id) ON DELETE SET NULL,
+  invoice_id TEXT,                                      -- sin FK en el esquema real
+  amount_cents INTEGER NOT NULL,
+  currency TEXT NOT NULL DEFAULT 'MXN',
+  payment_method TEXT NOT NULL DEFAULT 'Efectivo',
+  entry_date DATE NOT NULL DEFAULT CURRENT_DATE,
+  tenant_id TEXT NOT NULL DEFAULT 'tenant-default'
+    REFERENCES public.tenants(id) ON DELETE RESTRICT
+);
+
+CREATE TABLE IF NOT EXISTS public.commercial_quotes (
+  id TEXT PRIMARY KEY,
+  prospect_id TEXT REFERENCES public.commercial_prospects(id) ON DELETE CASCADE,
+  client_id TEXT REFERENCES public.clients(id) ON DELETE SET NULL,
+  plan_id TEXT REFERENCES public.plans(id) ON DELETE SET NULL,
+  title TEXT NOT NULL,
+  amount_cents INTEGER NOT NULL DEFAULT 0,
+  currency TEXT NOT NULL DEFAULT 'MXN',
+  status TEXT NOT NULL DEFAULT 'draft'
+    CHECK (status IN ('draft', 'sent', 'accepted', 'rejected', 'expired')),
+  tenant_id TEXT NOT NULL DEFAULT 'tenant-default'
+    REFERENCES public.tenants(id) ON DELETE RESTRICT
+);
+
+CREATE TABLE IF NOT EXISTS public.commercial_appointments (
+  id TEXT PRIMARY KEY,
+  prospect_id TEXT REFERENCES public.commercial_prospects(id) ON DELETE SET NULL,
+  client_id TEXT REFERENCES public.clients(id) ON DELETE SET NULL,
+  work_order_id TEXT REFERENCES public.work_orders(id) ON DELETE SET NULL,
+  title TEXT NOT NULL,
+  appointment_type TEXT NOT NULL DEFAULT 'visit'
+    CHECK (appointment_type IN ('visit', 'installation', 'survey', 'followup')),
+  scheduled_at TIMESTAMPTZ NOT NULL,
+  duration_minutes INTEGER NOT NULL DEFAULT 60,
+  status TEXT NOT NULL DEFAULT 'scheduled'
+    CHECK (status IN ('scheduled', 'completed', 'canceled', 'no_show')),
+  tenant_id TEXT NOT NULL DEFAULT 'tenant-default'
+    REFERENCES public.tenants(id) ON DELETE RESTRICT
+);
+
+-- item_id es NOT NULL pero NO tiene clave foránea en el esquema real
+-- (crm_erp_wisp_schema:69). No es un olvido de este bootstrap.
+CREATE TABLE IF NOT EXISTS public.inventory_serial_units (
+  id TEXT PRIMARY KEY,
+  item_id TEXT NOT NULL,
+  serial TEXT NOT NULL UNIQUE,
+  status TEXT NOT NULL DEFAULT 'available'
+    CHECK (status IN ('available', 'reserved', 'installed', 'rma', 'retired')),
+  client_id TEXT REFERENCES public.clients(id) ON DELETE SET NULL,
+  installed_at TIMESTAMPTZ
+);
+
+-- Única tabla del caso cuyo tenant_id es SET NULL en vez de RESTRICT.
+CREATE TABLE IF NOT EXISTS public.radius_accounting (
+  id TEXT PRIMARY KEY,
+  tenant_id TEXT DEFAULT 'tenant-default'
+    REFERENCES public.tenants(id) ON DELETE SET NULL,
+  username TEXT NOT NULL,
+  client_id TEXT REFERENCES public.clients(id) ON DELETE SET NULL,
+  bytes_in BIGINT NOT NULL DEFAULT 0,
+  bytes_out BIGINT NOT NULL DEFAULT 0,
+  started_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
+);
+
+-- Sin tenant_id: ni la SSOT ni su reaplicación alcanzaron esta tabla.
+CREATE TABLE IF NOT EXISTS public.suspension_action_logs (
+  id TEXT PRIMARY KEY,
+  client_id TEXT REFERENCES public.clients(id) ON DELETE SET NULL,
+  client_name TEXT,
+  action TEXT NOT NULL,
+  reason TEXT,
+  source TEXT NOT NULL DEFAULT 'manual'
+);
+
 -- ── Privilegios ─────────────────────────────────────────────────────
 -- USAGE sobre el schema es baseline de plataforma en Supabase; los privilegios
 -- de TABLA no lo son. Este bootstrap no concede NINGUNO sobre las tablas del
@@ -439,7 +539,10 @@ DECLARE
     'client_tags', 'client_alternate_contacts', 'client_activity_log',
     'payment_promises', 'portal_user_bindings', 'onus', 'tickets',
     'work_orders', 'customer_service_state', 'suspension_events',
-    'suspension_orders', 'reactivation_orders'
+    'suspension_orders', 'reactivation_orders',
+    -- Las seis que `remove()` no recorre
+    'cash_register_entries', 'commercial_quotes', 'commercial_appointments',
+    'inventory_serial_units', 'radius_accounting', 'suspension_action_logs'
   ];
 BEGIN
   FOREACH t IN ARRAY targets LOOP

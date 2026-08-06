@@ -7,11 +7,11 @@
 -- no como un efecto colateral.
 --
 -- Qué comprueba:
---   1. El grafo de claves foráneas del caso, entero y exacto (51 FK).
+--   1. El grafo de claves foráneas del caso, entero y exacto (67 FK).
 --      Cambiar un ON DELETE en el esquema y no aquí = fallo inmediato.
 --   2. Comportamiento observado con filas reales: qué bloquea, qué arrasa y
 --      qué desliga.
---   3. Que `service_role` sigue sin privilegios de tabla sobre las 25 tablas
+--   3. Que `service_role` sigue sin privilegios de tabla sobre las 31 tablas
 --      del caso: la RPC de T2 tendrá que concederlos ella misma.
 --
 -- NO implementa ninguna RPC de borrado. Eso es T2.
@@ -56,6 +56,15 @@ INSERT INTO expected_fks (child, col, parent, on_delete) VALUES
   ('onus',                      'client_id',   'clients', 'SET NULL'),
   ('tickets',                   'client_id',   'clients', 'SET NULL'),
   ('work_orders',               'client_id',   'clients', 'SET NULL'),
+  -- SET NULL que `remove()` NO recorre: hoy funcionan bien precisamente
+  -- porque el código no las toca y PostgreSQL las desliga solo. T2 tiene que
+  -- preservar ese comportamiento cuando el borrado pase a SQL explícito.
+  ('cash_register_entries',     'client_id',   'clients', 'SET NULL'),
+  ('commercial_appointments',   'client_id',   'clients', 'SET NULL'),
+  ('commercial_quotes',         'client_id',   'clients', 'SET NULL'),
+  ('inventory_serial_units',    'client_id',   'clients', 'SET NULL'),
+  ('radius_accounting',         'client_id',   'clients', 'SET NULL'),
+  ('suspension_action_logs',    'client_id',   'clients', 'SET NULL'),
 
   -- Hacia invoices --------------------------------------------------
   ('adjustments',               'invoice_id',  'invoices', 'RESTRICT'),
@@ -74,6 +83,13 @@ INSERT INTO expected_fks (child, col, parent, on_delete) VALUES
   -- Hacia plans -----------------------------------------------------
   ('clients',                   'plan_id',     'plans', 'SET NULL'),
   ('service_subscriptions',     'plan_id',     'plans', 'RESTRICT'),
+  ('commercial_quotes',         'plan_id',     'plans', 'SET NULL'),
+  ('commercial_prospects',      'plan_id',     'plans', 'SET NULL'),
+
+  -- Hacia commercial_prospects / work_orders ------------------------
+  ('commercial_quotes',         'prospect_id',    'commercial_prospects', 'CASCADE'),
+  ('commercial_appointments',   'prospect_id',    'commercial_prospects', 'SET NULL'),
+  ('commercial_appointments',   'work_order_id',  'work_orders',          'SET NULL'),
 
   -- Hacia tenants ---------------------------------------------------
   ('client_activity_log',       'tenant_id',   'tenants', 'RESTRICT'),
@@ -94,6 +110,12 @@ INSERT INTO expected_fks (child, col, parent, on_delete) VALUES
   ('tickets',                   'tenant_id',   'tenants', 'RESTRICT'),
   ('work_orders',               'tenant_id',   'tenants', 'RESTRICT'),
   ('plans',                     'tenant_id',   'tenants', 'RESTRICT'),
+  ('cash_register_entries',     'tenant_id',   'tenants', 'RESTRICT'),
+  ('commercial_appointments',   'tenant_id',   'tenants', 'RESTRICT'),
+  ('commercial_quotes',         'tenant_id',   'tenants', 'RESTRICT'),
+  ('commercial_prospects',      'tenant_id',   'tenants', 'RESTRICT'),
+  -- La única excepción del esquema: SET NULL, no RESTRICT (ola6:19).
+  ('radius_accounting',         'tenant_id',   'tenants', 'SET NULL'),
 
   -- Hacia olts ------------------------------------------------------
   ('onus',                      'olt_id',      'olts', 'SET NULL');
@@ -151,8 +173,8 @@ DECLARE
   n INTEGER;
 BEGIN
   SELECT count(*) INTO n FROM expected_fks;
-  IF n <> 51 THEN
-    RAISE EXCEPTION 'la línea base debería declarar 51 FK, declara %', n;
+  IF n <> 67 THEN
+    RAISE EXCEPTION 'la línea base debería declarar 67 FK, declara %', n;
   END IF;
   RAISE NOTICE 'grafo de FK verificado: % claves foráneas coinciden con el esquema', n;
 END $$;
@@ -193,6 +215,20 @@ INSERT INTO public.onus (id, client_id, client_name, olt_id) VALUES ('onu-1', 'c
 INSERT INTO public.tickets (id, client_id, client_name, title, description, category)
 VALUES ('tk-1', 'c-full', 'Cliente con historial', 'Sin señal', 'Reporta corte', 'soporte');
 INSERT INTO public.work_orders (id, title, client_id, client_name) VALUES ('wo-1', 'Instalación', 'c-full', 'Cliente con historial');
+
+-- Las seis que `remove()` no recorre. Hoy nadie las limpia a mano: al borrar
+-- el cliente sólo actúa el SET NULL de PostgreSQL, y eso es lo correcto.
+INSERT INTO public.commercial_prospects (id, name, plan_id) VALUES ('pros-1', 'Prospecto', 'plan-basic');
+INSERT INTO public.cash_register_entries (id, client_id, amount_cents) VALUES ('cre-1', 'c-full', 50000);
+INSERT INTO public.commercial_quotes (id, prospect_id, client_id, plan_id, title)
+VALUES ('cq-1', 'pros-1', 'c-full', 'plan-basic', 'Cotización');
+INSERT INTO public.commercial_appointments (id, prospect_id, client_id, work_order_id, title, scheduled_at)
+VALUES ('cap-1', 'pros-1', 'c-full', 'wo-1', 'Visita', NOW());
+INSERT INTO public.inventory_serial_units (id, item_id, serial, client_id)
+VALUES ('isu-1', 'inv-1', 'SN-0001', 'c-full');
+INSERT INTO public.radius_accounting (id, username, client_id) VALUES ('ra-1', 'c-full@wisp', 'c-full');
+INSERT INTO public.suspension_action_logs (id, client_id, client_name, action)
+VALUES ('sal-1', 'c-full', 'Cliente con historial', 'suspend');
 
 INSERT INTO public.customer_service_state (customer_id) VALUES ('c-full');
 INSERT INTO public.suspension_events (id, customer_id, event_type) VALUES ('sev-1', 'c-full', 'evaluated');
@@ -306,6 +342,51 @@ BEGIN
   RAISE NOTICE 'SET NULL verificado: onus, tickets y work_orders sobreviven desligados';
 END $$;
 
+-- Las seis invisibles desde `remove()`. Hoy funcionan BIEN: el código no las
+-- toca y el SET NULL de PostgreSQL actúa solo. Éste es el assert que impide
+-- que T2, al pasar el borrado a SQL explícito, las convierta en hard-borrado
+-- por olvidarse de que existen.
+DO $$
+DECLARE
+  t TEXT;
+  n INTEGER;
+  untouched TEXT[] := ARRAY[
+    'cash_register_entries', 'commercial_quotes', 'commercial_appointments',
+    'inventory_serial_units', 'radius_accounting', 'suspension_action_logs'
+  ];
+BEGIN
+  FOREACH t IN ARRAY untouched LOOP
+    -- Sobreviven…
+    EXECUTE format('SELECT count(*) FROM public.%I', t) INTO n;
+    IF n <> 1 THEN
+      RAISE EXCEPTION '% debía sobrevivir al borrado del cliente, quedan % fila(s)', t, n;
+    END IF;
+    -- …y quedan desligadas, no colgando de un cliente inexistente.
+    EXECUTE format('SELECT count(*) FROM public.%I WHERE client_id IS NOT NULL', t) INTO n;
+    IF n <> 0 THEN
+      RAISE EXCEPTION '% conservó client_id tras el borrado: SET NULL no actuó', t;
+    END IF;
+  END LOOP;
+
+  -- El resto de sus vínculos NO se toca: la cita sigue colgada de su
+  -- prospecto y de su orden de trabajo, y la cotización de su plan.
+  SELECT count(*) INTO n FROM public.commercial_appointments
+   WHERE id = 'cap-1' AND prospect_id = 'pros-1' AND work_order_id = 'wo-1';
+  IF n <> 1 THEN RAISE EXCEPTION 'commercial_appointments perdió vínculos ajenos al cliente'; END IF;
+
+  SELECT count(*) INTO n FROM public.commercial_quotes
+   WHERE id = 'cq-1' AND prospect_id = 'pros-1' AND plan_id = 'plan-basic';
+  IF n <> 1 THEN RAISE EXCEPTION 'commercial_quotes perdió vínculos ajenos al cliente'; END IF;
+
+  -- suspension_action_logs conserva el nombre denormalizado: es la única
+  -- huella de a quién se suspendió.
+  SELECT count(*) INTO n FROM public.suspension_action_logs
+   WHERE id = 'sal-1' AND client_name = 'Cliente con historial';
+  IF n <> 1 THEN RAISE EXCEPTION 'suspension_action_logs perdió la huella del cliente'; END IF;
+
+  RAISE NOTICE 'las 6 tablas que remove() no recorre sobreviven desligadas, como hoy';
+END $$;
+
 -- ── 2.4 Los objetos de Storage quedan huérfanos ─────────────────────
 -- El CASCADE se llevó la fila de client_documents con su storage_path, y
 -- nada tocó el objeto del bucket. PL/pgSQL no puede: no habla con la Storage
@@ -370,11 +451,14 @@ DECLARE
     'client_tags', 'client_alternate_contacts', 'client_activity_log',
     'payment_promises', 'portal_user_bindings', 'onus', 'tickets',
     'work_orders', 'customer_service_state', 'suspension_events',
-    'suspension_orders', 'reactivation_orders'
+    'suspension_orders', 'reactivation_orders',
+    -- Las seis que `remove()` no recorre
+    'cash_register_entries', 'commercial_quotes', 'commercial_appointments',
+    'inventory_serial_units', 'radius_accounting', 'suspension_action_logs'
   ];
 BEGIN
-  IF array_length(targets, 1) <> 25 THEN
-    RAISE EXCEPTION 'el caso debía cubrir 25 tablas, cubre %', array_length(targets, 1);
+  IF array_length(targets, 1) <> 31 THEN
+    RAISE EXCEPTION 'el caso debía cubrir 31 tablas, cubre %', array_length(targets, 1);
   END IF;
   FOREACH t IN ARRAY targets LOOP
     FOREACH p IN ARRAY ARRAY['SELECT', 'INSERT', 'UPDATE', 'DELETE'] LOOP
@@ -383,7 +467,7 @@ BEGIN
       END IF;
     END LOOP;
   END LOOP;
-  RAISE NOTICE 'service_role sin privilegios de tabla sobre las 25 tablas del caso';
+  RAISE NOTICE 'service_role sin privilegios de tabla sobre las 31 tablas del caso';
 END $$;
 
 -- ====================================================================
