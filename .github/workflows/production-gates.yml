@@ -61,7 +61,24 @@ jobs:
       # El runner ya trae Docker; el script levanta y elimina su propio
       # contenedor desechable, así que no hace falta un `services:` compartido
       # (el fixture necesita dblink sobre el socket local del propio servidor).
-      - run: npm run test:db:postgres17
+      - run: npm run test:db:postgres17 -- webhook
+
+  # Borrar un cliente atraviesa 25 tablas con acciones referenciales mezcladas
+  # (RESTRICT, CASCADE y SET NULL), y `npm test` corre en modo mock, donde las
+  # filas van a un array sin claves foráneas: un defecto de integridad pasaría
+  # invisible. Este job fija la línea base referencial de HOY para que el
+  # borrado transaccional (T2) se contraste contra ella en vez de contra el
+  # recuerdo de lo que el esquema decía.
+  customer-delete-postgres17:
+    name: Customer delete baseline · PostgreSQL 17 real
+    runs-on: ubuntu-latest
+    needs: quality
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+      - run: npm run test:db:postgres17 -- customer-delete
 
   security-smoke:
     name: Security contract tests
