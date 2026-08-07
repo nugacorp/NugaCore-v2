@@ -20,6 +20,8 @@ import {
   IdempotencyResolutionError,
 } from '../../common/errors';
 import { tenantScopedIdempotencyId } from '../../common/idempotency';
+import { redactStoragePath } from '../../common/log-redaction';
+import { removeDocumentObject } from '../../services/supabase-storage';
 import {
   ClientRow,
   TimelineRow,
@@ -179,10 +181,127 @@ export class StoreCustomersRepository implements CustomersRepository {
 const CLIENTS_TABLE = 'clients';
 const TIMELINE_TABLE = 'client_timeline';
 
+/**
+ * Un `PostgrestError` es un objeto plano, NO un `Error`: `String(error)` lo
+ * convierte en `[object Object]` y el diagnóstico se pierde entero. Importa
+ * más desde que `remove()` va por RPC, porque ya no deja rastro tabla a tabla:
+ * este log es la única traza de cualquier fallo no traducido.
+ */
+const describeDbError = (error: unknown): string => {
+  if (error instanceof Error) return error.message;
+  if (error && typeof error === 'object') {
+    const e = error as { message?: unknown; code?: unknown; details?: unknown; hint?: unknown };
+    const parts = [
+      typeof e.message === 'string' ? e.message : null,
+      typeof e.code === 'string' ? `code=${e.code}` : null,
+      typeof e.details === 'string' && e.details ? `details=${e.details}` : null,
+      typeof e.hint === 'string' && e.hint ? `hint=${e.hint}` : null,
+    ].filter(Boolean);
+    if (parts.length > 0) return parts.join(' · ');
+  }
+  return String(error);
+};
+
 const fail = (context: string, error: unknown): never => {
-  const message = error instanceof Error ? error.message : String(error);
+  const message = describeDbError(error);
   logger.error(`Supabase customers repository error: ${context}`, { message });
   throw new Error(`Customers DB error (${context}): ${message}`);
+};
+
+// --------------------------------------------------------------------
+// Borrado de cliente: traducción del bloqueo y barrido del bucket.
+// --------------------------------------------------------------------
+
+/** 23503: violación de clave foránea. Llega como objeto plano, no como Error. */
+const isForeignKeyViolation = (error: unknown): boolean => {
+  if (!error || typeof error !== 'object') return false;
+  const { code, message } = error as { code?: unknown; message?: unknown };
+  return code === '23503' || (typeof message === 'string' && message.includes('23503'));
+};
+
+/** Tablas que bloquean el borrado → cómo llamarlas delante de un usuario. */
+const BLOCKING_LABELS: Record<string, [string, string]> = {
+  payments: ['pago registrado', 'pagos registrados'],
+  payment_receipts: ['comprobante de pago', 'comprobantes de pago'],
+  credit_notes: ['nota de crédito', 'notas de crédito'],
+  adjustments: ['ajuste de facturación', 'ajustes de facturación'],
+  payment_applications: ['pago aplicado a facturas', 'pagos aplicados a facturas'],
+  credit_applications: ['nota de crédito aplicada', 'notas de crédito aplicadas'],
+};
+
+const SALIDA = 'Usa la Baja comercial para desactivarlo conservando su historial.';
+
+/**
+ * `customers_delete_cascade: client_delete_blocked: {"payments":2,...}` → el
+ * mensaje que ve el usuario. La RPC dice QUÉ bloquea y con cuántas filas, así
+ * que el conflicto puede ser concreto en vez de genérico, y ofrece la salida
+ * que el producto ya tiene: la baja comercial.
+ */
+export const clientDeleteBlockedMessage = (rpcMessage: string): string => {
+  const detail = (() => {
+    const start = rpcMessage.indexOf('{');
+    if (start < 0) return '';
+    try {
+      const counts = JSON.parse(rpcMessage.slice(start)) as Record<string, unknown>;
+      return Object.entries(counts)
+        .filter(([, n]) => typeof n === 'number' && n > 0)
+        .map(([table, n]) => {
+          const count = n as number;
+          const label = BLOCKING_LABELS[table] ?? [table, table];
+          return `${count} ${count === 1 ? label[0] : label[1]}`;
+        })
+        .join(', ');
+    } catch {
+      // La RPC cambió de forma: mejor un mensaje genérico que uno inventado.
+      return '';
+    }
+  })();
+
+  return (
+    'No se puede eliminar: el cliente tiene historial financiero con obligación de conservación'
+    + (detail ? ` (${detail})` : '')
+    + `. ${SALIDA}`
+  );
+};
+
+/** Rutas de Storage devueltas por la RPC, saneadas. */
+const storagePathsOf = (raw: Record<string, unknown> | null): string[] => {
+  const paths = raw?.storage_paths;
+  if (!Array.isArray(paths)) return [];
+  return paths.filter((p): p is string => typeof p === 'string' && p.trim() !== '');
+};
+
+/**
+ * Barrido best-effort de los objetos del bucket, DESPUÉS del commit.
+ *
+ * Nunca lanza: el cliente ya está borrado y la transacción confirmada. Fallar
+ * aquí le diría al llamador que el borrado no ocurrió, cuando sí ocurrió. Lo
+ * que queda si esto falla son objetos huérfanos —basura recuperable— y una
+ * traza con lo justo para localizarlos: el cliente y la carpeta, nunca el
+ * nombre del archivo, que es dato personal.
+ */
+const sweepDocumentObjects = async (clientId: string, paths: string[]): Promise<void> => {
+  if (paths.length === 0) return;
+  try {
+    const orphaned: string[] = [];
+    for (const path of paths) {
+      if (!(await removeDocumentObject(path))) orphaned.push(redactStoragePath(path));
+    }
+    if (orphaned.length > 0) {
+      logger.warn('customers.remove: objetos huérfanos en el bucket', {
+        clientId,
+        orphaned: orphaned.length,
+        total: paths.length,
+        prefixes: [...new Set(orphaned)],
+      });
+    }
+  } catch (error) {
+    logger.warn('customers.remove: el barrido del bucket falló entero', {
+      clientId,
+      total: paths.length,
+      message: error instanceof Error ? error.message : String(error),
+    });
+  }
 };
 
 export class SupabaseCustomersRepository implements CustomersRepository {
@@ -235,118 +354,53 @@ export class SupabaseCustomersRepository implements CustomersRepository {
   }
 
   async remove(id: string, tenantId?: string): Promise<boolean> {
-    // Supabase JS no lanza en errores PostgREST: hay que leer `{ error }`.
-    // Varias tablas RESTRICT (payments, credit_notes, …) y otras usan
-    // `customer_id` (suspensión). payment_applications NO tiene client_id.
-    if (tenantId) {
-      const owned = await this.findById(id, tenantId);
-      if (!owned) return false;
-    }
-
-    const warn = (table: string, error: { code?: string; message?: string } | null) => {
-      if (!error) return;
-      logger.warn('customers.remove dep cleanup', {
-        table,
-        code: error.code,
-        message: error.message,
-      });
-    };
-
-    const delEq = async (table: string, column: string, value: string) => {
-      const { error } = await this.client.from(table).delete().eq(column, value);
-      warn(table, error);
-    };
-
-    const delIn = async (table: string, column: string, values: string[]) => {
-      if (values.length === 0) return;
-      const { error } = await this.client.from(table).delete().in(column, values);
-      warn(table, error);
-    };
-
-    const { data: invoiceRows, error: invErr } = await this.client
-      .from('invoices')
-      .select('id')
-      .eq('client_id', id);
-    warn('invoices.select', invErr);
-    const invoiceIds = (invoiceRows ?? []).map((r) => String((r as { id: string }).id));
-
-    const { data: paymentRows, error: payErr } = await this.client
-      .from('payments')
-      .select('id')
-      .eq('client_id', id);
-    warn('payments.select', payErr);
-    const paymentIds = (paymentRows ?? []).map((r) => String((r as { id: string }).id));
-
-    const { data: creditRows, error: cnErr } = await this.client
-      .from('credit_notes')
-      .select('id')
-      .eq('client_id', id);
-    warn('credit_notes.select', cnErr);
-    const creditNoteIds = (creditRows ?? []).map((r) => String((r as { id: string }).id));
-
-    // Hijos M:N primero (sin client_id directo)
-    await delIn('payment_applications', 'payment_id', paymentIds);
-    await delIn('payment_applications', 'invoice_id', invoiceIds);
-    await delIn('payment_receipts', 'payment_id', paymentIds);
-    await delIn('credit_applications', 'credit_note_id', creditNoteIds);
-    await delIn('credit_applications', 'invoice_id', invoiceIds);
-    await delIn('adjustments', 'invoice_id', invoiceIds);
-    await delEq('adjustments', 'client_id', id);
-    await delIn('invoice_payments', 'invoice_id', invoiceIds);
-    await delIn('invoice_items', 'invoice_id', invoiceIds);
-
-    // Entidades con client_id RESTRICT
-    await delEq('payment_receipts', 'client_id', id);
-    await delEq('payments', 'client_id', id);
-    await delEq('credit_notes', 'client_id', id);
-    await delIn('invoices', 'id', invoiceIds);
-    await delEq('invoices', 'client_id', id);
-
-    // Suspensión / estado de servicio usan customer_id
-    await delEq('reactivation_orders', 'customer_id', id);
-    await delEq('suspension_orders', 'customer_id', id);
-    await delEq('suspension_events', 'customer_id', id);
-    await delEq('customer_service_state', 'customer_id', id);
-
-    // Relacionadas tipicas (CASCADE o SET NULL; limpiar por robustez)
-    const clientIdTables = [
-      'service_subscriptions',
-      'client_timeline',
-      'client_documents',
-      'client_tags',
-      'client_alternate_contacts',
-      'client_activity_log',
-      'payment_promises',
-      'portal_user_bindings',
-      'onus',
-      'tickets',
-      'work_orders',
-    ];
-    for (const table of clientIdTables) {
-      await delEq(table, 'client_id', id);
-    }
-
-    let deleteQuery = this.client
-      .from(CLIENTS_TABLE)
-      .delete({ count: 'exact' })
-      .eq('id', id);
-    if (tenantId) deleteQuery = deleteQuery.eq('tenant_id', tenantId);
-    const { error, count } = await deleteQuery;
+    // Una sola transacción Postgres: comprueba los bloqueantes ANTES de tocar
+    // nada, borra y desliga según declara el esquema, y devuelve los
+    // `storage_path` de los documentos que se llevó por delante.
+    //
+    // NO hay fallback al borrado multi-write que había aquí. Si la RPC no está,
+    // esto falla cerrado: volver a borrar ~25 tablas una a una, sin transacción
+    // y tragándose los errores, reintroduciría el defecto justo cuando más
+    // falta hace —el cliente sobrevivía con su historial financiero destruido.
+    const { data, error } = await this.client.rpc('customers_delete_cascade', {
+      p_client_id: id,
+      p_tenant_id: tenantId ?? null,
+    });
 
     if (error) {
-      if (
-        typeof error === 'object' &&
-        error !== null &&
-        'code' in error &&
-        (error as { code: string }).code === '23503'
-      ) {
-        throw new ConflictError(
-          'No se puede eliminar: el cliente tiene historial financiero o relaciones bloqueantes. Usa Baja comercial o limpia dependencias primero.',
-        );
+      const message = error.message ?? '';
+      // La RPC no distingue "no existe" de "es de otro tenant", a propósito:
+      // así no filtra la existencia de clientes ajenos. Ambos son 404, igual
+      // que antes.
+      if (/client_not_found/i.test(message)) return false;
+      if (/client_delete_blocked/i.test(message)) {
+        throw new ConflictError(clientDeleteBlockedMessage(message));
+      }
+      // Cinturón: una violación de clave foránea que el pre-check no vio.
+      // Bajo READ COMMITTED puede pasar —un INSERT sin confirmar sobre una
+      // factura del cliente es invisible al contarlo, y el `FOR UPDATE` sobre
+      // `clients` no lo serializa porque esa tabla no cuelga de `clients`— y
+      // también taparía cualquier tabla que se escape del cierre de la
+      // cascada. El usuario merece el 409 con la salida a Baja comercial, no
+      // un 500. La transacción ya revirtió: no se ha perdido nada.
+      if (isForeignKeyViolation(error)) {
+        logger.warn('customers.remove: bloqueo no previsto por el pre-check', {
+          clientId: id,
+          message: describeDbError(error),
+        });
+        throw new ConflictError(clientDeleteBlockedMessage(''));
       }
       return fail('remove', error);
     }
-    return (count ?? 0) > 0;
+
+    // ── POST-COMMIT, y sólo aquí ──────────────────────────────────────
+    // El orden es el diseño: la transacción ya confirmó, así que los objetos
+    // que se barren no tienen ninguna fila que los nombre. Al revés —barrer
+    // antes— un rollback dejaría filas apuntando a bytes inexistentes, que es
+    // corrupción; en este orden el peor caso son huérfanos, basura recuperable.
+    const raw = (Array.isArray(data) ? data[0] : data) as Record<string, unknown> | null;
+    await sweepDocumentObjects(id, storagePathsOf(raw));
+    return true;
   }
 
   async generateId(): Promise<string> {

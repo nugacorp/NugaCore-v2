@@ -3,6 +3,36 @@
 Proyecto Supabase: `elshnzkceutvjzxvzqad` (nugacore-staging).
 Última reconciliación: **2026-07-30** (vía cliente `pg` por el pooler).
 
+## ⚠️ Migraciones que el código exige: aplicar SIEMPRE antes del deploy
+
+Algunas migraciones no son aditivas desde el punto de vista del binario: el
+código nuevo **depende** de ellas y no trae camino alternativo. Para éstas el
+orden no es una preferencia, es un requisito.
+
+| Migración | La exige | Si sale el código primero |
+| --- | --- | --- |
+| `20260806120000_customers_delete_cascade` | `customers/repository.ts::remove()` | `PGRST202` (función inexistente): el botón **Eliminar cliente** devuelve 500 para *todos* los clientes, no sólo los bloqueados |
+
+Que no haya fallback es deliberado —el camino anterior borraba ~25 tablas sin
+transacción y se tragaba los errores, dejando clientes vivos con su historial
+destruido—, pero traslada la responsabilidad al orden de despliegue:
+
+```
+1. Aplicar la migración al proyecto Supabase   (psql por el pooler, ver abajo)
+2. Verificar que la función existe             (consulta de comprobación)
+3. Sólo entonces, desplegar el binario
+```
+
+```sql
+-- Paso 2: debe devolver una fila antes de desplegar
+SELECT p.proname, pg_get_function_identity_arguments(p.oid)
+  FROM pg_proc p JOIN pg_namespace n ON n.oid = p.pronamespace
+ WHERE n.nspname = 'public' AND p.proname = 'customers_delete_cascade';
+```
+
+El rollback del binario al anterior es seguro: la función queda huérfana pero no
+estorba a nadie.
+
 ## Estado actual (2026-07-30)
 
 **Historial: 51 migraciones registradas · repo: 52 archivos.** El descuadre no es

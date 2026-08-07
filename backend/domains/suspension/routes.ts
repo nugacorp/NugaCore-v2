@@ -414,16 +414,33 @@ const TEST_CUSTOMER_PREFIX = '__TEST__';
 // Purga la cadena de Billing del cliente en el ORDEN de FK correcto.
 // (payments.client_id y payment_applications.* son ON DELETE RESTRICT, por
 //  eso borrar el cliente directo daba 500.) Idempotente.
+//
+// Desde que `customers.remove()` va por `customers_delete_cascade`, esta purga
+// tiene que dejar el cliente SIN historial financiero: la RPC ya no esquiva los
+// RESTRICT, los respeta y devuelve 409. Faltaban comprobantes, notas de crédito
+// y ajustes, así que un cliente de prueba que los tuviera se volvía imposible
+// de limpiar. Se recorre la cadena entera, hijos antes que padres.
 async function purgeBillingForCustomer(customerId: string): Promise<void> {
   if (isDomainOnDb('billing') && supabaseAdmin) {
     const { data: invs } = await supabaseAdmin.from('invoices').select('id').eq('client_id', customerId);
     const invoiceIds = (invs || []).map((r: { id: string }) => r.id);
     const { data: pays } = await supabaseAdmin.from('payments').select('id').eq('client_id', customerId);
     const paymentIds = (pays || []).map((r: { id: string }) => r.id);
+    const { data: notes } = await supabaseAdmin.from('credit_notes').select('id').eq('client_id', customerId);
+    const creditNoteIds = (notes || []).map((r: { id: string }) => r.id);
 
     if (invoiceIds.length) await supabaseAdmin.from('payment_applications').delete().in('invoice_id', invoiceIds);
     if (paymentIds.length) await supabaseAdmin.from('payment_applications').delete().in('payment_id', paymentIds);
+    if (paymentIds.length) await supabaseAdmin.from('payment_receipts').delete().in('payment_id', paymentIds);
+    await supabaseAdmin.from('payment_receipts').delete().eq('client_id', customerId);
+    if (creditNoteIds.length) await supabaseAdmin.from('credit_applications').delete().in('credit_note_id', creditNoteIds);
+    if (invoiceIds.length) await supabaseAdmin.from('credit_applications').delete().in('invoice_id', invoiceIds);
+    await supabaseAdmin.from('adjustments').delete().eq('client_id', customerId);
+    await supabaseAdmin.from('credit_notes').delete().eq('client_id', customerId);
     await supabaseAdmin.from('payments').delete().eq('client_id', customerId);
+    // `payment_orders.invoice_id` es NO ACTION: sin esto el DELETE de invoices
+    // falla en silencio (aquí nadie lee `{ error }`) y la purga miente.
+    await supabaseAdmin.from('payment_orders').delete().eq('customer_id', customerId);
     if (invoiceIds.length) await supabaseAdmin.from('invoice_items').delete().in('invoice_id', invoiceIds);
     await supabaseAdmin.from('invoices').delete().eq('client_id', customerId);
     return;
