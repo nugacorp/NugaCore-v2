@@ -73,6 +73,14 @@ const CASES = {
     fixture: 'tests/db/customer-delete-postgres17.sql',
     fixtureLabel: 'fixture: grafo de FK y comportamiento del borrado',
   },
+  'portal-config': {
+    label: 'Config del portal · persistencia y privilegios',
+    db: 'portalcfg',
+    migrations: ['supabase/migrations/20260807170000_portal_config_persistence.sql'],
+    bootstrap: 'tests/db/portal-config-postgres17-bootstrap.sql',
+    fixture: 'tests/db/portal-config-postgres17.sql',
+    fixtureLabel: 'fixture: la config sobrevive al reinicio',
+  },
   'schema-replay': {
     label: 'El esquema se reconstruye desde cero',
     db: 'replay',
