@@ -96,6 +96,21 @@ jobs:
           node-version: 22
       - run: npm run test:db:postgres17 -- schema-replay
 
+  # La config del portal vivía en un Map y se reseteaba en cada redeploy: un
+  # WISP que apagaba "ver saldo" se lo encontraba encendido al día siguiente.
+  # `npm test` no puede demostrar el arreglo — en modo mock el respaldo en
+  # memoria se comporta igual que la tabla.
+  portal-config-postgres17:
+    name: Config del portal persiste · PostgreSQL 17 real
+    runs-on: ubuntu-latest
+    needs: quality
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+      - run: npm run test:db:postgres17 -- portal-config
+
   security-smoke:
     name: Security contract tests
     runs-on: ubuntu-latest

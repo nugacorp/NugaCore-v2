@@ -15,8 +15,8 @@ import type { Client } from '../../../src/types';
 const router = Router();
 const PORTAL_CONFIG_WRITE = ['super admin', 'administrador', 'cobranza'] as const;
 
-const assertPortalFeature = (tenantId: string, feature: PortalFeatureKey): void => {
-  if (!isPortalFeatureEnabled(tenantId, feature)) {
+const assertPortalFeature = async (tenantId: string, feature: PortalFeatureKey): Promise<void> => {
+  if (!(await isPortalFeatureEnabled(tenantId, feature))) {
     throw new ForbiddenError('Función deshabilitada en el portal del cliente', 'PORTAL_FEATURE_DISABLED');
   }
 };
@@ -37,11 +37,11 @@ router.get('/api/portal/status', asyncHandler(async (_req, res) => {
 }));
 
 router.get('/api/portal/config', requireRoles(READ_ROLES), asyncHandler(async (req, res) => {
-  res.json(getPortalConfig(tenantIdFromRequest(req)));
+  res.json(await getPortalConfig(tenantIdFromRequest(req)));
 }));
 
 router.put('/api/portal/config', requireRoles([...PORTAL_CONFIG_WRITE]), asyncHandler(async (req, res) => {
-  res.json(updatePortalConfig(tenantIdFromRequest(req), { features: req.body?.features }));
+  res.json(await updatePortalConfig(tenantIdFromRequest(req), { features: req.body?.features }));
 }));
 
 router.get('/api/portal/:clientId/summary', asyncHandler(async (req, res) => {
@@ -58,7 +58,7 @@ router.get('/api/portal/:clientId/summary', asyncHandler(async (req, res) => {
     tenantId: auth.tenantId,
   });
 
-  const features = getPortalConfig(auth.tenantId).features;
+  const features = (await getPortalConfig(auth.tenantId)).features;
   res.json({
     client: { id: client.id, name: client.name, status: client.status, planId: client.planId },
     balance: features.balance ? balance : 0,
@@ -76,7 +76,7 @@ router.get('/api/portal/:clientId/summary', asyncHandler(async (req, res) => {
 router.get('/api/portal/:clientId/invoices', asyncHandler(async (req, res) => {
   const auth = await resolvePortalAuth(req);
 
-  assertPortalFeature(auth.tenantId, 'invoices');
+  await assertPortalFeature(auth.tenantId, 'invoices');
   const client = await loadPortalClient(auth);
   const invoices = await getBillingService().listInvoices(auth.tenantId);
   res.json(invoices.filter((i) => i.clientId === client.id));
@@ -85,7 +85,7 @@ router.get('/api/portal/:clientId/invoices', asyncHandler(async (req, res) => {
 router.get('/api/portal/:clientId/tickets', asyncHandler(async (req, res) => {
   const auth = await resolvePortalAuth(req);
 
-  assertPortalFeature(auth.tenantId, 'tickets');
+  await assertPortalFeature(auth.tenantId, 'tickets');
   const client = await loadPortalClient(auth);
   const tickets = await getSupportService().listTickets({ clientId: client.id }, auth.tenantId);
   res.json(tickets);
@@ -94,7 +94,7 @@ router.get('/api/portal/:clientId/tickets', asyncHandler(async (req, res) => {
 router.post('/api/portal/:clientId/tickets', asyncHandler(async (req, res) => {
   const auth = await resolvePortalAuth(req);
 
-  assertPortalFeature(auth.tenantId, 'reportFailure');
+  await assertPortalFeature(auth.tenantId, 'reportFailure');
   const client = await loadPortalClient(auth);
   const title = String(req.body?.title || req.body?.subject || 'Reporte portal').trim();
   const ticket = await getSupportService().createTicket({
@@ -110,7 +110,7 @@ router.post('/api/portal/:clientId/tickets', asyncHandler(async (req, res) => {
 router.post('/api/portal/:clientId/payment-promise', asyncHandler(async (req, res) => {
   const auth = await resolvePortalAuth(req);
 
-  assertPortalFeature(auth.tenantId, 'paymentPromise');
+  await assertPortalFeature(auth.tenantId, 'paymentPromise');
   const client = await loadPortalClient(auth);
   const promise = await getCollectionsService().createPromise({
     clientId: client.id,
