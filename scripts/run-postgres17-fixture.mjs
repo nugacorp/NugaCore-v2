@@ -26,7 +26,7 @@
 
 import { spawnSync } from 'node:child_process';
 import { randomBytes } from 'node:crypto';
-import { existsSync } from 'node:fs';
+import { existsSync, readdirSync } from 'node:fs';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 
@@ -39,6 +39,14 @@ const READY_TIMEOUT_MS = 120_000;
 // `docker run --name` choca con el contenedor de la anterior y el gate sale 1
 // sin dejar rastro útil. Es el mismo defecto que el repo ya arregló en `uid()`.
 const RUN_ID = `${process.pid}-${randomBytes(4).toString('hex')}`;
+
+/** Todas las migraciones del repo, en el mismo orden en que las aplica Supabase. */
+function allMigrations() {
+  return readdirSync(path.join(repoRoot, 'supabase/migrations'))
+    .filter((f) => f.endsWith('.sql'))
+    .sort()
+    .map((f) => `supabase/migrations/${f}`);
+}
 
 // ── Casos ───────────────────────────────────────────────────────────
 // Añadir un caso es añadir una entrada aquí: nada más del runner cambia.
@@ -64,6 +72,20 @@ const CASES = {
     bootstrap: 'tests/db/customer-delete-postgres17-bootstrap.sql',
     fixture: 'tests/db/customer-delete-postgres17.sql',
     fixtureLabel: 'fixture: grafo de FK y comportamiento del borrado',
+  },
+  'schema-replay': {
+    label: 'El esquema se reconstruye desde cero',
+    db: 'replay',
+    // TODAS las migraciones, en orden, leídas del disco: una nueva entra en el
+    // gate por existir, sin tocar este archivo. Es la propiedad que importa —
+    // una lista a mano se quedaría atrás justo cuando hiciera falta.
+    migrations: allMigrations(),
+    // Sin segunda pasada: ver `buildSteps`. Varias migraciones históricas no
+    // son reaplicables y en producción nunca se reaplican.
+    applyTwice: false,
+    bootstrap: 'tests/db/schema-replay-postgres17-bootstrap.sql',
+    fixture: 'tests/db/schema-replay-postgres17.sql',
+    fixtureLabel: 'fixture: el esquema reconstruido es utilizable',
   },
 };
 
@@ -141,12 +163,20 @@ async function waitForReady(container, db) {
 
 // Los pasos del caso, en orden. Cada migración va dos veces a propósito: la
 // segunda pasada es la que demuestra que el DDL es idempotente.
+//
+// `applyTwice: false` desactiva esa segunda pasada. Sólo tiene sentido para el
+// caso que replica el historial COMPLETO: varias migraciones históricas no son
+// reaplicables —`init_schema` recrea tipos, otras recrean constraints y
+// políticas— y nunca se reaplican en un entorno real, porque `schema_migrations`
+// las da por corridas. Exigirles idempotencia sería inventar un requisito que
+// producción no tiene.
 function buildSteps(testCase) {
   const steps = [['bootstrap (service_role sin privilegios)', testCase.bootstrap]];
+  const twice = testCase.applyTwice !== false;
   for (const migration of testCase.migrations) {
     const name = path.basename(migration);
-    steps.push([`migración ${name} · 1ª aplicación`, migration]);
-    steps.push([`migración ${name} · 2ª aplicación (idempotencia)`, migration]);
+    steps.push([twice ? `migración ${name} · 1ª aplicación` : `migración ${name}`, migration]);
+    if (twice) steps.push([`migración ${name} · 2ª aplicación (idempotencia)`, migration]);
   }
   steps.push([testCase.fixtureLabel, testCase.fixture]);
   return steps;
