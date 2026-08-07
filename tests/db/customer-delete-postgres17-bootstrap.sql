@@ -519,6 +519,36 @@ CREATE TABLE IF NOT EXISTS public.suspension_action_logs (
   source TEXT NOT NULL DEFAULT 'manual'
 );
 
+-- ── El segundo nivel: lo que la cascada alcanza sin desmontarse ─────
+-- `payment_orders.invoice_id` NO lleva ON DELETE (payment_engine:13), así que
+-- es NO ACTION: la cascada llega desde `invoices` y se estrella. Faltaba en la
+-- línea base de T1 porque ésta se construyó desde las FK DIRECTAS a `clients`,
+-- y esta cuelga de `invoices`. `payment_events` cuelga a su vez de las órdenes,
+-- también sin ON DELETE, pero con la columna NULLABLE a propósito.
+CREATE TABLE IF NOT EXISTS public.payment_orders (
+  id TEXT PRIMARY KEY,
+  customer_id TEXT NOT NULL,                            -- sin FK en el esquema real
+  invoice_id TEXT NOT NULL REFERENCES public.invoices(id),
+  provider TEXT NOT NULL,
+  amount_cents INTEGER NOT NULL CHECK (amount_cents > 0),
+  status TEXT NOT NULL DEFAULT 'pending'
+    CHECK (status IN ('pending','processing','completed','failed','expired','cancelled')),
+  tenant_id TEXT NOT NULL DEFAULT 'tenant-default'
+    REFERENCES public.tenants(id) ON DELETE RESTRICT
+);
+
+CREATE TABLE IF NOT EXISTS public.payment_events (
+  id TEXT PRIMARY KEY,
+  provider TEXT NOT NULL,
+  provider_event_id TEXT NOT NULL,
+  event_type TEXT NOT NULL,
+  processed BOOLEAN NOT NULL DEFAULT FALSE,
+  payment_order_id TEXT REFERENCES public.payment_orders(id),
+  payload JSONB NOT NULL DEFAULT '{}'::jsonb,
+  tenant_id TEXT NOT NULL DEFAULT 'tenant-default'
+    REFERENCES public.tenants(id) ON DELETE RESTRICT
+);
+
 -- ── Privilegios ─────────────────────────────────────────────────────
 -- USAGE sobre el schema es baseline de plataforma en Supabase; los privilegios
 -- de TABLA no lo son. Este bootstrap no concede NINGUNO sobre las tablas del
@@ -542,7 +572,9 @@ DECLARE
     'suspension_orders', 'reactivation_orders',
     -- Las seis que `remove()` no recorre
     'cash_register_entries', 'commercial_quotes', 'commercial_appointments',
-    'inventory_serial_units', 'radius_accounting', 'suspension_action_logs'
+    'inventory_serial_units', 'radius_accounting', 'suspension_action_logs',
+    -- El segundo nivel que no se desmonta solo
+    'payment_orders', 'payment_events'
   ];
 BEGIN
   FOREACH t IN ARRAY targets LOOP

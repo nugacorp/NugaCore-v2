@@ -181,8 +181,29 @@ export class StoreCustomersRepository implements CustomersRepository {
 const CLIENTS_TABLE = 'clients';
 const TIMELINE_TABLE = 'client_timeline';
 
+/**
+ * Un `PostgrestError` es un objeto plano, NO un `Error`: `String(error)` lo
+ * convierte en `[object Object]` y el diagnóstico se pierde entero. Importa
+ * más desde que `remove()` va por RPC, porque ya no deja rastro tabla a tabla:
+ * este log es la única traza de cualquier fallo no traducido.
+ */
+const describeDbError = (error: unknown): string => {
+  if (error instanceof Error) return error.message;
+  if (error && typeof error === 'object') {
+    const e = error as { message?: unknown; code?: unknown; details?: unknown; hint?: unknown };
+    const parts = [
+      typeof e.message === 'string' ? e.message : null,
+      typeof e.code === 'string' ? `code=${e.code}` : null,
+      typeof e.details === 'string' && e.details ? `details=${e.details}` : null,
+      typeof e.hint === 'string' && e.hint ? `hint=${e.hint}` : null,
+    ].filter(Boolean);
+    if (parts.length > 0) return parts.join(' · ');
+  }
+  return String(error);
+};
+
 const fail = (context: string, error: unknown): never => {
-  const message = error instanceof Error ? error.message : String(error);
+  const message = describeDbError(error);
   logger.error(`Supabase customers repository error: ${context}`, { message });
   throw new Error(`Customers DB error (${context}): ${message}`);
 };
@@ -190,6 +211,13 @@ const fail = (context: string, error: unknown): never => {
 // --------------------------------------------------------------------
 // Borrado de cliente: traducción del bloqueo y barrido del bucket.
 // --------------------------------------------------------------------
+
+/** 23503: violación de clave foránea. Llega como objeto plano, no como Error. */
+const isForeignKeyViolation = (error: unknown): boolean => {
+  if (!error || typeof error !== 'object') return false;
+  const { code, message } = error as { code?: unknown; message?: unknown };
+  return code === '23503' || (typeof message === 'string' && message.includes('23503'));
+};
 
 /** Tablas que bloquean el borrado → cómo llamarlas delante de un usuario. */
 const BLOCKING_LABELS: Record<string, [string, string]> = {
@@ -347,6 +375,20 @@ export class SupabaseCustomersRepository implements CustomersRepository {
       if (/client_not_found/i.test(message)) return false;
       if (/client_delete_blocked/i.test(message)) {
         throw new ConflictError(clientDeleteBlockedMessage(message));
+      }
+      // Cinturón: una violación de clave foránea que el pre-check no vio.
+      // Bajo READ COMMITTED puede pasar —un INSERT sin confirmar sobre una
+      // factura del cliente es invisible al contarlo, y el `FOR UPDATE` sobre
+      // `clients` no lo serializa porque esa tabla no cuelga de `clients`— y
+      // también taparía cualquier tabla que se escape del cierre de la
+      // cascada. El usuario merece el 409 con la salida a Baja comercial, no
+      // un 500. La transacción ya revirtió: no se ha perdido nada.
+      if (isForeignKeyViolation(error)) {
+        logger.warn('customers.remove: bloqueo no previsto por el pre-check', {
+          clientId: id,
+          message: describeDbError(error),
+        });
+        throw new ConflictError(clientDeleteBlockedMessage(''));
       }
       return fail('remove', error);
     }

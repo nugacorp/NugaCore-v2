@@ -7,7 +7,8 @@
 -- pasa a exigir que la RPC NO lo tenga.
 --
 -- Qué comprueba:
---   1. El grafo de claves foráneas del caso, entero y exacto (67 FK).
+--   1. El grafo de claves foráneas del caso, entero y exacto (71 FK), y que
+--      la matriz cubra el CIERRE de la cascada, no solo las FK directas.
 --   2. Lo que PostgreSQL hace por sí solo: qué bloquea, qué arrasa, qué
 --      desliga. Es el contrato sobre el que se apoya la RPC.
 --   3. Los privilegios EXACTOS que la migración concede, ni uno más.
@@ -116,7 +117,16 @@ INSERT INTO expected_fks (child, col, parent, on_delete) VALUES
   ('radius_accounting',         'tenant_id',   'tenants', 'SET NULL'),
 
   -- Hacia olts ------------------------------------------------------
-  ('onus',                      'olt_id',      'olts', 'SET NULL');
+  ('onus',                      'olt_id',      'olts', 'SET NULL'),
+
+  -- Segundo nivel: NO ACTION, el hueco que T1 no vio ------------------
+  -- Ninguna de las dos apunta a `clients`, y por eso se colaron: la línea
+  -- base se construyó desde las FK directas al cliente en vez de desde el
+  -- cierre de la cascada. La sección 1b lo impide a partir de ahora.
+  ('payment_orders',            'invoice_id',      'invoices',       'NO ACTION'),
+  ('payment_orders',            'tenant_id',       'tenants',        'RESTRICT'),
+  ('payment_events',            'payment_order_id','payment_orders', 'NO ACTION'),
+  ('payment_events',            'tenant_id',       'tenants',        'RESTRICT');
 
 CREATE TEMP VIEW actual_fks AS
 SELECT
@@ -171,10 +181,83 @@ DECLARE
   n INTEGER;
 BEGIN
   SELECT count(*) INTO n FROM expected_fks;
-  IF n <> 67 THEN
-    RAISE EXCEPTION 'la línea base debería declarar 67 FK, declara %', n;
+  IF n <> 71 THEN
+    RAISE EXCEPTION 'la línea base debería declarar 71 FK, declara %', n;
   END IF;
   RAISE NOTICE 'grafo de FK verificado: % claves foráneas coinciden con el esquema', n;
+END $$;
+
+-- ====================================================================
+-- 1b. EL CIERRE DE LA CASCADA — la comprobación que faltaba
+--
+-- La sección 1 verifica que las FK declaradas son las que hay. No verifica
+-- que la MATRIZ las cubra, y ahí estuvo el fallo: la matriz se derivó de las
+-- FK **directas** a `clients`, pero la cascada no se detiene en los hijos
+-- directos — sigue por los hijos de todo lo que borra.
+--
+-- `payment_orders.invoice_id` es NO ACTION y cuelga de `invoices`, que sí
+-- cascadea. Un checkout iniciado y nunca pagado hacía reventar el borrado con
+-- un 23503 crudo, invisible al pre-check porque sin cobro no hay `payments`.
+--
+-- Esto lo calcula desde `pg_constraint`: el cierre transitivo sobre las
+-- aristas CASCADE partiendo de `clients` da las tablas cuyas filas SE BORRAN;
+-- toda FK que apunte a cualquiera de ellas y no sea CASCADE ni SET NULL
+-- bloquea, y tiene que estar tratada. Una tabla nueva en CUALQUIER nivel
+-- rompe el gate en vez de colarse hasta producción.
+-- ====================================================================
+
+CREATE TEMP TABLE handled_blockers (tbl TEXT, note TEXT);
+INSERT INTO handled_blockers (tbl, note) VALUES
+  -- Bloquean de verdad: el pre-check de la RPC los cuenta y niega el borrado.
+  ('payments',             'BLOQUEAR · pre-check'),
+  ('payment_receipts',     'BLOQUEAR · pre-check'),
+  ('credit_notes',         'BLOQUEAR · pre-check'),
+  ('adjustments',          'BLOQUEAR · pre-check'),
+  ('payment_applications', 'BLOQUEAR · pre-check'),
+  ('credit_applications',  'BLOQUEAR · pre-check'),
+  -- La RPC los desmonta a mano porque el esquema no lo hace solo.
+  ('payment_orders',       'PURGAR · checkout abandonado, decisión del usuario'),
+  ('payment_events',       'DESLIGAR · ledger del proveedor, columna nullable');
+
+DO $$
+DECLARE
+  gaps TEXT;
+  n INTEGER;
+BEGIN
+  WITH RECURSIVE fk AS (
+    SELECT c.conrelid::regclass::TEXT AS child,
+           c.confrelid::regclass::TEXT AS parent,
+           (SELECT string_agg(a.attname, ',' ORDER BY x.ord)
+              FROM unnest(c.conkey) WITH ORDINALITY x(att, ord)
+              JOIN pg_attribute a ON a.attrelid = c.conrelid AND a.attnum = x.att) AS col,
+           CASE c.confdeltype
+             WHEN 'a' THEN 'NO ACTION' WHEN 'r' THEN 'RESTRICT' WHEN 'c' THEN 'CASCADE'
+             WHEN 'n' THEN 'SET NULL' WHEN 'd' THEN 'SET DEFAULT' END AS act
+    FROM pg_constraint c
+    JOIN pg_namespace ns ON ns.oid = c.connamespace
+    WHERE c.contype = 'f' AND ns.nspname = 'public'
+  ),
+  -- Tablas cuyas FILAS acaban borradas al borrar un cliente. `payment_orders`
+  -- entra porque la RPC lo purga por sentencia propia, no por cascada.
+  deleted AS (
+    SELECT 'clients'::TEXT AS t
+    UNION SELECT 'payment_orders'::TEXT
+    UNION SELECT fk.child FROM fk JOIN deleted d ON fk.parent = d.t WHERE fk.act = 'CASCADE'
+  )
+  SELECT count(*), string_agg(msg, E'\n  ' ORDER BY msg) INTO n, gaps
+  FROM (
+    SELECT DISTINCT format('%s.%s → %s (%s) no está en la matriz', fk.child, fk.col, fk.parent, fk.act) AS msg
+    FROM fk JOIN deleted d ON fk.parent = d.t
+    WHERE fk.act IN ('NO ACTION', 'RESTRICT', 'SET DEFAULT')
+      AND fk.child NOT IN (SELECT tbl FROM handled_blockers)
+  ) g;
+
+  IF n > 0 THEN
+    RAISE EXCEPTION
+      E'el cierre de la cascada tiene % tabla(s) sin tratar — el borrado fallaría con un 23503 crudo:\n  %',
+      n, gaps;
+  END IF;
+  RAISE NOTICE 'cierre de la cascada cubierto: las 8 aristas bloqueantes están tratadas';
 END $$;
 
 -- ====================================================================
@@ -204,7 +287,11 @@ DECLARE
     'commercial_appointments:client_id', 'inventory_serial_units:client_id',
     'radius_accounting:client_id', 'suspension_action_logs:client_id',
     'invoice_items:@invoice', 'invoice_payments:@invoice',
-    'payment_applications:@invoice', 'credit_applications:@invoice'
+    'payment_applications:@invoice', 'credit_applications:@invoice',
+    -- El segundo nivel. `payment_orders` importa especialmente aquí: la RPC lo
+    -- borra por sentencia propia, así que si un borrado bloqueado lo destruyera
+    -- sería pérdida real, no basura.
+    'payment_orders:@invoice'
   ];
 BEGIN
   FOREACH spec IN ARRAY specs LOOP
@@ -436,7 +523,12 @@ CREATE TEMP TABLE expected_grants (tbl TEXT, priv TEXT);
 -- UPDATE sobre clients no es para escribir: lo exige el `SELECT … FOR UPDATE`
 -- del paso 1 de la RPC. Es la única tabla que lo tiene.
 INSERT INTO expected_grants (tbl, priv) VALUES
-  ('clients', 'SELECT'), ('clients', 'UPDATE'), ('clients', 'DELETE');
+  ('clients', 'SELECT'), ('clients', 'UPDATE'), ('clients', 'DELETE'),
+  -- El segundo nivel: la cascada no lo desmonta, así que la RPC lo toca por
+  -- sentencia propia y necesita el privilegio de verdad. Son los únicos
+  -- DELETE/UPDATE fuera de `clients`.
+  ('payment_orders', 'SELECT'), ('payment_orders', 'DELETE'),
+  ('payment_events', 'SELECT'), ('payment_events', 'UPDATE');
 
 INSERT INTO expected_grants (tbl, priv)
 SELECT t, 'SELECT' FROM unnest(ARRAY[
@@ -466,7 +558,8 @@ DECLARE
     'suspension_orders', 'reactivation_orders',
     'onus', 'tickets', 'work_orders', 'cash_register_entries',
     'commercial_quotes', 'commercial_appointments', 'inventory_serial_units',
-    'radius_accounting', 'suspension_action_logs'
+    'radius_accounting', 'suspension_action_logs',
+    'payment_orders', 'payment_events'
   ];
 BEGIN
   SELECT count(*), string_agg(msg, E'\n  ' ORDER BY msg) INTO n, diff
@@ -488,7 +581,7 @@ BEGIN
   IF n > 0 THEN
     RAISE EXCEPTION E'los privilegios de service_role no son los declarados (%):\n  %', n, diff;
   END IF;
-  RAISE NOTICE 'privilegios exactos: SELECT sobre 31 tablas; UPDATE y DELETE sólo sobre clients';
+  RAISE NOTICE 'privilegios exactos: SELECT sobre 31 tablas; UPDATE/DELETE solo en clients y el segundo nivel';
 END $$;
 
 -- ====================================================================
@@ -752,7 +845,7 @@ BEGIN
     RAISE EXCEPTION 'c-block desapareció pese a estar bloqueado';
   END IF;
 
-  RAISE NOTICE 'borrado bloqueado: censo idéntico en las 31 tablas, nada se perdió';
+  RAISE NOTICE 'borrado bloqueado: censo idéntico en las 33 tablas, nada se perdió';
 END $$;
 
 -- ── 5.3 Aislamiento por tenant ──────────────────────────────────────
@@ -839,6 +932,93 @@ BEGIN
   END IF;
 
   RAISE NOTICE 'retirado el bloqueante, el mismo cliente se borra entero';
+END $$;
+
+-- ── 5.6 REGRESIÓN: el checkout abandonado (H1) ──────────────────────
+-- Antes de este arreglo, este escenario reventaba con un 23503 crudo desde el
+-- DELETE final: `payment_orders.invoice_id` es NO ACTION y la cascada choca
+-- ahí. El pre-check no lo veía porque sin cobro no hay fila en `payments`.
+--
+-- Es el peor caso posible: se inserta en CADA checkout
+-- (`payments/repository.ts:443`), así que bastaba con que un cliente hubiera
+-- abierto una pasarela de pago una vez para no poder borrarlo nunca.
+INSERT INTO public.clients (id, full_name, address, city) VALUES
+  ('c-checkout', 'Checkout abandonado', 'Calle 6', 'Mérida');
+INSERT INTO public.invoices (id, client_id, client_name, amount, due_date, total_cents)
+VALUES ('fac-k1', 'c-checkout', 'Checkout abandonado', 300, CURRENT_DATE, 30000);
+INSERT INTO public.payment_orders (id, customer_id, invoice_id, provider, amount_cents, status)
+VALUES ('po-k1', 'c-checkout', 'fac-k1', 'openpay', 30000, 'pending');
+-- El proveedor llegó a mandar un acuse, pero el cobro nunca se confirmó.
+INSERT INTO public.payment_events (id, provider, provider_event_id, event_type, payment_order_id)
+VALUES ('pe-k1', 'openpay', 'evt-k1', 'charge.failed', 'po-k1');
+
+DO $$
+DECLARE
+  res JSONB;
+BEGIN
+  res := public.customers_delete_cascade('c-checkout', 'tenant-default');
+
+  IF EXISTS (SELECT 1 FROM public.clients WHERE id = 'c-checkout') THEN
+    RAISE EXCEPTION 'el checkout abandonado volvió a bloquear el borrado';
+  END IF;
+
+  -- La orden se va con el cliente: no es historial financiero.
+  IF EXISTS (SELECT 1 FROM public.payment_orders WHERE id = 'po-k1') THEN
+    RAISE EXCEPTION 'payment_orders debía purgarse con el cliente';
+  END IF;
+  IF (res -> 'deleted' ->> 'payment_orders')::INT <> 1 THEN
+    RAISE EXCEPTION 'el censo no registró la purga de payment_orders: %', res -> 'deleted';
+  END IF;
+
+  -- El acuse del proveedor SOBREVIVE, desligado: es el ledger de idempotencia
+  -- que sostiene 20260730150000, y su columna es nullable a propósito.
+  IF NOT EXISTS (
+    SELECT 1 FROM public.payment_events WHERE id = 'pe-k1' AND payment_order_id IS NULL
+  ) THEN
+    RAISE EXCEPTION 'payment_events debía sobrevivir desligado, no borrarse';
+  END IF;
+  IF (res -> 'detached' ->> 'payment_events')::INT <> 1 THEN
+    RAISE EXCEPTION 'el censo no registró el desligado de payment_events: %', res -> 'detached';
+  END IF;
+
+  RAISE NOTICE 'H1 cerrado: checkout abandonado borrado, acuse del proveedor conservado';
+END $$;
+
+-- Y el contrapunto: en cuanto HAY cobro, vuelve a bloquear. La orden de pago
+-- no es lo que decide; lo que decide es que exista historial financiero.
+INSERT INTO public.clients (id, full_name, address, city) VALUES
+  ('c-paid', 'Checkout pagado', 'Calle 7', 'Mérida');
+INSERT INTO public.invoices (id, client_id, client_name, amount, due_date, total_cents)
+VALUES ('fac-k2', 'c-paid', 'Checkout pagado', 300, CURRENT_DATE, 30000);
+INSERT INTO public.payment_orders (id, customer_id, invoice_id, provider, amount_cents, status)
+VALUES ('po-k2', 'c-paid', 'fac-k2', 'openpay', 30000, 'completed');
+INSERT INTO public.payments (id, client_id, client_name, amount_cents)
+VALUES ('pay-k2', 'c-paid', 'Checkout pagado', 30000);
+
+DO $$
+DECLARE
+  msg TEXT;
+  completed BOOLEAN := FALSE;
+BEGIN
+  BEGIN
+    PERFORM public.customers_delete_cascade('c-paid', 'tenant-default');
+    completed := TRUE;
+  EXCEPTION WHEN raise_exception THEN
+    GET STACKED DIAGNOSTICS msg = MESSAGE_TEXT;
+    IF position('client_delete_blocked' IN msg) = 0 THEN
+      RAISE EXCEPTION 'error inesperado: %', msg;
+    END IF;
+  END;
+
+  IF completed THEN
+    RAISE EXCEPTION 'un cliente con cobro confirmado no debía poder borrarse';
+  END IF;
+  -- Y la orden de pago sigue intacta: el bloqueo revierte la purga.
+  IF NOT EXISTS (SELECT 1 FROM public.payment_orders WHERE id = 'po-k2') THEN
+    RAISE EXCEPTION 'la purga de payment_orders no revirtió con el bloqueo';
+  END IF;
+
+  RAISE NOTICE 'con cobro confirmado sigue bloqueando, y la purga revierte entera';
 END $$;
 
 SELECT 'borrado transaccional de clientes verificado contra PostgreSQL 17' AS resultado;

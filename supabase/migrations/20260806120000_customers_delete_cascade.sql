@@ -60,6 +60,29 @@
 -- borrarse; se le da de baja. El cambio no se nota aquí —nadie llama a esta
 -- función— sino cuando T3 conecte `remove()`.
 --
+-- ── El segundo nivel del grafo ──────────────────────────────────────
+--
+-- La matriz de arriba se derivó al principio de las FK DIRECTAS a `clients`.
+-- Eso dejó una fuga: la cascada no se detiene en los hijos directos, sigue por
+-- los hijos de todo lo que borra. `payment_orders.invoice_id` es NO ACTION y
+-- cuelga de `invoices`, que sí cascadea — así que un checkout iniciado y nunca
+-- pagado hacía reventar el borrado con un 23503 crudo, y encima invisible al
+-- pre-check, porque sin cobro no hay fila en `payments`.
+--
+-- El criterio correcto no es "las FK que apuntan a clients" sino **el cierre
+-- transitivo de la cascada**: toda tabla cuyas filas acaben borradas, y toda
+-- FK que apunte a cualquiera de ellas. El fixture lo calcula ahora desde
+-- `pg_constraint` y exige que la matriz cubra el cierre entero, así que una
+-- tabla nueva en cualquier nivel rompe el gate en vez de colarse.
+--
+-- PURGAR (1) — la cascada las alcanza y no se desmontan solas:
+--   payment_orders. Se borra: un checkout abandonado no es historial
+--   financiero. Si llegó a pagarse hay fila en `payments`, y ésa bloquea.
+--
+-- DESLIGAR por sentencia (1):
+--   payment_events. Es el acuse del proveedor y el ledger de idempotencia de
+--   20260730150000; la columna es nullable a propósito. Se conserva.
+--
 -- ── Bytes fuera de la transacción ───────────────────────────────────
 --
 -- PL/pgSQL no habla con la Storage API, así que la función NO puede borrar
@@ -121,6 +144,10 @@ DECLARE
     'radius_accounting:client_id',
     'suspension_action_logs:client_id'
   ];
+  -- Tablas que la cascada ALCANZA pero que NO se desmontan solas, porque su
+  -- FK es NO ACTION. Sin tratarlas aquí el borrado revienta con un 23503
+  -- crudo en el DELETE final. Ver la nota "El segundo nivel del grafo".
+  c_purge TEXT[] := ARRAY['payment_orders'];
 
   v_spec TEXT;
   v_table TEXT;
@@ -242,7 +269,43 @@ BEGIN
     END IF;
   END LOOP;
 
-  -- ── 5. Un solo DELETE ────────────────────────────────────────────
+  -- ── 5. El segundo nivel que no se desmonta solo ──────────────────
+  -- `payment_orders.invoice_id` es NO ACTION: la cascada llega hasta ahí y
+  -- se estrella. Un checkout iniciado y nunca pagado NO es historial
+  -- financiero —no hay cobro, comprobante ni obligación de conservación—, y
+  -- si llegara a pagarse existiría una fila en `payments`, que sí bloquea.
+  -- Decisión del usuario: se borra con el cliente.
+  --
+  -- Sus `payment_events` NO se borran: son el acuse del proveedor y el ledger
+  -- de idempotencia que sostiene 20260730150000. La columna es nullable a
+  -- propósito, así que el evento sobrevive desligado de la orden, igual que
+  -- una ONU sobrevive desligada del abonado.
+  UPDATE public.payment_events e
+     SET payment_order_id = NULL
+   WHERE e.payment_order_id IN (
+     SELECT o.id FROM public.payment_orders o
+      WHERE o.customer_id = p_client_id
+         OR o.invoice_id IN (SELECT i.id FROM public.invoices i WHERE i.client_id = p_client_id)
+   );
+  GET DIAGNOSTICS v_count = ROW_COUNT;
+  IF v_count > 0 THEN
+    v_detached := v_detached || jsonb_build_object('payment_events', v_count);
+  END IF;
+
+  FOREACH v_spec IN ARRAY c_purge LOOP
+    v_table := split_part(v_spec, ':', 1);
+    IF to_regclass(format('public.%I', v_table)) IS NULL THEN CONTINUE; END IF;
+    EXECUTE format(
+      'DELETE FROM public.%I t WHERE t.customer_id = $1 OR t.invoice_id IN '
+      '(SELECT i.id FROM public.invoices i WHERE i.client_id = $1)', v_table
+    ) USING p_client_id;
+    GET DIAGNOSTICS v_count = ROW_COUNT;
+    IF v_count > 0 THEN
+      v_deleted := v_deleted || jsonb_build_object(v_table, v_count);
+    END IF;
+  END LOOP;
+
+  -- ── 6. Un solo DELETE ────────────────────────────────────────────
   -- Las 15 tablas de BORRAR se van por CASCADE y las 9 de DESLIGAR quedan con
   -- client_id en NULL por SET NULL, todo dentro de esta misma sentencia. No
   -- se reimplementa a mano lo que el esquema ya declara: reimplementarlo es
@@ -298,6 +361,11 @@ DECLARE
     'adjustments:SELECT',
     'payment_applications:SELECT',
     'credit_applications:SELECT',
+    -- La cascada NO comprueba privilegios, pero estas dos SÍ se tocan por
+    -- sentencia propia: `payment_orders` se borra y `payment_events` se
+    -- desliga. Son los únicos DELETE/UPDATE fuera de `clients`.
+    'payment_orders:SELECT, DELETE',
+    'payment_events:SELECT, UPDATE',
     -- Censo de lo que se borra por CASCADE.
     'invoices:SELECT',
     'invoice_items:SELECT',

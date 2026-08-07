@@ -154,6 +154,82 @@ describe('remove() — el orden es el diseño', () => {
   });
 });
 
+describe('remove() — el cinturón del 23503', () => {
+  // El pre-check de la RPC cuenta los bloqueantes, pero bajo READ COMMITTED un
+  // INSERT sin confirmar sobre una factura del cliente es invisible al contarlo,
+  // y el `FOR UPDATE` sobre `clients` no lo serializa porque esa tabla no cuelga
+  // de `clients`. Si eso ocurre —o si alguna tabla se escapa del cierre de la
+  // cascada— el usuario merece el 409 con la salida a Baja comercial, no un 500.
+  it('traduce una violación de FK cruda a ConflictError, no a 500', async () => {
+    const { client } = makeClient({
+      data: null,
+      error: {
+        message:
+          'update or delete on table "invoices" violates foreign key constraint '
+          + '"payment_orders_invoice_id_fkey" on table "payment_orders"',
+        code: '23503',
+      } as { message: string },
+    });
+
+    const error = (await new SupabaseCustomersRepository(client)
+      .remove('c-1')
+      .then(() => null, (e: Error) => e)) as ConflictError;
+
+    expect(error).toBeInstanceOf(ConflictError);
+    expect(error.statusCode).toBe(409);
+    expect(error.message).toContain('Baja comercial');
+  });
+
+  it('no barre el bucket cuando el 23503 salta: la transacción revirtió', async () => {
+    const { client } = makeClient({
+      data: null,
+      error: { message: 'violates foreign key constraint', code: '23503' } as { message: string },
+    });
+
+    await expect(new SupabaseCustomersRepository(client).remove('c-1')).rejects.toThrow(
+      ConflictError,
+    );
+    expect(removeDocumentObject).not.toHaveBeenCalled();
+  });
+
+  it('un fallo que no es de integridad sigue siendo 500, no 409', async () => {
+    const { client } = makeClient(rpcError('deadlock detected'));
+
+    const error = (await new SupabaseCustomersRepository(client)
+      .remove('c-1')
+      .then(() => null, (e: Error) => e)) as Error;
+
+    expect(error).not.toBeInstanceOf(ConflictError);
+  });
+});
+
+describe('diagnóstico de errores de Postgres', () => {
+  // Un PostgrestError es un objeto plano, no un Error: `String(error)` lo
+  // convertía en `[object Object]`. Desde que `remove()` va por RPC ya no queda
+  // rastro tabla a tabla, así que este log es la ÚNICA traza de un fallo no
+  // traducido — y sin él, un borrado que falla en producción no deja nada.
+  it('no vuelve a registrar [object Object] para un PostgrestError', async () => {
+    const errorSpy = vi.spyOn(logger, 'error').mockImplementation(() => {});
+    const { client } = makeClient({
+      data: null,
+      error: {
+        message: 'permission denied for table clients',
+        code: '42501',
+        details: 'algo mas',
+        hint: 'revisa los grants',
+      } as { message: string },
+    });
+
+    await expect(new SupabaseCustomersRepository(client).remove('c-1')).rejects.toThrow();
+
+    const logged = JSON.stringify(errorSpy.mock.calls);
+    expect(logged).not.toContain('[object Object]');
+    expect(logged).toContain('permission denied for table clients');
+    expect(logged).toContain('code=42501');
+    expect(logged).toContain('hint=revisa los grants');
+  });
+});
+
 describe('remove() — el barrido es best-effort', () => {
   it('el borrado sigue siendo un éxito aunque el objeto no se pueda barrer', async () => {
     vi.mocked(removeDocumentObject).mockResolvedValue(false);
