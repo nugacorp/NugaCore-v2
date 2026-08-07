@@ -85,6 +85,43 @@ CREATE TABLE IF NOT EXISTS public.inventory_items (
   updated_at TIMESTAMPTZ DEFAULT NOW()
 );
 
+-- Reconciliación de las columnas operativas.
+--
+-- El `CREATE TABLE IF NOT EXISTS` de arriba **nunca llega a ejecutarse**:
+-- `20260531000000_init_schema.sql:429` ya creó `inventory_items`, y lo hizo sin
+-- las columnas operativas — en aquel modelo vivían en `inventory_item_states`.
+-- Al saltarse el CREATE, `operational_status` no existía y el índice
+-- `idx_inv_items_opstatus` (más abajo) reventaba con
+-- `column "operational_status" does not exist`.
+--
+-- Eso hacía que el esquema NO se pudiera reconstruir desde cero: 57 de 58
+-- migraciones aplicaban y ésta rompía la cadena. `20260714000000_inventory_
+-- items_reconciliation.sql` ya trae estos mismos ADD COLUMN, pero con
+-- timestamp 22 días posterior y diez migraciones en medio, así que llegaba
+-- tarde: el runner aplica por orden de nombre y no hay forma de adelantarla.
+--
+-- Aditivo e idempotente: sobre una base donde las columnas ya existen —staging,
+-- producción y cualquier entorno donde 20260714 ya corrió— esto es no-op y no
+-- cambia nada. Se conserva 20260714 tal cual, que pasa a ser el no-op que su
+-- cabecera decía ser.
+ALTER TABLE public.inventory_items
+  ADD COLUMN IF NOT EXISTS operational_status TEXT NOT NULL DEFAULT 'Disponible';
+ALTER TABLE public.inventory_items ADD COLUMN IF NOT EXISTS assigned_to_type  TEXT;
+ALTER TABLE public.inventory_items ADD COLUMN IF NOT EXISTS assigned_to_id    TEXT;
+ALTER TABLE public.inventory_items ADD COLUMN IF NOT EXISTS assigned_to_label TEXT;
+
+-- El CHECK va aparte: `ADD COLUMN IF NOT EXISTS` no lo aplicaría sobre una
+-- columna preexistente, y añadirlo dos veces es un error.
+DO $$ BEGIN
+  IF NOT EXISTS (
+    SELECT 1 FROM pg_constraint WHERE conname = 'inventory_items_operational_status_check'
+  ) THEN
+    ALTER TABLE public.inventory_items
+      ADD CONSTRAINT inventory_items_operational_status_check
+      CHECK (operational_status IN ('Disponible', 'Instalado', 'En reparacion', 'Danado', 'Perdido', 'Baja'));
+  END IF;
+END $$;
+
 DO $$ BEGIN
   IF NOT EXISTS (
     SELECT 1 FROM pg_trigger WHERE tgname = 'trg_inventory_items_modtime'

@@ -17,12 +17,23 @@
 -- tipos preexistentes (category ENUM / serials JSONB permanecen intactos;
 -- su convergencia de tipo, si se requiere, es una fase aparte).
 --
--- En un despliegue limpio 20260622000000 crea la tabla completa y esta
--- migración es no-op. En staging (tabla heredada de init_schema) añade lo
--- que falta. Segura de re-aplicar.
+-- CORRECCIÓN (2026-08-07): esta cabecera decía dos cosas falsas.
 --
--- Aplicar ANTES de (re)aplicar:
---   20260622000000_inventory_schema.sql   (índice sobre operational_status)
+--   1. "En un despliegue limpio 20260622000000 crea la tabla completa y esta
+--      migración es no-op."
+--      Falso. `init_schema` (20260531) corre SIEMPRE antes, así que el
+--      `CREATE TABLE IF NOT EXISTS` de 20260622 se salta también en limpio.
+--      El caso limpio no era el sano: era justo el que rompía.
+--
+--   2. "Aplicar ANTES de (re)aplicar 20260622000000_inventory_schema.sql."
+--      Imposible de obedecer: las migraciones se aplican por orden de nombre y
+--      20260714 > 20260622. La instrucción no la podía cumplir ningún runner.
+--
+-- Consecuencia: durante 22 días el esquema no se pudo reconstruir desde cero.
+-- Los ADD COLUMN se movieron a 20260622, justo antes del índice que los
+-- necesita, y esta migración es AHORA SÍ el no-op que decía ser sobre
+-- cualquier base al día. Se conserva porque staging y producción la tienen en
+-- su historial de `schema_migrations` y sigue siendo segura de reaplicar.
 -- ====================================================================
 
 ALTER TABLE public.inventory_items
