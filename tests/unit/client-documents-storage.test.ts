@@ -1,5 +1,5 @@
 import { readFileSync } from 'node:fs';
-import { describe, expect, it } from 'vitest';
+import { beforeEach, describe, expect, it } from 'vitest';
 import {
   ALLOWED_DOCUMENT_MIME_TYPES,
   MAX_DOCUMENT_BYTES,
@@ -8,6 +8,7 @@ import {
   sanitizeFileName,
 } from '../../backend/services/supabase-storage';
 import { Client360Service } from '../../backend/domains/client-360/service';
+import { client360Memory } from '../../backend/domains/client-360/memory-store';
 
 // ====================================================================
 // Storage de documentos de cliente.
@@ -31,6 +32,13 @@ const serviceWithOwnedClient = () => {
   svc.assertClientOwned = async () => {};
   return svc;
 };
+
+// El store en memoria es un módulo compartido: sin esto un test ve las filas
+// que dejó el anterior.
+beforeEach(() => {
+  client360Memory.documents.length = 0;
+  client360Memory.activity.length = 0;
+});
 
 describe('sanitizeFileName', () => {
   it('se queda solo con el basename', () => {
@@ -88,41 +96,50 @@ describe('pathBelongsToTenant', () => {
   });
 });
 
-describe('addDocument — validación de storagePath', () => {
-  it('rechaza `..` en la ruta', async () => {
-    await expect(
-      serviceWithOwnedClient().addDocument('c-1', 'tenant-a', {
-        fileName: 'x.pdf',
-        storagePath: 'tenant-a/../tenant-b/x.pdf',
-      }),
-    ).rejects.toThrow(/Invalid storagePath/);
-  });
+describe('addDocument — la ruta la deriva el backend', () => {
+  // Antes esta función aceptaba el `storagePath` del cuerpo y sólo comprobaba
+  // formato, `..` y prefijo de tenant. Lo que nunca comprobó es que la ruta
+  // correspondiera al documentId/clientId que emitió la firma, así que se podía
+  // registrar una fila de tipo inocuo apuntando al objeto de OTRO documento del
+  // mismo tenant; borrarla se llevaba los bytes ajenos. Ahora la ruta se
+  // construye, no se recibe: el alias deja de ser expresable.
 
-  it('rechaza una ruta de otro tenant', async () => {
-    await expect(
-      serviceWithOwnedClient().addDocument('c-1', 'tenant-a', {
-        fileName: 'x.pdf',
-        storagePath: 'tenant-b/c-1/x.pdf',
-      }),
-    ).rejects.toThrow(/fuera del tenant/);
-  });
-
-  it('acepta una ruta del propio tenant', async () => {
-    const doc = await serviceWithOwnedClient().addDocument('c-1', 'tenant-a', {
-      fileName: 'ine.pdf',
-      storagePath: 'tenant-a/c-1/doc-1-ine.pdf',
-    });
-    expect(doc.storagePath).toBe('tenant-a/c-1/doc-1-ine.pdf');
-    expect(doc.tenantId).toBe('tenant-a');
-  });
-
-  it('reutiliza el documentId emitido al firmar, para que fila y objeto coincidan', async () => {
+  it('la ruta se construye con documentId + fileName', async () => {
     const doc = await serviceWithOwnedClient().addDocument('c-1', 'tenant-a', {
       fileName: 'ine.pdf',
       documentId: 'doc-abc123',
-      storagePath: 'tenant-a/c-1/doc-abc123-ine.pdf',
     });
     expect(doc.id).toBe('doc-abc123');
+    expect(doc.storagePath).toBe(buildDocumentPath('tenant-a', 'c-1', 'doc-abc123', 'ine.pdf'));
+    expect(doc.tenantId).toBe('tenant-a');
+  });
+
+  it('un storagePath en el cuerpo se ignora: no llega a la fila', async () => {
+    const doc = await serviceWithOwnedClient().addDocument('c-1', 'tenant-a', {
+      fileName: 'ine.pdf',
+      documentId: 'doc-mio',
+      // Ruta del MISMO tenant y con forma válida — pasaba las tres validaciones
+      // anteriores — pero apunta al objeto de otro cliente.
+      storagePath: 'tenant-a/c-victima/doc-ajeno-contrato.pdf',
+    });
+    expect(doc.storagePath).toBe('tenant-a/c-1/doc-mio-ine.pdf');
+    expect(doc.storagePath).not.toContain('c-victima');
+  });
+
+  it('ni siquiera con `..`: la ruta del cuerpo no se lee en absoluto', async () => {
+    const doc = await serviceWithOwnedClient().addDocument('c-1', 'tenant-a', {
+      fileName: 'x.pdf',
+      documentId: 'doc-2',
+      storagePath: 'tenant-a/../tenant-b/x.pdf',
+    });
+    expect(doc.storagePath!.startsWith('tenant-a/c-1/')).toBe(true);
+    expect(doc.storagePath).not.toContain('..');
+  });
+
+  it('exige documentId: sin él no se sabe qué objeto se subió', async () => {
+    await expect(
+      serviceWithOwnedClient().addDocument('c-1', 'tenant-a', { fileName: 'x.pdf' }),
+    ).rejects.toThrow(/Missing documentId/);
   });
 
   it('rechaza un documentId con forma inválida', async () => {
@@ -132,6 +149,53 @@ describe('addDocument — validación de storagePath', () => {
         documentId: '../../evil',
       }),
     ).rejects.toThrow(/Invalid documentId/);
+  });
+
+  it('sigue exigiendo fileName', async () => {
+    await expect(
+      serviceWithOwnedClient().addDocument('c-1', 'tenant-a', { documentId: 'doc-3' }),
+    ).rejects.toThrow(/Missing fileName/);
+  });
+});
+
+describe('addDocument — doc_type', () => {
+  it("rechaza 'contract': lo emite sólo el flujo de firma", async () => {
+    await expect(
+      serviceWithOwnedClient().addDocument('c-1', 'tenant-a', {
+        fileName: 'contrato.pdf',
+        documentId: 'doc-4',
+        docType: 'contract',
+      }),
+    ).rejects.toMatchObject({ statusCode: 400, code: 'DOC_TYPE_RESERVED' });
+  });
+
+  it('rechaza un tipo fuera del CHECK en vez de dejar que reviente el insert', async () => {
+    await expect(
+      serviceWithOwnedClient().addDocument('c-1', 'tenant-a', {
+        fileName: 'x.pdf',
+        documentId: 'doc-5',
+        docType: 'inventado',
+      }),
+    ).rejects.toMatchObject({ statusCode: 400, code: 'INVALID_FIELD' });
+  });
+
+  it('acepta los tipos asignables', async () => {
+    for (const docType of ['ine', 'receipt', 'installation_photo', 'other']) {
+      const doc = await serviceWithOwnedClient().addDocument('c-1', 'tenant-a', {
+        fileName: `${docType}.pdf`,
+        documentId: `doc-${docType}`,
+        docType,
+      });
+      expect(doc.docType).toBe(docType);
+    }
+  });
+
+  it('sin docType cae a `other`', async () => {
+    const doc = await serviceWithOwnedClient().addDocument('c-1', 'tenant-a', {
+      fileName: 'x.pdf',
+      documentId: 'doc-6',
+    });
+    expect(doc.docType).toBe('other');
   });
 });
 

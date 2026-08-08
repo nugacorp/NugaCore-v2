@@ -56,10 +56,26 @@ router.post('/api/clients/:clientId/documents/upload-url', requireRoles([...WRIT
   res.status(201).json(await svc().prepareDocumentUpload(req.params.clientId, tenantId, req.body || {}));
 }));
 
-// Paso 2: registrar los metadatos (incluido el storagePath ya subido).
+// Compensación: la subida salió bien pero el registro falló, así que hay un
+// objeto sin fila. Recibe {documentId, fileName} y recalcula la ruta — nunca la
+// acepta. Va antes del POST de metadatos sólo por legibilidad: son paths
+// distintos y no compiten.
+router.post('/api/clients/:clientId/documents/orphan-cleanup', requireRoles([...WRITE]), asyncHandler(async (req, res) => {
+  const tenantId = tenantIdFromRequest(req);
+  res.json(await svc().cleanupOrphanDocumentObject(req.params.clientId, tenantId, req.body || {}));
+}));
+
+// Paso 2: registrar los metadatos. El `storagePath` NO se acepta: se deriva del
+// documentId que devolvió `upload-url`.
 router.post('/api/clients/:clientId/documents', requireRoles([...WRITE]), asyncHandler(async (req, res) => {
   const tenantId = tenantIdFromRequest(req);
   res.status(201).json(await svc().addDocument(req.params.clientId, tenantId, req.body || {}, req.authContext?.userId));
+}));
+
+// Baja de un documento: borra la fila y, si nada más lo referencia, el objeto.
+router.delete('/api/clients/:clientId/documents/:documentId', requireRoles([...WRITE]), asyncHandler(async (req, res) => {
+  const tenantId = tenantIdFromRequest(req);
+  res.json(await svc().deleteDocument(req.params.clientId, tenantId, req.params.documentId));
 }));
 
 // Descarga: URL firmada de vida corta. El bucket es privado.

@@ -1,5 +1,5 @@
 import { isDomainOnDb } from '../../config/feature-flags';
-import { BadRequestError, NotFoundError } from '../../common/errors';
+import { BadRequestError, ConflictError, NotFoundError } from '../../common/errors';
 import { isSupabaseAdminConfigured, supabaseAdmin } from '../../services/supabase-admin';
 import {
   ALLOWED_DOCUMENT_MIME_TYPES,
@@ -9,6 +9,7 @@ import {
   createDocumentUploadUrl,
   isStorageConfigured,
   pathBelongsToTenant,
+  removeDocumentObject,
 } from '../../services/supabase-storage';
 import { getCustomersService } from '../customers/service';
 import {
@@ -21,6 +22,16 @@ import {
   type ClientDocument,
   type ClientTag,
 } from './memory-store';
+
+/**
+ * Los mismos valores que el CHECK de `client_documents.doc_type`
+ * (`20260715000000_client_documents_reconciliation.sql:38`). Validarlos aquí
+ * convierte un 500 del CHECK en un 400 con diagnóstico.
+ */
+const DOCUMENT_TYPES = ['ine', 'contract', 'receipt', 'installation_photo', 'other'] as const;
+
+/** Los que la API acepta: `contract` está reservado al flujo de firma. */
+const ASSIGNABLE_DOCUMENT_TYPES = DOCUMENT_TYPES.filter((t) => t !== 'contract');
 
 export class Client360Service {
   private useDb = isDomainOnDb('customers') && isSupabaseAdminConfigured && Boolean(supabaseAdmin);
@@ -141,29 +152,46 @@ export class Client360Service {
     await this.assertClientOwned(clientId, tenantId);
     const fileName = String(body.fileName || '').trim();
     if (!fileName) throw new BadRequestError('Missing fileName', 'MISSING_FIELD');
-    const storagePath = body.storagePath ? String(body.storagePath).trim() : undefined;
-    if (storagePath) {
-      // `[\w./-]+` admitía `..`, así que un `../<otro-tenant>/x` pasaba el
-      // filtro. Con el bucket ya en uso eso permitiría apuntar el registro a
-      // un objeto de otro WISP y luego pedir su URL firmada.
-      if (!/^[\w./-]+$/.test(storagePath) || storagePath.split('/').includes('..')) {
-        throw new BadRequestError('Invalid storagePath', 'INVALID_FIELD');
-      }
-      if (!pathBelongsToTenant(storagePath, tenantId)) {
-        throw new BadRequestError('storagePath fuera del tenant', 'INVALID_FIELD');
-      }
-    }
-    // Reutiliza el id emitido por `prepareDocumentUpload` para que la fila y la
-    // ruta del objeto coincidan; si no viene, se genera uno nuevo.
-    const providedId = body.documentId ? String(body.documentId).trim() : '';
-    if (providedId && !/^[\w-]{1,64}$/.test(providedId)) {
+
+    // El id lo emite `prepareDocumentUpload` y de él cuelga la ruta del objeto.
+    // Es obligatorio: sin él no hay forma de saber qué objeto se acaba de subir,
+    // y generarlo aquí produciría una fila apuntando a una ruta vacía.
+    const documentId = String(body.documentId || '').trim();
+    if (!documentId) throw new BadRequestError('Missing documentId', 'MISSING_FIELD');
+    if (!/^[\w-]{1,64}$/.test(documentId)) {
       throw new BadRequestError('Invalid documentId', 'INVALID_FIELD');
     }
+
+    const docType = String(body.docType || 'other');
+    // Los contratos los crea sólo la RPC de firma, en SQL directo. Que un rol de
+    // escritura pudiera fabricarlos por API convertía la guardia de inmutabilidad
+    // del DELETE en algo que cualquiera puede aplicarse a un documento arbitrario.
+    if (docType === 'contract') {
+      throw new BadRequestError(
+        "doc_type 'contract' está reservado: los contratos los emite el flujo de firma.",
+        'DOC_TYPE_RESERVED',
+      );
+    }
+    if (!DOCUMENT_TYPES.includes(docType as ClientDocument['docType'])) {
+      throw new BadRequestError(
+        `docType no permitido. Admitidos: ${ASSIGNABLE_DOCUMENT_TYPES.join(', ')}`,
+        'INVALID_FIELD',
+      );
+    }
+
+    // La ruta NO se lee del cuerpo. Se deriva con la misma función que la
+    // construyó al firmar, así que siempre corresponde a este tenant, a este
+    // cliente y a este documento. El aislamiento deja de ser una validación que
+    // hay que acordarse de repetir y pasa a ser propiedad de construcción: no
+    // existe forma de que la fila apunte al objeto de otro documento.
+    // Un `storagePath` en el cuerpo se ignora.
+    const storagePath = buildDocumentPath(tenantId, clientId, documentId, fileName);
+
     const doc: ClientDocument = {
-      id: providedId || uid('doc'),
+      id: documentId,
       clientId,
       tenantId,
-      docType: (String(body.docType || 'other') as ClientDocument['docType']),
+      docType: docType as ClientDocument['docType'],
       fileName,
       storagePath,
       mimeType: body.mimeType ? String(body.mimeType) : undefined,
@@ -244,6 +272,174 @@ export class Client360Service {
 
     const signed = await createDocumentDownloadUrl(doc.storagePath);
     return { documentId, fileName: doc.fileName, mimeType: doc.mimeType, ...signed };
+  }
+
+  /**
+   * Baja de un documento: primero la fila, después —y sólo si procede— el objeto.
+   * Ese orden deja como peor caso un objeto huérfano en el bucket, que es basura;
+   * el inverso dejaría una fila apuntando a bytes que ya no existen, que es
+   * corrupción visible para el usuario.
+   */
+  async deleteDocument(clientId: string, tenantId: string, documentId: string) {
+    await this.assertClientOwned(clientId, tenantId);
+
+    // `listDocuments` ya filtra por cliente y por tenant: un documentId de otro
+    // WISP simplemente no aparece.
+    const documents = await this.listDocuments(clientId, tenantId);
+    const doc = documents.find((d) => d.id === documentId);
+    if (!doc) throw new NotFoundError('Document not found', 'NOT_FOUND');
+
+    // El PDF de un contrato es la única prueba de lo que se firmó: se anula, no
+    // se borra. La guardia mira el archivo, no sólo el tipo, porque las filas
+    // fantasma que dejó la UI anterior también son `contract` — con
+    // `storage_path` NULL— y ésas sí hay que poder limpiarlas.
+    if (doc.docType === 'contract' && doc.storagePath) {
+      throw new ConflictError(
+        'El documento de un contrato no se borra: los contratos se anulan.',
+        'CONTRACT_DOCUMENT_IMMUTABLE',
+      );
+    }
+
+    const retention = await this.objectRetentionReason(doc, tenantId);
+
+    if (this.useDb) {
+      const { error } = await this.admin
+        .from('client_documents')
+        .delete()
+        .eq('id', documentId)
+        .eq('client_id', clientId);
+      if (error) throw error;
+    } else {
+      const idx = client360Memory.documents.findIndex(
+        (d) => d.id === documentId && d.clientId === clientId && matchesTenant(d.tenantId, tenantId),
+      );
+      if (idx < 0) throw new NotFoundError('Document not found', 'NOT_FOUND');
+      client360Memory.documents.splice(idx, 1);
+    }
+
+    await this.logActivity(clientId, tenantId, {
+      action: 'document_removed',
+      oldValue: doc.fileName,
+    });
+
+    const objectRemoved = retention === null ? await removeDocumentObject(doc.storagePath!) : false;
+
+    return {
+      ok: true,
+      documentId,
+      storagePath: doc.storagePath ?? null,
+      objectRemoved,
+      objectRetainedReason: retention,
+    };
+  }
+
+  /**
+   * Por qué NO tocar el objeto de esta fila, o `null` si sí hay que borrarlo.
+   * Se resuelve antes de borrar la fila: después ya no se puede contar quién más
+   * referencia la ruta.
+   */
+  private async objectRetentionReason(
+    doc: ClientDocument,
+    tenantId: string,
+  ): Promise<'no_storage_object' | 'foreign_tenant_path' | 'shared_by_other_documents' | 'storage_unavailable' | null> {
+    if (!doc.storagePath) return 'no_storage_object';
+
+    // Segunda barrera de tenant, la misma que usa la descarga: la ruta de una
+    // fila antigua pudo escribirse cuando el backend aceptaba la del cliente.
+    if (!pathBelongsToTenant(doc.storagePath, tenantId)) return 'foreign_tenant_path';
+
+    // Defensa en profundidad para las filas que ya existen en staging y
+    // producción: con la ruta derivada no se pueden crear alias nuevos, pero los
+    // viejos siguen ahí y borrar uno no debe llevarse los bytes del otro.
+    const others = await this.countOtherRowsWithStoragePath(doc.storagePath, doc.id);
+    if (others > 0) return 'shared_by_other_documents';
+
+    if (!isStorageConfigured()) return 'storage_unavailable';
+    return null;
+  }
+
+  /** Filas —de cualquier cliente o tenant— que apuntan a la misma ruta. */
+  private async countOtherRowsWithStoragePath(storagePath: string, excludeId: string): Promise<number> {
+    if (this.useDb) {
+      const { data, error } = await this.admin
+        .from('client_documents')
+        .select('id')
+        .eq('storage_path', storagePath)
+        .neq('id', excludeId);
+      if (error) throw error;
+      return (data ?? []).length;
+    }
+    return client360Memory.documents.filter(
+      (d) => d.storagePath === storagePath && d.id !== excludeId,
+    ).length;
+  }
+
+  /**
+   * Compensación del objeto huérfano: la subida a Storage salió bien pero el
+   * registro de metadatos falló, así que no hay fila y `deleteDocument` no puede
+   * resolver la ruta.
+   *
+   * El cuerpo trae `{documentId, fileName}` y **no** una ruta: se recalcula con
+   * la misma función que la construyó al firmar. Así este endpoint no puede
+   * apuntar a un objeto que no le corresponde, ni siquiera dentro del tenant.
+   */
+  async cleanupOrphanDocumentObject(clientId: string, tenantId: string, body: Record<string, unknown>) {
+    await this.assertClientOwned(clientId, tenantId);
+
+    const documentId = String(body.documentId || '').trim();
+    if (!documentId) throw new BadRequestError('Missing documentId', 'MISSING_FIELD');
+    if (!/^[\w-]{1,64}$/.test(documentId)) {
+      throw new BadRequestError('Invalid documentId', 'INVALID_FIELD');
+    }
+    const fileName = String(body.fileName || '').trim();
+    if (!fileName) throw new BadRequestError('Missing fileName', 'MISSING_FIELD');
+
+    const storagePath = buildDocumentPath(tenantId, clientId, documentId, fileName);
+
+    // Redundante por construcción —el primer segmento es el tenant saneado—,
+    // pero es la barrera que el resto del dominio aplica antes de tocar un
+    // objeto, y quitarla dejaría este camino dependiendo sólo de que nadie
+    // cambie `buildDocumentPath`.
+    if (!pathBelongsToTenant(storagePath, tenantId)) {
+      throw new BadRequestError('storagePath fuera del tenant', 'INVALID_FIELD');
+    }
+
+    // Sin esto, esto sería un borrado de documentos encubierto: llegaría al
+    // objeto de una fila viva sin pasar por la guardia de contratos del DELETE.
+    const referencing = await this.countRowsReferencing(documentId, storagePath);
+    if (referencing > 0) {
+      throw new ConflictError(
+        'El objeto está referenciado por un documento registrado: no es huérfano.',
+        'DOCUMENT_NOT_ORPHAN',
+      );
+    }
+
+    if (!isStorageConfigured()) {
+      throw new BadRequestError('Storage no configurado.', 'STORAGE_UNAVAILABLE');
+    }
+
+    const removed = await removeDocumentObject(storagePath);
+    await this.logActivity(clientId, tenantId, {
+      action: 'document_orphan_cleanup',
+      oldValue: fileName,
+    });
+    return { ok: true, documentId, storagePath, removed };
+  }
+
+  /** Filas que referencian el objeto, por id o por ruta. */
+  private async countRowsReferencing(documentId: string, storagePath: string): Promise<number> {
+    if (this.useDb) {
+      const [byId, byPath] = await Promise.all([
+        this.admin.from('client_documents').select('id').eq('id', documentId),
+        this.admin.from('client_documents').select('id').eq('storage_path', storagePath),
+      ]);
+      if (byId.error) throw byId.error;
+      if (byPath.error) throw byPath.error;
+      return new Set([...(byId.data ?? []), ...(byPath.data ?? [])].map((r) => String(r.id))).size;
+    }
+    return client360Memory.documents.filter(
+      (d) => d.id === documentId || d.storagePath === storagePath,
+    ).length;
   }
 
   async listActivity(clientId: string, tenantId: string, limit = 50) {
