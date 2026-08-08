@@ -255,4 +255,20 @@ describe('rutas', () => {
     const documentRoutes = routes.split('\n').filter((l) => l.includes('/documents'));
     expect(documentRoutes.length).toBeGreaterThanOrEqual(3);
   });
+
+  it('borrar un documento exige rol de escritura', () => {
+    expect(routes).toMatch(
+      /router\.delete\('\/api\/clients\/:clientId\/documents\/:documentId', requireRoles\(\[\.\.\.WRITE\]\)/,
+    );
+  });
+
+  it('limpiar un huérfano exige rol de escritura', () => {
+    expect(routes).toMatch(/documents\/orphan-cleanup', requireRoles\(\[\.\.\.WRITE\]\)/);
+  });
+
+  it('ningún endpoint de documentos toma el tenant del cuerpo', () => {
+    expect(routes).not.toMatch(/req\.body[^\n]*tenantId/);
+    const handlers = routes.match(/\/documents[^\n]*asyncHandler/g) ?? [];
+    expect(handlers.length).toBeGreaterThanOrEqual(5);
+  });
 });
