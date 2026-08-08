@@ -1,5 +1,5 @@
 import React, { useCallback, useEffect, useRef, useState } from 'react';
-import { AlertTriangle, Loader2, Upload, WifiOff } from 'lucide-react';
+import { AlertTriangle, Camera, Loader2, Upload, WifiOff } from 'lucide-react';
 import {
   ALLOWED_DOCUMENT_MIME_TYPES,
   ASSIGNABLE_DOC_TYPES,
@@ -65,6 +65,18 @@ interface Props {
   idPrefix?: string;
   disabled?: boolean;
   putObject?: ObjectPutter;
+  /**
+   * Renombra el archivo conservando la extensión. La PWA lo usa para que INE
+   * frente y reverso —mismo `doc_type`— se distingan por el nombre.
+   */
+  fileNamePrefix?: string;
+  /**
+   * Abre la cámara en vez del explorador de archivos y acota el `accept` a
+   * imágenes. En escritorio el navegador lo ignora y cae al selector normal.
+   */
+  captureFromCamera?: boolean;
+  /** Etiqueta visible cuando sólo hay un tipo y el selector no se muestra. */
+  label?: string;
 }
 
 export default function DocumentUploadControl({
@@ -76,6 +88,9 @@ export default function DocumentUploadControl({
   idPrefix = 'document-upload',
   disabled = false,
   putObject = defaultPutObject,
+  fileNamePrefix,
+  captureFromCamera = false,
+  label,
 }: Props) {
   const online = useOnlineStatus();
   const [docType, setDocType] = useState<AssignableDocType>(defaultDocType ?? docTypes[0] ?? 'other');
@@ -101,6 +116,7 @@ export default function DocumentUploadControl({
           putObject,
           encodeImage: canvasImageEncoder,
           isOnline: online,
+          fileNamePrefix,
         });
         setNotice('Documento subido.');
         await onUploaded();
@@ -119,30 +135,39 @@ export default function DocumentUploadControl({
         if (inputRef.current) inputRef.current.value = '';
       }
     },
-    [clientId, docType, transport, putObject, online, onUploaded],
+    [clientId, docType, transport, putObject, online, onUploaded, fileNamePrefix],
   );
 
   return (
     <div id={`${idPrefix}-control`} className="space-y-1.5">
       <div className="flex gap-2">
-        <select
-          id={`${idPrefix}-type`}
-          aria-label="Tipo de documento"
-          value={docType}
-          disabled={blocked}
-          onChange={(e) => setDocType(e.target.value as AssignableDocType)}
-          className="flex-1 bg-slate-950 border border-slate-800 rounded-lg px-2 py-1 text-[11px] text-white disabled:opacity-50"
-        >
-          {docTypes.map((t) => (
-            <option key={t} value={t}>{DOC_TYPE_LABEL[t] ?? t}</option>
-          ))}
-        </select>
+        {docTypes.length > 1 ? (
+          <select
+            id={`${idPrefix}-type`}
+            aria-label="Tipo de documento"
+            value={docType}
+            disabled={blocked}
+            onChange={(e) => setDocType(e.target.value as AssignableDocType)}
+            className="flex-1 bg-slate-950 border border-slate-800 rounded-lg px-2 py-1 text-[11px] text-white disabled:opacity-50"
+          >
+            {docTypes.map((t) => (
+              <option key={t} value={t}>{DOC_TYPE_LABEL[t] ?? t}</option>
+            ))}
+          </select>
+        ) : (
+          // Un selector de una sola opción no es una elección, es ruido: la PWA
+          // monta un control por casilla (INE frente, INE reverso, foto).
+          <span id={`${idPrefix}-label`} className="flex-1 self-center text-[11px] text-slate-300">
+            {label ?? DOC_TYPE_LABEL[docType] ?? docType}
+          </span>
+        )}
         <input
           ref={inputRef}
           id={`${idPrefix}-file`}
           type="file"
           className="hidden"
-          accept={ALLOWED_DOCUMENT_MIME_TYPES.join(',')}
+          accept={captureFromCamera ? 'image/*' : ALLOWED_DOCUMENT_MIME_TYPES.join(',')}
+          {...(captureFromCamera ? { capture: 'environment' as const } : {})}
           onChange={(e) => void handleFile(e.target.files?.[0])}
         />
         <button
@@ -152,8 +177,14 @@ export default function DocumentUploadControl({
           onClick={() => inputRef.current?.click()}
           className="px-2 py-1 rounded-lg bg-indigo-600/20 text-indigo-300 text-[10px] inline-flex items-center gap-1 disabled:opacity-50"
         >
-          {uploading ? <Loader2 className="w-3 h-3 animate-spin" /> : <Upload className="w-3 h-3" />}
-          <span>{uploading ? 'Subiendo…' : 'Subir'}</span>
+          {uploading ? (
+            <Loader2 className="w-3 h-3 animate-spin" />
+          ) : captureFromCamera ? (
+            <Camera className="w-3 h-3" />
+          ) : (
+            <Upload className="w-3 h-3" />
+          )}
+          <span>{uploading ? 'Subiendo…' : captureFromCamera ? 'Tomar foto' : 'Subir'}</span>
         </button>
       </div>
 
@@ -175,7 +206,9 @@ export default function DocumentUploadControl({
         <p id={`${idPrefix}-notice`} className="text-[10px] text-emerald-400">{notice}</p>
       )}
       <p className="text-[9px] text-slate-600">
-        PDF o imagen (JPG, PNG, WebP), máx. 10 MB. Las fotos se comprimen antes de subir.
+        {captureFromCamera
+          ? 'La foto se comprime antes de subir: en 4G una imagen de 5 MB no termina.'
+          : 'PDF o imagen (JPG, PNG, WebP), máx. 10 MB. Las fotos se comprimen antes de subir.'}
       </p>
     </div>
   );

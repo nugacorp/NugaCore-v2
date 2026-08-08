@@ -150,6 +150,21 @@ export const compressIfImage = async (
   }
 };
 
+/**
+ * Sustituye el nombre base conservando la extensión.
+ *
+ * INE frente y reverso son el MISMO `doc_type` ('ine') y se distinguen por el
+ * nombre del archivo: cambiar el CHECK de la tabla obligaría a una migración
+ * para algo que la ruta del objeto ya expresa. Y el nombre que trae la cámara
+ * (`IMG_20260808_112233.jpg`) no distingue nada.
+ */
+export const composeFileName = (prefix: string | undefined, originalName: string): string => {
+  const clean = String(prefix ?? '').trim();
+  if (!clean) return originalName;
+  const match = /\.[^./\\]+$/.exec(originalName);
+  return `${clean}${match ? match[0] : ''}`;
+};
+
 export interface UploadedDocument {
   id: string;
   fileName: string;
@@ -175,6 +190,8 @@ export async function uploadClientDocument(params: {
   putObject: ObjectPutter;
   encodeImage?: ImageEncoder;
   isOnline?: boolean;
+  /** Renombra el archivo: así `ine-frente` y `ine-reverso` se distinguen. */
+  fileNamePrefix?: string;
 }): Promise<UploadedDocument> {
   const { clientId, docType, transport, putObject, encodeImage } = params;
 
@@ -194,11 +211,18 @@ export async function uploadClientDocument(params: {
   const finalCheck = validateDocumentFile(file);
   if (!finalCheck.ok) throw new DocumentUploadError(finalCheck.code, finalCheck.message);
 
+  // Se calcula UNA vez y se usa en los tres sitios. El backend deriva la ruta
+  // de (documentId, fileName) tanto al firmar como al registrar: mandar nombres
+  // distintos dejaría la fila apuntando a un objeto que no existe.
+  // El File no se renombra —eso rompería el Blob del PUT— y no hace falta: la
+  // ruta del objeto la fija la URL firmada, no el nombre local.
+  const fileName = composeFileName(params.fileNamePrefix, file.name);
+
   let signed: SignedUploadResponse;
   try {
     signed = await transport.post<SignedUploadResponse>(
       `/api/clients/${clientId}/documents/upload-url`,
-      { fileName: file.name, mimeType: file.type, sizeBytes: file.size },
+      { fileName, mimeType: file.type, sizeBytes: file.size },
     );
   } catch (err) {
     throw new DocumentUploadError('SIGN_FAILED', messageOf(err, 'No se pudo preparar la subida.'));
@@ -217,12 +241,12 @@ export async function uploadClientDocument(params: {
     // distinto aquí registraría la fila sobre un objeto que no existe.
     return await transport.post<UploadedDocument>(`/api/clients/${clientId}/documents`, {
       documentId: signed.documentId,
-      fileName: file.name,
+      fileName,
       docType,
       mimeType: file.type,
     });
   } catch (err) {
-    const orphanLeft = !(await tryCleanupOrphan(transport, clientId, signed.documentId, file.name));
+    const orphanLeft = !(await tryCleanupOrphan(transport, clientId, signed.documentId, fileName));
     throw new DocumentUploadError(
       'REGISTER_FAILED',
       messageOf(err, 'El archivo se subió pero no se pudo registrar.'),

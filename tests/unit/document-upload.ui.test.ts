@@ -74,7 +74,10 @@ describe('sin conexión', () => {
 
 describe('el MIME se acota en el propio input', () => {
   it('accept sale de la lista compartida, no de una cadena suelta', () => {
-    expect(control).toContain('accept={ALLOWED_DOCUMENT_MIME_TYPES.join(\',\')}');
+    // En modo cámara se acota a `image/*`; en el resto, a la lista que comparte
+    // con el backend y con el CHECK del bucket.
+    expect(control).toContain("ALLOWED_DOCUMENT_MIME_TYPES.join(',')");
+    expect(control).toMatch(/accept=\{captureFromCamera \? 'image\/\*' : ALLOWED_DOCUMENT_MIME_TYPES/);
   });
 });
 
