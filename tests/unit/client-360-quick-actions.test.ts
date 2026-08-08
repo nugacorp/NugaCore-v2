@@ -128,7 +128,7 @@ describe('Client 360 — RBAC (clientActionCaps)', () => {
 
   it('Solo lectura NO ve acciones mutables', () => {
     const c = caps('Solo lectura');
-    for (const key of ['suspend', 'reactivate', 'changePlan', 'changeIp', 'registerPayment', 'generateInvoice', 'editClient', 'createTicket'] as const) {
+    for (const key of ['suspend', 'reactivate', 'changePlan', 'changeIp', 'registerPayment', 'generateInvoice', 'editClient', 'createTicket', 'manageDocuments'] as const) {
       expect(c[key], `Solo lectura no debería tener ${key}`).toBe(false);
     }
     // lectura segura
