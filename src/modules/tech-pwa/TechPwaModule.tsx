@@ -17,6 +17,8 @@ import {
   AlertTriangle,
 } from 'lucide-react';
 import { fetchWithRateLimitBackoff } from '../../lib/apiBackoff';
+import { createBackoffDocumentTransport } from '../../lib/documentTransport';
+import DocumentUploadControl from '../../components/DocumentUploadControl';
 import { getAppScope } from '../../lib/appScope';
 import { buildTechAppShareUrl } from '../../lib/techAppLinks';
 import { classifyRxPower, RX_POWER_LABELS } from '../../lib/ftthOptical';
@@ -137,6 +139,14 @@ export default function TechPwaModule({ getAuthHeaders }: TechPwaModuleProps) {
   const [ftthDrafts, setFtthDrafts] = useState<Record<string, FtthDraft>>({});
   /** Motivos por los que el servidor rechazó cerrar una orden de fibra. */
   const [blockers, setBlockers] = useState<Record<string, string[]>>({});
+
+  // El transporte de la PWA: `fetchWithRateLimitBackoff` envuelto en la forma
+  // que espera el control compartido. NO se usa `apiClient` aquí — perdería el
+  // backoff de 429 justo donde la red va peor.
+  const documentTransport = useMemo(
+    () => createBackoffDocumentTransport(getAuthHeaders),
+    [getAuthHeaders],
+  );
 
   const techLink = useMemo(() => {
     try {
@@ -576,6 +586,53 @@ export default function TechPwaModule({ getAuthHeaders }: TechPwaModuleProps) {
                   </div>
                 );
               })()}
+              {/* Expediente del cliente — captura desde la cámara, en sitio.
+                  Sólo si la orden tiene cliente: `clientId` es opcional y sin
+                  cliente no hay expediente al que subir. Se oculta en vez de
+                  fallar al pulsarlo. */}
+              {o.clientId && (
+                <div
+                  id={`tech-pwa-expediente-${o.id}`}
+                  className="rounded-xl border border-amber-900/40 bg-slate-950/60 p-3 space-y-2"
+                >
+                  <p className="text-[10px] font-mono uppercase tracking-wide text-amber-300">
+                    Expediente del cliente
+                  </p>
+                  {/* INE frente y reverso son el MISMO doc_type ('ine'): se
+                      distinguen por el nombre del archivo. Cambiar el CHECK
+                      obligaría a una migración para algo que la ruta ya dice. */}
+                  <DocumentUploadControl
+                    clientId={o.clientId}
+                    transport={documentTransport}
+                    docTypes={['ine']}
+                    label="INE — frente"
+                    fileNamePrefix="ine-frente"
+                    idPrefix={`tech-pwa-ine-frente-${o.id}`}
+                    captureFromCamera
+                    onUploaded={() => setActionMsg('INE (frente) subida al expediente.')}
+                  />
+                  <DocumentUploadControl
+                    clientId={o.clientId}
+                    transport={documentTransport}
+                    docTypes={['ine']}
+                    label="INE — reverso"
+                    fileNamePrefix="ine-reverso"
+                    idPrefix={`tech-pwa-ine-reverso-${o.id}`}
+                    captureFromCamera
+                    onUploaded={() => setActionMsg('INE (reverso) subida al expediente.')}
+                  />
+                  <DocumentUploadControl
+                    clientId={o.clientId}
+                    transport={documentTransport}
+                    docTypes={['installation_photo']}
+                    label="Foto de instalación"
+                    fileNamePrefix="instalacion"
+                    idPrefix={`tech-pwa-instalacion-${o.id}`}
+                    captureFromCamera
+                    onUploaded={() => setActionMsg('Foto de instalación subida al expediente.')}
+                  />
+                </div>
+              )}
               <div className="flex flex-wrap gap-2">
                 <button
                   type="button"

@@ -1,14 +1,16 @@
-import React, { useState, useEffect, useCallback } from 'react';
+import React, { useState, useEffect, useCallback, useMemo } from 'react';
 import {
   X, MapPin, Phone, Mail, Wifi, Router as RouterIcon, CalendarClock,
   CreditCard, Ticket, UserMinus, CheckCircle, Pencil, Network, Navigation, History,
   Wallet, Receipt, FileText, AlertTriangle, ClipboardList, Brain, Bell,
-  Tag, Users, Paperclip, Loader2, Plus, Send,
+  Tag, Users, Paperclip, Loader2, Plus, Send, Download, Trash2, FileWarning,
 } from 'lucide-react';
 import { Client } from '../types';
 import { ClientActionCaps } from '../lib/rbac';
 import { ClientQuickAction } from './ClientActionsMenu';
 import { createAuthorizedApi } from '../lib/apiClient';
+import DocumentUploadControl from './DocumentUploadControl';
+import { DOC_TYPE_LABEL, describeDeletion, hasStoredFile, isDeletableDocument } from '../lib/documentUpload';
 
 // Resumen de cobranza del cliente (FASE D — Billing Foundation).
 // Proyección de GET /api/billing/customers/:customerId/balance. Opcional:
@@ -95,6 +97,10 @@ export interface Client360Document {
   docType: string;
   fileName: string;
   createdAt: string;
+  /** Ausente en las filas que dejó el `addDocument()` anterior, que no subía
+   *  ningún archivo. Se marcan en la lista; ocultarlas taparía el rastro. */
+  storagePath?: string;
+  mimeType?: string;
 }
 
 export interface Client360Activity {
@@ -181,7 +187,7 @@ export default function Client360Panel({
   const [expediente, setExpediente] = useState<Client360Expediente | null>(null);
   const [expedienteLoading, setExpedienteLoading] = useState(false);
   const [newTag, setNewTag] = useState('');
-  const [newDocName, setNewDocName] = useState('');
+  const [docNotice, setDocNotice] = useState<string | null>(null);
   const [busy, setBusy] = useState(false);
   const [notifyChannel, setNotifyChannel] = useState(client.notificationChannel || 'whatsapp');
   const [telegramChatId, setTelegramChatId] = useState(client.telegramChatId || '');
@@ -235,15 +241,50 @@ export default function Client360Panel({
     }
   };
 
-  const addDocument = async () => {
-    const fileName = newDocName.trim();
-    if (!fileName) return;
+  // El transporte del CRM. `DocumentUploadControl` lo recibe por parámetro y no
+  // importa ningún cliente HTTP: la PWA del técnico le pasará el suyo, que sí
+  // lleva backoff de 429.
+  const documentTransport = useMemo(() => createAuthorizedApi(getAuthHeaders), [getAuthHeaders]);
+
+  const downloadDocument = async (doc: Client360Document) => {
+    setDocNotice(null);
     setBusy(true);
     try {
-      const api = createAuthorizedApi(getAuthHeaders);
-      await api.post(`/api/clients/${client.id}/documents`, { fileName, docType: 'contract' });
-      setNewDocName('');
+      const { url } = await documentTransport.get<{ url: string }>(
+        `/api/clients/${client.id}/documents/${doc.id}/download-url`,
+      );
+      // El bucket es privado: esta URL es firmada y de vida corta.
+      window.open(url, '_blank', 'noopener,noreferrer');
+    } catch {
+      setDocNotice('No se pudo obtener el enlace de descarga.');
+    } finally {
+      setBusy(false);
+    }
+  };
+
+  const removeDocument = async (doc: Client360Document) => {
+    // El icono de papelera mide 12 px y vive a 4 px del de descarga; esto borra
+    // la fila y los bytes sin deshacer. Mismo patrón que el borrado de cliente
+    // (`CrmModule.tsx:993`) y el resto de acciones destructivas del repo.
+    const ok = window.confirm(
+      hasStoredFile(doc)
+        ? `¿Eliminar «${doc.fileName}»?\n\nSe borra el registro y el archivo del almacenamiento. No se puede deshacer.`
+        : `¿Eliminar el registro «${doc.fileName}»?\n\nNo tiene archivo asociado: sólo se borra la fila.`,
+    );
+    if (!ok) return;
+    setDocNotice(null);
+    setBusy(true);
+    try {
+      const result = await documentTransport.delete<{
+        objectRemoved?: boolean;
+        objectRetainedReason?: string | null;
+      }>(`/api/clients/${client.id}/documents/${doc.id}`);
+      // El backend puede quitar la fila y dejar el objeto (contrato, ruta
+      // compartida…). Decirlo evita que el usuario crea que el archivo se fue.
+      setDocNotice(describeDeletion(result));
       await loadExpediente();
+    } catch (err) {
+      setDocNotice(err instanceof Error ? err.message : 'No se pudo eliminar el documento.');
     } finally {
       setBusy(false);
     }
@@ -386,16 +427,65 @@ export default function Client360Panel({
               {(expediente?.documents ?? []).length === 0 ? (
                 <p className="text-[11px] text-slate-500">Sin documentos</p>
               ) : (
-                <ul className="space-y-1">
+                <ul id="client360-documents" className="space-y-1">
                   {expediente!.documents.map((d) => (
-                    <li key={d.id} className="text-[11px] text-slate-300">{d.fileName} <span className="text-slate-500">({d.docType})</span></li>
+                    <li key={d.id} className="flex items-center justify-between gap-2 text-[11px] text-slate-300">
+                      <span className="min-w-0 truncate">
+                        {d.fileName} <span className="text-slate-500">({DOC_TYPE_LABEL[d.docType] ?? d.docType})</span>
+                        {!hasStoredFile(d) && (
+                          // Fila que quedó del flujo anterior: registro sin
+                          // archivo. Se marca en vez de ocultarla, y sin botón
+                          // de descarga: daría un 404 sin explicación.
+                          <span
+                            id={`client360-document-nofile-${d.id}`}
+                            className="ml-1 inline-flex items-center gap-0.5 text-amber-500"
+                          >
+                            <FileWarning className="w-3 h-3" /> sin archivo
+                          </span>
+                        )}
+                      </span>
+                      <span className="flex shrink-0 items-center gap-1">
+                        {hasStoredFile(d) && (
+                          <button
+                            type="button"
+                            id={`client360-document-download-${d.id}`}
+                            aria-label={`Descargar ${d.fileName}`}
+                            disabled={busy}
+                            onClick={() => void downloadDocument(d)}
+                            className="text-slate-400 hover:text-indigo-300 disabled:opacity-50"
+                          >
+                            <Download className="w-3 h-3" />
+                          </button>
+                        )}
+                        {caps.manageDocuments && isDeletableDocument(d) && (
+                          <button
+                            type="button"
+                            id={`client360-document-delete-${d.id}`}
+                            aria-label={`Eliminar ${d.fileName}`}
+                            disabled={busy}
+                            onClick={() => void removeDocument(d)}
+                            className="text-slate-400 hover:text-rose-400 disabled:opacity-50"
+                          >
+                            <Trash2 className="w-3 h-3" />
+                          </button>
+                        )}
+                      </span>
+                    </li>
                   ))}
                 </ul>
               )}
-              {caps.editClient && (
-                <div className="flex gap-2 mt-2">
-                  <input value={newDocName} onChange={(e) => setNewDocName(e.target.value)} placeholder="Nombre archivo (metadato)" className="flex-1 bg-slate-950 border border-slate-800 rounded-lg px-2 py-1 text-[11px]" />
-                  <button type="button" disabled={busy} onClick={() => void addDocument()} className="px-2 py-1 rounded-lg bg-indigo-600/20 text-indigo-300 text-[10px]"><Plus className="w-3 h-3" /></button>
+              {docNotice && (
+                <p id="client360-document-notice" className="mt-1 text-[10px] text-slate-400">{docNotice}</p>
+              )}
+              {caps.manageDocuments && (
+                <div className="mt-2">
+                  <DocumentUploadControl
+                    clientId={client.id}
+                    transport={documentTransport}
+                    idPrefix="client360-document-upload"
+                    disabled={busy}
+                    onUploaded={() => loadExpediente()}
+                  />
                 </div>
               )}
             </div>

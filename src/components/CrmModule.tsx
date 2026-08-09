@@ -41,6 +41,11 @@ type ZoneOption = {
 import type { UserRole } from '../lib/supabase';
 import { clientActionCaps } from '../lib/rbac';
 import { buildPortalShareUrl } from '../lib/portalLinks';
+import {
+  countDocumentsByType,
+  countDocumentsWithFile,
+  type ExpedienteDocument,
+} from '../lib/documentUpload';
 import ClientActionsMenu, { ClientQuickAction } from './ClientActionsMenu';
 import Client360Panel, { ClientHistoryEntry, ClientBillingSummary, ClientServiceStatusView } from './Client360Panel';
 import {
@@ -201,6 +206,7 @@ export default function CrmModule({
   const [ftthError, setFtthError] = useState('');
   const [isLeadForm, setIsLeadForm] = useState(false);
   const [selectedClient, setSelectedClient] = useState<Client | null>(null);
+  const [sidebarDocuments, setSidebarDocuments] = useState<ExpedienteDocument[]>([]);
   const [portalLinkCopied, setPortalLinkCopied] = useState(false);
 
   // ── Client 360 + acciones rápidas ───────────────────────────────────
@@ -365,6 +371,31 @@ export default function CrmModule({
     })();
     return () => { cancelled = true; };
   }, [client360, getAuthHeaders]);
+
+  // Expediente del cliente seleccionado en el SIDEBAR — su propio fetch.
+  //
+  // No se puede reutilizar el del panel: el expediente vive en estado local de
+  // `Client360Panel` y el sidebar no lo ve. Y el sidebar se abre sin abrir el
+  // panel, así que sin esto los conteos seguirían siendo el "2 Documentos"
+  // escrito a mano que había aquí.
+  useEffect(() => {
+    if (!selectedClient) {
+      setSidebarDocuments([]);
+      return;
+    }
+    let cancelled = false;
+    const customerId = selectedClient.id;
+    (async () => {
+      try {
+        const api = createAuthorizedApi(getAuthHeaders);
+        const docs = await api.get<ExpedienteDocument[]>(`/api/clients/${customerId}/documents`);
+        if (!cancelled) setSidebarDocuments(Array.isArray(docs) ? docs : []);
+      } catch {
+        if (!cancelled) setSidebarDocuments([]);
+      }
+    })();
+    return () => { cancelled = true; };
+  }, [selectedClient, getAuthHeaders]);
 
   // Estado oficial de servicio del cliente abierto (Pre-PROD-7, read-only).
   useEffect(() => {
@@ -1280,21 +1311,39 @@ export default function CrmModule({
                   </p>
                 </div>
 
-                {/* Docs / Photos Placeholder */}
+                {/* Expediente digital — conteos reales, no un número escrito a mano */}
                 <div>
                   <span className="text-slate-500 block uppercase text-[9px] font-mono mb-2">Expediente Digital</span>
-                  <div className="flex gap-2">
-                    <div className="flex-1 bg-slate-900 text-center p-3 rounded-xl border border-slate-800 text-[10px] space-y-1">
-                      <FileText className="w-4 h-4 mx-auto text-indigo-400" />
-                      <span className="block font-semibold">INE / Comprobante</span>
-                      <span className="text-slate-500 block text-[8px]">2 Documentos</span>
-                    </div>
-                    <div className="flex-1 bg-slate-900 text-center p-3 rounded-xl border border-slate-800 text-[10px] space-y-1">
-                      <Image className="w-4 h-4 mx-auto text-emerald-400" />
-                      <span className="block font-semibold">Instalación</span>
-                      <span className="text-slate-500 block text-[8px]">Fotografías</span>
-                    </div>
-                  </div>
+                  {(() => {
+                    const counts = countDocumentsByType(sidebarDocuments);
+                    const identidad = (counts.ine ?? 0) + (counts.receipt ?? 0);
+                    const fotos = counts.installation_photo ?? 0;
+                    // Las filas sin archivo se cuentan aparte: sumarlas al total
+                    // diría que hay documentos donde sólo hay registros vacíos.
+                    const sinArchivo = sidebarDocuments.length - countDocumentsWithFile(sidebarDocuments);
+                    const plural = (n: number, s: string, p: string) => `${n} ${n === 1 ? s : p}`;
+                    return (
+                      <>
+                        <div className="flex gap-2">
+                          <div id="crm-expediente-identidad" className="flex-1 bg-slate-900 text-center p-3 rounded-xl border border-slate-800 text-[10px] space-y-1">
+                            <FileText className="w-4 h-4 mx-auto text-indigo-400" />
+                            <span className="block font-semibold">INE / Comprobante</span>
+                            <span className="text-slate-500 block text-[8px]">{plural(identidad, 'Documento', 'Documentos')}</span>
+                          </div>
+                          <div id="crm-expediente-fotos" className="flex-1 bg-slate-900 text-center p-3 rounded-xl border border-slate-800 text-[10px] space-y-1">
+                            <Image className="w-4 h-4 mx-auto text-emerald-400" />
+                            <span className="block font-semibold">Instalación</span>
+                            <span className="text-slate-500 block text-[8px]">{plural(fotos, 'Fotografía', 'Fotografías')}</span>
+                          </div>
+                        </div>
+                        {sinArchivo > 0 && (
+                          <p id="crm-expediente-sin-archivo" className="text-[9px] text-amber-500 font-mono mt-1">
+                            {plural(sinArchivo, 'registro sin archivo', 'registros sin archivo')}
+                          </p>
+                        )}
+                      </>
+                    );
+                  })()}
                 </div>
 
                 {/* Lead context & Conversion action */}

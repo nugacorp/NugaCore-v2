@@ -172,13 +172,23 @@ export interface ClientActionCaps {
   viewLocation: boolean;      // Ver ubicación (mapa)
   copyIp: boolean;            // Copiar IP
   viewHistory: boolean;       // Ver eventos / historial
+  /**
+   * Subir, descargar y borrar documentos del expediente.
+   *
+   * NO es `editClient`. El WRITE del backend
+   * (`backend/domains/client-360/routes.ts:8`) incluye `soporte` y `cobranza`,
+   * que `editClient` deja fuera: reutilizarlo les quitaría en la UI una
+   * capacidad que la API sí les concede, y como el backend seguiría
+   * aceptándoles la petición, ningún test lo delataría.
+   */
+  manageDocuments: boolean;
 }
 
 const NO_CLIENT_ACTIONS: ClientActionCaps = {
   viewProfile: false, editClient: false, suspend: false, reactivate: false,
   changePlan: false, changeIp: false, registerPayment: false, generateInvoice: false,
   accountStatement: false, createTicket: false, viewTickets: false, viewRouter: false,
-  viewLocation: false, copyIp: false, viewHistory: false,
+  viewLocation: false, copyIp: false, viewHistory: false, manageDocuments: false,
 };
 
 /**
@@ -194,26 +204,26 @@ export function clientActionCaps(role: UserRole): ClientActionCaps {
         viewProfile: true, editClient: true, suspend: true, reactivate: true,
         changePlan: true, changeIp: true, registerPayment: true, generateInvoice: true,
         accountStatement: true, createTicket: true, viewTickets: true, viewRouter: true,
-        viewLocation: true, copyIp: true, viewHistory: true,
+        viewLocation: true, copyIp: true, viewHistory: true, manageDocuments: true,
       };
     case 'Técnico':
       return {
         ...NO_CLIENT_ACTIONS,
         viewProfile: true, editClient: true, changeIp: true,
         createTicket: true, viewTickets: true, viewRouter: true,
-        viewLocation: true, copyIp: true, viewHistory: true,
+        viewLocation: true, copyIp: true, viewHistory: true, manageDocuments: true,
       };
     case 'Soporte':
       return {
         ...NO_CLIENT_ACTIONS,
         viewProfile: true, createTicket: true, viewTickets: true,
-        viewLocation: true, copyIp: true, viewHistory: true,
+        viewLocation: true, copyIp: true, viewHistory: true, manageDocuments: true,
       };
     case 'Cobranza':
       return {
         ...NO_CLIENT_ACTIONS,
         viewProfile: true, registerPayment: true, accountStatement: true,
-        viewHistory: true,
+        viewHistory: true, manageDocuments: true,
       };
     case 'Solo lectura':
       return {
