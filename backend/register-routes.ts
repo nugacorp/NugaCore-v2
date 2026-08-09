@@ -49,6 +49,7 @@ import tenancyRoutes from './domains/tenancy/routes';
 import wispOnboardingRoutes from './domains/wisp-onboarding/routes';
 import integrationsRoutes from './domains/integrations/routes';
 import jobsRoutes from './domains/jobs/routes';
+import contractTemplateRoutes from './domains/contract-templates/routes';
 
 export function registerRoutes(app: Express): void {
   app.use(healthRoutes);
@@ -101,4 +102,5 @@ export function registerRoutes(app: Express): void {
   app.use(tenancyRoutes);
   app.use(wispOnboardingRoutes);
   app.use(jobsRoutes);
+  app.use(contractTemplateRoutes);
 }
