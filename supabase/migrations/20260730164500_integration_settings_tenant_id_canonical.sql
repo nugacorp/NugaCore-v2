@@ -214,9 +214,11 @@ BEGIN
       'MT-03 abortada en preflight: múltiples FK equivalentes sobre tenant_id (%)', exact_fk_count;
   END IF;
 
-  -- Contrato RLS exacto: cero policies (se creará la canónica) o exactamente
-  -- una policy PERMISSIVE/FOR ALL ligada sólo al OID real de service_role, con
-  -- USING/WITH CHECK true. Cualquier policy extra abriría acceso por OR.
+  -- Contrato RLS exacto: cero policies (se creará la canónica), la policy
+  -- canónica, o exclusivamente la huella versionada que creó 20260716140000.
+  -- Esa huella legacy se acepta sólo como estado de upgrade y se reemplaza
+  -- después de terminar todos los demás preflights. Cualquier policy extra o
+  -- near-miss abriría acceso por OR y aborta antes de mutar.
   SELECT count(*) INTO policy_count
     FROM pg_policy p
    WHERE p.polrelid = table_oid;
@@ -245,12 +247,28 @@ BEGIN
     FROM pg_policy p
     WHERE p.polrelid = table_oid;
 
-    IF policy_name IS DISTINCT FROM 'wisp_integration_settings_service_role'
-       OR policy_permissive IS DISTINCT FROM TRUE
-       OR policy_cmd IS DISTINCT FROM '*'
-       OR policy_roles IS DISTINCT FROM ARRAY[service_role_oid]::OID[]
-       OR policy_using IS DISTINCT FROM 'true'
-       OR policy_check IS DISTINCT FROM 'true' THEN
+    IF NOT COALESCE((
+      -- Estado final canónico.
+      (
+        policy_name = 'wisp_integration_settings_service_role'
+        AND policy_permissive
+        AND policy_cmd = '*'
+        AND policy_roles = ARRAY[service_role_oid]::OID[]
+        AND policy_using = 'true'
+        AND policy_check = 'true'
+      )
+      OR
+      -- Única huella legacy admitida: PUBLIC es el OID especial 0 y la
+      -- expresión normalizada del catálogo conserva SELECT ... AS role.
+      (
+        policy_name = 'wisp_integration_settings_service_role'
+        AND policy_permissive
+        AND policy_cmd = '*'
+        AND policy_roles = ARRAY[0]::OID[]
+        AND policy_using = 'selectauth.roleasrole=''service_role''::text'
+        AND policy_check = 'selectauth.roleasrole=''service_role''::text'
+      )
+    ), FALSE) THEN
       RAISE EXCEPTION
         'MT-03 abortada en preflight: policy RLS incompatible (name %, cmd %, roles %, permissive %, using %, check %)',
         policy_name, policy_cmd, policy_roles, policy_permissive, policy_using, policy_check;
@@ -379,14 +397,43 @@ BEGIN
 END $$;
 
 DO $$
+DECLARE
+  table_oid OID;
+  policy_count BIGINT;
+  legacy_policy_count BIGINT;
 BEGIN
   IF to_regclass('public.wisp_integration_settings') IS NULL THEN RETURN; END IF;
 
+  table_oid := 'public.wisp_integration_settings'::regclass;
+  SELECT
+    count(*),
+    count(*) FILTER (
+      WHERE p.polname = 'wisp_integration_settings_service_role'
+        AND p.polpermissive
+        AND p.polcmd = '*'
+        AND p.polroles = ARRAY[0]::OID[]
+        AND regexp_replace(lower(pg_get_expr(p.polqual, p.polrelid)), '[[:space:]()]', '', 'g')
+            = 'selectauth.roleasrole=''service_role''::text'
+        AND regexp_replace(lower(pg_get_expr(p.polwithcheck, p.polrelid)), '[[:space:]()]', '', 'g')
+            = 'selectauth.roleasrole=''service_role''::text'
+    )
+  INTO policy_count, legacy_policy_count
+  FROM pg_policy p
+  WHERE p.polrelid = table_oid;
+
+  -- El ACCESS EXCLUSIVE LOCK del preflight evita cambios de catálogo entre
+  -- ambas fases. Esta segunda comprobación impide mutar ante un estado nuevo.
+  IF policy_count = 1 AND legacy_policy_count = 1 THEN
+    DROP POLICY wisp_integration_settings_service_role
+      ON public.wisp_integration_settings;
+    policy_count := 0;
+  ELSIF policy_count > 1 OR legacy_policy_count > 0 THEN
+    RAISE EXCEPTION
+      'MT-03 abortada en mutación: inventario de policy cambió tras preflight';
+  END IF;
+
   ALTER TABLE public.wisp_integration_settings ENABLE ROW LEVEL SECURITY;
-  IF NOT EXISTS (
-    SELECT 1 FROM pg_policy p
-     WHERE p.polrelid = 'public.wisp_integration_settings'::regclass
-  ) THEN
+  IF policy_count = 0 THEN
     CREATE POLICY wisp_integration_settings_service_role
       ON public.wisp_integration_settings
       AS PERMISSIVE

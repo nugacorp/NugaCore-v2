@@ -516,7 +516,7 @@ describe('MT-03 migration ejecutada en Postgres hermético', () => {
   );
 
   it.each([false, true])(
-    'preflight rechaza policy legacy PUBLIC/auth.role() antes de mutar (tenant_id=%s)',
+    'reconcilia exclusivamente la policy legacy versionada PUBLIC/auth.role() (tenant_id=%s)',
     async (withTenantColumn) => {
     const db = await database();
     await baseSchema(db, { withTenantColumn });
@@ -532,7 +532,88 @@ describe('MT-03 migration ejecutada en Postgres hermético', () => {
         WITH CHECK ((select auth.role()) = 'service_role');
     `);
 
-    await expectPreflightFailureWithoutMutation(db, /policy.*incompatible/i);
+    await db.exec(migrationSql);
+
+    const policies = await db.query<{
+      policyname: string;
+      permissive: string;
+      roles: string[];
+      cmd: string;
+      qual: string;
+      with_check: string;
+    }>(`
+      SELECT policyname, permissive, roles, cmd, qual, with_check
+      FROM pg_policies
+      WHERE schemaname = 'public'
+        AND tablename = 'wisp_integration_settings'
+    `);
+    expect(policies.rows).toEqual([{
+      policyname: 'wisp_integration_settings_service_role',
+      permissive: 'PERMISSIVE',
+      roles: ['service_role'],
+      cmd: 'ALL',
+      qual: 'true',
+      with_check: 'true',
+    }]);
+    },
+  );
+
+  it.each([
+    {
+      variant: 'nombre distinto',
+      policy: `CREATE POLICY wisp_integration_settings_service_roles
+        ON public.wisp_integration_settings FOR ALL TO public
+        USING ((select auth.role()) = 'service_role')
+        WITH CHECK ((select auth.role()) = 'service_role')`,
+    },
+    {
+      variant: 'RESTRICTIVE',
+      policy: `CREATE POLICY wisp_integration_settings_service_role
+        ON public.wisp_integration_settings AS RESTRICTIVE FOR ALL TO public
+        USING ((select auth.role()) = 'service_role')
+        WITH CHECK ((select auth.role()) = 'service_role')`,
+    },
+    {
+      variant: 'comando SELECT',
+      policy: `CREATE POLICY wisp_integration_settings_service_role
+        ON public.wisp_integration_settings FOR SELECT TO public
+        USING ((select auth.role()) = 'service_role')`,
+    },
+    {
+      variant: 'rol authenticated',
+      policy: `CREATE POLICY wisp_integration_settings_service_role
+        ON public.wisp_integration_settings FOR ALL TO authenticated
+        USING ((select auth.role()) = 'service_role')
+        WITH CHECK ((select auth.role()) = 'service_role')`,
+    },
+    {
+      variant: 'predicado sin SELECT init-plan',
+      policy: `CREATE POLICY wisp_integration_settings_service_role
+        ON public.wisp_integration_settings FOR ALL TO public
+        USING (auth.role() = 'service_role')
+        WITH CHECK (auth.role() = 'service_role')`,
+    },
+    {
+      variant: 'WITH CHECK diferente',
+      policy: `CREATE POLICY wisp_integration_settings_service_role
+        ON public.wisp_integration_settings FOR ALL TO public
+        USING ((select auth.role()) = 'service_role')
+        WITH CHECK ((select auth.role()) = 'authenticated')`,
+    },
+  ])(
+    'preflight rechaza near-miss legacy $variant y revierte sin mutar',
+    async ({ policy }) => {
+      const db = await database();
+      await baseSchema(db);
+      await db.exec(`
+        INSERT INTO public.tenants (id) VALUES ('tenant-default');
+        INSERT INTO public.wisp_integration_settings (id, marker)
+        VALUES ('default', 'ORIGINAL');
+        ALTER TABLE public.wisp_integration_settings ENABLE ROW LEVEL SECURITY;
+        ${policy};
+      `);
+
+      await expectPreflightFailureWithoutMutation(db, /policy.*incompatible/i);
     },
   );
 
