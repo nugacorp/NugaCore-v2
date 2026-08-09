@@ -4,6 +4,7 @@
 
 import { isDomainOnDb } from './feature-flags';
 import { productionGatesSnapshot } from './production-gates';
+import { productionRestoreEvidenceVerified } from './restore-evidence';
 
 const CRITICAL_DOMAINS = [
   'customers',
@@ -21,7 +22,7 @@ export const productionReadinessSnapshot = () => {
     onDb: isDomainOnDb(domain),
   }));
   const allCriticalOnDb = persistence.every((row) => row.onDb);
-  const restoreTested = (process.env.STAGING_RESTORE_TESTED || '').trim().toLowerCase() === 'true';
+  const restoreTested = productionRestoreEvidenceVerified();
   const authTrustHeaders = (process.env.AUTH_TRUST_HEADERS || 'false').trim().toLowerCase() === 'true';
   const portalStagingToken = Boolean((process.env.PORTAL_STAGING_TOKEN || '').trim());
   const supabaseConfigured = Boolean(
@@ -32,7 +33,7 @@ export const productionReadinessSnapshot = () => {
 
   const blockers: string[] = [];
   if (!allCriticalOnDb) blockers.push('USE_DB_* críticos incompletos');
-  if (!restoreTested) blockers.push('STAGING_RESTORE_TESTED=false');
+  if (!restoreTested) blockers.push('PRODUCTION_RESTORE_EVIDENCE_INVALID');
   if (!supabaseConfigured) blockers.push('Supabase no configurado');
   if (authTrustHeaders) blockers.push('AUTH_TRUST_HEADERS=true');
   if (portalStagingToken && (process.env.NODE_ENV || '') === 'production') {
@@ -54,7 +55,7 @@ export const productionReadinessSnapshot = () => {
     gates,
     blockers,
     recommendedEnableOrder: [
-      'USE_DB_* críticos + STAGING_RESTORE_TESTED',
+      'USE_DB_* críticos + evidencia de restore productivo verificada',
       'PAYMENTS_ROUTER_LIVE + webhooks',
       'SERVICE_STATUS_LIVE',
       'NOTIFICATIONS_LIVE',

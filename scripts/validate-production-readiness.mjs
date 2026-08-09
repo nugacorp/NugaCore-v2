@@ -1,4 +1,6 @@
 #!/usr/bin/env node
+import { readFileSync, statSync } from 'node:fs';
+import { validateRestoreEvidence, validateSecretFileMetadata } from './lib/gl02-backup-config.mjs';
 // ====================================================================
 // Validación local de gates de producción real.
 //
@@ -41,7 +43,18 @@ function checkLocal() {
   chk(Boolean(process.env.MIKROTIK_CREDENTIALS_KEY) || !asBool(process.env.PUBLIC_DEPLOYMENT), 'MIKROTIK_CREDENTIALS_KEY (si público)');
   chk(!asBool(process.env.MIKROTIK_WORKER_LIVE), 'MIKROTIK_WORKER_LIVE=false');
   chk(!asBool(process.env.USE_DB_MIKROTIK), 'USE_DB_MIKROTIK=false');
-  chk(asBool(process.env.PRODUCTION_RESTORE_TESTED) || asBool(process.env.STAGING_RESTORE_TESTED), 'Restore probado');
+  const restoreEvidenceOk = (() => {
+    try {
+      const evidencePath = process.env.PRODUCTION_RESTORE_EVIDENCE_FILE || '';
+      const keyPath = process.env.PRODUCTION_RESTORE_EVIDENCE_HMAC_KEY_FILE || '';
+      if (process.platform === 'linux' && validateSecretFileMetadata(statSync(keyPath)).length) throw new Error('key metadata');
+      const evidence = JSON.parse(readFileSync(evidencePath, 'utf8'));
+      const key = readFileSync(keyPath, 'utf8').trim();
+      return asBool(process.env.PRODUCTION_RESTORE_TESTED)
+        && validateRestoreEvidence(evidence, key).ok;
+    } catch { return false; }
+  })();
+  chk(restoreEvidenceOk, 'Restore productivo con evidencia HMAC (staging no aplica)');
   chk(!asBool(process.env.VITE_ENABLE_QUICK_LOGIN) || process.env.NODE_ENV !== 'production', 'Quick login off en prod');
   chk(!process.env.PORTAL_STAGING_TOKEN || process.env.NODE_ENV !== 'production', 'Sin PORTAL_STAGING_TOKEN en prod');
 
