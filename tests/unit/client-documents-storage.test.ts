@@ -107,29 +107,29 @@ describe('addDocument — la ruta la deriva el backend', () => {
   it('la ruta se construye con documentId + fileName', async () => {
     const doc = await serviceWithOwnedClient().addDocument('c-1', 'tenant-a', {
       fileName: 'ine.pdf',
-      documentId: 'doc-abc123',
+      documentId: 'doc-1754650000011-000abc12',
     });
-    expect(doc.id).toBe('doc-abc123');
-    expect(doc.storagePath).toBe(buildDocumentPath('tenant-a', 'c-1', 'doc-abc123', 'ine.pdf'));
+    expect(doc.id).toBe('doc-1754650000011-000abc12');
+    expect(doc.storagePath).toBe(buildDocumentPath('tenant-a', 'c-1', 'doc-1754650000011-000abc12', 'ine.pdf'));
     expect(doc.tenantId).toBe('tenant-a');
   });
 
   it('un storagePath en el cuerpo se ignora: no llega a la fila', async () => {
     const doc = await serviceWithOwnedClient().addDocument('c-1', 'tenant-a', {
       fileName: 'ine.pdf',
-      documentId: 'doc-mio',
+      documentId: 'doc-1754650000010-0000a100',
       // Ruta del MISMO tenant y con forma válida — pasaba las tres validaciones
       // anteriores — pero apunta al objeto de otro cliente.
       storagePath: 'tenant-a/c-victima/doc-ajeno-contrato.pdf',
     });
-    expect(doc.storagePath).toBe('tenant-a/c-1/doc-mio-ine.pdf');
+    expect(doc.storagePath).toBe('tenant-a/c-1/doc-1754650000010-0000a100-ine.pdf');
     expect(doc.storagePath).not.toContain('c-victima');
   });
 
   it('ni siquiera con `..`: la ruta del cuerpo no se lee en absoluto', async () => {
     const doc = await serviceWithOwnedClient().addDocument('c-1', 'tenant-a', {
       fileName: 'x.pdf',
-      documentId: 'doc-2',
+      documentId: 'doc-1754650000002-000000a2',
       storagePath: 'tenant-a/../tenant-b/x.pdf',
     });
     expect(doc.storagePath!.startsWith('tenant-a/c-1/')).toBe(true);
@@ -153,7 +153,7 @@ describe('addDocument — la ruta la deriva el backend', () => {
 
   it('sigue exigiendo fileName', async () => {
     await expect(
-      serviceWithOwnedClient().addDocument('c-1', 'tenant-a', { documentId: 'doc-3' }),
+      serviceWithOwnedClient().addDocument('c-1', 'tenant-a', { documentId: 'doc-1754650000003-000000a3' }),
     ).rejects.toThrow(/Missing fileName/);
   });
 });
@@ -163,7 +163,7 @@ describe('addDocument — doc_type', () => {
     await expect(
       serviceWithOwnedClient().addDocument('c-1', 'tenant-a', {
         fileName: 'contrato.pdf',
-        documentId: 'doc-4',
+        documentId: 'doc-1754650000004-000000a4',
         docType: 'contract',
       }),
     ).rejects.toMatchObject({ statusCode: 400, code: 'DOC_TYPE_RESERVED' });
@@ -173,17 +173,21 @@ describe('addDocument — doc_type', () => {
     await expect(
       serviceWithOwnedClient().addDocument('c-1', 'tenant-a', {
         fileName: 'x.pdf',
-        documentId: 'doc-5',
+        documentId: 'doc-1754650000005-000000a5',
         docType: 'inventado',
       }),
     ).rejects.toMatchObject({ statusCode: 400, code: 'INVALID_FIELD' });
   });
 
   it('acepta los tipos asignables', async () => {
-    for (const docType of ['ine', 'receipt', 'installation_photo', 'other']) {
+    // Los ids llevan la forma que emite `uid('doc')`: `doc-<ms>-<hex8>`. No vale
+    // inventarlos con el nombre del tipo — el patrón anclado los rechaza, y esa
+    // es justo la propiedad que impide que dos documentos compartan ruta.
+    const tipos = ['ine', 'receipt', 'installation_photo', 'other'];
+    for (const [i, docType] of tipos.entries()) {
       const doc = await serviceWithOwnedClient().addDocument('c-1', 'tenant-a', {
         fileName: `${docType}.pdf`,
-        documentId: `doc-${docType}`,
+        documentId: `doc-17546500001${i}-000000b${i}`,
         docType,
       });
       expect(doc.docType).toBe(docType);
@@ -193,7 +197,7 @@ describe('addDocument — doc_type', () => {
   it('sin docType cae a `other`', async () => {
     const doc = await serviceWithOwnedClient().addDocument('c-1', 'tenant-a', {
       fileName: 'x.pdf',
-      documentId: 'doc-6',
+      documentId: 'doc-1754650000006-000000a6',
     });
     expect(doc.docType).toBe('other');
   });
@@ -211,7 +215,7 @@ describe('prepareDocumentUpload / getDocumentDownloadUrl — sin Storage configu
 
   it('la descarga también', async () => {
     await expect(
-      serviceWithOwnedClient().getDocumentDownloadUrl('c-1', 'tenant-a', 'doc-1'),
+      serviceWithOwnedClient().getDocumentDownloadUrl('c-1', 'tenant-a', 'doc-1754650000001-000000a1'),
     ).rejects.toThrow(/Storage no configurado/);
   });
 });

@@ -10,7 +10,7 @@ import { ClientActionCaps } from '../lib/rbac';
 import { ClientQuickAction } from './ClientActionsMenu';
 import { createAuthorizedApi } from '../lib/apiClient';
 import DocumentUploadControl from './DocumentUploadControl';
-import { DOC_TYPE_LABEL, describeDeletion, hasStoredFile } from '../lib/documentUpload';
+import { DOC_TYPE_LABEL, describeDeletion, hasStoredFile, isDeletableDocument } from '../lib/documentUpload';
 
 // Resumen de cobranza del cliente (FASE D — Billing Foundation).
 // Proyección de GET /api/billing/customers/:customerId/balance. Opcional:
@@ -263,6 +263,15 @@ export default function Client360Panel({
   };
 
   const removeDocument = async (doc: Client360Document) => {
+    // El icono de papelera mide 12 px y vive a 4 px del de descarga; esto borra
+    // la fila y los bytes sin deshacer. Mismo patrón que el borrado de cliente
+    // (`CrmModule.tsx:993`) y el resto de acciones destructivas del repo.
+    const ok = window.confirm(
+      hasStoredFile(doc)
+        ? `¿Eliminar «${doc.fileName}»?\n\nSe borra el registro y el archivo del almacenamiento. No se puede deshacer.`
+        : `¿Eliminar el registro «${doc.fileName}»?\n\nNo tiene archivo asociado: sólo se borra la fila.`,
+    );
+    if (!ok) return;
     setDocNotice(null);
     setBusy(true);
     try {
@@ -448,7 +457,7 @@ export default function Client360Panel({
                             <Download className="w-3 h-3" />
                           </button>
                         )}
-                        {caps.manageDocuments && (
+                        {caps.manageDocuments && isDeletableDocument(d) && (
                           <button
                             type="button"
                             id={`client360-document-delete-${d.id}`}

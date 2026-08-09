@@ -67,6 +67,30 @@ export const client360Memory = {
 export const uid = (p: string) => `${p}-${Date.now()}-${randomBytes(4).toString('hex')}`;
 export const stamp = () => new Date().toISOString();
 
+/**
+ * La forma EXACTA que `uid('doc')` emite. Va aquí, pegado a `uid`, porque son
+ * un par: cambiar uno sin el otro rompe la unicidad de la ruta del objeto.
+ *
+ * No es cosmético. `buildDocumentPath` compone el tercer segmento como
+ * `${documentId}-${sanitizeFileName(fileName)}`, y `-` es legal dentro de
+ * `/^[\w-]{1,64}$/`, así que con la validación laxa el id absorbía el prefijo
+ * del nombre y DOS documentos distintos producían la MISMA ruta:
+ *
+ *   doc-1754650000000-a1b2c3d4      + ine-frente.jpg
+ *   doc-1754650000000-a1b2c3d4-ine  + frente.jpg
+ *   → tenant-a/cli-1/doc-1754650000000-a1b2c3d4-ine-frente.jpg   (la misma)
+ *
+ * Con el hex de longitud fija anclado por `$`, ningún id válido puede ser
+ * prefijo de otro seguido de `-`: tras el último guión hay exactamente 8
+ * dígitos hex y fin, y `\d+` no admite ni letras ni guiones. La ruta vuelve a
+ * ser inyectiva, que es lo que el resto del diseño da por supuesto.
+ */
+export const DOCUMENT_ID_PATTERN = /^doc-\d+-[0-9a-f]{8}$/;
+
+/** ¿Lo emitió `prepareDocumentUpload`? Es el único emisor legítimo. */
+export const isEmittedDocumentId = (value: string): boolean =>
+  DOCUMENT_ID_PATTERN.test(value);
+
 /** Legacy rows without stamp belong to tenant-default. */
 export const matchesTenant = (
   recordTenantId: string | undefined,

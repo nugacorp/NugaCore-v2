@@ -104,13 +104,14 @@ export class DocumentUploadError extends Error {
 export const isCompressibleImage = (mimeType: string): boolean =>
   mimeType === 'image/jpeg' || mimeType === 'image/png' || mimeType === 'image/webp';
 
+export type FileCheck = { ok: true } | { ok: false; code: UploadFailureCode; message: string };
+
 /**
- * Valida ANTES de pedir la URL firmada: una firma gastada en un archivo que el
- * bucket va a rechazar es una firma tirada.
+ * Lo que se sabe SIN mirar el tamaño, y por tanto puede decidirse antes de
+ * comprimir: el formato y que el archivo no venga vacío. Comprimir un tipo que
+ * el bucket no acepta es trabajo tirado, y firmarlo, una firma tirada.
  */
-export const validateDocumentFile = (
-  file: UploadableFile,
-): { ok: true } | { ok: false; code: UploadFailureCode; message: string } => {
+export const validateDocumentType = (file: UploadableFile): FileCheck => {
   if (!ALLOWED_DOCUMENT_MIME_TYPES.includes(file.type as (typeof ALLOWED_DOCUMENT_MIME_TYPES)[number])) {
     return {
       ok: false,
@@ -121,14 +122,34 @@ export const validateDocumentFile = (
   if (file.size <= 0) {
     return { ok: false, code: 'EMPTY_FILE', message: 'El archivo está vacío.' };
   }
+  return { ok: true };
+};
+
+/**
+ * El tamaño se juzga DESPUÉS de comprimir, sobre lo que de verdad se va a
+ * subir.
+ *
+ * Antes corría delante, y eso rechazaba con "supera el máximo de 10 MB" un
+ * JPEG de 12 MB que el canvas habría dejado en 300 KB — un móvil de 48 MP en
+ * HDR, o sea el equipo del técnico en campo, sin ninguna salida ofrecida. El
+ * argumento de "no gastar una firma" no aplicaba: la firma no se pide hasta
+ * después de comprimir.
+ */
+export const validateDocumentSize = (file: UploadableFile): FileCheck => {
   if (file.size > MAX_DOCUMENT_BYTES) {
     return {
       ok: false,
       code: 'FILE_TOO_LARGE',
-      message: `El archivo supera el máximo de ${Math.floor(MAX_DOCUMENT_BYTES / (1024 * 1024))} MB.`,
+      message: `El archivo supera el máximo de ${Math.floor(MAX_DOCUMENT_BYTES / (1024 * 1024))} MB, incluso comprimido.`,
     };
   }
   return { ok: true };
+};
+
+/** Ambas comprobaciones. Es lo que se aplica al archivo ya listo para subir. */
+export const validateDocumentFile = (file: UploadableFile): FileCheck => {
+  const type = validateDocumentType(file);
+  return type.ok ? validateDocumentSize(file) : type;
 };
 
 /**
@@ -174,7 +195,9 @@ export interface UploadedDocument {
 interface SignedUploadResponse {
   documentId: string;
   uploadUrl: string;
-  storagePath: string;
+  // `storagePath` también viene en la respuesta y NO se declara a propósito: el
+  // cliente no debe usar la ruta para nada. La deriva el backend en los dos
+  // pasos; tenerla a mano aquí sólo invitaría a volver a mandarla.
 }
 
 /**
@@ -202,12 +225,15 @@ export async function uploadClientDocument(params: {
     );
   }
 
-  const firstCheck = validateDocumentFile(params.file);
-  if (!firstCheck.ok) throw new DocumentUploadError(firstCheck.code, firstCheck.message);
+  // Sólo el formato: el tamaño todavía no significa nada, porque comprimir es
+  // precisamente lo que puede meterlo dentro del límite.
+  const typeCheck = validateDocumentType(params.file);
+  if (!typeCheck.ok) throw new DocumentUploadError(typeCheck.code, typeCheck.message);
 
   const file = await compressIfImage(params.file, encodeImage);
 
-  // Comprimir puede cambiar tipo y tamaño (PNG → JPEG), así que se revalida.
+  // Ahora sí, sobre lo que de verdad se va a subir. Se revalida también el tipo
+  // porque comprimir lo cambia (PNG → JPEG).
   const finalCheck = validateDocumentFile(file);
   if (!finalCheck.ok) throw new DocumentUploadError(finalCheck.code, finalCheck.message);
 
@@ -290,6 +316,18 @@ export interface ExpedienteDocument {
 
 /** Una fila sin objeto no se oculta: se marca. Esconderla taparía el rastro. */
 export const hasStoredFile = (doc: ExpedienteDocument): boolean => Boolean(doc.storagePath);
+
+/**
+ * El mismo criterio que la guardia del backend, y por el mismo motivo: el PDF
+ * de un contrato es la única prueba de lo que se firmó, así que se anula, nunca
+ * se borra. `DELETE` responde 409 CONTRACT_DOCUMENT_IMMUTABLE, y ofrecer un
+ * botón que siempre falla es peor que no ofrecerlo.
+ *
+ * La fila fantasma —`contract` SIN archivo— sí se borra: es justo la basura que
+ * este trabajo viene a limpiar. El matiz es el mismo a los dos lados.
+ */
+export const isDeletableDocument = (doc: ExpedienteDocument): boolean =>
+  !(doc.docType === 'contract' && hasStoredFile(doc));
 
 /** Conteos por tipo para el sidebar del CRM, que no ve el estado del panel. */
 export const countDocumentsByType = (documents: ExpedienteDocument[]): Record<string, number> => {

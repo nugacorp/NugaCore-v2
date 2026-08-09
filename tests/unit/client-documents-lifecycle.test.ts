@@ -63,13 +63,13 @@ beforeEach(() => {
 
 describe('deleteDocument — barreras de tenant', () => {
   it('un documento de otro tenant no existe para éste', async () => {
-    seed({ id: 'doc-1', tenantId: 'tenant-b', storagePath: 'tenant-b/c-1/doc-1-x.pdf' });
+    seed({ id: 'doc-1754650000001-000000a1', tenantId: 'tenant-b', storagePath: 'tenant-b/c-1/doc-1754650000001-000000a1-x.pdf' });
 
-    await expect(service().deleteDocument('c-1', 'tenant-a', 'doc-1')).rejects.toMatchObject({
+    await expect(service().deleteDocument('c-1', 'tenant-a', 'doc-1754650000001-000000a1')).rejects.toMatchObject({
       statusCode: 404,
       code: 'NOT_FOUND',
     });
-    expect(docIds()).toContain('doc-1');
+    expect(docIds()).toContain('doc-1754650000001-000000a1');
     expect(storage.removeDocumentObject).not.toHaveBeenCalled();
   });
 
@@ -81,24 +81,24 @@ describe('deleteDocument — barreras de tenant', () => {
   });
 
   it('no relaja assertClientOwned: sin cliente propio no llega a mirar el documento', async () => {
-    seed({ id: 'doc-1', clientId: 'c-ajeno', storagePath: 'tenant-a/c-ajeno/doc-1-x.pdf' });
+    seed({ id: 'doc-1754650000001-000000a1', clientId: 'c-ajeno', storagePath: 'tenant-a/c-ajeno/doc-1754650000001-000000a1-x.pdf' });
 
     // Servicio intacto: el cliente no existe en este tenant.
     await expect(
-      new Client360Service().deleteDocument('c-ajeno', 'tenant-a', 'doc-1'),
+      new Client360Service().deleteDocument('c-ajeno', 'tenant-a', 'doc-1754650000001-000000a1'),
     ).rejects.toMatchObject({ statusCode: 404 });
-    expect(docIds()).toContain('doc-1');
+    expect(docIds()).toContain('doc-1754650000001-000000a1');
     expect(storage.removeDocumentObject).not.toHaveBeenCalled();
   });
 
   it('una fila legacy que apunta fuera del tenant se borra, pero el objeto no se toca', async () => {
     // Sólo es alcanzable para filas escritas cuando el backend aceptaba la ruta
     // del cliente. Borrar la fila limpia; borrar el objeto sería cruzar tenants.
-    seed({ id: 'doc-1', storagePath: 'tenant-b/c-9/doc-1-robado.pdf' });
+    seed({ id: 'doc-1754650000001-000000a1', storagePath: 'tenant-b/c-9/doc-1754650000001-000000a1-robado.pdf' });
 
-    const res = await service().deleteDocument('c-1', 'tenant-a', 'doc-1');
+    const res = await service().deleteDocument('c-1', 'tenant-a', 'doc-1754650000001-000000a1');
 
-    expect(docIds()).not.toContain('doc-1');
+    expect(docIds()).not.toContain('doc-1754650000001-000000a1');
     expect(res.objectRetainedReason).toBe('foreign_tenant_path');
     expect(storage.removeDocumentObject).not.toHaveBeenCalled();
   });
@@ -107,17 +107,17 @@ describe('deleteDocument — barreras de tenant', () => {
 describe('deleteDocument — el contrato con archivo es inmutable', () => {
   it('409 si doc_type=contract y hay storage_path', async () => {
     seed({
-      id: 'doc-contrato',
+      id: 'doc-1754650000020-000c0000',
       docType: 'contract',
       fileName: 'contrato.pdf',
-      storagePath: 'tenant-a/c-1/doc-contrato-contrato.pdf',
+      storagePath: 'tenant-a/c-1/doc-1754650000020-000c0000-contrato.pdf',
     });
 
-    await expect(service().deleteDocument('c-1', 'tenant-a', 'doc-contrato')).rejects.toMatchObject({
+    await expect(service().deleteDocument('c-1', 'tenant-a', 'doc-1754650000020-000c0000')).rejects.toMatchObject({
       statusCode: 409,
       code: 'CONTRACT_DOCUMENT_IMMUTABLE',
     });
-    expect(docIds()).toContain('doc-contrato');
+    expect(docIds()).toContain('doc-1754650000020-000c0000');
     expect(storage.removeDocumentObject).not.toHaveBeenCalled();
   });
 
@@ -151,11 +151,11 @@ describe('deleteDocument — el objeto compartido sobrevive', () => {
   });
 
   it('cuenta las filas de cualquier cliente, no sólo las del propio', async () => {
-    const shared = 'tenant-a/c-1/doc-1-ine.pdf';
-    seed({ id: 'doc-1', storagePath: shared });
+    const shared = 'tenant-a/c-1/doc-1754650000001-000000a1-ine.pdf';
+    seed({ id: 'doc-1754650000001-000000a1', storagePath: shared });
     seed({ id: 'doc-vecino', clientId: 'c-2', storagePath: shared });
 
-    const res = await service().deleteDocument('c-1', 'tenant-a', 'doc-1');
+    const res = await service().deleteDocument('c-1', 'tenant-a', 'doc-1754650000001-000000a1');
 
     expect(res.objectRetainedReason).toBe('shared_by_other_documents');
     expect(storage.removeDocumentObject).not.toHaveBeenCalled();
@@ -164,32 +164,32 @@ describe('deleteDocument — el objeto compartido sobrevive', () => {
 
 describe('deleteDocument — camino normal', () => {
   it('borra la fila y pide el borrado del objeto con su ruta exacta', async () => {
-    const path = buildDocumentPath('tenant-a', 'c-1', 'doc-1', 'ine.pdf');
-    seed({ id: 'doc-1', docType: 'ine', fileName: 'ine.pdf', storagePath: path });
+    const path = buildDocumentPath('tenant-a', 'c-1', 'doc-1754650000001-000000a1', 'ine.pdf');
+    seed({ id: 'doc-1754650000001-000000a1', docType: 'ine', fileName: 'ine.pdf', storagePath: path });
 
-    const res = await service().deleteDocument('c-1', 'tenant-a', 'doc-1');
+    const res = await service().deleteDocument('c-1', 'tenant-a', 'doc-1754650000001-000000a1');
 
-    expect(docIds()).not.toContain('doc-1');
+    expect(docIds()).not.toContain('doc-1754650000001-000000a1');
     expect(storage.removeDocumentObject).toHaveBeenCalledWith(path);
     expect(res.objectRemoved).toBe(true);
     expect(res.objectRetainedReason).toBeNull();
   });
 
   it('la baja queda en el timeline', async () => {
-    seed({ id: 'doc-1', fileName: 'ine.pdf', storagePath: 'tenant-a/c-1/doc-1-ine.pdf' });
+    seed({ id: 'doc-1754650000001-000000a1', fileName: 'ine.pdf', storagePath: 'tenant-a/c-1/doc-1754650000001-000000a1-ine.pdf' });
 
-    await service().deleteDocument('c-1', 'tenant-a', 'doc-1');
+    await service().deleteDocument('c-1', 'tenant-a', 'doc-1754650000001-000000a1');
 
     expect(client360Memory.activity.some((a) => a.action === 'document_removed')).toBe(true);
   });
 
   it('sin Storage configurado borra la fila y no finge haber borrado el objeto', async () => {
     storage.isStorageConfigured.mockReturnValue(false);
-    seed({ id: 'doc-1', storagePath: 'tenant-a/c-1/doc-1-x.pdf' });
+    seed({ id: 'doc-1754650000001-000000a1', storagePath: 'tenant-a/c-1/doc-1754650000001-000000a1-x.pdf' });
 
-    const res = await service().deleteDocument('c-1', 'tenant-a', 'doc-1');
+    const res = await service().deleteDocument('c-1', 'tenant-a', 'doc-1754650000001-000000a1');
 
-    expect(docIds()).not.toContain('doc-1');
+    expect(docIds()).not.toContain('doc-1754650000001-000000a1');
     expect(res.objectRetainedReason).toBe('storage_unavailable');
     expect(storage.removeDocumentObject).not.toHaveBeenCalled();
   });
@@ -211,7 +211,7 @@ describe('cleanupOrphanDocumentObject — no acepta rutas, las recalcula', () =>
       service().cleanupOrphanDocumentObject('c-1', 'tenant-a', { fileName: 'x.pdf' }),
     ).rejects.toMatchObject({ code: 'MISSING_FIELD' });
     await expect(
-      service().cleanupOrphanDocumentObject('c-1', 'tenant-a', { documentId: 'doc-1' }),
+      service().cleanupOrphanDocumentObject('c-1', 'tenant-a', { documentId: 'doc-1754650000001-000000a1' }),
     ).rejects.toMatchObject({ code: 'MISSING_FIELD' });
     expect(storage.removeDocumentObject).not.toHaveBeenCalled();
   });
@@ -219,7 +219,7 @@ describe('cleanupOrphanDocumentObject — no acepta rutas, las recalcula', () =>
   it('no relaja assertClientOwned: un cliente de otro tenant no llega al bucket', async () => {
     await expect(
       new Client360Service().cleanupOrphanDocumentObject('c-ajeno', 'tenant-a', {
-        documentId: 'doc-1',
+        documentId: 'doc-1754650000001-000000a1',
         fileName: 'x.pdf',
       }),
     ).rejects.toMatchObject({ statusCode: 404 });
@@ -230,7 +230,7 @@ describe('cleanupOrphanDocumentObject — no acepta rutas, las recalcula', () =>
     // El cuerpo no puede desviarla: tenantId y clientId salen de la petición ya
     // autorizada, no del body.
     await service().cleanupOrphanDocumentObject('c-1', 'tenant-a', {
-      documentId: 'doc-1',
+      documentId: 'doc-1754650000001-000000a1',
       fileName: '../../tenant-b/robo.pdf',
     });
 
@@ -245,11 +245,11 @@ describe('cleanupOrphanDocumentObject — sólo huérfanos de verdad', () => {
   it('rechaza si existe una fila con ese documentId', async () => {
     // Sin esta guardia, orphan-cleanup sería un borrado de documentos encubierto
     // que además saltaría la guardia de contratos del DELETE.
-    seed({ id: 'doc-1', storagePath: buildDocumentPath('tenant-a', 'c-1', 'doc-1', 'ine.pdf') });
+    seed({ id: 'doc-1754650000001-000000a1', storagePath: buildDocumentPath('tenant-a', 'c-1', 'doc-1754650000001-000000a1', 'ine.pdf') });
 
     await expect(
       service().cleanupOrphanDocumentObject('c-1', 'tenant-a', {
-        documentId: 'doc-1',
+        documentId: 'doc-1754650000001-000000a1',
         fileName: 'ine.pdf',
       }),
     ).rejects.toMatchObject({ statusCode: 409, code: 'DOCUMENT_NOT_ORPHAN' });
@@ -257,11 +257,11 @@ describe('cleanupOrphanDocumentObject — sólo huérfanos de verdad', () => {
   });
 
   it('rechaza si otra fila referencia la ruta derivada, aunque su id sea otro', async () => {
-    seed({ id: 'doc-otro', storagePath: buildDocumentPath('tenant-a', 'c-1', 'doc-1', 'ine.pdf') });
+    seed({ id: 'doc-otro', storagePath: buildDocumentPath('tenant-a', 'c-1', 'doc-1754650000001-000000a1', 'ine.pdf') });
 
     await expect(
       service().cleanupOrphanDocumentObject('c-1', 'tenant-a', {
-        documentId: 'doc-1',
+        documentId: 'doc-1754650000001-000000a1',
         fileName: 'ine.pdf',
       }),
     ).rejects.toMatchObject({ statusCode: 409, code: 'DOCUMENT_NOT_ORPHAN' });
@@ -270,27 +270,27 @@ describe('cleanupOrphanDocumentObject — sólo huérfanos de verdad', () => {
 
   it('no puede llegar al PDF de un contrato registrado', async () => {
     seed({
-      id: 'doc-contrato',
+      id: 'doc-1754650000020-000c0000',
       docType: 'contract',
       fileName: 'contrato.pdf',
-      storagePath: buildDocumentPath('tenant-a', 'c-1', 'doc-contrato', 'contrato.pdf'),
+      storagePath: buildDocumentPath('tenant-a', 'c-1', 'doc-1754650000020-000c0000', 'contrato.pdf'),
     });
 
     await expect(
       service().cleanupOrphanDocumentObject('c-1', 'tenant-a', {
-        documentId: 'doc-contrato',
+        documentId: 'doc-1754650000020-000c0000',
         fileName: 'contrato.pdf',
       }),
     ).rejects.toMatchObject({ statusCode: 409, code: 'DOCUMENT_NOT_ORPHAN' });
-    expect(docIds()).toContain('doc-contrato');
+    expect(docIds()).toContain('doc-1754650000020-000c0000');
     expect(storage.removeDocumentObject).not.toHaveBeenCalled();
   });
 
   it('un huérfano real sí se limpia, con la ruta derivada', async () => {
-    const path = buildDocumentPath('tenant-a', 'c-1', 'doc-huerfano', 'ine.pdf');
+    const path = buildDocumentPath('tenant-a', 'c-1', 'doc-1754650000030-000f0000', 'ine.pdf');
 
     const res = await service().cleanupOrphanDocumentObject('c-1', 'tenant-a', {
-      documentId: 'doc-huerfano',
+      documentId: 'doc-1754650000030-000f0000',
       fileName: 'ine.pdf',
     });
 
@@ -304,7 +304,7 @@ describe('cleanupOrphanDocumentObject — sólo huérfanos de verdad', () => {
 
     await expect(
       service().cleanupOrphanDocumentObject('c-1', 'tenant-a', {
-        documentId: 'doc-1',
+        documentId: 'doc-1754650000001-000000a1',
         fileName: 'x.pdf',
       }),
     ).rejects.toMatchObject({ statusCode: 400, code: 'STORAGE_UNAVAILABLE' });

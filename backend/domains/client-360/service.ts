@@ -16,6 +16,7 @@ import {
   client360Memory,
   uid,
   stamp,
+  isEmittedDocumentId,
   matchesTenant,
   type ActivityLogEntry,
   type AlternateContact,
@@ -158,7 +159,11 @@ export class Client360Service {
     // y generarlo aquí produciría una fila apuntando a una ruta vacía.
     const documentId = String(body.documentId || '').trim();
     if (!documentId) throw new BadRequestError('Missing documentId', 'MISSING_FIELD');
-    if (!/^[\w-]{1,64}$/.test(documentId)) {
+    // La forma exacta que emite `prepareDocumentUpload`, no un `[\w-]{1,64}`
+    // cualquiera: con `-` legal dentro del id, un id podía absorber el prefijo
+    // del nombre y hacer que dos documentos compartieran ruta. Ver
+    // DOCUMENT_ID_PATTERN.
+    if (!isEmittedDocumentId(documentId)) {
       throw new BadRequestError('Invalid documentId', 'INVALID_FIELD');
     }
 
@@ -388,7 +393,9 @@ export class Client360Service {
 
     const documentId = String(body.documentId || '').trim();
     if (!documentId) throw new BadRequestError('Missing documentId', 'MISSING_FIELD');
-    if (!/^[\w-]{1,64}$/.test(documentId)) {
+    // Mismo anclaje que `addDocument`: sin él, un id con `-` extra deriva la
+    // ruta de OTRO documento y este endpoint pasa a poder señalarla.
+    if (!isEmittedDocumentId(documentId)) {
       throw new BadRequestError('Invalid documentId', 'INVALID_FIELD');
     }
     const fileName = String(body.fileName || '').trim();

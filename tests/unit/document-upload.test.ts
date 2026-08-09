@@ -9,8 +9,11 @@ import {
   describeDeletion,
   hasStoredFile,
   isCompressibleImage,
+  isDeletableDocument,
   uploadClientDocument,
   validateDocumentFile,
+  validateDocumentSize,
+  validateDocumentType,
   type DocumentTransport,
   type UploadableFile,
 } from '../../src/lib/documentUpload';
@@ -76,9 +79,47 @@ describe('validación del archivo — antes de gastar una firma', () => {
     expect(res).toMatchObject({ ok: false, code: 'INVALID_MIME_TYPE' });
   });
 
-  it('rechaza lo que el bucket rechazaría por tamaño', () => {
-    const res = validateDocumentFile(file({ size: MAX_DOCUMENT_BYTES + 1 }));
-    expect(res).toMatchObject({ ok: false, code: 'FILE_TOO_LARGE' });
+  it('el tamaño NO se juzga antes de comprimir', () => {
+    // Este test afirmaba lo contrario y consagraba un defecto: una foto de
+    // 12 MB —móvil de 48 MP en HDR, o sea el equipo del técnico en campo— moría
+    // con "supera el máximo" sin pasar por el canvas que la deja en 300 KB.
+    const enorme = file({ size: MAX_DOCUMENT_BYTES + 1 });
+    expect(validateDocumentType(enorme)).toEqual({ ok: true });
+    expect(validateDocumentSize(enorme)).toMatchObject({ ok: false, code: 'FILE_TOO_LARGE' });
+  });
+
+  it('una foto de 12 MB que comprime a 300 KB SÍ se sube', async () => {
+    const { transport, post } = transportSpy();
+    const encode = vi.fn(async () => file({ size: 300 * 1024 }));
+
+    await uploadClientDocument({
+      clientId: 'c-1',
+      docType: 'ine',
+      file: file({ size: 12 * 1024 * 1024 }),
+      transport,
+      putObject: vi.fn(),
+      encodeImage: encode,
+    });
+
+    expect(encode).toHaveBeenCalled();
+    expect(urlsPosted(post)).toContain('/api/clients/c-1/documents');
+  });
+
+  it('lo que sigue pasándose de grande DESPUÉS de comprimir sí se rechaza', async () => {
+    const { transport, post } = transportSpy();
+    // Un PDF no se comprime, así que el límite del bucket se aplica igual.
+    await expect(
+      uploadClientDocument({
+        clientId: 'c-1',
+        docType: 'other',
+        file: file({ name: 'plano.pdf', type: 'application/pdf', size: 12 * 1024 * 1024 }),
+        transport,
+        putObject: vi.fn(),
+      }),
+    ).rejects.toMatchObject({ code: 'FILE_TOO_LARGE' });
+
+    // Y sigue sin gastarse una firma en algo que el bucket rechazaría.
+    expect(post).not.toHaveBeenCalled();
   });
 
   it('rechaza un archivo vacío', () => {
@@ -330,6 +371,29 @@ describe('lectura del expediente', () => {
 
   it('el conteo con archivo excluye las filas fantasma', () => {
     expect(countDocumentsWithFile(docs)).toBe(3);
+  });
+});
+
+describe('isDeletableDocument — el mismo criterio que la guardia del backend', () => {
+  const doc = (over: Partial<{ docType: string; storagePath: string }> = {}) => ({
+    id: 'd', docType: 'other', fileName: 'x.pdf', createdAt: '2026-08-01', ...over,
+  });
+
+  it('el PDF de un contrato NO ofrece borrado: el backend responde 409', () => {
+    // Ofrecer un botón que siempre falla es peor que no ofrecerlo.
+    expect(isDeletableDocument(doc({ docType: 'contract', storagePath: 't/c/d-contrato.pdf' }))).toBe(false);
+  });
+
+  it('la fila fantasma —contract SIN archivo— sí', () => {
+    // Es la basura que este trabajo viene a limpiar: el matiz es el mismo que
+    // aplica el DELETE del backend.
+    expect(isDeletableDocument(doc({ docType: 'contract' }))).toBe(true);
+  });
+
+  it('cualquier otro tipo con archivo, también', () => {
+    for (const docType of ['ine', 'receipt', 'installation_photo', 'other']) {
+      expect(isDeletableDocument(doc({ docType, storagePath: 't/c/d-x.jpg' })), docType).toBe(true);
+    }
   });
 });
 

@@ -28,14 +28,35 @@ import { canvasImageEncoder } from '../lib/imageCompression';
 //     son `fetch` y el canvas.
 // ====================================================================
 
+/**
+ * Cuánto se espera al bucket antes de rendirse. Sin esto, en 4G rural el PUT se
+ * queda colgado y el control dice "Subiendo…" indefinidamente: el técnico no
+ * tiene forma de salir salvo recargar la página, y no sabe si subió o no.
+ */
+const PUT_TIMEOUT_MS = 60_000;
+
 /** El PUT va DIRECTO al bucket, no a nuestra API: ni auth ni backoff aplican. */
 const defaultPutObject: ObjectPutter = async (uploadUrl, file) => {
-  const res = await fetch(uploadUrl, {
-    method: 'PUT',
-    body: file as unknown as Blob,
-    headers: { 'Content-Type': file.type },
-  });
-  if (!res.ok) throw new Error(`El almacenamiento rechazó el archivo (${res.status}).`);
+  const controller = new AbortController();
+  const timer = setTimeout(() => controller.abort(), PUT_TIMEOUT_MS);
+  try {
+    const res = await fetch(uploadUrl, {
+      method: 'PUT',
+      body: file as unknown as Blob,
+      headers: { 'Content-Type': file.type },
+      signal: controller.signal,
+    });
+    if (!res.ok) throw new Error(`El almacenamiento rechazó el archivo (${res.status}).`);
+  } catch (err) {
+    if (err instanceof Error && err.name === 'AbortError') {
+      throw new Error('La subida tardó demasiado. Comprueba tu señal e inténtalo de nuevo.', {
+        cause: err,
+      });
+    }
+    throw err;
+  } finally {
+    clearTimeout(timer);
+  }
 };
 
 /** `navigator.onLine` con sus dos eventos. Sin conexión no se encola nada. */
