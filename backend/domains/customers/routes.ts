@@ -289,6 +289,7 @@ router.post('/api/clients', requireRoles(['super admin', 'administrador', 'tecni
       provisioningService.validateAction(action.id, req.authContext?.userId || 'system');
       provisioningService.simulateAction(action.id, req.authContext?.userId || 'system');
       store.MIKROTIK_LOGS.push({
+        tenantId,
         timestamp: new Date().toISOString().replace('T', ' ').substring(0, 19),
         message: `provisioning,info CREATE_CUSTOMER queued for ${newClient.pppoeUser || newClient.id} on ${newClient.routerId} plan=${planExists.name}`,
       });

@@ -44,7 +44,8 @@ describe('RBAC visual por rol (frontend)', () => {
   });
 
   it('Solo lectura: lectura básica + noc + inventory-routers; sin mikrotik/support/owner', () => {
-    expect(getAllowedTabsByRole('Solo lectura')).toEqual(['dashboard', 'noc', 'crm', 'commercial', 'billing', 'suspension', 'network', 'inventory-routers', 'gis', 'reports', 'portal', 'manual-safe-mode', 'safe-command-queue', 'routeros-readonly', 'inventory-sync', 'provisioning', 'user-manual']);
+    expect(getAllowedTabsByRole('Solo lectura')).toEqual(['dashboard', 'noc', 'crm', 'commercial', 'suspension', 'network', 'inventory-routers', 'gis', 'reports', 'portal', 'manual-safe-mode', 'safe-command-queue', 'routeros-readonly', 'inventory-sync', 'provisioning', 'user-manual']);
+    expect(canAccessTab('Solo lectura', 'billing')).toBe(false);
     expect(canAccessTab('Solo lectura', 'mikrotik')).toBe(false);
     expect(canAccessTab('Solo lectura', 'owner')).toBe(false);
     expect(canAccessTab('Solo lectura', 'support')).toBe(false);

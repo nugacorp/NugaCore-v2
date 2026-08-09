@@ -46,7 +46,7 @@ const roleTabs: Record<UserRole, AppTab[]> = {
   'Cobranza':     ['dashboard', 'crm', 'commercial', 'billing', 'finance', 'suspension', 'payments', 'reports', 'portal', 'portal-admin', 'provisioning', 'user-manual'],
   'Técnico':      ['dashboard', 'noc', 'crm', 'suspension', 'network', 'olt', 'mikrotik', 'routeros-resources', 'routeros-templates', 'router-enrollment', 'support', 'tech-pwa', 'inventory', 'inventory-routers', 'gis', 'portal', 'manual-safe-mode', 'safe-command-queue', 'routeros-readonly', 'inventory-sync', 'provisioning', 'user-manual'],
   'Soporte':      ['dashboard', 'noc', 'crm', 'commercial', 'support', 'tech-pwa', 'inventory-routers', 'gis', 'portal', 'manual-safe-mode', 'safe-command-queue', 'routeros-readonly', 'inventory-sync', 'provisioning', 'user-manual'],
-  'Solo lectura': ['dashboard', 'noc', 'crm', 'commercial', 'billing', 'suspension', 'network', 'inventory-routers', 'gis', 'reports', 'portal', 'manual-safe-mode', 'safe-command-queue', 'routeros-readonly', 'inventory-sync', 'provisioning', 'user-manual'],
+  'Solo lectura': ['dashboard', 'noc', 'crm', 'commercial', 'suspension', 'network', 'inventory-routers', 'gis', 'reports', 'portal', 'manual-safe-mode', 'safe-command-queue', 'routeros-readonly', 'inventory-sync', 'provisioning', 'user-manual'],
 };
 
 // ====================================================================

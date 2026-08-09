@@ -219,6 +219,7 @@ router.post('/api/network-towers/:id/toggle-state', requireRoles(['super admin',
       store.createAlert('tower', 'critical', tower.name, `ATENCION: La torre ${tower.name} ha dejado de reportar pings (Enlace caido).`);
 
       store.MIKROTIK_LOGS.push({
+        tenantId: tenantIdFromRequest(req),
         timestamp: new Date().toISOString().replace('T', ' ').substring(0, 19),
         message: `system,error OSPF Link failure to ${tower.ip} - peer unreachable`,
       });

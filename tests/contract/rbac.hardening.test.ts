@@ -1,7 +1,8 @@
-import { describe, it, expect, beforeAll } from 'vitest';
+import { describe, it, expect, beforeAll, afterEach } from 'vitest';
 import request from 'supertest';
 import type { Express } from 'express';
 import { createApp } from '../../backend/app';
+import { store } from '../../backend/state/store';
 
 // ====================================================================
 // Hardening P0 RBAC (2026-07-15) — cierra las fugas de lectura por rol
@@ -33,6 +34,7 @@ const FINANCE_READS = [
 
 const MIKROTIK_VIEWS = [
   '/api/mikrotik/routers',
+  '/api/mikrotik/logs',
 ];
 
 describe('RBAC hardening — lectura de finanzas (solo roles de dinero)', () => {
@@ -56,6 +58,52 @@ describe('RBAC hardening — lectura de finanzas (solo roles de dinero)', () => 
       });
     }
   }
+});
+
+describe('RBAC hardening - aislamiento tenant de observabilidad MikroTik', () => {
+  let app: Express;
+  const originalLogs = [...store.MIKROTIK_LOGS];
+  const originalAudit = [...store.MIKROTIK_COMMAND_AUDIT];
+
+  beforeAll(() => { app = createApp(); });
+  afterEach(() => {
+    store.MIKROTIK_LOGS.splice(0, store.MIKROTIK_LOGS.length, ...originalLogs);
+    store.MIKROTIK_COMMAND_AUDIT.splice(0, store.MIKROTIK_COMMAND_AUDIT.length, ...originalAudit);
+  });
+
+  it('GET /api/mikrotik/logs devuelve solo el tenant activo', async () => {
+    store.MIKROTIK_LOGS.splice(0, store.MIKROTIK_LOGS.length,
+      { tenantId: 'tenant-default', timestamp: '2026-08-09 10:00:00', message: 'log-a' },
+      { tenantId: 'tenant-b', timestamp: '2026-08-09 10:00:01', message: 'log-b' },
+    );
+
+    const res = await request(app)
+      .get('/api/mikrotik/logs')
+      .set(hdr('administrador'));
+
+    expect(res.status).toBe(200);
+    expect(res.body.map((row: { message: string }) => row.message)).toEqual(['log-a']);
+  });
+
+  it('GET /api/mikrotik/command-audit devuelve solo el tenant activo', async () => {
+    store.MIKROTIK_COMMAND_AUDIT.splice(0, store.MIKROTIK_COMMAND_AUDIT.length,
+      {
+        id: 'audit-a', tenantId: 'tenant-default', command: '/system resource print', mode: 'read',
+        status: 'executed', message: 'audit-a', createdAt: '2026-08-09 10:00:00',
+      },
+      {
+        id: 'audit-b', tenantId: 'tenant-b', command: '/system resource print', mode: 'read',
+        status: 'executed', message: 'audit-b', createdAt: '2026-08-09 10:00:01',
+      },
+    );
+
+    const res = await request(app)
+      .get('/api/mikrotik/command-audit')
+      .set(hdr('administrador'));
+
+    expect(res.status).toBe(200);
+    expect(res.body.map((row: { message: string }) => row.message)).toEqual(['audit-a']);
+  });
 });
 
 describe('RBAC hardening — vista MikroTik (solo operación de red)', () => {

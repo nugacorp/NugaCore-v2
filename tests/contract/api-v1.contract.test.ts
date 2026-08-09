@@ -101,7 +101,7 @@ describe('API v1 — contrato de lectura (núcleo que usa el frontend)', () => {
     expect(alerts.status).toBe(200);
     expectKeys(alerts.body[0], ['id', 'source', 'severity', 'message']);
 
-    const logs = await request(app).get('/api/mikrotik/logs');
+    const logs = await request(app).get('/api/mikrotik/logs').set(ADMIN);
     expect(logs.status).toBe(200);
     expectKeys(logs.body[0], ['timestamp', 'message']);
   });

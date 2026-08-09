@@ -2,7 +2,7 @@ import { Router } from 'express';
 import { getGemini } from '../../../backend/services/gemini';
 import { encryptSecret } from '../../../backend/services/crypto';
 import { store, MikrotikRouterRegistryItem } from '../../../backend/state/store';
-import { READ_ROLES, requireRoles } from '../../common/rbac';
+import { NETWORK_VIEW_ROLES, requireRoles } from '../../common/rbac';
 import { generateApiCredential, generateApiUsername, generateProvisioningToken } from './provisioning/credentials';
 import { generateProvisioningScript } from './provisioning/script-generator';
 import { provisioningStore, toProvisionedView } from './provisioning/store';
@@ -139,6 +139,7 @@ const resolveRouterFromPayload = (routerId: string | undefined, tenantId: string
 };
 
 const logMikrotikAudit = (params: {
+  tenantId: string;
   routerId?: string;
   routerName?: string;
   command: string;
@@ -478,24 +479,27 @@ router.get('/api/mikrotik/routers/:id/read/ppp', requireRoles(['super admin', 'a
 });
 
 router.get('/api/mikrotik/command-audit', requireRoles(['super admin', 'administrador', 'tecnico']), (req, res) => {
+  const tenantId = tenantIdFromRequest(req);
   const routerId = String(req.query.routerId || '').trim();
-  const rows = routerId
-    ? store.MIKROTIK_COMMAND_AUDIT.filter((row) => row.routerId === routerId)
-    : store.MIKROTIK_COMMAND_AUDIT;
+  const rows = store.MIKROTIK_COMMAND_AUDIT.filter(
+    (row) => row.tenantId === tenantId && (!routerId || row.routerId === routerId),
+  );
   res.json(rows);
 });
 
-router.get('/api/mikrotik/logs', requireRoles(READ_ROLES), (_req, res) => {
-  res.json(store.MIKROTIK_LOGS);
+router.get('/api/mikrotik/logs', requireRoles(NETWORK_VIEW_ROLES), (req, res) => {
+  const tenantId = tenantIdFromRequest(req);
+  res.json(store.MIKROTIK_LOGS.filter((row) => row.tenantId === tenantId));
 });
 
 router.post('/api/mikrotik/command', requireRoles(['super admin', 'administrador', 'tecnico', 'soporte']), (req, res) => {
   const { command, routerId, confirmWrite } = req.body;
   if (!command) return res.status(400).json({ error: 'No query command' });
+  const tenantId = tenantIdFromRequest(req);
 
   const routerItem = resolveRouterFromPayload(
     routerId ? String(routerId) : undefined,
-    tenantIdFromRequest(req),
+    tenantId,
   );
   if (!routerItem) {
     return res.status(404).json({ error: 'Router not found' });
@@ -505,6 +509,7 @@ router.post('/api/mikrotik/command', requireRoles(['super admin', 'administrador
   const actorId = req.authContext?.userId;
   if (mode === 'write' && confirmWrite !== true) {
     logMikrotikAudit({
+      tenantId,
       routerId: routerItem.id,
       routerName: routerItem.name,
       command: String(command),
@@ -518,6 +523,7 @@ router.post('/api/mikrotik/command', requireRoles(['super admin', 'administrador
 
   if (mode === 'write' && /reboot|reset\s+configuration|system\s+reset/i.test(String(command))) {
     logMikrotikAudit({
+      tenantId,
       routerId: routerItem.id,
       routerName: routerItem.name,
       command: String(command),
@@ -530,6 +536,7 @@ router.post('/api/mikrotik/command', requireRoles(['super admin', 'administrador
   }
 
   logMikrotikAudit({
+    tenantId,
     routerId: routerItem.id,
     routerName: routerItem.name,
     command: String(command),
@@ -542,11 +549,13 @@ router.post('/api/mikrotik/command', requireRoles(['super admin', 'administrador
   const output = getSimulatedCommandOutput(String(command), routerItem.id);
 
   store.MIKROTIK_LOGS.push({
+    tenantId,
     timestamp: new Date().toISOString().replace('T', ' ').substring(0, 19),
     message: `user,info [${routerItem.name}] Command (${mode}): "${String(command)}"`,
   });
 
   logMikrotikAudit({
+    tenantId,
     routerId: routerItem.id,
     routerName: routerItem.name,
     command: String(command),

@@ -57,6 +57,7 @@ const suspendClient = (clientId: string, reason: string, source: 'manual' | 'aut
 
   client.status = 'suspended';
   store.MIKROTIK_LOGS.push({
+    tenantId: tenantId || 'tenant-default',
     timestamp: new Date().toISOString().replace('T', ' ').substring(0, 19),
     message: `script,info Core Router Suspended PPPoE: ${client.pppoeUser || client.id} block address list active`,
   });
@@ -87,6 +88,7 @@ const reactivateClient = (clientId: string, reason: string, source: 'manual' | '
 
   client.status = 'active';
   store.MIKROTIK_LOGS.push({
+    tenantId: tenantId || 'tenant-default',
     timestamp: new Date().toISOString().replace('T', ' ').substring(0, 19),
     message: `script,info Core Router Reactivated PPPoE: ${client.pppoeUser || client.id} unblocked address list`,
   });

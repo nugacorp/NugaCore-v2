@@ -168,6 +168,7 @@ router.post(
         if (client && client.status === 'suspended' && store.SUSPENSION_POLICY.allowAutoReactivateOnPayment) {
           client.status = 'active';
           store.MIKROTIK_LOGS.push({
+            tenantId,
             timestamp: new Date().toISOString().replace('T', ' ').substring(0, 19),
             message: `script,info Automations Flow: billing payment success of ${invoice.id} triggers reactivate customer state for ${client.pppoeUser}`,
           });
