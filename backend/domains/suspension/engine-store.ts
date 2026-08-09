@@ -13,6 +13,7 @@ import {
   SuspensionEvent,
   SuspensionEventType,
   SuspensionOrder,
+  OrderClaimInput,
   SuspensionPolicyV2,
 } from './types';
 
@@ -195,6 +196,39 @@ export const engineStore = {
     if (!order) return null;
     Object.assign(order, patch);
     return order;
+  },
+
+  /** Compare-and-set síncrono: en Store ningún owner puede intercalarse. */
+  claimOrder(orderId: string, claim: OrderClaimInput): SuspensionOrder | null {
+    const order = this.ORDERS.find((o) => o.id === orderId);
+    if (!order) return null;
+    const leaseExpired = Boolean(order.claimedAt && order.claimedAt <= claim.reclaimBefore);
+    const safeQueuedRecovery = order.status === 'QUEUED'
+      && leaseExpired
+      && (!order.effectStartedAt || Boolean(order.effectConfirmedAt));
+    const claimable = order.status === 'PENDING'
+      || (order.status === 'FAILED' && !order.effectStartedAt)
+      || safeQueuedRecovery;
+    if (!claimable) return null;
+    Object.assign(order, {
+      status: 'QUEUED' as const,
+      workerRunId: claim.workerRunId,
+      claimedAt: claim.claimedAt,
+      executedAt: undefined,
+      workerNote: `Claim adquirido por ${claim.workerRunId}.`,
+    });
+    return { ...order };
+  },
+
+  updateClaimedOrder(
+    orderId: string,
+    workerRunId: string,
+    patch: Partial<SuspensionOrder>,
+  ): SuspensionOrder | null {
+    const order = this.ORDERS.find((o) => o.id === orderId);
+    if (!order || order.status !== 'QUEUED' || order.workerRunId !== workerRunId) return null;
+    Object.assign(order, patch);
+    return { ...order };
   },
 
   /** Elimina TODO el estado del motor para un cliente (cleanup test-tools). */

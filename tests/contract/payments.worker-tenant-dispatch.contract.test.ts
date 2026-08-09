@@ -145,6 +145,109 @@ describe('MT-04-F2 — contratos de dispatch Payments', () => {
 });
 
 describe('MT-04-F2 — Payments → dispatcher → worker tenant-scoped', () => {
+  it('dos workers concurrentes producen un solo claim y una sola ejecución', async () => {
+    process.env.MIKROTIK_WORKER_COMMIT = 'true';
+    process.env.MIKROTIK_WORKER_LIVE = 'true';
+    const order = unsafePaymentOrder({
+      customerId: CUSTOMER_A,
+      tenantId: TENANT_A,
+      routerId: ROUTER_A,
+      idempotencyKey: 'f4:concurrent-claim',
+    });
+    const scope = { orderId: order.id, tenantId: TENANT_A, routerId: ROUTER_A };
+
+    const runs = await Promise.all([
+      processPendingOrders('worker-a', scope),
+      processPendingOrders('worker-b', scope),
+    ]);
+
+    expect(runs.map((run) => run.processed).sort()).toEqual([0, 1]);
+    expect(executePlannedCommandsMock).toHaveBeenCalledTimes(1);
+    expect(engineStore.ORDERS.find((candidate) => candidate.id === order.id)?.status).toBe('EXECUTED');
+  });
+
+  it('un resultado RouterOS incierto queda QUEUED y no se reejecuta a ciegas', async () => {
+    process.env.MIKROTIK_WORKER_COMMIT = 'true';
+    process.env.MIKROTIK_WORKER_LIVE = 'true';
+    executePlannedCommandsMock.mockResolvedValueOnce({
+      ok: false,
+      executed: 1,
+      errors: ['timeout después del primer comando'],
+    });
+    const order = unsafePaymentOrder({
+      customerId: CUSTOMER_A,
+      tenantId: TENANT_A,
+      routerId: ROUTER_A,
+      idempotencyKey: 'f4:uncertain-effect',
+    });
+    const scope = { orderId: order.id, tenantId: TENANT_A, routerId: ROUTER_A };
+
+    const first = await processPendingOrders('worker-a', scope);
+    const retry = await processPendingOrders('worker-b', scope);
+    const durable = engineStore.ORDERS.find((candidate) => candidate.id === order.id);
+
+    expect(first.results[0]?.outcome).toBe('failed');
+    expect(retry.processed).toBe(0);
+    expect(executePlannedCommandsMock).toHaveBeenCalledTimes(1);
+    expect(durable).toMatchObject({
+      status: 'QUEUED',
+      workerRunId: first.id,
+    });
+    expect(durable?.effectStartedAt).toBeTruthy();
+    expect(durable?.effectConfirmedAt).toBeUndefined();
+  });
+
+  it('un lease vencido con efecto confirmado reanuda sólo el post-efecto', async () => {
+    process.env.MIKROTIK_WORKER_COMMIT = 'true';
+    process.env.MIKROTIK_WORKER_LIVE = 'true';
+    const order = unsafePaymentOrder({
+      customerId: CUSTOMER_A,
+      tenantId: TENANT_A,
+      routerId: ROUTER_A,
+      idempotencyKey: 'f4:confirmed-recovery',
+    });
+    engineStore.updateOrder(order.id, {
+      status: 'QUEUED',
+      workerRunId: 'worker-dead',
+      claimedAt: '2026-08-09T00:00:00.000Z',
+      effectStartedAt: '2026-08-09T00:01:00.000Z',
+      effectConfirmedAt: '2026-08-09T00:02:00.000Z',
+    });
+
+    const run = await processPendingOrders('worker-recovery', {
+      orderId: order.id, tenantId: TENANT_A, routerId: ROUTER_A,
+    });
+
+    expect(run.results[0]?.outcome).toBe('executed');
+    expect(executePlannedCommandsMock).not.toHaveBeenCalled();
+    expect(store.CLIENTS.find((client) => client.id === CUSTOMER_A)?.status).toBe('active');
+    expect(engineStore.ORDERS.find((candidate) => candidate.id === order.id)?.status).toBe('EXECUTED');
+  });
+
+  it('FAILED antes del efecto puede reclamarse y completar en un retry explícito', async () => {
+    process.env.MIKROTIK_WORKER_COMMIT = 'true';
+    process.env.MIKROTIK_WORKER_LIVE = 'true';
+    const order = unsafePaymentOrder({
+      customerId: CUSTOMER_A,
+      tenantId: TENANT_A,
+      routerId: ROUTER_A,
+      idempotencyKey: 'f4:failed-retry',
+    });
+    store.CLIENTS = store.CLIENTS.filter((client) => client.id !== CUSTOMER_A);
+    const scope = { orderId: order.id, tenantId: TENANT_A, routerId: ROUTER_A };
+
+    const first = await processPendingOrders('worker-a', scope);
+    seedCustomersAndRouters();
+    const retry = await processPendingOrders('worker-b', scope);
+
+    expect(first.results[0]?.outcome).toBe('failed');
+    expect(retry.results[0]?.outcome).toBe('executed');
+    expect(executePlannedCommandsMock).toHaveBeenCalledTimes(1);
+    expect(engineStore.ORDERS.find((candidate) => candidate.id === order.id)).toMatchObject({
+      status: 'EXECUTED', workerRunId: retry.id,
+    });
+  });
+
   it('dry-run conserva router-a aunque el cliente A apunte obsoletamente a router-b', async () => {
     const pendingB = unsafePaymentOrder({
       customerId: CUSTOMER_B,

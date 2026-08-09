@@ -116,6 +116,12 @@ export interface SuspensionOrder {
   dryRun?: boolean;
   workerRunId?: string;
   workerNote?: string;
+  /** Lease durable del worker que ganó el claim. */
+  claimedAt?: string;
+  /** Se persiste inmediatamente antes de cruzar el límite RouterOS. */
+  effectStartedAt?: string;
+  /** Confirma que RouterOS respondió OK; permite reanudar sólo el post-efecto. */
+  effectConfirmedAt?: string;
 }
 
 /** Parche que el Worker aplica a una orden tras procesarla (dry-run). */
@@ -125,6 +131,16 @@ export interface OrderUpdate {
   dryRun?: boolean;
   workerRunId?: string;
   workerNote?: string;
+  claimedAt?: string;
+  effectStartedAt?: string;
+  effectConfirmedAt?: string;
+}
+
+export interface OrderClaimInput {
+  workerRunId: string;
+  claimedAt: string;
+  /** Un QUEUED sólo es abandonado si su lease es anterior o igual a este instante. */
+  reclaimBefore: string;
 }
 
 // ── Resultado de evaluación ────────────────────────────────────────────

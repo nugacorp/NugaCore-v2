@@ -73,11 +73,23 @@ export async function processNetworkOrder(
     if (!order.tenantId?.trim() || !order.routerId?.trim()) {
       throw new Error('processNetworkOrder: orden durable sin tenantId/routerId.');
     }
-    await processPendingOrders(actor ?? order.source, {
+    const run = await processPendingOrders(actor ?? order.source, {
       tenantId: order.tenantId,
       orderId: order.id,
       routerId: order.routerId,
     });
+    const result = run.results.find((candidate) => candidate.orderId === order.id);
+    if (result && result.outcome !== 'executed') {
+      throw new Error(`processNetworkOrder: orden '${order.id}' no completada (${result.outcome}).`);
+    }
+    if (!result) {
+      const [latest] = await getSuspensionService().repo.listOrders({ orderId: order.id });
+      if (latest?.status !== 'EXECUTED') {
+        throw new Error(
+          `processNetworkOrder: orden '${order.id}' sin claim disponible; retry requerido.`,
+        );
+      }
+    }
   }
   return order;
 }

@@ -20,6 +20,8 @@ import { buildReactivateCommands, buildSuspendCommands } from '../access-control
 import type { SuspensionOrder } from '../../suspension/types';
 import type { SuspensionRepository } from '../../suspension/repository';
 
+const ORDER_CLAIM_LEASE_MS = 5 * 60 * 1000;
+
 const planFor = (
   orderType: 'suspension' | 'reactivation',
   pppoeUser: string,
@@ -71,18 +73,18 @@ export async function processPendingOrders(
     if (order.tenantId !== tenantId || order.routerId !== routerId) {
       throw new Error(`Orden '${orderId}' rechazada: scope de orden no coincide con el dispatch.`);
     }
-    pending = order.status === 'PENDING' ? [order] : [];
+    pending = ['PENDING', 'FAILED', 'QUEUED'].includes(order.status) ? [order] : [];
   } else {
     pending = await repo.listOrders({ status: 'PENDING' });
   }
   const results: OrderProcessResult[] = [];
 
   const failBeforePlanning = async (
-    repository: SuspensionRepository,
     order: SuspensionOrder,
     note: string,
+    persist: (patch: Parameters<SuspensionRepository['updateOrder']>[1]) => Promise<SuspensionOrder>,
   ): Promise<OrderProcessResult> => {
-    await repository.updateOrder(order, {
+    await persist({
       status: 'FAILED', executedAt: nowIso(), dryRun: !commitEnabled, workerRunId: runId, workerNote: note,
     });
     return {
@@ -93,13 +95,38 @@ export async function processPendingOrders(
 
   for (const order of pending) {
     const requiresTenantScope = order.source === 'payment-engine' || scope !== undefined;
+    const requiresDurableClaim = order.orderType === 'reactivation' && order.source === 'payment-engine';
+    let claimedOrder: SuspensionOrder | null = null;
+    if (requiresDurableClaim) {
+      const claimedAt = nowIso();
+      claimedOrder = await repo.claimOrder(order, {
+        workerRunId: runId,
+        claimedAt,
+        reclaimBefore: new Date(Date.parse(claimedAt) - ORDER_CLAIM_LEASE_MS).toISOString(),
+      });
+      // Otro owner conserva el lease, el efecto es incierto o la orden ya acabó.
+      // Ninguno de esos casos autoriza volver a cruzar RouterOS.
+      if (!claimedOrder) continue;
+    }
+    const persist = async (
+      patch: Parameters<SuspensionRepository['updateOrder']>[1],
+    ): Promise<SuspensionOrder> => {
+      if (!requiresDurableClaim) return repo.updateOrder(order, patch);
+      const updated = await repo.updateClaimedOrder(claimedOrder!, runId, patch);
+      if (!updated) throw new Error(`Worker perdió el claim durable de la orden '${order.id}'.`);
+      claimedOrder = updated;
+      // Conserva observabilidad por referencia en Store/tests sin confiar en ella
+      // como mecanismo de exclusión; el CAS del repositorio es la autoridad.
+      Object.assign(order, updated);
+      return updated;
+    };
     const tenantId = order.tenantId?.trim();
     const routerId = order.routerId?.trim();
     if (requiresTenantScope && (!tenantId || !routerId)) {
       results.push(await failBeforePlanning(
-        repo,
         order,
         `Orden ${order.id} rechazada: tenantId/routerId obligatorios para ${order.source}.`,
+        persist,
       ));
       continue;
     }
@@ -107,9 +134,9 @@ export async function processPendingOrders(
     const client = await customers.getById(order.customerId, effectiveTenantId);
     if (!client) {
       results.push(await failBeforePlanning(
-        repo,
         order,
         `Orden ${order.id} rechazada: cliente no pertenece al tenant de la orden.`,
+        persist,
       ));
       continue;
     }
@@ -118,9 +145,9 @@ export async function processPendingOrders(
       : resolveRouterForCustomer(effectiveTenantId, client.routerId);
     if (requiresTenantScope && (!router || (!router.encryptedPassword && !router.hasCredentials))) {
       results.push(await failBeforePlanning(
-        repo,
         order,
         `Orden ${order.id} rechazada: router no pertenece al tenant o no tiene credenciales.`,
+        persist,
       ));
       continue;
     }
@@ -130,7 +157,7 @@ export async function processPendingOrders(
 
     if (!commitEnabled) {
       const note = `DRY-RUN: ${order.orderType} simulada para ${order.customerId}. No se ejecutó ninguna acción en el router.`;
-      await repo.updateOrder(order, {
+      await persist({
         status: 'EXECUTED',
         executedAt: nowIso(),
         dryRun: true,
@@ -152,7 +179,7 @@ export async function processPendingOrders(
 
     if (!router) {
       const note = `COMMIT falló: sin router registrado para ${order.customerId}.`;
-      await repo.updateOrder(order, {
+      await persist({
         status: 'FAILED',
         executedAt: nowIso(),
         dryRun: false,
@@ -171,12 +198,33 @@ export async function processPendingOrders(
       continue;
     }
 
-    const exec = await executePlannedCommands(router, plannedCommands);
+    // Si otro owner ya confirmó RouterOS y cayó durante el post-efecto, este
+    // claim sólo reanuda customer/status. Nunca envía los comandos otra vez.
+    let exec = claimedOrder?.effectConfirmedAt
+      ? { ok: true, executed: 0, errors: [] as string[] }
+      : null;
+    if (!exec) {
+      if (requiresDurableClaim) {
+        await persist({ effectStartedAt: nowIso() });
+      }
+      try {
+        exec = await executePlannedCommands(router, plannedCommands);
+      } catch (error) {
+        const note = `COMMIT incierto: RouterOS lanzó ${error instanceof Error ? error.message : String(error)}. Requiere conciliación; no se reintentará automáticamente.`;
+        if (requiresDurableClaim) {
+          await persist({ dryRun: false, workerNote: note });
+        }
+        throw error;
+      }
+    }
     if (exec.ok) {
+      if (requiresDurableClaim && !claimedOrder?.effectConfirmedAt) {
+        await persist({ effectConfirmedAt: nowIso() });
+      }
       const nextStatus = order.orderType === 'suspension' ? 'suspended' : 'active';
       await customers.update(order.customerId, { status: nextStatus }, effectiveTenantId);
       const note = `COMMIT OK: ${order.orderType} ejecutada en router ${router.name} (${exec.executed} comandos).`;
-      await repo.updateOrder(order, {
+      await persist({
         status: 'EXECUTED',
         executedAt: nowIso(),
         dryRun: false,
@@ -194,8 +242,13 @@ export async function processPendingOrders(
         note,
       });
     } else {
-      const note = `COMMIT falló: ${exec.errors.join('; ')}`;
-      await repo.updateOrder(order, {
+      const note = requiresDurableClaim
+        ? `COMMIT incierto: ${exec.errors.join('; ')}. Requiere conciliación; no se reintentará automáticamente.`
+        : `COMMIT falló: ${exec.errors.join('; ')}`;
+      await persist(requiresDurableClaim ? {
+        dryRun: false,
+        workerNote: note,
+      } : {
         status: 'FAILED',
         executedAt: nowIso(),
         dryRun: false,
