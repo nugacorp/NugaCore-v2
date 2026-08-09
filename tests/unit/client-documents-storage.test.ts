@@ -112,7 +112,10 @@ describe('buildDocumentPath es INYECTIVA — dos documentos nunca comparten ruta
     // Si alguien simplifica `uid`, este test cae y avisa de que la ruta deja de
     // ser única antes de que lo descubra un cliente.
     for (let i = 0; i < 200; i += 1) {
-      expect(isEmittedDocumentId(uid('doc')), uid('doc')).toBe(true);
+      // El id se genera UNA vez: pasar `uid('doc')` también como mensaje daría
+      // un id distinto del que falló y mandaría a depurar el equivocado.
+      const id = uid('doc');
+      expect(isEmittedDocumentId(id), id).toBe(true);
     }
   });
 
@@ -160,7 +163,8 @@ describe('buildDocumentPath es INYECTIVA — dos documentos nunca comparten ruta
     ).rejects.toMatchObject({ statusCode: 400, code: 'INVALID_FIELD' });
   });
 
-  it('el documento legítimo sigue pasando por los dos caminos', async () => {
+  it('el documento legítimo se registra con su ruta de siempre', async () => {
+    // El anclaje cierra el alias sin estrechar lo que sí debe pasar.
     const doc = await serviceWithOwnedClient().addDocument('c-1', 'tenant-a', {
       fileName: 'ine-frente.jpg',
       documentId: LEGITIMO,
