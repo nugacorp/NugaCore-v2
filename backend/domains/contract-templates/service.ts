@@ -58,6 +58,46 @@ const VARIABLE_CATALOG: readonly ContractVariableDefinition[] = [
   { token: '{{fecha.contrato}}', label: 'Fecha del contrato', description: 'Fecha local en que se genera el contrato.', example: '9 de agosto de 2026' },
 ];
 
+const ALLOWED_PLACEHOLDERS = new Set(VARIABLE_CATALOG.map((variable) => variable.token));
+
+const assertValidPlaceholders = (text: string, clauseIndex: number): void => {
+  for (let cursor = 0; cursor < text.length;) {
+    const char = text[cursor];
+    if (char === '}') {
+      throw new BadRequestError(
+        `clauses[${clauseIndex}].cuerpo contiene llaves desbalanceadas`,
+        'INVALID_CONTRACT_PLACEHOLDER',
+      );
+    }
+    if (char !== '{') {
+      cursor += 1;
+      continue;
+    }
+    if (text[cursor + 1] !== '{') {
+      throw new BadRequestError(
+        `clauses[${clauseIndex}].cuerpo contiene una llave malformada`,
+        'INVALID_CONTRACT_PLACEHOLDER',
+      );
+    }
+    const close = text.indexOf('}}', cursor + 2);
+    if (close < 0) {
+      throw new BadRequestError(
+        `clauses[${clauseIndex}].cuerpo contiene un placeholder sin cerrar`,
+        'INVALID_CONTRACT_PLACEHOLDER',
+      );
+    }
+    const inner = text.slice(cursor + 2, close);
+    const token = text.slice(cursor, close + 2);
+    if (!inner || inner.includes('{') || inner.includes('}') || !ALLOWED_PLACEHOLDERS.has(token)) {
+      throw new BadRequestError(
+        `clauses[${clauseIndex}].cuerpo contiene un placeholder no permitido`,
+        'INVALID_CONTRACT_PLACEHOLDER',
+      );
+    }
+    cursor = close + 2;
+  }
+};
+
 const cloneClauses = (clauses: readonly ContractClause[]): ContractClause[] =>
   clauses.map((clause) => ({ ...clause }));
 
@@ -185,9 +225,15 @@ const parseClause = (value: unknown, index: number): ContractClause => {
     throw new BadRequestError(`clauses[${index}] debe ser un objeto`, 'INVALID_CONTRACT_CLAUSE');
   }
   const row = value as Record<string, unknown>;
-  const id = String(row.id ?? '').trim();
-  const titulo = String(row.titulo ?? '').trim();
-  const cuerpo = String(row.cuerpo ?? '').trim();
+  if (typeof row.id !== 'string' || typeof row.titulo !== 'string' || typeof row.cuerpo !== 'string') {
+    throw new BadRequestError(
+      `clauses[${index}] requiere id, titulo y cuerpo como strings`,
+      'INVALID_CONTRACT_CLAUSE',
+    );
+  }
+  const id = row.id.trim();
+  const titulo = row.titulo.trim();
+  const cuerpo = row.cuerpo.trim();
   const activa = row.activa;
   if (!/^[a-z0-9][a-z0-9_-]{0,63}$/i.test(id) || !titulo || !cuerpo || typeof activa !== 'boolean') {
     throw new BadRequestError(
@@ -198,6 +244,7 @@ const parseClause = (value: unknown, index: number): ContractClause => {
   if (titulo.length > 160 || cuerpo.length > 10_000) {
     throw new BadRequestError(`clauses[${index}] excede el tamaño permitido`, 'INVALID_CONTRACT_CLAUSE');
   }
+  assertValidPlaceholders(cuerpo, index);
   return { id, titulo, cuerpo, activa };
 };
 
@@ -206,8 +253,8 @@ const parseSaveInput = (input: unknown): Omit<SaveContractTemplateCommand, 'tena
     throw new BadRequestError('El cuerpo debe ser un objeto', 'INVALID_CONTRACT_TEMPLATE');
   }
   const body = input as Record<string, unknown>;
-  const expectedVersion = Number(body.expectedVersion);
-  if (!Number.isSafeInteger(expectedVersion) || expectedVersion < 0) {
+  const expectedVersion = body.expectedVersion;
+  if (typeof expectedVersion !== 'number' || !Number.isSafeInteger(expectedVersion) || expectedVersion < 0) {
     throw new BadRequestError('expectedVersion debe ser un entero no negativo', 'INVALID_TEMPLATE_VERSION');
   }
   if (!Array.isArray(body.clauses) || body.clauses.length === 0 || body.clauses.length > 100) {

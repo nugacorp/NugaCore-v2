@@ -72,4 +72,21 @@ describe('Contract templates API', () => {
     expect(current.body.version).toBe(2);
     expect(current.body.clauses[0]).toEqual({ id: 'servicio', titulo: 'Servicio', cuerpo: 'v2', activa: true });
   });
+
+  it.each([
+    ['token desconocido', body(0, 'Cobrar {{secreto.inventado}}')],
+    ['llaves incompletas', body(0, 'Cliente {{cliente.nombre}')],
+    ['tipos coaccionables', {
+      expectedVersion: '0',
+      showInPortal: 'true',
+      clauses: [{ id: 7, titulo: 123, cuerpo: true, activa: 1 }],
+    }],
+  ])('rechaza %s sin persistir', async (_name, payload) => {
+    const adminHeaders = headers('administrador');
+    const rejected = await request(app).put('/api/contract-template').set(adminHeaders).send(payload);
+    const current = await request(app).get('/api/contract-template').set(adminHeaders);
+
+    expect(rejected.status).toBe(400);
+    expect(current.body).toMatchObject({ configured: false, version: 0 });
+  });
 });

@@ -109,4 +109,49 @@ describe('ContractTemplateService', () => {
       expect.objectContaining({ token: '{{precio}}' }),
     ]));
   });
+
+  it.each([
+    ['expectedVersion string', { expectedVersion: '0', showInPortal: false, clauses: [{ id: 'x', titulo: 'T', cuerpo: 'C', activa: true }] }],
+    ['showInPortal string', { expectedVersion: 0, showInPortal: 'false', clauses: [{ id: 'x', titulo: 'T', cuerpo: 'C', activa: true }] }],
+    ['id number', { expectedVersion: 0, showInPortal: false, clauses: [{ id: 7, titulo: 'T', cuerpo: 'C', activa: true }] }],
+    ['titulo number', { expectedVersion: 0, showInPortal: false, clauses: [{ id: 'x', titulo: 123, cuerpo: 'C', activa: true }] }],
+    ['cuerpo boolean', { expectedVersion: 0, showInPortal: false, clauses: [{ id: 'x', titulo: 'T', cuerpo: true, activa: true }] }],
+    ['activa number', { expectedVersion: 0, showInPortal: false, clauses: [{ id: 'x', titulo: 'T', cuerpo: 'C', activa: 1 }] }],
+  ])('rechaza primitivas coaccionables: %s', async (_name, input) => {
+    await expect(service.saveTemplate('tenant-strict', input)).rejects.toMatchObject({ statusCode: 400 });
+    expect(await repository.get('tenant-strict')).toBeNull();
+  });
+
+  it.each([
+    ['desconocido', 'Cobrar {{secreto.inventado}}'],
+    ['vacío', 'Cliente {{}}'],
+    ['vacío con espacios', 'Cliente {{   }}'],
+    ['anidado', 'Cliente {{cliente.{{nombre}}}}'],
+    ['apertura incompleta', 'Cliente {{cliente.nombre}'],
+    ['cierre sin apertura', 'Cliente cliente.nombre}}'],
+    ['llave simple', 'Cliente {cliente.nombre}'],
+    ['tres llaves', 'Cliente {{{cliente.nombre}}}'],
+  ])('rechaza placeholder %s', async (_name, cuerpo) => {
+    await expect(service.saveTemplate('tenant-placeholders', {
+      expectedVersion: 0,
+      showInPortal: false,
+      clauses: [{ id: 'x', titulo: 'T', cuerpo, activa: true }],
+    })).rejects.toMatchObject({ statusCode: 400, code: 'INVALID_CONTRACT_PLACEHOLDER' });
+    expect(await repository.get('tenant-placeholders')).toBeNull();
+  });
+
+  it('acepta varios placeholders conocidos en el mismo cuerpo', async () => {
+    const saved = await service.saveTemplate('tenant-known-placeholders', {
+      expectedVersion: 0,
+      showInPortal: false,
+      clauses: [{
+        id: 'x',
+        titulo: 'T',
+        cuerpo: '{{cliente.nombre}} contrata {{plan.velocidad}} por {{precio}}.',
+        activa: true,
+      }],
+    });
+
+    expect(saved.version).toBe(1);
+  });
 });
