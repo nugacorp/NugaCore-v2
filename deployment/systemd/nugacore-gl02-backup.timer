@@ -1,0 +1,11 @@
+[Unit]
+Description=Daily NugaCore GL-02 backup timer
+
+[Timer]
+OnCalendar=*-*-* 03:15:00 UTC
+RandomizedDelaySec=15m
+Persistent=true
+Unit=nugacore-gl02-backup.service
+
+[Install]
+WantedBy=timers.target
