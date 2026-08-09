@@ -81,6 +81,22 @@ const CASES = {
     fixture: 'tests/db/portal-config-postgres17.sql',
     fixtureLabel: 'fixture: la config sobrevive al reinicio',
   },
+  'reactivation-clean': {
+    label: 'Saga de reactivación · clean, ACL, claim y rollback',
+    db: 'reactclean',
+    migrations: ['supabase/migrations/20260809130000_reactivation_order_saga.sql'],
+    bootstrap: 'tests/db/reactivation-saga-postgres17-bootstrap.sql',
+    fixture: 'tests/db/reactivation-saga-postgres17.sql',
+    fixtureLabel: 'fixture: ACL mínima, carrera, retry y rollback',
+  },
+  'reactivation-upgrade': {
+    label: 'Saga de reactivación · upgrade, ACL, claim y rollback',
+    db: 'reactupgrade',
+    migrations: ['supabase/migrations/20260809130000_reactivation_order_saga.sql'],
+    bootstrap: 'tests/db/reactivation-saga-upgrade-postgres17-bootstrap.sql',
+    fixture: 'tests/db/reactivation-saga-postgres17.sql',
+    fixtureLabel: 'fixture: ACL mínima, carrera, retry y rollback',
+  },
   'schema-replay': {
     label: 'El esquema se reconstruye desde cero',
     db: 'replay',

@@ -36,6 +36,21 @@ BEGIN
     END IF;
   END LOOP;
 
+  FOR column_record IN
+    SELECT a.attname, format_type(a.atttypid, a.atttypmod) AS data_type,
+           a.attidentity, a.attgenerated
+    FROM pg_attribute a
+    WHERE a.attrelid = 'public.reactivation_orders'::regclass
+      AND a.attname IN ('claimed_at', 'effect_started_at', 'effect_confirmed_at')
+      AND a.attnum > 0 AND NOT a.attisdropped
+  LOOP
+    IF column_record.data_type <> 'timestamp with time zone'
+       OR column_record.attidentity <> ''
+       OR column_record.attgenerated <> '' THEN
+      RAISE EXCEPTION 'MT-04-F4 preflight: columna % incompatible', column_record.attname;
+    END IF;
+  END LOOP;
+
   SELECT pg_get_indexdef(c.oid) INTO index_definition
   FROM pg_class c
   JOIN pg_namespace n ON n.oid = c.relnamespace
@@ -149,6 +164,12 @@ ALTER TABLE public.reactivation_orders
   ADD COLUMN IF NOT EXISTS router_id TEXT;
 ALTER TABLE public.reactivation_orders
   ADD COLUMN IF NOT EXISTS idempotency_key TEXT;
+ALTER TABLE public.reactivation_orders
+  ADD COLUMN IF NOT EXISTS claimed_at TIMESTAMPTZ;
+ALTER TABLE public.reactivation_orders
+  ADD COLUMN IF NOT EXISTS effect_started_at TIMESTAMPTZ;
+ALTER TABLE public.reactivation_orders
+  ADD COLUMN IF NOT EXISTS effect_confirmed_at TIMESTAMPTZ;
 
 -- El default histórico podía adjudicar órdenes nuevas a tenant-default sin evidencia.
 ALTER TABLE public.reactivation_orders ALTER COLUMN tenant_id DROP DEFAULT;
@@ -230,6 +251,12 @@ $indexes$;
 
 -- FK compuesta customer/tenant diferida a MT-05: clients aún no expone UNIQUE (tenant_id, id).
 
+-- El worker usa SECURITY INVOKER a través de PostgREST. BYPASSRLS no sustituye
+-- los privilegios de tabla: necesita leer, crear y transicionar la orden, pero
+-- jamás borrarla ni alterar su definición.
+REVOKE ALL ON TABLE public.reactivation_orders FROM service_role;
+GRANT SELECT, INSERT, UPDATE ON TABLE public.reactivation_orders TO service_role;
+
 DO $postcondition$
 BEGIN
   IF (SELECT count(*) FROM information_schema.columns
@@ -237,6 +264,12 @@ BEGIN
         AND column_name IN ('tenant_id', 'router_id', 'idempotency_key')
         AND data_type = 'text') <> 3 THEN
     RAISE EXCEPTION 'MT-04-F3 postcondición fallida: columnas de scope';
+  END IF;
+  IF (SELECT count(*) FROM information_schema.columns
+      WHERE table_schema = 'public' AND table_name = 'reactivation_orders'
+        AND column_name IN ('claimed_at', 'effect_started_at', 'effect_confirmed_at')
+        AND data_type = 'timestamp with time zone') <> 3 THEN
+    RAISE EXCEPTION 'MT-04-F4 postcondición fallida: columnas de claim';
   END IF;
   IF to_regclass('public.uq_reactivation_orders_tenant_idempotency') IS NULL
      OR to_regclass('public.idx_reactivation_orders_tenant_status') IS NULL THEN
@@ -262,6 +295,15 @@ BEGIN
       AND pg_get_constraintdef(oid) ILIKE '%FOREIGN KEY (tenant_id) REFERENCES tenants(id)%'
   ) THEN
     RAISE EXCEPTION 'MT-04-F3 postcondición fallida: constraints';
+  END IF;
+  IF NOT has_table_privilege('service_role', 'public.reactivation_orders', 'SELECT')
+     OR NOT has_table_privilege('service_role', 'public.reactivation_orders', 'INSERT')
+     OR NOT has_table_privilege('service_role', 'public.reactivation_orders', 'UPDATE')
+     OR has_table_privilege('service_role', 'public.reactivation_orders', 'DELETE')
+     OR has_table_privilege('service_role', 'public.reactivation_orders', 'TRUNCATE')
+     OR has_table_privilege('service_role', 'public.reactivation_orders', 'REFERENCES')
+     OR has_table_privilege('service_role', 'public.reactivation_orders', 'TRIGGER') THEN
+    RAISE EXCEPTION 'MT-04-F4 postcondición fallida: ACL service_role no es mínima';
   END IF;
 END
 $postcondition$;

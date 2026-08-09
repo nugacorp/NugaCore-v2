@@ -8,6 +8,10 @@ const files = readdirSync(migrationsDir).filter((name) =>
 );
 const migrationFile = files[0] ?? '';
 const sql = migrationFile ? readFileSync(new URL(migrationFile, migrationsDir), 'utf8') : '';
+const schemaReplayBootstrap = readFileSync(
+  new URL('../db/schema-replay-postgres17-bootstrap.sql', import.meta.url),
+  'utf8',
+);
 const databases: PGlite[] = [];
 
 const database = async (): Promise<PGlite> => {
@@ -23,6 +27,7 @@ afterEach(async () => {
 
 const baseSchema = async (db: PGlite, upgraded = false): Promise<void> => {
   await db.exec(`
+    CREATE ROLE service_role NOLOGIN BYPASSRLS;
     CREATE TABLE public.tenants (id TEXT PRIMARY KEY);
     INSERT INTO public.tenants (id) VALUES ('tenant-a'), ('tenant-b')${upgraded ? ", ('tenant-default')" : ''};
     CREATE TABLE public.clients (
@@ -76,7 +81,8 @@ const snapshot = async (db: PGlite) => ({
 describe('MT-04-F3 migration — contrato estático', () => {
   it('usa una migración aditiva nueva y no reescribe la base histórica', () => {
     expect(files).toHaveLength(1);
-    expect(Number(migrationFile.slice(0, 14))).toBeGreaterThan(20260807170000);
+    expect(migrationFile).toBe('20260809130000_reactivation_order_saga.sql');
+    expect(Number(migrationFile.slice(0, 14))).toBeGreaterThan(20260809120000);
     expect(sql).not.toMatch(/CREATE TABLE/i);
     expect(sql).toMatch(/ADD COLUMN IF NOT EXISTS tenant_id TEXT/i);
     expect(sql).toMatch(/ADD COLUMN IF NOT EXISTS router_id TEXT/i);
@@ -100,6 +106,23 @@ describe('MT-04-F3 migration — contrato estático', () => {
     expect(sql).toMatch(/CREATE UNIQUE INDEX[\s\S]*?\(tenant_id, idempotency_key\)[\s\S]*?WHERE idempotency_key IS NOT NULL/i);
     expect(sql).toMatch(/CREATE INDEX[\s\S]*?\(tenant_id, status\)/i);
     expect(sql).toMatch(/FK compuesta customer\/tenant diferida a MT-05/i);
+  });
+
+  it('concede a service_role sólo SELECT/INSERT/UPDATE y valida la capability', () => {
+    expect(sql).toMatch(/REVOKE ALL ON (?:TABLE )?public\.reactivation_orders FROM service_role/i);
+    expect(sql).toMatch(/GRANT SELECT, INSERT, UPDATE ON (?:TABLE )?public\.reactivation_orders TO service_role/i);
+    expect(sql).toMatch(/has_table_privilege\('service_role',[\s\S]*?'UPDATE'\)/i);
+    expect(sql).toMatch(/NOT has_table_privilege\('service_role',[\s\S]*?'DELETE'\)/i);
+  });
+
+  it('agrega checkpoints durables del claim sin quitar compatibilidad legacy', () => {
+    expect(sql).toMatch(/ADD COLUMN IF NOT EXISTS claimed_at TIMESTAMPTZ/i);
+    expect(sql).toMatch(/ADD COLUMN IF NOT EXISTS effect_started_at TIMESTAMPTZ/i);
+    expect(sql).toMatch(/ADD COLUMN IF NOT EXISTS effect_confirmed_at TIMESTAMPTZ/i);
+  });
+
+  it('schema-replay modela service_role BYPASSRLS sin relajar MT-03', () => {
+    expect(schemaReplayBootstrap).toMatch(/CREATE ROLE service_role NOLOGIN BYPASSRLS/i);
   });
 });
 
