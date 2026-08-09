@@ -116,7 +116,6 @@ export const engineStore = {
     orderType: SuspensionOrder['orderType'];
     source: 'engine' | 'manual' | 'payment-engine' | 'provisioning-center' | 'service-status';
     reason?: string;
-    tenantId?: string;
     idempotencyKey?: string;
   }): SuspensionOrder {
     // "Un dispatch" del contrato T5 significa UNA FILA durable por
@@ -128,6 +127,7 @@ export const engineStore = {
       );
       if (existing) {
         const equivalent = existing.customerId === input.customerId
+          && (existing.routerId ?? null) === (input.routerId ?? null)
           && (existing.invoiceId ?? null) === (input.invoiceId ?? null)
           && existing.orderType === input.orderType
           && existing.source === input.source

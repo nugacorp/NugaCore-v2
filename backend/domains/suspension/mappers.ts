@@ -141,6 +141,7 @@ export const eventToRow = (e: SuspensionEvent): Record<string, unknown> => {
 export interface OrderRow {
   id: string;
   customer_id: string;
+  router_id?: string | null;
   invoice_id: string | null;
   status: OrderStatus;
   source: 'engine' | 'manual' | 'payment-engine' | 'provisioning-center' | 'service-status';
@@ -155,6 +156,7 @@ export interface OrderRow {
 export const rowToOrder = (r: OrderRow, orderType: SuspensionOrder['orderType']): SuspensionOrder => ({
   id: r.id,
   customerId: r.customer_id,
+  routerId: r.router_id || undefined,
   invoiceId: r.invoice_id || undefined,
   orderType,
   status: r.status,
@@ -179,6 +181,7 @@ export const orderToRow = (o: SuspensionOrder): Record<string, unknown> => {
     executed_at: o.executedAt || null,
   };
   if (o.tenantId !== undefined) row.tenant_id = o.tenantId;
+  if (o.routerId !== undefined) row.router_id = o.routerId;
   if (o.idempotencyKey !== undefined) row.idempotency_key = o.idempotencyKey;
   return row;
 };

@@ -14,11 +14,14 @@ import {
   CheckpointStepInput,
   CheckpointStepOutcome,
   IdempotentActionResult,
+  MikrotikActionMutablePatch,
   MikrotikActionRecord,
   PaymentEventRecord,
+  PaymentOrderMutablePatch,
   PaymentOrderRecord,
   PaymentOrderStatus,
   PaymentProvider,
+  TenantOwned,
   WEBHOOK_REACTIVATION_PROGRESS_KEY,
   WEBHOOK_REACTIVATION_STEPS,
   WebhookReactivationProgress,
@@ -37,6 +40,42 @@ import {
 
 const matchesTenant = (recordTenantId: string | undefined, tenantId: string): boolean =>
   (recordTenantId || 'tenant-default') === tenantId;
+
+/** Runtime fail-closed belt for untyped/JavaScript callers. */
+export const requireTenantId = (tenantId: string, operation: string): string => {
+  const scoped = (tenantId ?? '').trim();
+  if (!scoped) {
+    throw new Error(`${operation}: tenantId es obligatorio; no existe variante global de este método.`);
+  }
+  return scoped;
+};
+
+export interface PaymentOrderFilter {
+  tenantId: string;
+  customerId?: string;
+  invoiceId?: string;
+  status?: PaymentOrderStatus;
+}
+
+export interface MikrotikActionFilter {
+  tenantId: string;
+  customerId?: string;
+  status?: string;
+}
+
+const mutableOrderPatch = (patch?: PaymentOrderMutablePatch): PaymentOrderMutablePatch => {
+  const safe: PaymentOrderMutablePatch = {};
+  if (patch?.providerOrderId !== undefined) safe.providerOrderId = patch.providerOrderId;
+  if (patch?.checkoutUrl !== undefined) safe.checkoutUrl = patch.checkoutUrl;
+  return safe;
+};
+
+const mutableActionPatch = (patch: MikrotikActionMutablePatch): MikrotikActionMutablePatch => {
+  const safe: MikrotikActionMutablePatch = {};
+  if (patch.status !== undefined) safe.status = patch.status;
+  if (patch.result !== undefined) safe.result = patch.result;
+  return safe;
+};
 
 // ── Claim de eventos (idempotencia bajo concurrencia) ─────────────────
 //
@@ -104,7 +143,7 @@ const actionsAreEquivalent = (a: MikrotikActionRecord, b: MikrotikActionRecord):
   && idempotencyPayloadsEquivalent(a.payload ?? {}, b.payload ?? {});
 
 const requireIdempotentAction = (rec: MikrotikActionRecord): { tenantId: string; key: string } => {
-  const tenantId = rec.tenantId || 'tenant-default';
+  const tenantId = requireTenantId(rec.tenantId as string, 'createActionIdempotent');
   if (!rec.idempotencyKey) {
     throw new Error('createActionIdempotent requiere idempotencyKey (las acciones manuales usan createAction).');
   }
@@ -146,15 +185,20 @@ const copyAction = (rec: MikrotikActionRecord): MikrotikActionRecord => ({
   result: copyJsonRecord(rec.result),
 });
 
+const locateStoreAction = (tenantId: string, idempotencyKey: string): MikrotikActionRecord | undefined =>
+  (store.MIKROTIK_ACTIONS as MikrotikActionRecord[]).find(
+    (action) => matchesTenant(action.tenantId, tenantId) && action.idempotencyKey === idempotencyKey,
+  );
+
 // ── Contrato ──────────────────────────────────────────────────────────
 
 export interface PaymentRepository {
   // Payment Orders
-  listOrders(filter?: { customerId?: string; invoiceId?: string; status?: PaymentOrderStatus; tenantId?: string }): Promise<PaymentOrderRecord[]>;
-  findOrderById(id: string, tenantId?: string): Promise<PaymentOrderRecord | null>;
-  findOrderByProviderOrderId(provider: PaymentProvider, providerOrderId: string, tenantId?: string): Promise<PaymentOrderRecord | null>;
-  createOrder(rec: PaymentOrderRecord): Promise<PaymentOrderRecord>;
-  updateOrderStatus(id: string, status: PaymentOrderStatus, patch?: Partial<PaymentOrderRecord>, tenantId?: string): Promise<PaymentOrderRecord | null>;
+  listOrders(filter: PaymentOrderFilter): Promise<PaymentOrderRecord[]>;
+  findOrderById(id: string, tenantId: string): Promise<PaymentOrderRecord | null>;
+  findOrderByProviderOrderId(provider: PaymentProvider, providerOrderId: string, tenantId: string): Promise<PaymentOrderRecord | null>;
+  createOrder(rec: TenantOwned<PaymentOrderRecord>): Promise<PaymentOrderRecord>;
+  updateOrderStatus(id: string, tenantId: string, status: PaymentOrderStatus, patch?: PaymentOrderMutablePatch): Promise<PaymentOrderRecord | null>;
 
   // Payment Events. La idempotencia es por (tenant, provider, provider_event_id):
   // dos merchants distintos pueden reutilizar el mismo id de evento sin pisarse.
@@ -165,18 +209,19 @@ export interface PaymentRepository {
    * Reserva el evento de forma atómica. Solo `outcome: 'claimed'` autoriza a
    * procesarlo; el resto de entregas simultáneas reciben el evento existente.
    */
-  claimEvent(rec: PaymentEventRecord): Promise<EventClaimResult>;
+  claimEvent(rec: TenantOwned<PaymentEventRecord>): Promise<EventClaimResult>;
   /** Renueva el lease solo si el llamador conserva el epoch del claim. */
-  renewEventClaim(id: string, claimToken: string): Promise<boolean>;
-  createEvent(rec: PaymentEventRecord): Promise<PaymentEventRecord>;
+  renewEventClaim(id: string, tenantId: string, claimToken: string): Promise<boolean>;
+  createEvent(rec: TenantOwned<PaymentEventRecord>): Promise<PaymentEventRecord>;
   /** Cierra el evento solo si el llamador conserva el epoch del claim. */
-  markEventProcessed(id: string, claimToken: string): Promise<boolean>;
+  markEventProcessed(id: string, tenantId: string, claimToken: string): Promise<boolean>;
 
   // Mikrotik Actions
-  listActions(filter?: { customerId?: string; status?: string; tenantId?: string }): Promise<MikrotikActionRecord[]>;
+  listActions(filter: MikrotikActionFilter): Promise<MikrotikActionRecord[]>;
+  findActionById(id: string, tenantId: string): Promise<MikrotikActionRecord | null>;
   /** Ruta manual/legacy: inserta sin identidad durable, como siempre. */
-  createAction(rec: MikrotikActionRecord): Promise<MikrotikActionRecord>;
-  updateAction(id: string, patch: Partial<MikrotikActionRecord>, tenantId?: string): Promise<MikrotikActionRecord | null>;
+  createAction(rec: TenantOwned<MikrotikActionRecord>): Promise<MikrotikActionRecord>;
+  updateAction(id: string, tenantId: string, patch: MikrotikActionMutablePatch): Promise<MikrotikActionRecord | null>;
   /** Lectura por identidad durable; `null` significa "no existe", no "error". */
   findActionByIdempotencyKey(tenantId: string, idempotencyKey: string): Promise<MikrotikActionRecord | null>;
   /**
@@ -184,7 +229,7 @@ export interface PaymentRepository {
    * evento reciben el MISMO `actionId`. Una clave repetida con contenido
    * distinto lanza `IdempotencyConflictError` (fail-closed).
    */
-  createActionIdempotent(rec: MikrotikActionRecord): Promise<IdempotentActionResult>;
+  createActionIdempotent(rec: TenantOwned<MikrotikActionRecord>): Promise<IdempotentActionResult>;
   /**
    * Marca un paso `ausente → true` en una sola operación atómica condicionada
    * al claim vigente. Nunca reemplaza el progreso ni permite regresiones.
@@ -200,70 +245,73 @@ export interface PaymentRepository {
 // ── Store (memoria) ───────────────────────────────────────────────────
 
 export class StorePaymentRepository implements PaymentRepository {
-  async listOrders(filter?: { customerId?: string; invoiceId?: string; status?: PaymentOrderStatus; tenantId?: string }) {
-    let orders = store.PAYMENT_ORDERS as PaymentOrderRecord[];
-    if (filter?.tenantId) orders = orders.filter((o) => matchesTenant(o.tenantId, filter.tenantId!));
-    if (filter?.customerId) orders = orders.filter((o) => o.customerId === filter.customerId);
-    if (filter?.invoiceId) orders = orders.filter((o) => o.invoiceId === filter.invoiceId);
-    if (filter?.status) orders = orders.filter((o) => o.status === filter.status);
+  async listOrders(filter: PaymentOrderFilter) {
+    const tenantId = requireTenantId(filter.tenantId, 'listOrders');
+    let orders = (store.PAYMENT_ORDERS as PaymentOrderRecord[]).filter((o) =>
+      matchesTenant(o.tenantId, tenantId));
+    if (filter.customerId) orders = orders.filter((o) => o.customerId === filter.customerId);
+    if (filter.invoiceId) orders = orders.filter((o) => o.invoiceId === filter.invoiceId);
+    if (filter.status) orders = orders.filter((o) => o.status === filter.status);
     return orders.slice().sort((a, b) => b.createdAt.localeCompare(a.createdAt));
   }
 
-  async findOrderById(id: string, tenantId?: string) {
-    const order = (store.PAYMENT_ORDERS as PaymentOrderRecord[]).find((o) => o.id === id) ?? null;
-    if (!order || !tenantId) return order;
-    return matchesTenant(order.tenantId, tenantId) ? order : null;
+  async findOrderById(id: string, tenantId: string) {
+    const scoped = requireTenantId(tenantId, 'findOrderById');
+    return (store.PAYMENT_ORDERS as PaymentOrderRecord[]).find(
+      (o) => o.id === id && matchesTenant(o.tenantId, scoped),
+    ) ?? null;
   }
 
-  async findOrderByProviderOrderId(provider: PaymentProvider, providerOrderId: string, tenantId?: string) {
+  async findOrderByProviderOrderId(provider: PaymentProvider, providerOrderId: string, tenantId: string) {
     // El tenant va DENTRO del predicado: filtrarlo después dejaría que la
     // primera coincidencia global (la de otro WISP con el mismo
     // providerOrderId) tapara la del WISP buscado y devolviera null.
+    const scoped = requireTenantId(tenantId, 'findOrderByProviderOrderId');
     return (
       (store.PAYMENT_ORDERS as PaymentOrderRecord[]).find(
         (o) =>
           o.provider === provider &&
           o.providerOrderId === providerOrderId &&
-          (!tenantId || matchesTenant(o.tenantId, tenantId)),
+          matchesTenant(o.tenantId, scoped),
       ) ?? null
     );
   }
 
-  async createOrder(rec: PaymentOrderRecord) {
-    const stamped = { ...rec, tenantId: rec.tenantId || 'tenant-default' };
+  async createOrder(rec: TenantOwned<PaymentOrderRecord>) {
+    const stamped = { ...rec, tenantId: requireTenantId(rec.tenantId, 'createOrder') };
     store.PAYMENT_ORDERS.push(stamped);
     return stamped;
   }
 
-  async updateOrderStatus(id: string, status: PaymentOrderStatus, patch?: Partial<PaymentOrderRecord>, tenantId?: string) {
-    const order = (store.PAYMENT_ORDERS as PaymentOrderRecord[]).find((o) => {
-      if (o.id !== id) return false;
-      if (tenantId && !matchesTenant(o.tenantId, tenantId)) return false;
-      return true;
-    });
+  async updateOrderStatus(id: string, tenantId: string, status: PaymentOrderStatus, patch?: PaymentOrderMutablePatch) {
+    const scoped = requireTenantId(tenantId, 'updateOrderStatus');
+    const order = (store.PAYMENT_ORDERS as PaymentOrderRecord[]).find(
+      (o) => o.id === id && matchesTenant(o.tenantId, scoped),
+    );
     if (!order) return null;
-    Object.assign(order, { status, ...patch, updatedAt: new Date().toISOString() });
+    Object.assign(order, { status, ...mutableOrderPatch(patch), updatedAt: new Date().toISOString() });
     return order;
   }
 
   async findEventByProviderId(provider: PaymentProvider, providerEventId: string, tenantId: string) {
+    const scoped = requireTenantId(tenantId, 'findEventByProviderId');
     return (
       (store.PAYMENT_EVENTS as PaymentEventRecord[]).find(
         (e) =>
           e.provider === provider &&
           e.providerEventId === providerEventId &&
-          matchesTenant(e.tenantId, tenantId),
+          matchesTenant(e.tenantId, scoped),
       ) ?? null
     );
   }
 
-  async claimEvent(rec: PaymentEventRecord): Promise<EventClaimResult> {
+  async claimEvent(rec: TenantOwned<PaymentEventRecord>): Promise<EventClaimResult> {
     // Atómico por construcción: entre la búsqueda y la escritura no hay ningún
     // `await`, así que el bucle de eventos no puede intercalar otra entrega.
     const now = Date.now();
     const nowIso = new Date(now).toISOString();
     const claimToken = crypto.randomUUID();
-    const tenantId = rec.tenantId || 'tenant-default';
+    const tenantId = requireTenantId(rec.tenantId, 'claimEvent');
     const events = store.PAYMENT_EVENTS as PaymentEventRecord[];
     const existing = events.find(
       (e) =>
@@ -285,24 +333,32 @@ export class StorePaymentRepository implements PaymentRepository {
     return { outcome: 'claimed', event: { ...stamped } };
   }
 
-  async renewEventClaim(id: string, claimToken: string): Promise<boolean> {
+  async renewEventClaim(id: string, tenantId: string, claimToken: string): Promise<boolean> {
+    const scoped = requireTenantId(tenantId, 'renewEventClaim');
     const event = (store.PAYMENT_EVENTS as PaymentEventRecord[]).find(
-      (candidate) => candidate.id === id && !candidate.processed && candidate.claimToken === claimToken,
+      (candidate) => candidate.id === id
+        && matchesTenant(candidate.tenantId, scoped)
+        && !candidate.processed
+        && candidate.claimToken === claimToken,
     );
     if (!event) return false;
     event.claimedAt = new Date().toISOString();
     return true;
   }
 
-  async createEvent(rec: PaymentEventRecord) {
-    const stamped = { ...rec, tenantId: rec.tenantId || 'tenant-default' };
+  async createEvent(rec: TenantOwned<PaymentEventRecord>) {
+    const stamped = { ...rec, tenantId: requireTenantId(rec.tenantId, 'createEvent') };
     store.PAYMENT_EVENTS.push(stamped);
     return stamped;
   }
 
-  async markEventProcessed(id: string, claimToken: string): Promise<boolean> {
+  async markEventProcessed(id: string, tenantId: string, claimToken: string): Promise<boolean> {
+    const scoped = requireTenantId(tenantId, 'markEventProcessed');
     const event = (store.PAYMENT_EVENTS as PaymentEventRecord[]).find(
-      (candidate) => candidate.id === id && !candidate.processed && candidate.claimToken === claimToken,
+      (candidate) => candidate.id === id
+        && matchesTenant(candidate.tenantId, scoped)
+        && !candidate.processed
+        && candidate.claimToken === claimToken,
     );
     if (!event) return false;
     event.processed = true;
@@ -310,11 +366,12 @@ export class StorePaymentRepository implements PaymentRepository {
     return true;
   }
 
-  async listActions(filter?: { customerId?: string; status?: string; tenantId?: string }) {
-    let actions = store.MIKROTIK_ACTIONS as MikrotikActionRecord[];
-    if (filter?.tenantId) actions = actions.filter((a) => matchesTenant(a.tenantId, filter.tenantId!));
-    if (filter?.customerId) actions = actions.filter((a) => a.customerId === filter.customerId);
-    if (filter?.status) actions = actions.filter((a) => a.status === filter.status);
+  async listActions(filter: MikrotikActionFilter) {
+    const tenantId = requireTenantId(filter.tenantId, 'listActions');
+    let actions = (store.MIKROTIK_ACTIONS as MikrotikActionRecord[]).filter((a) =>
+      matchesTenant(a.tenantId, tenantId));
+    if (filter.customerId) actions = actions.filter((a) => a.customerId === filter.customerId);
+    if (filter.status) actions = actions.filter((a) => a.status === filter.status);
     // Copias: un lector no puede ver mutaciones a medias de otro owner ni
     // escribir progreso saltándose el checkpoint condicionado.
     return actions
@@ -322,40 +379,40 @@ export class StorePaymentRepository implements PaymentRepository {
       .sort((a, b) => b.createdAt.localeCompare(a.createdAt));
   }
 
-  async createAction(rec: MikrotikActionRecord) {
-    const stamped = copyAction({ ...rec, tenantId: rec.tenantId || 'tenant-default' });
+  async findActionById(id: string, tenantId: string) {
+    const scoped = requireTenantId(tenantId, 'findActionById');
+    const found = (store.MIKROTIK_ACTIONS as MikrotikActionRecord[]).find(
+      (a) => a.id === id && matchesTenant(a.tenantId, scoped),
+    );
+    return found ? copyAction(found) : null;
+  }
+
+  async createAction(rec: TenantOwned<MikrotikActionRecord>) {
+    const stamped = copyAction({ ...rec, tenantId: requireTenantId(rec.tenantId, 'createAction') });
     store.MIKROTIK_ACTIONS.push(stamped);
     return copyAction(stamped);
   }
 
-  async updateAction(id: string, patch: Partial<MikrotikActionRecord>, tenantId?: string) {
-    const action = (store.MIKROTIK_ACTIONS as MikrotikActionRecord[]).find((a) => {
-      if (a.id !== id) return false;
-      if (tenantId && !matchesTenant(a.tenantId, tenantId)) return false;
-      return true;
-    });
+  async updateAction(id: string, tenantId: string, patch: MikrotikActionMutablePatch) {
+    const scoped = requireTenantId(tenantId, 'updateAction');
+    const action = (store.MIKROTIK_ACTIONS as MikrotikActionRecord[]).find(
+      (a) => a.id === id && matchesTenant(a.tenantId, scoped),
+    );
     if (!action) return null;
-    Object.assign(action, patch, { updatedAt: new Date().toISOString() });
+    Object.assign(action, mutableActionPatch(patch), { updatedAt: new Date().toISOString() });
     return copyAction(action);
   }
 
-  /** Resolución síncrona por (tenant, key): es el índice único del Store. */
-  private locate(tenantId: string, idempotencyKey: string): MikrotikActionRecord | undefined {
-    return (store.MIKROTIK_ACTIONS as MikrotikActionRecord[]).find(
-      (a) => matchesTenant(a.tenantId, tenantId) && a.idempotencyKey === idempotencyKey,
-    );
-  }
-
   async findActionByIdempotencyKey(tenantId: string, idempotencyKey: string) {
-    const found = this.locate(tenantId, idempotencyKey);
+    const found = locateStoreAction(requireTenantId(tenantId, 'findActionByIdempotencyKey'), idempotencyKey);
     return found ? copyAction(found) : null;
   }
 
-  async createActionIdempotent(rec: MikrotikActionRecord): Promise<IdempotentActionResult> {
+  async createActionIdempotent(rec: TenantOwned<MikrotikActionRecord>): Promise<IdempotentActionResult> {
     // Atómico por construcción: no hay `await` entre la búsqueda y el push, así
     // que el bucle de eventos no puede intercalar a otro owner.
     const { tenantId, key } = requireIdempotentAction(rec);
-    const existing = this.locate(tenantId, key);
+    const existing = locateStoreAction(tenantId, key);
     if (existing) {
       if (!actionsAreEquivalent(existing, { ...rec, tenantId })) {
         throw new IdempotencyConflictError(ACTION_IDEMPOTENCY_SCOPE, key);
@@ -369,11 +426,12 @@ export class StorePaymentRepository implements PaymentRepository {
 
   async checkpointReactivationStep(input: CheckpointStepInput): Promise<CheckpointStepOutcome> {
     assertKnownStep(input.step);
+    const tenantId = requireTenantId(input.tenantId, 'checkpointReactivationStep');
 
     // Mismo orden que la RPC: primero el evento (autoridad del claim), después
     // la acción. Toda la sección es síncrona: equivale a la transacción SQL.
     const event = (store.PAYMENT_EVENTS as PaymentEventRecord[]).find(
-      (e) => e.id === input.eventId && matchesTenant(e.tenantId, input.tenantId),
+      (e) => e.id === input.eventId && matchesTenant(e.tenantId, tenantId),
     );
     if (!event) throw new Error(`Checkpoint sin evento de pago: ${input.eventId}`);
     // Ownership ANTES que el bit: si se mirara primero el progreso, un owner
@@ -381,7 +439,7 @@ export class StorePaymentRepository implements PaymentRepository {
     if (event.processed || event.claimToken !== input.claimToken) return 'ownership_lost';
 
     const action = (store.MIKROTIK_ACTIONS as MikrotikActionRecord[]).find(
-      (a) => a.id === input.actionId && matchesTenant(a.tenantId, input.tenantId),
+      (a) => a.id === input.actionId && matchesTenant(a.tenantId, tenantId),
     );
     if (!action) throw new Error(`Checkpoint sin acción durable: ${input.actionId}`);
     if (!event.webhookPaymentId || event.webhookPaymentId !== action.webhookPaymentId) {
@@ -409,61 +467,70 @@ export class StorePaymentRepository implements PaymentRepository {
 export class SupabasePaymentRepository implements PaymentRepository {
   constructor(private readonly client: SupabaseClient) {}
 
-  async listOrders(filter?: { customerId?: string; invoiceId?: string; status?: PaymentOrderStatus; tenantId?: string }) {
-    let q = this.client.from('payment_orders').select('*').order('created_at', { ascending: false });
-    if (filter?.tenantId) q = q.eq('tenant_id', filter.tenantId);
-    if (filter?.customerId) q = q.eq('customer_id', filter.customerId);
-    if (filter?.invoiceId) q = q.eq('invoice_id', filter.invoiceId);
-    if (filter?.status) q = q.eq('status', filter.status);
+  async listOrders(filter: PaymentOrderFilter) {
+    const tenantId = requireTenantId(filter.tenantId, 'listOrders');
+    let q = this.client.from('payment_orders').select('*')
+      .eq('tenant_id', tenantId)
+      .order('created_at', { ascending: false });
+    if (filter.customerId) q = q.eq('customer_id', filter.customerId);
+    if (filter.invoiceId) q = q.eq('invoice_id', filter.invoiceId);
+    if (filter.status) q = q.eq('status', filter.status);
     const { data, error } = await q;
     if (error) throw new Error(`listOrders: ${error.message}`);
     return (data ?? []).map((r) => rowToPaymentOrder(r as PaymentOrderRow));
   }
 
-  async findOrderById(id: string, tenantId?: string) {
-    let q = this.client.from('payment_orders').select('*').eq('id', id);
-    if (tenantId) q = q.eq('tenant_id', tenantId);
-    const { data, error } = await q.maybeSingle();
+  async findOrderById(id: string, tenantId: string) {
+    const scoped = requireTenantId(tenantId, 'findOrderById');
+    const { data, error } = await this.client.from('payment_orders').select('*')
+      .eq('id', id)
+      .eq('tenant_id', scoped)
+      .maybeSingle();
     if (error) throw new Error(`findOrderById: ${error.message}`);
     return data ? rowToPaymentOrder(data as PaymentOrderRow) : null;
   }
 
-  async findOrderByProviderOrderId(provider: PaymentProvider, providerOrderId: string, tenantId?: string) {
-    let q = this.client
+  async findOrderByProviderOrderId(provider: PaymentProvider, providerOrderId: string, tenantId: string) {
+    const scoped = requireTenantId(tenantId, 'findOrderByProviderOrderId');
+    const { data, error } = await this.client
       .from('payment_orders').select('*')
-      .eq('provider', provider).eq('provider_order_id', providerOrderId);
-    if (tenantId) q = q.eq('tenant_id', tenantId);
-    const { data, error } = await q.maybeSingle();
+      .eq('provider', provider)
+      .eq('provider_order_id', providerOrderId)
+      .eq('tenant_id', scoped)
+      .maybeSingle();
     if (error) throw new Error(`findOrderByProviderOrderId: ${error.message}`);
     return data ? rowToPaymentOrder(data as PaymentOrderRow) : null;
   }
 
-  async createOrder(rec: PaymentOrderRecord) {
-    const stamped = { ...rec, tenantId: rec.tenantId || 'tenant-default' };
+  async createOrder(rec: TenantOwned<PaymentOrderRecord>) {
+    const stamped = { ...rec, tenantId: requireTenantId(rec.tenantId, 'createOrder') };
     const { error } = await this.client.from('payment_orders').insert(paymentOrderToRow(stamped));
     if (error) throw new Error(`createOrder: ${error.message}`);
     return stamped;
   }
 
-  async updateOrderStatus(id: string, status: PaymentOrderStatus, patch?: Partial<PaymentOrderRecord>, tenantId?: string) {
+  async updateOrderStatus(id: string, tenantId: string, status: PaymentOrderStatus, patch?: PaymentOrderMutablePatch) {
+    const scoped = requireTenantId(tenantId, 'updateOrderStatus');
+    const safePatch = mutableOrderPatch(patch);
     const row: Record<string, unknown> = { status, updated_at: new Date().toISOString() };
-    if (patch?.providerOrderId !== undefined) row.provider_order_id = patch.providerOrderId;
-    if (patch?.checkoutUrl !== undefined) row.checkout_url = patch.checkoutUrl;
-    let q = this.client.from('payment_orders').update(row).eq('id', id);
-    if (tenantId) q = q.eq('tenant_id', tenantId);
-    const { error } = await q;
+    if (safePatch.providerOrderId !== undefined) row.provider_order_id = safePatch.providerOrderId;
+    if (safePatch.checkoutUrl !== undefined) row.checkout_url = safePatch.checkoutUrl;
+    const { error } = await this.client.from('payment_orders').update(row)
+      .eq('id', id)
+      .eq('tenant_id', scoped);
     if (error) throw new Error(`updateOrderStatus: ${error.message}`);
-    return this.findOrderById(id, tenantId);
+    return this.findOrderById(id, scoped);
   }
 
   async findEventByProviderId(provider: PaymentProvider, providerEventId: string, tenantId: string) {
+    const scoped = requireTenantId(tenantId, 'findEventByProviderId');
     // El filtro por tenant es lo que garantiza como mucho una fila: es
     // exactamente la clave del índice único uq_payment_events_tenant_provider_event.
     const { data, error } = await this.client
       .from('payment_events').select('*')
       .eq('provider', provider)
       .eq('provider_event_id', providerEventId)
-      .eq('tenant_id', tenantId)
+      .eq('tenant_id', scoped)
       .maybeSingle();
     if (error) throw new Error(`findEventByProviderId: ${error.message}`);
     return data ? rowToPaymentEvent(data as PaymentEventRow) : null;
@@ -480,8 +547,8 @@ export class SupabasePaymentRepository implements PaymentRepository {
     };
   }
 
-  async claimEvent(rec: PaymentEventRecord): Promise<EventClaimResult> {
-    const tenantId = rec.tenantId || 'tenant-default';
+  async claimEvent(rec: TenantOwned<PaymentEventRecord>): Promise<EventClaimResult> {
+    const tenantId = requireTenantId(rec.tenantId, 'claimEvent');
     const claimedAt = new Date().toISOString();
     const claimToken = crypto.randomUUID();
     const stamped = { ...rec, tenantId, claimedAt, claimToken };
@@ -515,11 +582,13 @@ export class SupabasePaymentRepository implements PaymentRepository {
     return { outcome: 'claimed', event: { ...existing, claimedAt, claimToken } };
   }
 
-  async renewEventClaim(id: string, claimToken: string): Promise<boolean> {
+  async renewEventClaim(id: string, tenantId: string, claimToken: string): Promise<boolean> {
+    const scoped = requireTenantId(tenantId, 'renewEventClaim');
     const { data, error } = await this.client
       .from('payment_events')
       .update({ claimed_at: new Date().toISOString() })
       .eq('id', id)
+      .eq('tenant_id', scoped)
       .eq('processed', false)
       .eq('claim_token', claimToken)
       .select('id');
@@ -527,18 +596,20 @@ export class SupabasePaymentRepository implements PaymentRepository {
     return (data ?? []).length === 1;
   }
 
-  async createEvent(rec: PaymentEventRecord) {
-    const stamped = { ...rec, tenantId: rec.tenantId || 'tenant-default' };
+  async createEvent(rec: TenantOwned<PaymentEventRecord>) {
+    const stamped = { ...rec, tenantId: requireTenantId(rec.tenantId, 'createEvent') };
     const { error } = await this.client.from('payment_events').insert(this.eventRow(stamped));
     if (error) throw new Error(`createEvent: ${error.message}`);
     return stamped;
   }
 
-  async markEventProcessed(id: string, claimToken: string): Promise<boolean> {
+  async markEventProcessed(id: string, tenantId: string, claimToken: string): Promise<boolean> {
+    const scoped = requireTenantId(tenantId, 'markEventProcessed');
     const { data, error } = await this.client
       .from('payment_events')
       .update({ processed: true, processed_at: new Date().toISOString() })
       .eq('id', id)
+      .eq('tenant_id', scoped)
       .eq('processed', false)
       .eq('claim_token', claimToken)
       .select('id');
@@ -546,38 +617,53 @@ export class SupabasePaymentRepository implements PaymentRepository {
     return (data ?? []).length === 1;
   }
 
-  async listActions(filter?: { customerId?: string; status?: string; tenantId?: string }) {
-    let q = this.client.from('mikrotik_actions').select('*').order('created_at', { ascending: false });
-    if (filter?.tenantId) q = q.eq('tenant_id', filter.tenantId);
-    if (filter?.customerId) q = q.eq('customer_id', filter.customerId);
-    if (filter?.status) q = q.eq('status', filter.status);
+  async listActions(filter: MikrotikActionFilter) {
+    const tenantId = requireTenantId(filter.tenantId, 'listActions');
+    let q = this.client.from('mikrotik_actions').select('*')
+      .eq('tenant_id', tenantId)
+      .order('created_at', { ascending: false });
+    if (filter.customerId) q = q.eq('customer_id', filter.customerId);
+    if (filter.status) q = q.eq('status', filter.status);
     const { data, error } = await q;
     if (error) throw new Error(`listActions: ${error.message}`);
     return (data ?? []).map((r) => rowToMikrotikAction(r as MikrotikActionRow));
   }
 
-  async createAction(rec: MikrotikActionRecord) {
-    const stamped = { ...rec, tenantId: rec.tenantId || 'tenant-default' };
+  async findActionById(id: string, tenantId: string) {
+    const scoped = requireTenantId(tenantId, 'findActionById');
+    const { data, error } = await this.client.from('mikrotik_actions').select('*')
+      .eq('id', id)
+      .eq('tenant_id', scoped)
+      .maybeSingle();
+    if (error) throw new Error(`findActionById: ${error.message}`);
+    return data ? rowToMikrotikAction(data as MikrotikActionRow) : null;
+  }
+
+  async createAction(rec: TenantOwned<MikrotikActionRecord>) {
+    const stamped = { ...rec, tenantId: requireTenantId(rec.tenantId, 'createAction') };
     const { error } = await this.client.from('mikrotik_actions').insert(mikrotikActionToRow(stamped));
     if (error) throw new Error(`createAction: ${error.message}`);
     return stamped;
   }
 
-  async updateAction(id: string, patch: Partial<MikrotikActionRecord>, tenantId?: string) {
+  async updateAction(id: string, tenantId: string, patch: MikrotikActionMutablePatch) {
+    const scoped = requireTenantId(tenantId, 'updateAction');
+    const safePatch = mutableActionPatch(patch);
     const row: Record<string, unknown> = { updated_at: new Date().toISOString() };
-    if (patch.status !== undefined) row.status = patch.status;
-    if (patch.result !== undefined) row.result = patch.result;
-    let q = this.client.from('mikrotik_actions').update(row).eq('id', id);
-    if (tenantId) q = q.eq('tenant_id', tenantId);
-    const { error } = await q;
+    if (safePatch.status !== undefined) row.status = safePatch.status;
+    if (safePatch.result !== undefined) row.result = safePatch.result;
+    const { error } = await this.client.from('mikrotik_actions').update(row)
+      .eq('id', id)
+      .eq('tenant_id', scoped);
     if (error) throw new Error(`updateAction: ${error.message}`);
-    return this.listActions({ tenantId }).then((all) => all.find((a) => a.id === id) ?? null);
+    return this.findActionById(id, scoped);
   }
 
   async findActionByIdempotencyKey(tenantId: string, idempotencyKey: string) {
+    const scoped = requireTenantId(tenantId, 'findActionByIdempotencyKey');
     const { data, error } = await this.client
       .from('mikrotik_actions').select('*')
-      .eq('tenant_id', tenantId)
+      .eq('tenant_id', scoped)
       .eq('idempotency_key', idempotencyKey)
       .maybeSingle();
     // Un error de lectura NO es ausencia: tratarlo así reabriría la duplicación.
@@ -585,7 +671,7 @@ export class SupabasePaymentRepository implements PaymentRepository {
     return data ? rowToMikrotikAction(data as MikrotikActionRow) : null;
   }
 
-  async createActionIdempotent(rec: MikrotikActionRecord): Promise<IdempotentActionResult> {
+  async createActionIdempotent(rec: TenantOwned<MikrotikActionRecord>): Promise<IdempotentActionResult> {
     const { tenantId, key } = requireIdempotentAction(rec);
     const stamped = { ...rec, tenantId };
 
@@ -607,8 +693,9 @@ export class SupabasePaymentRepository implements PaymentRepository {
 
   async checkpointReactivationStep(input: CheckpointStepInput): Promise<CheckpointStepOutcome> {
     assertKnownStep(input.step);
+    const tenantId = requireTenantId(input.tenantId, 'checkpointReactivationStep');
     const { data, error } = await this.client.rpc('payments_checkpoint_reactivation_step', {
-      p_tenant_id: input.tenantId,
+      p_tenant_id: tenantId,
       p_event_id: input.eventId,
       p_action_id: input.actionId,
       p_claim_token: input.claimToken,

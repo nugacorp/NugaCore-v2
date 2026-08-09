@@ -254,13 +254,6 @@ export interface IdempotentActionResult {
   action: MikrotikActionRecord;
 }
 
-export interface ReactivationContext {
-  triggeredBy?: string;
-  invoiceId?: string;
-  tenantId?: string;
-  webhookFence?: WebhookMutationFence;
-}
-
 // ── Input types ───────────────────────────────────────────────────────
 
 export interface CreatePaymentOrderInput {
@@ -280,6 +273,7 @@ export interface ReactivationContext {
   tenantId: string;
   triggeredBy?: string;
   invoiceId?: string;
+  webhookFence?: WebhookMutationFence;
 }
 
 export interface ProcessWebhookInput {

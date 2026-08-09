@@ -17,6 +17,7 @@ import {
   SuspensionEvent,
   SuspensionEventType,
   SuspensionOrder,
+  SuspensionOrderSource,
   SuspensionPolicyV2,
 } from './types';
 import { engineStore } from './engine-store';
@@ -57,9 +58,10 @@ export interface CreateOrderInput {
   customerId: string;
   invoiceId?: string;
   orderType: SuspensionOrder['orderType'];
-  source: 'engine' | 'manual' | 'payment-engine' | 'provisioning-center' | 'service-status';
+  source: SuspensionOrderSource;
   reason?: string;
   tenantId?: string;
+  routerId?: string;
   idempotencyKey?: string;
 }
 
@@ -84,10 +86,19 @@ const eventIsEquivalent = (existing: SuspensionEvent, input: RecordEventInput): 
 
 const orderIsEquivalent = (existing: SuspensionOrder, input: CreateOrderInput): boolean =>
   existing.customerId === input.customerId
+  && (existing.tenantId ?? null) === (input.tenantId ?? null)
+  && (existing.routerId ?? null) === (input.routerId ?? null)
   && (existing.invoiceId ?? null) === (input.invoiceId ?? null)
   && existing.orderType === input.orderType
   && existing.source === input.source
   && (existing.reason ?? null) === (input.reason ?? null);
+
+const requirePaymentOrderScope = (input: CreateOrderInput): void => {
+  if (input.source !== 'payment-engine') return;
+  if (!input.tenantId?.trim() || !input.routerId?.trim()) {
+    throw new Error('createOrder(payment-engine): tenantId y routerId son obligatorios.');
+  }
+};
 
 export interface SuspensionRepository {
   getPolicy(): Promise<SuspensionPolicyV2>;
@@ -139,7 +150,10 @@ export class StoreSuspensionRepository implements SuspensionRepository {
   async openOrders(customerId: string, orderType?: SuspensionOrder['orderType']) {
     return engineStore.openOrders(customerId, orderType);
   }
-  async createOrder(input: CreateOrderInput) { return engineStore.createOrder(input); }
+  async createOrder(input: CreateOrderInput) {
+    requirePaymentOrderScope(input);
+    return engineStore.createOrder(input);
+  }
   async cancelOpenOrders(customerId: string, orderType: SuspensionOrder['orderType'], reason: string, actorId?: string) {
     return engineStore.cancelOpenOrders(customerId, orderType, reason, actorId);
   }
@@ -254,6 +268,7 @@ export class SupabaseSuspensionRepository implements SuspensionRepository {
   }
 
   async createOrder(input: CreateOrderInput): Promise<SuspensionOrder> {
+    requirePaymentOrderScope(input);
     const isSusp = input.orderType === 'suspension';
     const durable = Boolean(input.idempotencyKey);
     const tenantId = durable ? (input.tenantId || 'tenant-default') : input.tenantId;
@@ -313,7 +328,9 @@ export class SupabaseSuspensionRepository implements SuspensionRepository {
     if (patch.workerRunId !== undefined) row.worker_run_id = patch.workerRunId;
     if (patch.workerNote !== undefined) row.worker_note = patch.workerNote;
     if (Object.keys(row).length > 0) {
-      const { error } = await this.client.from(table).update(row).eq('id', order.id);
+      let query = this.client.from(table).update(row).eq('id', order.id);
+      if (order.tenantId) query = query.eq('tenant_id', order.tenantId);
+      const { error } = await query;
       if (error) throw new Error(`updateOrder: ${error.message}`);
     }
     return { ...order, ...patch };

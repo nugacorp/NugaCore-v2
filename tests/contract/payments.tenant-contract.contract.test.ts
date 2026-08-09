@@ -507,11 +507,14 @@ describe('MT-04 — no existe operación de plataforma que cruce WISPs', () => {
     // inequívoco, rol de plataforma, auditoría y sus propios tests — nunca
     // reintroduciendo `tenantId` opcional en éstos.
     expect(metodos).toEqual([
+      'checkpointReactivationStep',
       'claimEvent',
       'createAction',
+      'createActionIdempotent',
       'createEvent',
       'createOrder',
       'findActionById',
+      'findActionByIdempotencyKey',
       'findEventByProviderId',
       'findOrderById',
       'findOrderByProviderOrderId',
