@@ -36,7 +36,11 @@ import {
   evaluateWebhookCapability,
 } from '../../backend/domains/payments/webhook-capability';
 import { PaymentService } from '../../backend/domains/payments/service';
-import type { MikrotikActionRecord, PaymentEventRecord } from '../../backend/domains/payments/types';
+import type {
+  MikrotikActionRecord,
+  PaymentEventRecord,
+  TenantOwned,
+} from '../../backend/domains/payments/types';
 import {
   StoreBillingRepository,
   SupabaseBillingRepository,
@@ -73,7 +77,7 @@ const claimedEvent = (
   id = EVENT_ID,
   tenantId = TENANT_A,
   claimToken = 'owner-a',
-): PaymentEventRecord => ({
+): TenantOwned<PaymentEventRecord> => ({
   id,
   tenantId,
   provider: 'openpay',
@@ -89,7 +93,7 @@ const claimedEvent = (
 
 const rootAction = (
   overrides: Partial<MikrotikActionRecord> = {},
-): MikrotikActionRecord => {
+): TenantOwned<MikrotikActionRecord> => {
   const customerId = overrides.customerId ?? `${PREFIX}root`;
   const paymentEventId = overrides.paymentEventId ?? EVENT_ID;
   const webhookPaymentId = overrides.webhookPaymentId ?? `payment:${paymentEventId}`;
@@ -482,6 +486,7 @@ describe('Destinos idempotentes por actionId + step', () => {
       source: 'payment-engine' as const,
       reason: 'Pago confirmado',
       tenantId: TENANT_A,
+      routerId: 'router-a',
       idempotencyKey: stepIdempotencyKey('ma-1', 'networkDispatched'),
     };
     const first = await repo.createOrder(input);
@@ -501,6 +506,7 @@ describe('Destinos idempotentes por actionId + step', () => {
       source: 'payment-engine' as const,
       reason: 'Pago confirmado',
       tenantId: TENANT_A,
+      routerId: 'router-a',
       idempotencyKey: stepIdempotencyKey('ma-1', 'networkDispatched'),
     };
     const first = await repo.createOrder(input);
@@ -611,6 +617,7 @@ describe('Destinos idempotentes por actionId + step', () => {
       source: 'payment-engine' as const,
       reason: 'Pago A',
       tenantId: TENANT_A,
+      routerId: 'router-a',
       idempotencyKey: stepIdempotencyKey('ma-conflict', 'networkDispatched'),
     };
 

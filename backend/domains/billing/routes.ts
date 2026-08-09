@@ -7,6 +7,7 @@ import { getBillingService } from './service';
 import { getBillingCycleService } from './cycle';
 import { getCustomersService } from '../customers/service';
 import { getPaymentService } from '../payments/service';
+import { rootActionIdempotencyKey } from '../payments/idempotency';
 import { getSuspensionService } from '../suspension/service';
 import { tenantIdFromRequest } from '../tenancy/tenant-scope';
 import { logger } from '../../common/logger';
@@ -158,6 +159,10 @@ router.post(
               // Sin tenant explícito la reactivación caía en `tenant-default` y
               // podía crear la acción en el WISP equivocado.
               tenantId,
+              idempotencyKey: rootActionIdempotencyKey(
+                `billing:${paymentInput.transactionId}`,
+                invoice.clientId,
+              ),
             });
           }
         }

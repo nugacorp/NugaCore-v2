@@ -22,7 +22,10 @@ import {
   ServiceUnavailableError,
 } from '../../common/errors';
 import { productionGates } from '../../config/production-gates';
-import { dispatchNetworkOrder } from '../../bridges/network-order-dispatch';
+import {
+  createOrGetNetworkOrder,
+  processNetworkOrder,
+} from '../../bridges/network-order-dispatch';
 import { isDomainOnDb } from '../../config/feature-flags';
 import { isSupabaseAdminConfigured, supabaseAdmin } from '../../services/supabase-admin';
 import { getBillingService } from '../billing/service';
@@ -346,6 +349,10 @@ export class PaymentService {
             triggeredBy: `webhook:${provider}:${opaqueFingerprint(providerEventId)}`,
             invoiceId: order.invoiceId,
             tenantId: orderTenantId,
+            idempotencyKey: rootActionIdempotencyKey(
+              invoiceResult.canonicalPaymentId!,
+              order.customerId,
+            ),
             webhookFence: {
               ...webhookFence,
               canonicalPaymentId: invoiceResult.canonicalPaymentId,
@@ -427,6 +434,10 @@ export class PaymentService {
             triggeredBy: `webhook:codi:${opaqueFingerprint(providerEventId)}`,
             invoiceId: invoice.id,
             tenantId: invoiceTenantId,
+            idempotencyKey: rootActionIdempotencyKey(
+              paymentResult.canonicalPaymentId!,
+              invoice.clientId,
+            ),
             webhookFence: {
               beforeMutation: () => this.renewOrThrow(eventId, tenantId, claimToken),
               eventId,
@@ -579,6 +590,14 @@ export class PaymentService {
     const tenantId = requireTenantId(context.tenantId, 'reactivateCustomerService');
     const triggeredBy = context?.triggeredBy ?? 'payment-engine';
     const webhookFence = context?.webhookFence;
+    const requestedDryRun = !productionGates.paymentsRouterLive();
+    const operationKey = context.idempotencyKey?.trim();
+    if ((!requestedDryRun || webhookFence) && !operationKey) {
+      throw new BadRequestError(
+        'idempotencyKey es obligatorio para reactivaciones live y webhooks.',
+        'REACTIVATION_IDEMPOTENCY_KEY_REQUIRED',
+      );
+    }
     const canonicalPaymentId = webhookFence?.canonicalPaymentId;
     if (webhookFence && !canonicalPaymentId) {
       throw new ServiceUnavailableError(
@@ -594,24 +613,26 @@ export class PaymentService {
     // La identidad durable del webhook permite reusar la acción ya creada. La
     // lectura es intencionalmente exclusiva de esta ruta: una llamada manual
     // conserva la semántica histórica de "activo => no-op".
-    const rootKey = webhookFence
+    const expectedWebhookKey = webhookFence
       ? rootActionIdempotencyKey(canonicalPaymentId!, customerId)
       : undefined;
+    if (expectedWebhookKey && operationKey !== expectedWebhookKey) {
+      throw new IdempotencyConflictError('reactivation_context', operationKey ?? '(vacía)');
+    }
+    const rootKey = operationKey;
     const existingAction = rootKey
       ? await this.repo.findActionByIdempotencyKey(tenantId, rootKey) ?? undefined
       : undefined;
 
     // Un cliente inicialmente activo no necesita reactivación. En webhook solo
     // se reanuda si ya existe la acción durable de este mismo evento.
-    if (client.status === 'active' && (!webhookFence || !existingAction)) {
+    if (client.status === 'active' && (!rootKey || !existingAction)) {
       logger.info('PaymentEngine: cliente ya activo, reactivación omitida', { customerId, tenantId });
       return { customerId, alreadyActive: true, mikrotikAction: null, message: 'Cliente ya activo.' };
     }
 
-    const requestedDryRun = !productionGates.paymentsRouterLive();
-
-    // La acción es el marcador durable de intención y se crea antes del cambio
-    // lógico. Así B distingue una reanudación de un cliente que ya era activo.
+    // La acción conserva el progreso durable después de que la orden de red
+    // exista. Así B distingue una reanudación de un cliente que ya era activo.
     const durablePreviousStatus = existingAction?.payload?.previousStatus;
     const prevStatus = typeof durablePreviousStatus === 'string'
       ? durablePreviousStatus
@@ -625,6 +646,12 @@ export class PaymentService {
     const requestedRouter = requestedRouterId
       ? findRouterForTenant(routers, requestedRouterId, tenantId)
       : undefined;
+    if (webhookFence && requestedRouterId && !requestedRouter) {
+      throw new ServiceUnavailableError(
+        'El router explícito del cliente no pertenece al tenant o no existe.',
+        'TENANT_ROUTER_MISMATCH',
+      );
+    }
     const router = requestedRouter
       ?? tenantRouters.find((r) => r.encryptedPassword || r.hasCredentials)
       ?? tenantRouters[0];
@@ -646,11 +673,34 @@ export class PaymentService {
         'TENANT_ROUTER_NOT_ELIGIBLE',
       );
     }
+    if (rootKey && !router) {
+      throw new ServiceUnavailableError(
+        'No hay un router disponible para crear la orden durable.',
+        'TENANT_ROUTER_UNAVAILABLE',
+      );
+    }
+
+    // F3: esta fila es el primer write del flujo. Si el esquema aún no tiene
+    // router_id/tenant_id/idempotency_key, el error ocurre sin estado parcial.
+    if (rootKey) await webhookFence?.beforeMutation();
+    const durableOrder = rootKey
+      ? await createOrGetNetworkOrder({
+          customerId,
+          tenantId,
+          routerId: router!.id,
+          orderType: 'reactivation',
+          source: 'payment-engine',
+          reason: `Pago confirmado. Factura: ${context?.invoiceId ?? 'N/A'}`,
+          actor: triggeredBy,
+          idempotencyKey: rootKey,
+        })
+      : undefined;
+
     // Contrato histórico manual: Customers y timeline se completan ANTES de
     // persistir la acción. Si cualquiera falla, no queda una acción pending y
     // un retry vuelve a empezar sin duplicar acciones huérfanas.
     const manualProgress: WebhookReactivationProgress = {};
-    if (!webhookFence) {
+    if (!rootKey) {
       await dataProvider.reactivateCustomer(customerId, tenantId);
       manualProgress.customerReactivated = true;
       await getCustomersService().addTimelineEvent({
@@ -682,15 +732,13 @@ export class PaymentService {
         createdAt: nowIso(),
         updatedAt: nowIso(),
       };
-      if (webhookFence && rootKey) {
-        // La acción es el PRIMER destino idempotente: si A y B insertaran
-        // acciones distintas, cada uno derivaría su propia familia de claves
-        // `actionId + step` y ninguna constraint aguas abajo evitaría duplicar
-        // timeline, orden, evento y alerta. Aquí ambos reciben el mismo id.
-        await webhookFence.beforeMutation();
+      if (rootKey) {
+        // La acción también es create-or-get: ambos owners reciben el mismo id
+        // y por tanto la misma familia `actionId + step` aguas abajo.
+        await webhookFence?.beforeMutation();
         const created = await this.repo.createActionIdempotent({
           ...candidate,
-          paymentEventId: webhookFence.eventId,
+          paymentEventId: webhookFence?.eventId,
           webhookPaymentId: canonicalPaymentId,
           idempotencyKey: rootKey,
         });
@@ -755,22 +803,13 @@ export class PaymentService {
           : 'Reactivación reanudada para cliente activo',
         details: `Reactivación por pago confirmado. ${context?.invoiceId ? `Factura: ${context.invoiceId}.` : ''}${dryRun ? ' Pendiente ejecución en router (dry_run).' : ' Orden de reactivación encolada.'}`,
         createdBy: durableTriggeredBy,
-      }, webhookFence ? { tenantId, idempotencyKey: effectKey('timelineAdded') } : undefined);
+      }, rootKey ? { tenantId, idempotencyKey: effectKey('timelineAdded') } : undefined);
       await checkpoint('timelineAdded');
     }
 
-    if (routerLive && !progress.networkDispatched) {
+    if (routerLive && durableOrder && !progress.networkDispatched) {
       await webhookFence?.beforeMutation();
-      await dispatchNetworkOrder({
-        customerId,
-        tenantId,
-        routerId: router!.id,
-        orderType: 'reactivation',
-        source: 'payment-engine',
-        reason: `Pago confirmado. Factura: ${context?.invoiceId ?? 'N/A'}`,
-        actor: durableTriggeredBy,
-        idempotencyKey: webhookFence ? effectKey('networkDispatched') : undefined,
-      });
+      await processNetworkOrder(durableOrder, durableTriggeredBy);
       await checkpoint('networkDispatched');
     }
 
@@ -783,8 +822,8 @@ export class PaymentService {
         automatic: true,
         actorId: durableTriggeredBy,
         metadata: { dryRun, routerLive },
-        tenantId: webhookFence ? tenantId : undefined,
-        idempotencyKey: webhookFence ? effectKey('suspensionEventRecorded') : undefined,
+        tenantId: rootKey ? tenantId : undefined,
+        idempotencyKey: rootKey ? effectKey('suspensionEventRecorded') : undefined,
       });
       await checkpoint('suspensionEventRecorded');
     }
@@ -792,7 +831,7 @@ export class PaymentService {
     if (!progress.alertCreated) {
       await webhookFence?.beforeMutation();
       const message = `Servicio reactivado por pago confirmado.${dryRun ? ' Acción MikroTik pendiente (dry_run).' : ' Orden de reactivación procesada.'}`;
-      if (webhookFence) {
+      if (rootKey) {
         // La alerta pasa a existir también en modo Supabase: antes sólo se
         // creaba con Customers en store, así que no había efecto que revisar.
         await getAlertSink().createAlertIdempotent({

@@ -271,6 +271,8 @@ export interface CreatePaymentOrderInput {
 /** Contexto de una reactivación. El WISP dueño del cliente es obligatorio. */
 export interface ReactivationContext {
   tenantId: string;
+  /** Identidad estable del pago/operación; obligatoria en live y webhooks. */
+  idempotencyKey?: string;
   triggeredBy?: string;
   invoiceId?: string;
   webhookFence?: WebhookMutationFence;

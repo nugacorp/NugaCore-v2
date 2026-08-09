@@ -156,6 +156,7 @@ describe('MT-04-F2 — Payments → dispatcher → worker tenant-scoped', () => 
     const reactivation = await service.reactivateCustomerService(CUSTOMER_A, {
       tenantId: TENANT_A,
       triggeredBy: 'test:dry-run',
+      idempotencyKey: 'f2:dry-run:customer-a',
     });
     const orderA = engineStore.ORDERS.find((order) => order.customerId === CUSTOMER_A);
     if (!orderA) throw new Error('No se creó la orden A.');
@@ -196,6 +197,7 @@ describe('MT-04-F2 — Payments → dispatcher → worker tenant-scoped', () => 
     const reactivation = await service.reactivateCustomerService(CUSTOMER_A, {
       tenantId: TENANT_A,
       triggeredBy: 'test:commit',
+      idempotencyKey: 'f2:commit:customer-a',
     });
 
     const orderA = engineStore.ORDERS.find((order) => order.customerId === CUSTOMER_A);

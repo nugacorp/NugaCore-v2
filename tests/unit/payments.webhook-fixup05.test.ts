@@ -145,7 +145,7 @@ describe('Fixup 05: identidad canónica del charge', () => {
     expect(store.MIKROTIK_ACTIONS).toHaveLength(1);
     expect(store.CLIENT_TIMELINE).toHaveLength(1);
     expect(engineStore.EVENTS).toHaveLength(1);
-    expect(engineStore.ORDERS).toHaveLength(live ? 1 : 0);
+    expect(engineStore.ORDERS).toHaveLength(1);
     expect(store.NOC_ALERTS).toHaveLength(1);
     expect(store.PAYMENT_EVENTS.filter((event) => event.processed)).toHaveLength(2);
     const canonicalIds = new Set(store.PAYMENT_EVENTS.map((event) => event.webhookPaymentId));

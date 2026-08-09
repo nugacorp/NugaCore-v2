@@ -214,11 +214,14 @@ describe('Fixup final: compatibilidad manual sin router', () => {
       invoiceId: INVOICE,
     });
 
-    expect(first).toMatchObject({ alreadyActive: false, mikrotikAction: null });
+    expect(first).toMatchObject({
+      alreadyActive: false,
+      mikrotikAction: { tenantId: TENANT, routerId: undefined },
+    });
     expect(retry).toMatchObject({ alreadyActive: true, mikrotikAction: null });
     expect(store.CLIENTS[0]?.status).toBe('active');
     expect(store.CLIENT_TIMELINE).toHaveLength(1);
-    expect(store.MIKROTIK_ACTIONS).toHaveLength(0);
+    expect(store.MIKROTIK_ACTIONS).toHaveLength(1);
   });
 });
 
@@ -303,7 +306,7 @@ describe('Fixup final: ganador atómico de liquidación', () => {
     engineStore.ORDERS = [];
     const repo = new StorePaymentRepository();
     const service = new PaymentService(repo);
-    const orders: PaymentOrderRecord[] = [
+    const orders: Array<PaymentOrderRecord & { tenantId: string }> = [
       { id: 'order-40', tenantId: TENANT, customerId: 'client-final-manual', invoiceId: INVOICE, provider: 'openpay', providerOrderId: 'tx-store-40', amountCents: 4_000, status: 'pending', createdAt: new Date().toISOString(), updatedAt: new Date().toISOString() },
       { id: 'order-60', tenantId: TENANT, customerId: 'client-final-manual', invoiceId: INVOICE, provider: 'openpay', providerOrderId: 'tx-store-60', amountCents: 6_000, status: 'pending', createdAt: new Date().toISOString(), updatedAt: new Date().toISOString() },
     ];

@@ -95,8 +95,8 @@ const orderIsEquivalent = (existing: SuspensionOrder, input: CreateOrderInput): 
 
 const requirePaymentOrderScope = (input: CreateOrderInput): void => {
   if (input.source !== 'payment-engine') return;
-  if (!input.tenantId?.trim() || !input.routerId?.trim()) {
-    throw new Error('createOrder(payment-engine): tenantId y routerId son obligatorios.');
+  if (!input.tenantId?.trim() || !input.routerId?.trim() || !input.idempotencyKey?.trim()) {
+    throw new Error('createOrder(payment-engine): tenantId, routerId e idempotencyKey son obligatorios.');
   }
 };
 

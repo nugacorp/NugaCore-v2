@@ -53,14 +53,16 @@ describe('Worker MikroTik tenant-scoped en commit mode', () => {
       { id: 'customer-a', tenantId: 'tenant-a', name: 'A', type: 'residential', status: 'suspended', email: '', phone: '', address: '', city: '', lat: 0, lng: 0, planId: 'p', ip: '192.0.2.10', routerId: 'router-a' },
       { id: 'customer-b', tenantId: 'tenant-b', name: 'B', type: 'residential', status: 'suspended', email: '', phone: '', address: '', city: '', lat: 0, lng: 0, planId: 'p', ip: '192.0.2.20', routerId: 'router-b' },
     );
-    const orderA = engineStore.createOrder({ customerId: 'customer-a', orderType: 'reactivation', source: 'payment-engine', tenantId: 'tenant-a', idempotencyKey: 'action-a:networkDispatched' });
-    const orderB = engineStore.createOrder({ customerId: 'customer-b', orderType: 'reactivation', source: 'payment-engine', tenantId: 'tenant-b', idempotencyKey: 'action-b:networkDispatched' });
+    const orderA = engineStore.createOrder({ customerId: 'customer-a', orderType: 'reactivation', source: 'payment-engine', tenantId: 'tenant-a', routerId: 'router-a', idempotencyKey: 'action-a:networkDispatched' });
+    const orderB = engineStore.createOrder({ customerId: 'customer-b', orderType: 'reactivation', source: 'payment-engine', tenantId: 'tenant-b', routerId: 'router-b', idempotencyKey: 'action-b:networkDispatched' });
     const scopedRun = processPendingOrders as unknown as (
       actorId: string,
-      scope: { tenantId: string; orderId: string },
+      scope: { tenantId: string; orderId: string; routerId: string },
     ) => ReturnType<typeof processPendingOrders>;
 
-    const run = await scopedRun('webhook', { tenantId: 'tenant-a', orderId: orderA.id });
+    const run = await scopedRun('webhook', {
+      tenantId: 'tenant-a', orderId: orderA.id, routerId: 'router-a',
+    });
 
     expect(run.pendingFound).toBe(1);
     expect(run.results).toHaveLength(1);
@@ -89,6 +91,7 @@ describe('Worker MikroTik tenant-scoped en commit mode', () => {
       reason: 'pago confirmado',
       actor: 'webhook',
       tenantId: 'tenant-a',
+      routerId: 'router-a',
       idempotencyKey: 'action-a:networkDispatched',
     });
 
@@ -100,21 +103,25 @@ describe('Worker MikroTik tenant-scoped en commit mode', () => {
     expect(store.CLIENTS.find((row) => row.id === 'customer-b')?.status).toBe('suspended');
   });
 
-  it('falla cerrado si el router indicado pertenece a otro tenant', async () => {
+  it('la orden scoped conserva router A aunque el cliente apunte obsoletamente a B', async () => {
     store.CLIENTS.push({
       id: 'customer-a', tenantId: 'tenant-a', name: 'A', type: 'residential', status: 'suspended',
       email: '', phone: '', address: '', city: '', lat: 0, lng: 0, planId: 'p', ip: '192.0.2.10', routerId: 'router-b',
     });
-    const order = engineStore.createOrder({ customerId: 'customer-a', orderType: 'reactivation', source: 'payment-engine', tenantId: 'tenant-a', idempotencyKey: 'action-a:networkDispatched' });
+    const order = engineStore.createOrder({ customerId: 'customer-a', orderType: 'reactivation', source: 'payment-engine', tenantId: 'tenant-a', routerId: 'router-a', idempotencyKey: 'action-a:networkDispatched' });
     const scopedRun = processPendingOrders as unknown as (
       actorId: string,
-      scope: { tenantId: string; orderId: string },
+      scope: { tenantId: string; orderId: string; routerId: string },
     ) => ReturnType<typeof processPendingOrders>;
 
-    const run = await scopedRun('webhook', { tenantId: 'tenant-a', orderId: order.id });
+    const run = await scopedRun('webhook', {
+      tenantId: 'tenant-a', orderId: order.id, routerId: 'router-a',
+    });
 
-    expect(run.results[0]).toMatchObject({ orderId: order.id, outcome: 'failed' });
-    expect(executeMock).not.toHaveBeenCalled();
-    expect(store.CLIENTS[0].status).toBe('suspended');
+    expect(run.results[0]).toMatchObject({
+      orderId: order.id, outcome: 'executed', targetRouterId: 'router-a',
+    });
+    expect(executeMock).toHaveBeenCalledTimes(1);
+    expect(store.CLIENTS[0].status).toBe('active');
   });
 });

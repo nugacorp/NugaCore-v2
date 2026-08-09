@@ -1,5 +1,5 @@
 // ====================================================================
-// Puente gated: encola órdenes de red y dispara worker MikroTik.
+// Puente gated: persiste órdenes y procesa una fila con scope explícito.
 // Vive fuera de service-status para mantener el guard estático Pre-PROD-7.
 // ====================================================================
 
@@ -13,15 +13,15 @@ interface BaseNetworkOrderDispatchInput {
   orderType: 'suspension' | 'reactivation';
   reason: string;
   actor: string | null;
-  /** Identidad durable (T5): con ella la orden es create-or-return. */
   idempotencyKey?: string;
 }
 
-type NetworkOrderDispatchInput =
+export type NetworkOrderDispatchInput =
   | (BaseNetworkOrderDispatchInput & {
       source: 'payment-engine';
       tenantId: string;
       routerId: string;
+      idempotencyKey: string;
     })
   | (BaseNetworkOrderDispatchInput & {
       source: Exclude<SuspensionOrderSource, 'payment-engine' | 'manual'>;
@@ -29,25 +29,31 @@ type NetworkOrderDispatchInput =
       routerId?: string;
     });
 
-const requirePaymentScope = (value: string, field: 'tenantId' | 'routerId'): string => {
+const requirePaymentScope = (
+  value: string,
+  field: 'tenantId' | 'routerId' | 'idempotencyKey',
+): string => {
   const scoped = (value ?? '').trim();
   if (!scoped) throw new Error(`dispatchNetworkOrder(payment-engine): ${field} es obligatorio.`);
   return scoped;
 };
 
-export async function dispatchNetworkOrder(input: NetworkOrderDispatchInput): Promise<SuspensionOrder> {
+/** Persiste o recupera la orden durable. No ejecuta ningún efecto de red. */
+export async function createOrGetNetworkOrder(
+  input: NetworkOrderDispatchInput,
+): Promise<SuspensionOrder> {
   const repo = getSuspensionService().repo;
-  const order = input.source === 'payment-engine'
-    ? await repo.createOrder({
+  return input.source === 'payment-engine'
+    ? repo.createOrder({
         customerId: input.customerId,
         orderType: input.orderType,
         source: input.source,
         reason: input.reason,
         tenantId: requirePaymentScope(input.tenantId, 'tenantId'),
         routerId: requirePaymentScope(input.routerId, 'routerId'),
-        idempotencyKey: input.idempotencyKey,
+        idempotencyKey: requirePaymentScope(input.idempotencyKey, 'idempotencyKey'),
       })
-    : await repo.createOrder({
+    : repo.createOrder({
         customerId: input.customerId,
         orderType: input.orderType,
         source: input.source,
@@ -56,14 +62,30 @@ export async function dispatchNetworkOrder(input: NetworkOrderDispatchInput): Pr
         routerId: input.routerId,
         idempotencyKey: input.idempotencyKey,
       });
-  // El worker puede procesar la MISMA fila más de una vez: la garantía de T5
-  // es una orden durable, no una única invocación ni exactly-once en RouterOS.
+}
+
+/** Procesa exclusivamente la fila ya persistida y su scope F2. */
+export async function processNetworkOrder(
+  order: SuspensionOrder,
+  actor: string | null,
+): Promise<SuspensionOrder> {
   if (productionGates.mikrotikWorkerCommit()) {
-    await processPendingOrders(input.actor ?? input.source, {
-      tenantId: order.tenantId || input.tenantId || 'tenant-default',
+    if (!order.tenantId?.trim() || !order.routerId?.trim()) {
+      throw new Error('processNetworkOrder: orden durable sin tenantId/routerId.');
+    }
+    await processPendingOrders(actor ?? order.source, {
+      tenantId: order.tenantId,
       orderId: order.id,
-      routerId: order.routerId || input.routerId || '',
+      routerId: order.routerId,
     });
   }
   return order;
+}
+
+/** Compatibilidad para los demás dominios: persiste y luego procesa. */
+export async function dispatchNetworkOrder(
+  input: NetworkOrderDispatchInput,
+): Promise<SuspensionOrder> {
+  const order = await createOrGetNetworkOrder(input);
+  return processNetworkOrder(order, input.actor);
 }

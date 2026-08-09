@@ -27,6 +27,7 @@ import type {
   PaymentEventRecord,
   PaymentOrderRecord,
   PaymentProvider,
+  TenantOwned,
 } from '../../backend/domains/payments/types';
 import { IdempotencyConflictError, opaqueFingerprint } from '../../backend/common/errors';
 import { logger } from '../../backend/common/logger';
@@ -47,7 +48,7 @@ const candidate = (
   id: string,
   providerEventId: string,
   tenantId = TENANT_A,
-): PaymentEventRecord => ({
+): TenantOwned<PaymentEventRecord> => ({
   id,
   tenantId,
   provider: 'openpay',
@@ -170,7 +171,7 @@ describe('Claim atómico en memoria', () => {
 
   it('tras procesarlo, una reentrega responde already_processed', async () => {
     const first = await repo.claimEvent(candidate('pe-1', 'evt-ok'));
-    await repo.markEventProcessed(first.event.id, first.event.claimToken!);
+    await repo.markEventProcessed(first.event.id, TENANT_A, first.event.claimToken!);
 
     const second = await repo.claimEvent(candidate('pe-2', 'evt-ok'));
     expect(second.outcome).toBe('already_processed');
@@ -216,10 +217,10 @@ describe('Claim atómico en memoria', () => {
     expect(b.event.claimToken).toBeTruthy();
     expect(b.event.claimToken).not.toBe(a.event.claimToken);
 
-    expect(await repo.renewEventClaim(a.event.id, a.event.claimToken!)).toBe(false);
-    expect(await repo.markEventProcessed(a.event.id, a.event.claimToken!)).toBe(false);
-    expect(await repo.renewEventClaim(b.event.id, b.event.claimToken!)).toBe(true);
-    expect(await repo.markEventProcessed(b.event.id, b.event.claimToken!)).toBe(true);
+    expect(await repo.renewEventClaim(a.event.id, TENANT_A, a.event.claimToken!)).toBe(false);
+    expect(await repo.markEventProcessed(a.event.id, TENANT_A, a.event.claimToken!)).toBe(false);
+    expect(await repo.renewEventClaim(b.event.id, TENANT_A, b.event.claimToken!)).toBe(true);
+    expect(await repo.markEventProcessed(b.event.id, TENANT_A, b.event.claimToken!)).toBe(true);
     expect(events()[0].processed).toBe(true);
   });
 });
@@ -312,7 +313,7 @@ describe('Claim atómico en Postgres', () => {
     const rows: Row[] = [];
     const pg = new SupabasePaymentRepository(fakeSupabase(rows));
     const first = await pg.claimEvent(candidate('pe-1', 'evt-pg'));
-    await pg.markEventProcessed(first.event.id, first.event.claimToken!);
+    await pg.markEventProcessed(first.event.id, TENANT_A, first.event.claimToken!);
 
     const second = await pg.claimEvent(candidate('pe-2', 'evt-pg'));
     expect(second.outcome).toBe('already_processed');
@@ -370,10 +371,10 @@ describe('Claim atómico en Postgres', () => {
     expect(b.outcome).toBe('claimed');
     expect(b.event.claimToken).not.toBe(a.event.claimToken);
 
-    expect(await pg.renewEventClaim(a.event.id, a.event.claimToken!)).toBe(false);
-    expect(await pg.markEventProcessed(a.event.id, a.event.claimToken!)).toBe(false);
-    expect(await pg.renewEventClaim(b.event.id, b.event.claimToken!)).toBe(true);
-    expect(await pg.markEventProcessed(b.event.id, b.event.claimToken!)).toBe(true);
+    expect(await pg.renewEventClaim(a.event.id, TENANT_A, a.event.claimToken!)).toBe(false);
+    expect(await pg.markEventProcessed(a.event.id, TENANT_A, a.event.claimToken!)).toBe(false);
+    expect(await pg.renewEventClaim(b.event.id, TENANT_A, b.event.claimToken!)).toBe(true);
+    expect(await pg.markEventProcessed(b.event.id, TENANT_A, b.event.claimToken!)).toBe(true);
     expect(rows[0].processed).toBe(true);
   });
 });
@@ -525,14 +526,14 @@ describe('PaymentService — ownership antes de efectos', () => {
         outcome: 'claimed' as const,
         event: { ...persisted, claimToken: claimCount++ === 0 ? 'owner-a' : 'owner-b' },
       }),
-      renewEventClaim: async (_id: string, token: string) => token === currentOwner,
+      renewEventClaim: async (_id: string, _tenantId: string, token: string) => token === currentOwner,
       findOrderByProviderOrderId: async () => order,
       updateOrderStatus: async () => {
         updates += 1;
         if (updates === 1) currentOwner = 'owner-b';
         return order;
       },
-      markEventProcessed: async (_id: string, token: string) => token === currentOwner,
+      markEventProcessed: async (_id: string, _tenantId: string, token: string) => token === currentOwner,
     } as unknown as PaymentRepository;
     const input = {
       provider: 'openpay' as const,
@@ -577,7 +578,7 @@ describe('PaymentService — ownership antes de efectos', () => {
         outcome: 'claimed' as const,
         event: { ...persisted, claimToken: 'owner-a' },
       }),
-      renewEventClaim: async (_id: string, token: string) => token === currentOwner,
+      renewEventClaim: async (_id: string, _tenantId: string, token: string) => token === currentOwner,
       findOrderByProviderOrderId: async () => order,
       updateOrderStatus: async () => order,
       markEventProcessed: async () => { closes += 1; return true; },
@@ -613,11 +614,11 @@ describe('PaymentService — ownership antes de efectos', () => {
     const fakeRepo = {
       nextEventId: async () => 'pe-codi-candidate',
       claimEvent: async () => ({ outcome: 'claimed' as const, event }),
-      renewEventClaim: async (_id: string, token: string) => token === currentOwner,
+      renewEventClaim: async (_id: string, _tenantId: string, token: string) => token === currentOwner,
       findOrderByProviderOrderId: async () => null,
       listOrders: async () => [order],
       updateOrderStatus: async () => { currentOwner = 'owner-b'; return order; },
-      markEventProcessed: async (_id: string, token: string) => token === currentOwner,
+      markEventProcessed: async (_id: string, _tenantId: string, token: string) => token === currentOwner,
     } as unknown as PaymentRepository;
     const service = new PaymentService(fakeRepo);
     stubServiceEffects(service, counters);
@@ -650,7 +651,7 @@ describe('PaymentService — ownership antes de efectos', () => {
     const fakeRepo = {
       nextEventId: async () => 'pe-codi-billing-candidate',
       claimEvent: async () => ({ outcome: 'claimed' as const, event }),
-      renewEventClaim: async (_id: string, token: string) => token === currentOwner,
+      renewEventClaim: async (_id: string, _tenantId: string, token: string) => token === currentOwner,
       findOrderByProviderOrderId: async () => null,
       listOrders: async () => [order],
       updateOrderStatus: async () => order,
@@ -730,11 +731,11 @@ describe('PaymentService — ownership antes de efectos', () => {
           currentOwner = claimToken;
           return { outcome: 'claimed' as const, event: { ...persisted, claimToken } };
         },
-        renewEventClaim: async (_id: string, token: string) => token === currentOwner,
+        renewEventClaim: async (_id: string, _tenantId: string, token: string) => token === currentOwner,
         findOrderByProviderOrderId: async () => provider === 'openpay' ? order : null,
         listOrders: async () => provider === 'codi' ? [order] : [],
         updateOrderStatus: async () => order,
-        markEventProcessed: async (_id: string, token: string) => {
+        markEventProcessed: async (_id: string, _tenantId: string, token: string) => {
           if (token !== currentOwner) return false;
           closes += 1;
           return true;
@@ -852,7 +853,7 @@ describe('PaymentService — ownership antes de efectos', () => {
           persistedStoreEvent.claimToken = claimToken;
           return { outcome: 'claimed' as const, event: { ...persisted, claimToken } };
         },
-        renewEventClaim: async (_id: string, token: string) => token === currentOwner,
+        renewEventClaim: async (_id: string, _tenantId: string, token: string) => token === currentOwner,
         findOrderByProviderOrderId: async () => provider === 'openpay' ? order : null,
         listOrders: async () => provider === 'codi' ? [order] : [],
         updateOrderStatus: async () => order,
@@ -862,7 +863,7 @@ describe('PaymentService — ownership antes de efectos', () => {
         createAction: actionRepo.createAction.bind(actionRepo),
         createActionIdempotent: actionRepo.createActionIdempotent.bind(actionRepo),
         checkpointReactivationStep: actionRepo.checkpointReactivationStep.bind(actionRepo),
-        markEventProcessed: async (_id: string, token: string) => {
+        markEventProcessed: async (_id: string, _tenantId: string, token: string) => {
           if (token !== currentOwner) return false;
           closes += 1;
           persistedStoreEvent.processed = true;
@@ -993,7 +994,7 @@ describe('PaymentService — ownership antes de efectos', () => {
         persistedStoreEvent.claimToken = claimToken;
         return { outcome: 'claimed' as const, event: { ...persisted, claimToken } };
       },
-      renewEventClaim: async (_id: string, token: string) => token === currentOwner,
+      renewEventClaim: async (_id: string, _tenantId: string, token: string) => token === currentOwner,
       findOrderByProviderOrderId: async () => order,
       updateOrderStatus: async () => order,
       listActions: actionRepo.listActions.bind(actionRepo),
@@ -1002,7 +1003,7 @@ describe('PaymentService — ownership antes de efectos', () => {
       createAction: actionRepo.createAction.bind(actionRepo),
       createActionIdempotent: actionRepo.createActionIdempotent.bind(actionRepo),
       checkpointReactivationStep: actionRepo.checkpointReactivationStep.bind(actionRepo),
-      markEventProcessed: async (_id: string, token: string) => {
+      markEventProcessed: async (_id: string, _tenantId: string, token: string) => {
         if (token !== currentOwner) return false;
         closes += 1;
         persistedStoreEvent.processed = true;
@@ -1164,7 +1165,7 @@ describe('PaymentService — ownership antes de efectos', () => {
         persistedStoreEvent.claimToken = claimToken;
         return { outcome: 'claimed' as const, event: { ...persisted, claimToken } };
       },
-      renewEventClaim: async (_id: string, token: string) => token === currentOwner,
+      renewEventClaim: async (_id: string, _tenantId: string, token: string) => token === currentOwner,
       findOrderByProviderOrderId: async () => order,
       updateOrderStatus: async () => order,
       listActions: actionRepo.listActions.bind(actionRepo),
@@ -1186,7 +1187,7 @@ describe('PaymentService — ownership antes de efectos', () => {
         }
         return actionRepo.checkpointReactivationStep(checkpointInput);
       },
-      markEventProcessed: async (_id: string, token: string) => {
+      markEventProcessed: async (_id: string, _tenantId: string, token: string) => {
         if (token !== currentOwner || processed) return false;
         processed = true;
         persistedStoreEvent.processed = true;
@@ -1290,8 +1291,8 @@ describe('PaymentService — ownership antes de efectos', () => {
     expect(result.first.idempotentReason).toBe('in_progress');
     expect(result.second.idempotent).toBe(false);
     expect(result.actions).toHaveLength(1);
-    expect(result.dispatchCalls).toBe(0);
-    expect(result.networkOrders).toHaveLength(0);
+    expect(result.dispatchCalls).toBe(2);
+    expect(result.networkOrders).toHaveLength(1);
     expect(result.suspensionCalls).toBe(2);
     expect(result.suspensionEvents).toHaveLength(1);
     expect(result.timeline).toHaveLength(1);
@@ -1331,8 +1332,8 @@ describe('PaymentService — ownership antes de efectos', () => {
     expect.soft(result.second.idempotent).toBe(false);
     expect.soft(result.redelivery.idempotentReason).toBe('already_processed');
     expect.soft(result.actions).toHaveLength(1);
-    expect.soft(result.dispatchCalls).toBe(0);
-    expect.soft(result.networkOrders).toHaveLength(0);
+    expect.soft(result.dispatchCalls).toBe(2);
+    expect.soft(result.networkOrders).toHaveLength(1);
     expect.soft(result.suspensionCalls).toBe(2);
     expect.soft(result.suspensionEvents).toHaveLength(1);
     expect.soft(result.timeline).toHaveLength(1);
@@ -1351,6 +1352,7 @@ describe('PaymentService — ownership antes de efectos', () => {
     const customerId = `${INTERNAL_FENCING_CUSTOMER_PREFIX}manual`;
     store.CLIENTS.push({
       id: customerId,
+      tenantId: TENANT_A,
       name: 'Cliente manual',
       type: 'residential',
       status: 'suspended',
@@ -1374,6 +1376,7 @@ describe('PaymentService — ownership antes de efectos', () => {
 
     const result = await new PaymentService(manualRepo).reactivateCustomerService(customerId, {
       triggeredBy: 'manual:test',
+      tenantId: TENANT_A,
     });
 
     expect(result.alreadyActive).toBe(false);
@@ -1385,6 +1388,7 @@ describe('PaymentService — ownership antes de efectos', () => {
     const customerId = `${INTERNAL_FENCING_CUSTOMER_PREFIX}manual-failure`;
     store.CLIENTS.push({
       id: customerId,
+      tenantId: TENANT_A,
       name: 'Cliente manual failure',
       type: 'residential',
       status: 'suspended',
@@ -1410,9 +1414,9 @@ describe('PaymentService — ownership antes de efectos', () => {
       .mockRejectedValue(new Error('customers unavailable'));
     const service = new PaymentService(manualRepo);
 
-    await expect(service.reactivateCustomerService(customerId, { triggeredBy: 'manual:test' }))
+    await expect(service.reactivateCustomerService(customerId, { triggeredBy: 'manual:test', tenantId: TENANT_A }))
       .rejects.toThrow('customers unavailable');
-    await expect(service.reactivateCustomerService(customerId, { triggeredBy: 'manual:test' }))
+    await expect(service.reactivateCustomerService(customerId, { triggeredBy: 'manual:test', tenantId: TENANT_A }))
       .rejects.toThrow('customers unavailable');
 
     expect(actions).toHaveLength(0);
@@ -1439,10 +1443,10 @@ describe('PaymentService — ownership antes de efectos', () => {
         currentOwner = claimToken;
         return { outcome: 'claimed' as const, event: { ...event, claimToken } };
       },
-      renewEventClaim: async (_id: string, token: string) => token === currentOwner,
+      renewEventClaim: async (_id: string, _tenantId: string, token: string) => token === currentOwner,
       findOrderByProviderOrderId: async () => null,
       listOrders: async () => [],
-      markEventProcessed: async (_id: string, token: string) => {
+      markEventProcessed: async (_id: string, _tenantId: string, token: string) => {
         if (token !== currentOwner) return false;
         closes += 1;
         return true;

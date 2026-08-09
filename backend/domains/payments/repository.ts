@@ -147,7 +147,7 @@ const requireIdempotentAction = (rec: MikrotikActionRecord): { tenantId: string;
   if (!rec.idempotencyKey) {
     throw new Error('createActionIdempotent requiere idempotencyKey (las acciones manuales usan createAction).');
   }
-  if (!rec.webhookPaymentId) {
+  if (rec.paymentEventId && !rec.webhookPaymentId) {
     throw new Error('createActionIdempotent requiere webhookPaymentId canónico.');
   }
   return { tenantId, key: rec.idempotencyKey };

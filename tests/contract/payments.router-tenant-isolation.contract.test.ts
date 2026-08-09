@@ -143,7 +143,10 @@ describe('MT-04-F1 — reactivación nunca referencia infraestructura de otro WI
     store.MIKROTIK_ROUTERS.push(routerOf('router-b', TENANT_B));
     const service = new PaymentService(new StorePaymentRepository());
 
-    await expect(service.reactivateCustomerService(CUSTOMER_A, { tenantId: TENANT_A }))
+    await expect(service.reactivateCustomerService(CUSTOMER_A, {
+      tenantId: TENANT_A,
+      idempotencyKey: 'f1:no-router:customer-a',
+    }))
       .rejects.toThrow(/router.*tenant/i);
 
     expect(store.CLIENTS[0]?.status).toBe('suspended');
@@ -156,7 +159,10 @@ describe('MT-04-F1 — reactivación nunca referencia infraestructura de otro WI
     store.MIKROTIK_ROUTERS.push(routerOf('router-a', TENANT_A, false));
     const service = new PaymentService(new StorePaymentRepository());
 
-    await expect(service.reactivateCustomerService(CUSTOMER_A, { tenantId: TENANT_A }))
+    await expect(service.reactivateCustomerService(CUSTOMER_A, {
+      tenantId: TENANT_A,
+      idempotencyKey: 'f1:no-credentials:customer-a',
+    }))
       .rejects.toThrow(/router.*elegible/i);
 
     expect(store.CLIENTS[0]?.status).toBe('suspended');
