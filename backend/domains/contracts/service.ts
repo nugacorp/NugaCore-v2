@@ -1,0 +1,179 @@
+import { randomUUID } from 'node:crypto';
+import { BadRequestError, ConflictError, NotFoundError } from '../../common/errors';
+import type { ContractTemplateView } from '../contract-templates/types';
+import type { Client, Plan } from '../../../src/types';
+import type { ContractRecord } from './types';
+
+export interface ContractsRepository {
+  createDraft(record: ContractRecord): Promise<ContractRecord>;
+  get(tenantId: string, contractId: string): Promise<ContractRecord | null>;
+}
+
+export interface ContractServiceDependencies {
+  repository: ContractsRepository;
+  templates: { getTemplate(tenantId: string): Promise<ContractTemplateView> };
+  customers: { getById(clientId: string, tenantId: string): Promise<Client | null> };
+  plans: { getById(planId: string, tenantId: string): Promise<Plan | null> };
+  tenants: { getTenant(tenantId: string): Promise<{ id: string; name: string; rfc?: string } | null> };
+  pdf: { renderSignedContract(...args: unknown[]): Promise<Buffer> };
+  storage: {
+    upload(storagePath: string, bytes: Buffer, mimeType: string): Promise<void>;
+    remove(storagePath: string): Promise<boolean>;
+  };
+  id(): string;
+  now(): Date;
+}
+
+const cloneRecord = (record: ContractRecord): ContractRecord => ({
+  ...record,
+  renderedClauses: record.renderedClauses.map((clause) => ({ ...clause })),
+});
+
+export class MemoryContractsRepository implements ContractsRepository {
+  private readonly records = new Map<string, ContractRecord>();
+
+  async createDraft(record: ContractRecord): Promise<ContractRecord> {
+    this.records.set(`${record.tenantId}:${record.id}`, cloneRecord(record));
+    return cloneRecord(record);
+  }
+
+  async get(tenantId: string, contractId: string): Promise<ContractRecord | null> {
+    const record = this.records.get(`${tenantId}:${contractId}`);
+    return record ? cloneRecord(record) : null;
+  }
+}
+
+const parseGenerateInput = (input: unknown): { clientId: string } => {
+  if (!input || typeof input !== 'object' || Array.isArray(input)) {
+    throw new BadRequestError('El cuerpo debe ser un objeto', 'INVALID_CONTRACT_GENERATION');
+  }
+  const body = input as Record<string, unknown>;
+  if (Object.keys(body).some((key) => key !== 'clientId')) {
+    throw new BadRequestError('El cuerpo contiene campos no permitidos', 'INVALID_CONTRACT_GENERATION');
+  }
+  if (typeof body.clientId !== 'string' || !body.clientId.trim() || body.clientId.length > 128) {
+    throw new BadRequestError('clientId debe ser un string válido', 'INVALID_CONTRACT_CLIENT_ID');
+  }
+  return { clientId: body.clientId.trim() };
+};
+
+const variableValues = (
+  client: Client,
+  plan: Plan,
+  tenant: { name: string; rfc?: string },
+  now: Date,
+): Record<string, string | undefined> => ({
+  '{{cliente.nombre}}': client.name?.trim() || undefined,
+  '{{cliente.rfc}}': typeof (client as Client & { rfc?: unknown }).rfc === 'string'
+    ? (client as Client & { rfc: string }).rfc.trim() || undefined
+    : undefined,
+  '{{cliente.direccion}}': client.address?.trim() || undefined,
+  '{{plan.nombre}}': plan.name?.trim() || undefined,
+  '{{plan.velocidad}}': Number.isFinite(plan.speedMbpsDown) && Number.isFinite(plan.speedMbpsUp)
+    ? `${plan.speedMbpsDown} Mbps descarga / ${plan.speedMbpsUp} Mbps subida`
+    : undefined,
+  '{{precio}}': Number.isFinite(plan.price) ? `$${plan.price.toFixed(2)}` : undefined,
+  '{{wisp.nombre}}': tenant.name?.trim() || undefined,
+  '{{wisp.rfc}}': tenant.rfc?.trim() || undefined,
+  '{{fecha.contrato}}': new Intl.DateTimeFormat('es-MX', {
+    year: 'numeric', month: 'long', day: 'numeric', timeZone: 'UTC',
+  }).format(now),
+});
+
+const renderTemplate = (
+  template: ContractTemplateView,
+  client: Client,
+  plan: Plan,
+  tenant: { name: string; rfc?: string },
+  now: Date,
+): { clauses: ContractRecord['renderedClauses']; text: string } => {
+  const values = variableValues(client, plan, tenant, now);
+  const clauses = template.clauses.map((clause) => {
+    let cuerpo = clause.cuerpo;
+    for (const token of cuerpo.match(/{{[^{}]*}}/g) ?? []) {
+      const value = values[token];
+      if (!value) {
+        throw new BadRequestError(
+          `Falta el dato requerido para ${token}`,
+          'CONTRACT_VARIABLE_DATA_MISSING',
+        );
+      }
+      cuerpo = cuerpo.split(token).join(value);
+    }
+    if (/[{}]/.test(cuerpo)) {
+      throw new BadRequestError(
+        'La plantilla contiene variables sin sustituir',
+        'CONTRACT_VARIABLE_DATA_MISSING',
+      );
+    }
+    return { ...clause, cuerpo };
+  });
+  return {
+    clauses,
+    text: clauses.map((clause) => `${clause.titulo}\n${clause.cuerpo}`).join('\n\n'),
+  };
+};
+
+export class ContractService {
+  constructor(private readonly deps: ContractServiceDependencies) {}
+
+  async generate(tenantId: string, input: unknown): Promise<ContractRecord> {
+    const { clientId } = parseGenerateInput(input);
+    const client = await this.deps.customers.getById(clientId, tenantId);
+    if (!client) throw new NotFoundError('Cliente no encontrado', 'CONTRACT_CLIENT_NOT_FOUND');
+    if (client.status === 'lead') {
+      throw new ConflictError(
+        'Convierte el prospecto a cliente antes de generar un contrato.',
+        'CONTRACT_LEAD_NOT_ALLOWED',
+      );
+    }
+    const [template, plan, tenant] = await Promise.all([
+      this.deps.templates.getTemplate(tenantId),
+      this.deps.plans.getById(client.planId, tenantId),
+      this.deps.tenants.getTenant(tenantId),
+    ]);
+    if (!template.configured || template.version < 1) {
+      throw new ConflictError(
+        'Configura y revisa la plantilla antes de generar contratos.',
+        'CONTRACT_TEMPLATE_NOT_CONFIGURED',
+      );
+    }
+    if (!plan || !tenant) {
+      throw new BadRequestError(
+        'Faltan datos del plan o del WISP para generar el contrato.',
+        'CONTRACT_VARIABLE_DATA_MISSING',
+      );
+    }
+    const now = this.deps.now();
+    const rendered = renderTemplate(template, client, plan, tenant, now);
+    const timestamp = now.toISOString();
+    return this.deps.repository.createDraft({
+      id: this.deps.id(),
+      tenantId,
+      clientId,
+      templateVersion: template.version,
+      renderedClauses: rendered.clauses,
+      renderedText: rendered.text,
+      status: 'draft',
+      documentId: null,
+      pdfSha256: null,
+      signedAt: null,
+      voidedAt: null,
+      createdAt: timestamp,
+      updatedAt: timestamp,
+    });
+  }
+
+  async get(tenantId: string, contractId: string, clientId?: string): Promise<ContractRecord> {
+    const record = await this.deps.repository.get(tenantId, contractId);
+    if (!record || (clientId && record.clientId !== clientId)) {
+      throw new NotFoundError('Contrato no encontrado', 'CONTRACT_NOT_FOUND');
+    }
+    return record;
+  }
+}
+
+export const defaultContractRuntime = (): Pick<ContractServiceDependencies, 'id' | 'now'> => ({
+  id: () => `contract-${randomUUID()}`,
+  now: () => new Date(),
+});
