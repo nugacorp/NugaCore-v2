@@ -1,12 +1,48 @@
-import { randomUUID } from 'node:crypto';
+import { createHash, randomUUID } from 'node:crypto';
 import { BadRequestError, ConflictError, NotFoundError } from '../../common/errors';
+import type { AppRole } from '../../common/rbac';
+import { buildDocumentPath } from '../../services/supabase-storage';
 import type { ContractTemplateView } from '../contract-templates/types';
 import type { Client, Plan } from '../../../src/types';
-import type { ContractRecord } from './types';
+import type { ContractRecord, ContractSignatureEvidence } from './types';
+
+export const MAX_CONTRACT_SIGNATURE_BYTES = 48 * 1024;
+
+export interface ContractSignApplyCommand {
+  tenantId: string;
+  contractId: string;
+  documentId: string;
+  fileName: string;
+  storagePath: string;
+  mimeType: 'application/pdf';
+  pdfSha256: string;
+  witnessUserId: string;
+  witnessRole: AppRole;
+  signerIp: string | null;
+  userAgent: string | null;
+  geo: ContractSignatureEvidence['geo'];
+  signedAt: string;
+}
+
+export interface ContractSignApplyResult {
+  contractId: string;
+  clientId: string;
+  documentId: string;
+  pdfSha256: string;
+  signedAt: string;
+  alreadySigned: boolean;
+  voidedContractIds: string[];
+}
+
+export interface ContractSignResult extends ContractSignApplyResult {
+  concurrentAttemptDiscarded: boolean;
+}
 
 export interface ContractsRepository {
   createDraft(record: ContractRecord): Promise<ContractRecord>;
   get(tenantId: string, contractId: string): Promise<ContractRecord | null>;
+  getEvidence(tenantId: string, contractId: string): Promise<ContractSignatureEvidence | null>;
+  signApply(command: ContractSignApplyCommand): Promise<ContractSignApplyResult>;
 }
 
 export interface ContractServiceDependencies {
@@ -15,7 +51,13 @@ export interface ContractServiceDependencies {
   customers: { getById(clientId: string, tenantId: string): Promise<Client | null> };
   plans: { getById(planId: string, tenantId: string): Promise<Plan | null> };
   tenants: { getTenant(tenantId: string): Promise<{ id: string; name: string; rfc?: string } | null> };
-  pdf: { renderSignedContract(...args: unknown[]): Promise<Buffer> };
+  pdf: {
+    renderSignedContract(input: {
+      contract: ContractRecord;
+      signaturePng: Buffer;
+      witness: { userId: string; role: AppRole };
+    }): Promise<Buffer>;
+  };
   storage: {
     upload(storagePath: string, bytes: Buffer, mimeType: string): Promise<void>;
     remove(storagePath: string): Promise<boolean>;
@@ -31,6 +73,7 @@ const cloneRecord = (record: ContractRecord): ContractRecord => ({
 
 export class MemoryContractsRepository implements ContractsRepository {
   private readonly records = new Map<string, ContractRecord>();
+  private readonly evidence = new Map<string, ContractSignatureEvidence>();
 
   async createDraft(record: ContractRecord): Promise<ContractRecord> {
     this.records.set(`${record.tenantId}:${record.id}`, cloneRecord(record));
@@ -41,6 +84,146 @@ export class MemoryContractsRepository implements ContractsRepository {
     const record = this.records.get(`${tenantId}:${contractId}`);
     return record ? cloneRecord(record) : null;
   }
+
+  async getEvidence(tenantId: string, contractId: string): Promise<ContractSignatureEvidence | null> {
+    const record = this.evidence.get(`${tenantId}:${contractId}`);
+    return record ? structuredClone(record) : null;
+  }
+
+  async signApply(command: ContractSignApplyCommand): Promise<ContractSignApplyResult> {
+    const key = `${command.tenantId}:${command.contractId}`;
+    const current = this.records.get(key);
+    if (!current) throw new NotFoundError('Contrato no encontrado', 'CONTRACT_NOT_FOUND');
+    if (current.status === 'signed' && current.documentId && current.pdfSha256 && current.signedAt) {
+      return {
+        contractId: current.id,
+        clientId: current.clientId,
+        documentId: current.documentId,
+        pdfSha256: current.pdfSha256,
+        signedAt: current.signedAt,
+        alreadySigned: true,
+        voidedContractIds: [],
+      };
+    }
+    if (current.status !== 'draft') {
+      throw new ConflictError('El contrato no se puede firmar en su estado actual', 'CONTRACT_NOT_SIGNABLE');
+    }
+
+    const voidedContractIds: string[] = [];
+    for (const [otherKey, other] of this.records) {
+      if (
+        otherKey !== key
+        && other.tenantId === command.tenantId
+        && other.clientId === current.clientId
+        && other.status === 'signed'
+      ) {
+        other.status = 'voided';
+        other.voidedAt = command.signedAt;
+        other.updatedAt = command.signedAt;
+        voidedContractIds.push(other.id);
+      }
+    }
+
+    current.status = 'signed';
+    current.documentId = command.documentId;
+    current.pdfSha256 = command.pdfSha256;
+    current.signedAt = command.signedAt;
+    current.updatedAt = command.signedAt;
+    this.evidence.set(key, {
+      id: `cse-${command.contractId}`,
+      tenantId: command.tenantId,
+      contractId: command.contractId,
+      pdfSha256: command.pdfSha256,
+      signedAt: command.signedAt,
+      witnessUserId: command.witnessUserId,
+      witnessRole: command.witnessRole,
+      signerIp: command.signerIp,
+      userAgent: command.userAgent,
+      geo: command.geo ? structuredClone(command.geo) : null,
+      createdAt: command.signedAt,
+    });
+    return {
+      contractId: current.id,
+      clientId: current.clientId,
+      documentId: command.documentId,
+      pdfSha256: command.pdfSha256,
+      signedAt: command.signedAt,
+      alreadySigned: false,
+      voidedContractIds: voidedContractIds.sort(),
+    };
+  }
+}
+
+type Geo = NonNullable<ContractSignatureEvidence['geo']>;
+
+const parseGeo = (value: unknown): Geo | null => {
+  if (value === undefined || value === null) return null;
+  if (!value || typeof value !== 'object' || Array.isArray(value)) {
+    throw new BadRequestError('geo debe ser un objeto', 'INVALID_CONTRACT_GEO');
+  }
+  const geo = value as Record<string, unknown>;
+  if (Object.keys(geo).some((key) => !['latitude', 'longitude', 'accuracy'].includes(key))) {
+    throw new BadRequestError('geo contiene campos no permitidos', 'INVALID_CONTRACT_GEO');
+  }
+  if (
+    typeof geo.latitude !== 'number'
+    || !Number.isFinite(geo.latitude)
+    || geo.latitude < -90
+    || geo.latitude > 90
+    || typeof geo.longitude !== 'number'
+    || !Number.isFinite(geo.longitude)
+    || geo.longitude < -180
+    || geo.longitude > 180
+    || (geo.accuracy !== undefined
+      && (typeof geo.accuracy !== 'number' || !Number.isFinite(geo.accuracy) || geo.accuracy < 0))
+  ) {
+    throw new BadRequestError('geo contiene coordenadas inválidas', 'INVALID_CONTRACT_GEO');
+  }
+  return {
+    latitude: geo.latitude,
+    longitude: geo.longitude,
+    ...(geo.accuracy !== undefined ? { accuracy: geo.accuracy } : {}),
+  };
+};
+
+const parseSignatureInput = (input: unknown): { signaturePng: Buffer; geo: Geo | null } => {
+  if (!input || typeof input !== 'object' || Array.isArray(input)) {
+    throw new BadRequestError('El cuerpo debe ser un objeto', 'INVALID_CONTRACT_SIGNATURE');
+  }
+  const body = input as Record<string, unknown>;
+  if (Object.keys(body).some((key) => !['signaturePng', 'geo'].includes(key))) {
+    throw new BadRequestError('El cuerpo contiene campos no permitidos', 'INVALID_CONTRACT_SIGNATURE');
+  }
+  if (typeof body.signaturePng !== 'string') {
+    throw new BadRequestError('signaturePng debe ser un PNG base64', 'INVALID_CONTRACT_SIGNATURE');
+  }
+  const match = /^data:image\/png;base64,([A-Za-z0-9+/]+={0,2})$/.exec(body.signaturePng);
+  if (!match) {
+    throw new BadRequestError('signaturePng debe ser un PNG base64', 'INVALID_CONTRACT_SIGNATURE');
+  }
+  const bytes = Buffer.from(match[1], 'base64');
+  const canonical = bytes.toString('base64').replace(/=+$/, '');
+  if (canonical !== match[1].replace(/=+$/, '')) {
+    throw new BadRequestError('signaturePng contiene base64 inválido', 'INVALID_CONTRACT_SIGNATURE');
+  }
+  if (bytes.length > MAX_CONTRACT_SIGNATURE_BYTES) {
+    throw new BadRequestError(
+      `La firma excede el máximo de ${MAX_CONTRACT_SIGNATURE_BYTES} bytes`,
+      'CONTRACT_SIGNATURE_TOO_LARGE',
+    );
+  }
+  const pngMagic = Buffer.from([0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a]);
+  if (bytes.length < pngMagic.length || !bytes.subarray(0, pngMagic.length).equals(pngMagic)) {
+    throw new BadRequestError('signaturePng no contiene un PNG válido', 'INVALID_CONTRACT_SIGNATURE');
+  }
+  return { signaturePng: bytes, geo: parseGeo(body.geo) };
+};
+
+export interface ContractWitnessContext {
+  userId: string;
+  role: AppRole;
+  signerIp?: string | null;
+  userAgent?: string | null;
 }
 
 const parseGenerateInput = (input: unknown): { clientId: string } => {
@@ -170,6 +353,79 @@ export class ContractService {
       throw new NotFoundError('Contrato no encontrado', 'CONTRACT_NOT_FOUND');
     }
     return record;
+  }
+
+  async sign(
+    tenantId: string,
+    contractId: string,
+    input: unknown,
+    witness: ContractWitnessContext,
+  ): Promise<ContractSignResult> {
+    const parsed = parseSignatureInput(input);
+    if (!witness.userId?.trim() || !['super admin', 'administrador', 'tecnico'].includes(witness.role)) {
+      throw new BadRequestError('Se requiere un testigo identificado', 'CONTRACT_WITNESS_REQUIRED');
+    }
+    const contract = await this.get(tenantId, contractId);
+    if (contract.status === 'signed' && contract.documentId && contract.pdfSha256 && contract.signedAt) {
+      return {
+        contractId: contract.id,
+        clientId: contract.clientId,
+        documentId: contract.documentId,
+        pdfSha256: contract.pdfSha256,
+        signedAt: contract.signedAt,
+        alreadySigned: true,
+        voidedContractIds: [],
+        concurrentAttemptDiscarded: false,
+      };
+    }
+    if (contract.status !== 'draft') {
+      throw new ConflictError('El contrato no se puede firmar en su estado actual', 'CONTRACT_NOT_SIGNABLE');
+    }
+
+    const documentId = this.deps.id();
+    const fileName = `contrato-${contract.id}-firmado.pdf`;
+    const storagePath = buildDocumentPath(tenantId, contract.clientId, documentId, fileName);
+    const bytes = await this.deps.pdf.renderSignedContract({
+      contract,
+      signaturePng: parsed.signaturePng,
+      witness: { userId: witness.userId.trim(), role: witness.role },
+    });
+    const pdfSha256 = createHash('sha256').update(bytes).digest('hex');
+
+    try {
+      await this.deps.storage.upload(storagePath, bytes, 'application/pdf');
+    } catch (error) {
+      await this.deps.storage.remove(storagePath);
+      throw error;
+    }
+
+    let applied: ContractSignApplyResult;
+    try {
+      applied = await this.deps.repository.signApply({
+        tenantId,
+        contractId,
+        documentId,
+        fileName,
+        storagePath,
+        mimeType: 'application/pdf',
+        pdfSha256,
+        witnessUserId: witness.userId.trim(),
+        witnessRole: witness.role,
+        signerIp: witness.signerIp?.slice(0, 128) || null,
+        userAgent: witness.userAgent?.slice(0, 512) || null,
+        geo: parsed.geo,
+        signedAt: this.deps.now().toISOString(),
+      });
+    } catch (error) {
+      await this.deps.storage.remove(storagePath);
+      throw error;
+    }
+
+    if (applied.alreadySigned) await this.deps.storage.remove(storagePath);
+    return {
+      ...applied,
+      concurrentAttemptDiscarded: applied.alreadySigned,
+    };
   }
 }
 
