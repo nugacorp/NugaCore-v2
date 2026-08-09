@@ -8,7 +8,7 @@ import {
   sanitizeFileName,
 } from '../../backend/services/supabase-storage';
 import { Client360Service } from '../../backend/domains/client-360/service';
-import { client360Memory } from '../../backend/domains/client-360/memory-store';
+import { client360Memory, isEmittedDocumentId, uid } from '../../backend/domains/client-360/memory-store';
 
 // ====================================================================
 // Storage de documentos de cliente.
@@ -79,6 +79,94 @@ describe('buildDocumentPath', () => {
     const path = buildDocumentPath('tenant-a', '../tenant-b', 'doc-9', 'x.pdf');
     expect(path.startsWith('tenant-a/')).toBe(true);
     expect(path.split('/')).not.toContain('..');
+  });
+});
+
+describe('buildDocumentPath es INYECTIVA — dos documentos nunca comparten ruta', () => {
+  // Los tests de arriba prueban que la ruta no ESCAPA del tenant. Ésta es otra
+  // propiedad, y la que el resto del diseño da por supuesta: que la ruta
+  // identifica un único documento.
+  //
+  // No lo era. El tercer segmento es `${documentId}-${sanitizeFileName(fileName)}`
+  // y `-` era legal dentro del id, así que el id absorbía el prefijo del nombre.
+  // El sufijo necesario lo publica este mismo trabajo: `fileNamePrefix="ine-frente"`.
+
+  const LEGITIMO = 'doc-1754650000000-a1b2c3d4';
+  const ALIAS = 'doc-1754650000000-a1b2c3d4-ine';
+
+  it('la colisión que existía: dos ids distintos, la misma ruta', () => {
+    const legit = buildDocumentPath('tenant-a', 'cli-1', LEGITIMO, 'ine-frente.jpg');
+    const alias = buildDocumentPath('tenant-a', 'cli-1', ALIAS, 'frente.jpg');
+
+    // La función sigue siendo colisionable si se le pasa cualquier cosa: quien
+    // garantiza la unicidad es la validación del id, no `buildDocumentPath`.
+    expect(alias).toBe(legit);
+  });
+
+  it('y el id que la provoca ya no es aceptable', () => {
+    expect(isEmittedDocumentId(LEGITIMO)).toBe(true);
+    expect(isEmittedDocumentId(ALIAS)).toBe(false);
+  });
+
+  it('el formato que emite uid() pasa: emisor y validador son un par', () => {
+    // Si alguien simplifica `uid`, este test cae y avisa de que la ruta deja de
+    // ser única antes de que lo descubra un cliente.
+    for (let i = 0; i < 200; i += 1) {
+      expect(isEmittedDocumentId(uid('doc')), uid('doc')).toBe(true);
+    }
+  });
+
+  it('ningún id válido es prefijo de otro seguido de `-`', () => {
+    // Ésta es la propiedad de la que cuelga la inyectividad: tras el último
+    // guión hay exactamente 8 hex y fin, y `\d+` no admite letras ni guiones.
+    const ids = Array.from({ length: 300 }, () => uid('doc'));
+    for (const a of ids) {
+      for (const sufijo of ['ine', 'x', '0', 'a1b2c3d4', 'frente']) {
+        expect(isEmittedDocumentId(`${a}-${sufijo}`), `${a}-${sufijo}`).toBe(false);
+      }
+    }
+  });
+
+  it('rechaza las formas laxas que el regex anterior admitía', () => {
+    for (const malo of [
+      'doc-abc123',                     // sin marca de tiempo
+      'doc-1754650000000',              // sin entropía
+      'doc-1754650000000-A1B2C3D4',     // hex en mayúsculas
+      'doc-1754650000000-a1b2c3d',      // 7 hex
+      'doc-1754650000000-a1b2c3d45',    // 9 hex
+      'doc-1754650000000-a1b2c3d4-ine', // el alias
+      'documento-1-a1b2c3d4',           // otro prefijo
+      'doc-1754650000000-zzzzzzzz',     // fuera del alfabeto hex
+    ]) {
+      expect(isEmittedDocumentId(malo), malo).toBe(false);
+    }
+  });
+
+  it('addDocument rechaza el id alias', async () => {
+    await expect(
+      serviceWithOwnedClient().addDocument('c-1', 'tenant-a', {
+        fileName: 'frente.jpg',
+        documentId: ALIAS,
+      }),
+    ).rejects.toMatchObject({ statusCode: 400, code: 'INVALID_FIELD' });
+  });
+
+  it('orphan-cleanup también: si no, señalaría el objeto de otro documento', async () => {
+    await expect(
+      serviceWithOwnedClient().cleanupOrphanDocumentObject('c-1', 'tenant-a', {
+        documentId: ALIAS,
+        fileName: 'frente.jpg',
+      }),
+    ).rejects.toMatchObject({ statusCode: 400, code: 'INVALID_FIELD' });
+  });
+
+  it('el documento legítimo sigue pasando por los dos caminos', async () => {
+    const doc = await serviceWithOwnedClient().addDocument('c-1', 'tenant-a', {
+      fileName: 'ine-frente.jpg',
+      documentId: LEGITIMO,
+      docType: 'ine',
+    });
+    expect(doc.storagePath).toBe('tenant-a/c-1/doc-1754650000000-a1b2c3d4-ine-frente.jpg');
   });
 });
 
