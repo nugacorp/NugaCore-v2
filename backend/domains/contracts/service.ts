@@ -1,7 +1,14 @@
 import { createHash, randomUUID } from 'node:crypto';
 import { BadRequestError, ConflictError, NotFoundError } from '../../common/errors';
 import type { AppRole } from '../../common/rbac';
-import { buildDocumentPath } from '../../services/supabase-storage';
+import { buildDocumentPath, removeDocumentObject, uploadDocumentObject } from '../../services/supabase-storage';
+import { isSupabaseAdminConfigured, supabaseAdmin } from '../../services/supabase-admin';
+import { getContractTemplateService } from '../contract-templates/service';
+import { getCustomersService } from '../customers/service';
+import { getPlansService } from '../plans/service';
+import { getTenancyService } from '../tenancy/service';
+import { PdfKitContractRenderer } from './pdf';
+import { SupabaseContractsRepository } from './repository';
 import type { ContractTemplateView } from '../contract-templates/types';
 import type { Client, Plan } from '../../../src/types';
 import type { ContractRecord, ContractSignatureEvidence } from './types';
@@ -43,6 +50,9 @@ export interface ContractsRepository {
   get(tenantId: string, contractId: string): Promise<ContractRecord | null>;
   getEvidence(tenantId: string, contractId: string): Promise<ContractSignatureEvidence | null>;
   signApply(command: ContractSignApplyCommand): Promise<ContractSignApplyResult>;
+  deleteDraft(tenantId: string, contractId: string): Promise<boolean>;
+  void(tenantId: string, contractId: string, voidedAt: string): Promise<ContractRecord | null>;
+  findSignedForClient(tenantId: string, clientId: string): Promise<ContractRecord | null>;
 }
 
 export interface ContractServiceDependencies {
@@ -151,6 +161,31 @@ export class MemoryContractsRepository implements ContractsRepository {
       alreadySigned: false,
       voidedContractIds: voidedContractIds.sort(),
     };
+  }
+
+  async deleteDraft(tenantId: string, contractId: string): Promise<boolean> {
+    const key = `${tenantId}:${contractId}`;
+    const current = this.records.get(key);
+    if (!current || current.status !== 'draft') return false;
+    return this.records.delete(key);
+  }
+
+  async void(tenantId: string, contractId: string, voidedAt: string): Promise<ContractRecord | null> {
+    const current = this.records.get(`${tenantId}:${contractId}`);
+    if (!current) return null;
+    if (current.status !== 'voided') {
+      current.status = 'voided';
+      current.voidedAt = voidedAt;
+      current.updatedAt = voidedAt;
+    }
+    return cloneRecord(current);
+  }
+
+  async findSignedForClient(tenantId: string, clientId: string): Promise<ContractRecord | null> {
+    const matches = [...this.records.values()]
+      .filter((record) => record.tenantId === tenantId && record.clientId === clientId && record.status === 'signed')
+      .sort((a, b) => String(b.signedAt).localeCompare(String(a.signedAt)));
+    return matches[0] ? cloneRecord(matches[0]) : null;
   }
 }
 
@@ -271,7 +306,7 @@ const renderTemplate = (
   now: Date,
 ): { clauses: ContractRecord['renderedClauses']; text: string } => {
   const values = variableValues(client, plan, tenant, now);
-  const clauses = template.clauses.map((clause) => {
+  const clauses = template.clauses.filter((clause) => clause.activa).map((clause) => {
     let cuerpo = clause.cuerpo;
     for (const token of cuerpo.match(/{{[^{}]*}}/g) ?? []) {
       const value = values[token];
@@ -355,6 +390,42 @@ export class ContractService {
     return record;
   }
 
+  async deleteDraft(tenantId: string, contractId: string, clientId: string): Promise<{ deleted: true }> {
+    const record = await this.get(tenantId, contractId, clientId);
+    if (record.status !== 'draft') {
+      throw new ConflictError('Sólo se pueden eliminar contratos en borrador', 'CONTRACT_DELETE_NOT_ALLOWED');
+    }
+    if (!await this.deps.repository.deleteDraft(tenantId, contractId)) {
+      throw new ConflictError('El contrato cambió antes de eliminarse', 'CONTRACT_DELETE_NOT_ALLOWED');
+    }
+    return { deleted: true };
+  }
+
+  async void(tenantId: string, contractId: string): Promise<ContractRecord> {
+    const current = await this.get(tenantId, contractId);
+    if (current.status === 'voided') return current;
+    const record = await this.deps.repository.void(tenantId, contractId, this.deps.now().toISOString());
+    if (!record) throw new NotFoundError('Contrato no encontrado', 'CONTRACT_NOT_FOUND');
+    return record;
+  }
+
+  async getEvidence(tenantId: string, contractId: string): Promise<ContractSignatureEvidence> {
+    await this.get(tenantId, contractId);
+    const evidence = await this.deps.repository.getEvidence(tenantId, contractId);
+    if (!evidence) throw new NotFoundError('Evidencia no encontrada', 'CONTRACT_EVIDENCE_NOT_FOUND');
+    return evidence;
+  }
+
+  async getPortalStatus(
+    tenantId: string,
+    clientId: string,
+  ): Promise<{ status: 'signed'; signedAt: string } | null> {
+    const template = await this.deps.templates.getTemplate(tenantId);
+    if (!template.showInPortal) return null;
+    const signed = await this.deps.repository.findSignedForClient(tenantId, clientId);
+    return signed?.signedAt ? { status: 'signed', signedAt: signed.signedAt } : null;
+  }
+
   async sign(
     tenantId: string,
     contractId: string,
@@ -392,10 +463,13 @@ export class ContractService {
     });
     const pdfSha256 = createHash('sha256').update(bytes).digest('hex');
 
+    const compensate = async (): Promise<void> => {
+      try { await this.deps.storage.remove(storagePath); } catch { /* best effort */ }
+    };
     try {
       await this.deps.storage.upload(storagePath, bytes, 'application/pdf');
     } catch (error) {
-      await this.deps.storage.remove(storagePath);
+      await compensate();
       throw error;
     }
 
@@ -417,11 +491,11 @@ export class ContractService {
         signedAt: this.deps.now().toISOString(),
       });
     } catch (error) {
-      await this.deps.storage.remove(storagePath);
+      await compensate();
       throw error;
     }
 
-    if (applied.alreadySigned) await this.deps.storage.remove(storagePath);
+    if (applied.alreadySigned) await compensate();
     return {
       ...applied,
       concurrentAttemptDiscarded: applied.alreadySigned,
@@ -433,3 +507,30 @@ export const defaultContractRuntime = (): Pick<ContractServiceDependencies, 'id'
   id: () => `contract-${randomUUID()}`,
   now: () => new Date(),
 });
+
+let singleton: ContractService | null = null;
+
+export const getContractService = (): ContractService => {
+  if (!singleton) {
+    const repository: ContractsRepository = isSupabaseAdminConfigured && supabaseAdmin
+      ? new SupabaseContractsRepository(supabaseAdmin)
+      : new MemoryContractsRepository();
+    singleton = new ContractService({
+      repository,
+      templates: getContractTemplateService(),
+      customers: getCustomersService(),
+      plans: getPlansService(),
+      tenants: getTenancyService(),
+      pdf: new PdfKitContractRenderer(),
+      storage: { upload: uploadDocumentObject, remove: removeDocumentObject },
+      ...defaultContractRuntime(),
+    });
+  }
+  return singleton;
+};
+
+export const setContractServiceForTests = (service: ContractService | null): void => {
+  singleton = service;
+};
+
+export const resetContractService = (): void => { singleton = null; };

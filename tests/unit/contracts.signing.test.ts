@@ -179,6 +179,19 @@ describe('ContractService signing', () => {
     expect((await repository.getEvidence(tenantId, 'contract-a'))?.witnessUserId).toBe('tech-first');
   });
 
+  it('dos firmantes en contratos sucesivos dejan uno vigente y conservan ambas evidencias', async () => {
+    await service.sign(tenantId, 'contract-a', { signaturePng }, witness('tech-first'));
+    await repository.createDraft({ ...draft(), id: 'contract-b' });
+    vi.mocked(deps.id).mockReturnValue('document-attempt-b');
+
+    await service.sign(tenantId, 'contract-b', { signaturePng }, witness('tech-second'));
+
+    expect(await repository.get(tenantId, 'contract-a')).toMatchObject({ status: 'voided' });
+    expect(await repository.get(tenantId, 'contract-b')).toMatchObject({ status: 'signed' });
+    expect(await repository.getEvidence(tenantId, 'contract-a')).toMatchObject({ witnessUserId: 'tech-first' });
+    expect(await repository.getEvidence(tenantId, 'contract-b')).toMatchObject({ witnessUserId: 'tech-second' });
+  });
+
   it('el perdedor concurrente elimina sólo su objeto y devuelve documento/hash del ganador', async () => {
     const winningHash = 'b'.repeat(64);
     vi.spyOn(repository, 'signApply').mockResolvedValue({
