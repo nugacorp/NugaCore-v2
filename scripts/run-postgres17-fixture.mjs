@@ -81,6 +81,14 @@ const CASES = {
     fixture: 'tests/db/portal-config-postgres17.sql',
     fixtureLabel: 'fixture: la config sobrevive al reinicio',
   },
+  'contract-sign': {
+    label: 'Contrato presencial · firma atómica y evidencia append-only',
+    db: 'contractsign',
+    migrations: ['supabase/migrations/20260809120000_contracts_and_signature.sql'],
+    bootstrap: 'tests/db/contract-sign-postgres17-bootstrap.sql',
+    fixture: 'tests/db/contract-sign-postgres17.sql',
+    fixtureLabel: 'fixture: ACL, carrera, reemplazo y acciones referenciales',
+  },
   'schema-replay': {
     label: 'El esquema se reconstruye desde cero',
     db: 'replay',
