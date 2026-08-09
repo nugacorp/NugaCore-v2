@@ -152,6 +152,29 @@ describe('MT-04-F3 — saga durable de reactivación', () => {
     expect(store.CLIENTS[0]?.status).toBe('active');
   });
 
+  it('orden sin acción reanuda la saga aunque el consumidor ya activó al cliente', async () => {
+    const repo = new StorePaymentRepository();
+    const actionWrite = vi.spyOn(repo, 'createActionIdempotent')
+      .mockRejectedValueOnce(new Error('action storage unavailable'));
+    const service = new PaymentService(repo);
+
+    await expect(service.reactivateCustomerService(CUSTOMER, context()))
+      .rejects.toThrow('action storage unavailable');
+    expect(engineStore.ORDERS).toHaveLength(1);
+    expect(store.MIKROTIK_ACTIONS).toHaveLength(0);
+    expect(store.CLIENT_TIMELINE).toHaveLength(0);
+
+    store.CLIENTS[0]!.status = 'active';
+    actionWrite.mockRestore();
+    const retry = await service.reactivateCustomerService(CUSTOMER, context());
+
+    expect(retry.alreadyActive).toBe(false);
+    expect(retry.mikrotikAction).not.toBeNull();
+    expect(engineStore.ORDERS).toHaveLength(1);
+    expect(store.MIKROTIK_ACTIONS).toHaveLength(1);
+    expect(store.CLIENT_TIMELINE).toHaveLength(1);
+  });
+
   it('retries concurrentes con la misma key comparten orden, acción y timeline', async () => {
     vi.stubEnv('PAYMENTS_ROUTER_LIVE', 'false');
     const service = new PaymentService(new StorePaymentRepository());

@@ -623,10 +623,16 @@ export class PaymentService {
     const existingAction = rootKey
       ? await this.repo.findActionByIdempotencyKey(tenantId, rootKey) ?? undefined
       : undefined;
+    // La orden es la raíz de la saga. Debe resolverse antes del no-op por
+    // cliente activo: puede existir aunque el write de la acción haya fallado.
+    const existingOrder = rootKey
+      ? await getSuspensionService().repo.findReactivationOrderByIdempotencyKey(tenantId, rootKey)
+        ?? undefined
+      : undefined;
 
     // Un cliente inicialmente activo no necesita reactivación. En webhook solo
-    // se reanuda si ya existe la acción durable de este mismo evento.
-    if (client.status === 'active' && (!rootKey || !existingAction)) {
+    // se reanuda si ya existe alguna raíz durable de este mismo evento.
+    if (client.status === 'active' && (!rootKey || (!existingAction && !existingOrder))) {
       logger.info('PaymentEngine: cliente ya activo, reactivación omitida', { customerId, tenantId });
       return { customerId, alreadyActive: true, mikrotikAction: null, message: 'Cliente ya activo.' };
     }
@@ -641,7 +647,7 @@ export class PaymentService {
     const tenantRouters = filterRoutersByTenant(routers, tenantId);
     // Una acción durable conserva su destino original. Para una acción nueva,
     // el router explícito del cliente manda; el fallback nunca sale del tenant.
-    const durableRouterId = existingAction?.routerId;
+    const durableRouterId = existingAction?.routerId ?? existingOrder?.routerId;
     const requestedRouterId = durableRouterId ?? client.routerId;
     const requestedRouter = requestedRouterId
       ? findRouterForTenant(routers, requestedRouterId, tenantId)
