@@ -466,6 +466,14 @@ export class ContractService {
     const compensate = async (): Promise<void> => {
       try { await this.deps.storage.remove(storagePath); } catch { /* best effort */ }
     };
+    const compensateAfterSignApplyFailure = async (): Promise<void> => {
+      try {
+        const current = await this.deps.repository.get(tenantId, contractId);
+        if (current?.status !== 'signed' || current.documentId !== documentId) await compensate();
+      } catch {
+        // The RPC result is uncertain and so is the confirming read. Preserve a possible signed PDF.
+      }
+    };
     try {
       await this.deps.storage.upload(storagePath, bytes, 'application/pdf');
     } catch (error) {
@@ -491,7 +499,7 @@ export class ContractService {
         signedAt: this.deps.now().toISOString(),
       });
     } catch (error) {
-      await compensate();
+      await compensateAfterSignApplyFailure();
       throw error;
     }
 

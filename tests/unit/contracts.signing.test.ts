@@ -162,6 +162,45 @@ describe('ContractService signing', () => {
     expect((await repository.get(tenantId, 'contract-a'))?.status).toBe('draft');
   });
 
+  it('conserva el PDF si la RPC confirma la firma pero se pierde su respuesta', async () => {
+    const realSignApply = repository.signApply.bind(repository);
+    vi.spyOn(repository, 'signApply').mockImplementation(async (command) => {
+      await realSignApply(command);
+      throw new Error('rpc response lost');
+    });
+
+    await expect(service.sign(tenantId, 'contract-a', { signaturePng }, witness()))
+      .rejects.toThrow('rpc response lost');
+
+    const uploadedPath = vi.mocked(deps.storage.upload).mock.calls[0][0];
+    expect(await repository.get(tenantId, 'contract-a')).toMatchObject({
+      status: 'signed',
+      documentId: 'document-attempt-a',
+    });
+    expect(await repository.getEvidence(tenantId, 'contract-a')).toMatchObject({
+      pdfSha256: createHash('sha256').update(pdfBytes).digest('hex'),
+    });
+    expect(deps.storage.remove).not.toHaveBeenCalledWith(uploadedPath);
+  });
+
+  it('conserva el PDF si no puede confirmar el estado después de un error de RPC', async () => {
+    const realGet = repository.get.bind(repository);
+    const realSignApply = repository.signApply.bind(repository);
+    vi.spyOn(repository, 'get')
+      .mockImplementationOnce(realGet)
+      .mockRejectedValueOnce(new Error('confirmation unavailable'));
+    vi.spyOn(repository, 'signApply').mockImplementation(async (command) => {
+      await realSignApply(command);
+      throw new Error('rpc response lost');
+    });
+
+    await expect(service.sign(tenantId, 'contract-a', { signaturePng }, witness()))
+      .rejects.toThrow('rpc response lost');
+
+    const uploadedPath = vi.mocked(deps.storage.upload).mock.calls[0][0];
+    expect(deps.storage.remove).not.toHaveBeenCalledWith(uploadedPath);
+  });
+
   it('redelivery devuelve el mismo documento/hash y conserva el primer testigo sin volver a subir', async () => {
     const first = await service.sign(tenantId, 'contract-a', { signaturePng }, witness('tech-first'));
     vi.clearAllMocks();

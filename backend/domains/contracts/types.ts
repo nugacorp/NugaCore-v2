@@ -32,4 +32,3 @@ export interface ContractSignatureEvidence {
   geo: { latitude: number; longitude: number; accuracy?: number } | null;
   createdAt: string;
 }
-
