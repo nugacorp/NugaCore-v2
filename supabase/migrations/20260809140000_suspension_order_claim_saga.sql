@@ -40,7 +40,8 @@ CREATE INDEX IF NOT EXISTS idx_suspension_orders_claim_recovery
 
 -- El worker necesita leer y transicionar la orden; no obtiene privilegios
 -- destructivos ni de definición de esquema.
-GRANT SELECT, UPDATE ON TABLE public.suspension_orders TO service_role;
+REVOKE ALL ON TABLE public.suspension_orders FROM service_role;
+GRANT SELECT, INSERT, UPDATE ON TABLE public.suspension_orders TO service_role;
 
 DO $postcondition$
 BEGIN
@@ -54,7 +55,12 @@ BEGIN
     RAISE EXCEPTION 'MT-04-F5 postcondición fallida: índice de recuperación';
   END IF;
   IF NOT has_table_privilege('service_role', 'public.suspension_orders', 'SELECT')
-     OR NOT has_table_privilege('service_role', 'public.suspension_orders', 'UPDATE') THEN
+     OR NOT has_table_privilege('service_role', 'public.suspension_orders', 'INSERT')
+     OR NOT has_table_privilege('service_role', 'public.suspension_orders', 'UPDATE')
+     OR has_table_privilege('service_role', 'public.suspension_orders', 'DELETE')
+     OR has_table_privilege('service_role', 'public.suspension_orders', 'TRUNCATE')
+     OR has_table_privilege('service_role', 'public.suspension_orders', 'REFERENCES')
+     OR has_table_privilege('service_role', 'public.suspension_orders', 'TRIGGER') THEN
     RAISE EXCEPTION 'MT-04-F5 postcondición fallida: ACL del worker';
   END IF;
 END

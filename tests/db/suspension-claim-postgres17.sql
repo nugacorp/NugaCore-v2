@@ -1,6 +1,15 @@
 \set ON_ERROR_STOP on
 
-INSERT INTO public.suspension_orders (id, customer_id) VALUES ('claim-race', 'customer-a');
+INSERT INTO public.suspension_orders (id, customer_id, tenant_id) VALUES ('claim-race', 'customer-a', 'tenant-a');
+
+DO $$ BEGIN
+  IF NOT has_table_privilege('service_role', 'public.suspension_orders', 'SELECT')
+     OR NOT has_table_privilege('service_role', 'public.suspension_orders', 'INSERT')
+     OR NOT has_table_privilege('service_role', 'public.suspension_orders', 'UPDATE')
+     OR has_table_privilege('service_role', 'public.suspension_orders', 'DELETE') THEN
+    RAISE EXCEPTION 'ACL mínima de suspension_orders inválida';
+  END IF;
+END $$;
 
 DO $$
 DECLARE
@@ -14,11 +23,11 @@ BEGIN
   PERFORM dblink_exec('susp_claim_b', 'SET ROLE service_role');
   PERFORM dblink_send_query('susp_claim_a', $q$
     UPDATE public.suspension_orders SET status='QUEUED', worker_run_id='worker-a', claimed_at=now()
-    WHERE id='claim-race' AND status='PENDING' RETURNING worker_run_id
+    WHERE id='claim-race' AND tenant_id='tenant-a' AND status='PENDING' RETURNING worker_run_id
   $q$);
   PERFORM dblink_send_query('susp_claim_b', $q$
     UPDATE public.suspension_orders SET status='QUEUED', worker_run_id='worker-b', claimed_at=now()
-    WHERE id='claim-race' AND status='PENDING' RETURNING worker_run_id
+    WHERE id='claim-race' AND tenant_id='tenant-a' AND status='PENDING' RETURNING worker_run_id
   $q$);
   SELECT count(*) INTO won_a FROM dblink_get_result('susp_claim_a') AS r(worker_run_id TEXT);
   SELECT count(*) INTO won_b FROM dblink_get_result('susp_claim_b') AS r(worker_run_id TEXT);

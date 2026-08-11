@@ -128,6 +128,9 @@ export interface SuspensionRepository {
     patch: OrderUpdate,
   ): Promise<SuspensionOrder | null>;
 
+  /** CAS administrativo: sólo toma un efecto incierto cuyo lease ya venció. */
+  confirmUncertainOrder(order: SuspensionOrder, reclaimBefore: string, note: string): Promise<SuspensionOrder | null>;
+
   /** Actualiza una orden (usado por el Worker dry-run). */
   updateOrder(order: SuspensionOrder, patch: OrderUpdate): Promise<SuspensionOrder>;
 
@@ -178,6 +181,12 @@ export class StoreSuspensionRepository implements SuspensionRepository {
   }
   async updateClaimedOrder(order: SuspensionOrder, workerRunId: string, patch: OrderUpdate) {
     return engineStore.updateClaimedOrder(order.id, workerRunId, patch);
+  }
+  async confirmUncertainOrder(order: SuspensionOrder, reclaimBefore: string, note: string) {
+    const current = engineStore.ORDERS.find((candidate) => candidate.id === order.id);
+    if (!current || current.status !== 'QUEUED' || !current.claimedAt || current.claimedAt > reclaimBefore
+      || !current.effectStartedAt || current.effectConfirmedAt) return null;
+    return engineStore.updateOrder(order.id, { effectConfirmedAt: new Date().toISOString(), claimedAt: new Date(0).toISOString(), workerNote: note });
   }
   async cancelOpenOrders(customerId: string, orderType: SuspensionOrder['orderType'], reason: string, actorId?: string) {
     return engineStore.cancelOpenOrders(customerId, orderType, reason, actorId);
@@ -400,6 +409,18 @@ export class SupabaseSuspensionRepository implements SuspensionRepository {
     if (order.tenantId) query = query.eq('tenant_id', order.tenantId);
     const { data, error } = await query.select('*').maybeSingle();
     if (error) throw new Error(`updateClaimedOrder: ${error.message}`);
+    return data ? rowToOrder(data as OrderRow, order.orderType) : null;
+  }
+
+  async confirmUncertainOrder(order: SuspensionOrder, reclaimBefore: string, note: string): Promise<SuspensionOrder | null> {
+    const table = order.orderType === 'suspension' ? 'suspension_orders' : 'reactivation_orders';
+    let query = this.client.from(table).update({
+      effect_confirmed_at: new Date().toISOString(), claimed_at: new Date(0).toISOString(), worker_note: note,
+    }).eq('id', order.id).eq('status', 'QUEUED').eq('claimed_at', order.claimedAt!)
+      .not('effect_started_at', 'is', null).is('effect_confirmed_at', null);
+    if (order.tenantId) query = query.eq('tenant_id', order.tenantId);
+    const { data, error } = await query.select('*').maybeSingle();
+    if (error) throw new Error(`confirmUncertainOrder: ${error.message}`);
     return data ? rowToOrder(data as OrderRow, order.orderType) : null;
   }
 

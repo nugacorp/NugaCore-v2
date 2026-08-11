@@ -146,6 +146,17 @@ describe('Worker MikroTik tenant-scoped en commit mode', () => {
     expect(engineStore.ORDERS.find((candidate) => candidate.id === order.id)).toMatchObject({ status: 'EXECUTED', effectConfirmedAt: expect.any(String) });
   });
 
+  it('la conciliación no pisa el lease vivo de un worker', async () => {
+    store.CLIENTS.push({ id: 'customer-a', tenantId: 'tenant-a', name: 'A', type: 'residential', status: 'suspended', email: '', phone: '', address: '', city: '', lat: 0, lng: 0, planId: 'p', ip: '192.0.2.10', routerId: 'router-a' });
+    const order = engineStore.createOrder({ customerId: 'customer-a', orderType: 'reactivation', source: 'engine', tenantId: 'tenant-a', routerId: 'router-a' });
+    engineStore.updateOrder(order.id, { status: 'QUEUED', workerRunId: 'live-worker', claimedAt: '2999-01-01T00:00:00.000Z', effectStartedAt: '2999-01-01T00:00:00.000Z' });
+
+    await expect(reconcileConfirmedOrder('admin-a', { tenantId: 'tenant-a', orderId: order.id, routerId: 'router-a' }))
+      .rejects.toThrow(/no requiere conciliación manual/i);
+    expect(engineStore.ORDERS.find((candidate) => candidate.id === order.id)).toMatchObject({ workerRunId: 'live-worker' });
+    expect(engineStore.ORDERS.find((candidate) => candidate.id === order.id)?.effectConfirmedAt).toBeUndefined();
+  });
+
   it('la orden scoped conserva router A aunque el cliente apunte obsoletamente a B', async () => {
     store.CLIENTS.push({
       id: 'customer-a', tenantId: 'tenant-a', name: 'A', type: 'residential', status: 'suspended',

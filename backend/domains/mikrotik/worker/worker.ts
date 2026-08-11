@@ -316,14 +316,16 @@ export async function reconcileConfirmedOrder(
   if (!order || order.tenantId !== scope.tenantId || order.routerId !== scope.routerId) {
     throw new Error(`Orden '${scope.orderId}' no pertenece al scope indicado.`);
   }
-  if (order.status !== 'QUEUED' || !order.effectStartedAt || order.effectConfirmedAt) {
+  const reclaimBefore = nowIso();
+  if (order.status !== 'QUEUED' || !order.claimedAt || order.claimedAt > reclaimBefore
+    || !order.effectStartedAt || order.effectConfirmedAt) {
     throw new Error(`Orden '${scope.orderId}' no requiere conciliación manual.`);
   }
-  await repo.updateOrder(order, {
-    effectConfirmedAt: nowIso(),
-    // Hace reclamable el post-efecto de inmediato, sin esperar cinco minutos.
-    claimedAt: new Date(0).toISOString(),
-    workerNote: `Efecto RouterOS confirmado manualmente por ${actorId}; se reanuda post-efecto.`,
-  });
+  const reconciled = await repo.confirmUncertainOrder(
+    order,
+    reclaimBefore,
+    `Efecto RouterOS confirmado manualmente por ${actorId}; se reanuda post-efecto.`,
+  );
+  if (!reconciled) throw new Error(`Orden '${scope.orderId}' no pudo cercarse para conciliación.`);
   return processPendingOrders(actorId, scope);
 }
