@@ -95,7 +95,10 @@ export async function processPendingOrders(
 
   for (const order of pending) {
     const requiresTenantScope = order.source === 'payment-engine' || scope !== undefined;
-    const requiresDurableClaim = order.orderType === 'reactivation' && order.source === 'payment-engine';
+    // Cada orden cruza el mismo límite no idempotente de RouterOS. El claim no
+    // depende de su productor: sin él, sweeps concurrentes pueden ejecutar dos
+    // veces tanto suspensiones como reactivaciones de cualquier origen.
+    const requiresDurableClaim = true;
     let claimedOrder: SuspensionOrder | null = null;
     if (requiresDurableClaim) {
       const claimedAt = nowIso();

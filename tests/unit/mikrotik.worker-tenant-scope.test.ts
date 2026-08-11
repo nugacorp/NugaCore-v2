@@ -103,6 +103,25 @@ describe('Worker MikroTik tenant-scoped en commit mode', () => {
     expect(store.CLIENTS.find((row) => row.id === 'customer-b')?.status).toBe('suspended');
   });
 
+  it('dos sweeps concurrentes ejecutan una suspensión del motor una sola vez', async () => {
+    store.CLIENTS.push({
+      id: 'customer-a', tenantId: 'tenant-a', name: 'A', type: 'residential', status: 'active',
+      email: '', phone: '', address: '', city: '', lat: 0, lng: 0, planId: 'p', ip: '192.0.2.10', routerId: 'router-a',
+    });
+    const order = engineStore.createOrder({
+      customerId: 'customer-a', orderType: 'suspension', source: 'engine', tenantId: 'tenant-a', routerId: 'router-a',
+    });
+
+    const runs = await Promise.all([
+      processPendingOrders('worker-a'),
+      processPendingOrders('worker-b'),
+    ]);
+
+    expect(runs.map((run) => run.processed).sort()).toEqual([0, 1]);
+    expect(executeMock).toHaveBeenCalledTimes(1);
+    expect(engineStore.ORDERS.find((candidate) => candidate.id === order.id)?.status).toBe('EXECUTED');
+  });
+
   it('la orden scoped conserva router A aunque el cliente apunte obsoletamente a B', async () => {
     store.CLIENTS.push({
       id: 'customer-a', tenantId: 'tenant-a', name: 'A', type: 'residential', status: 'suspended',

@@ -97,6 +97,14 @@ const CASES = {
     fixture: 'tests/db/reactivation-saga-postgres17.sql',
     fixtureLabel: 'fixture: ACL mínima, carrera, retry y rollback',
   },
+  'suspension-claim': {
+    label: 'Claim durable de suspensión',
+    db: 'suspclaim',
+    migrations: ['supabase/migrations/20260809140000_suspension_order_claim_saga.sql'],
+    bootstrap: 'tests/db/suspension-claim-postgres17-bootstrap.sql',
+    fixture: 'tests/db/suspension-claim-postgres17.sql',
+    fixtureLabel: 'fixture: un solo claim concurrente',
+  },
   'schema-replay': {
     label: 'El esquema se reconstruye desde cero',
     db: 'replay',
