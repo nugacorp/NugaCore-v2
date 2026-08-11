@@ -11,7 +11,7 @@ vi.mock('../../backend/domains/mikrotik/worker/command-executor', () => ({
   executePlannedCommands: executeMock,
 }));
 
-import { processPendingOrders } from '../../backend/domains/mikrotik/worker/worker';
+import { processPendingOrders, reconcileConfirmedOrder } from '../../backend/domains/mikrotik/worker/worker';
 import { dispatchNetworkOrder } from '../../backend/bridges/network-order-dispatch';
 import { engineStore } from '../../backend/domains/suspension/engine-store';
 import { store } from '../../backend/state/store';
@@ -120,6 +120,30 @@ describe('Worker MikroTik tenant-scoped en commit mode', () => {
     expect(runs.map((run) => run.processed).sort()).toEqual([0, 1]);
     expect(executeMock).toHaveBeenCalledTimes(1);
     expect(engineStore.ORDERS.find((candidate) => candidate.id === order.id)?.status).toBe('EXECUTED');
+  });
+
+  it('el sweep recupera un QUEUED abandonado sin efecto iniciado', async () => {
+    store.CLIENTS.push({ id: 'customer-a', tenantId: 'tenant-a', name: 'A', type: 'residential', status: 'active', email: '', phone: '', address: '', city: '', lat: 0, lng: 0, planId: 'p', ip: '192.0.2.10', routerId: 'router-a' });
+    const order = engineStore.createOrder({ customerId: 'customer-a', orderType: 'suspension', source: 'engine', tenantId: 'tenant-a', routerId: 'router-a' });
+    engineStore.updateOrder(order.id, { status: 'QUEUED', workerRunId: 'dead', claimedAt: '2026-01-01T00:00:00.000Z' });
+
+    const run = await processPendingOrders('recovery');
+
+    expect(run.processed).toBe(1);
+    expect(executeMock).toHaveBeenCalledTimes(1);
+    expect(engineStore.ORDERS.find((candidate) => candidate.id === order.id)?.status).toBe('EXECUTED');
+  });
+
+  it('la conciliación confirmada reanuda post-efecto sin reenviar RouterOS', async () => {
+    store.CLIENTS.push({ id: 'customer-a', tenantId: 'tenant-a', name: 'A', type: 'residential', status: 'suspended', email: '', phone: '', address: '', city: '', lat: 0, lng: 0, planId: 'p', ip: '192.0.2.10', routerId: 'router-a' });
+    const order = engineStore.createOrder({ customerId: 'customer-a', orderType: 'reactivation', source: 'engine', tenantId: 'tenant-a', routerId: 'router-a' });
+    engineStore.updateOrder(order.id, { status: 'QUEUED', workerRunId: 'dead', claimedAt: '2026-01-01T00:00:00.000Z', effectStartedAt: '2026-01-01T00:01:00.000Z' });
+
+    const run = await reconcileConfirmedOrder('admin-a', { tenantId: 'tenant-a', orderId: order.id, routerId: 'router-a' });
+
+    expect(run.processed).toBe(1);
+    expect(executeMock).not.toHaveBeenCalled();
+    expect(engineStore.ORDERS.find((candidate) => candidate.id === order.id)).toMatchObject({ status: 'EXECUTED', effectConfirmedAt: expect.any(String) });
   });
 
   it('la orden scoped conserva router A aunque el cliente apunte obsoletamente a B', async () => {

@@ -14,7 +14,7 @@ import {
 } from './provisioning/types';
 import { asyncHandler } from '../../common/errors';
 import { logger } from '../../common/logger';
-import { processPendingOrders, readRouterSnapshot, listWorkerRuns } from './worker/worker';
+import { processPendingOrders, readRouterSnapshot, listWorkerRuns, reconcileConfirmedOrder } from './worker/worker';
 import { getWireguardService } from '../wireguard/service';
 import type { PeerCreatedOnce } from '../wireguard/types';
 import { persistMikrotikRouter } from './repository';
@@ -859,6 +859,21 @@ router.post('/api/mikrotik/routers/:id/test-connection', requireRoles([...PROV_S
 // Procesa las órdenes PENDING en dry-run.
 router.post('/api/mikrotik/worker/run', requireRoles([...PROV_SCRIPT_ROLES]), asyncHandler(async (req, res) => {
   const run = await processPendingOrders(req.authContext?.userId);
+  res.status(201).json(run);
+}));
+
+// Un efecto incierto nunca se reintenta automáticamente. Super admin/Admin
+// confirman primero el estado real del router y sólo entonces reanudan el post-efecto.
+router.post('/api/mikrotik/worker/orders/:id/reconcile-confirmed', requireRoles(['super admin', 'administrador']), asyncHandler(async (req, res) => {
+  const tenantId = tenantIdFromRequest(req);
+  const routerId = typeof req.body?.routerId === 'string' ? req.body.routerId.trim() : '';
+  if (!routerId) {
+    res.status(400).json({ error: 'routerId es obligatorio.', code: 'WORKER_RECONCILE_ROUTER_REQUIRED' });
+    return;
+  }
+  const run = await reconcileConfirmedOrder(req.authContext?.userId || 'unknown', {
+    tenantId, orderId: req.params.id, routerId,
+  });
   res.status(201).json(run);
 }));
 

@@ -75,7 +75,13 @@ export async function processPendingOrders(
     }
     pending = ['PENDING', 'FAILED', 'QUEUED'].includes(order.status) ? [order] : [];
   } else {
-    pending = await repo.listOrders({ status: 'PENDING' });
+    const [pendingOrders, queuedOrders] = await Promise.all([
+      repo.listOrders({ status: 'PENDING' }),
+      // `claimOrder` acepta sólo leases vencidos que no sean inciertos. Se
+      // cargan aquí para rescatar un worker muerto, no para reintentar RouterOS.
+      repo.listOrders({ status: 'QUEUED' }),
+    ]);
+    pending = [...pendingOrders, ...queuedOrders];
   }
   const results: OrderProcessResult[] = [];
 
@@ -294,4 +300,30 @@ export async function readRouterSnapshot(routerId: string): Promise<RouterSnapsh
 
 export function listWorkerRuns(limit = 50): WorkerRun[] {
   return workerStore.RUNS.slice(0, limit);
+}
+
+/**
+ * Tras verificar manualmente RouterOS, un operador confirma el efecto incierto.
+ * El worker sólo reanuda el post-efecto: `effectConfirmedAt` impide reenviar
+ * comandos al router.
+ */
+export async function reconcileConfirmedOrder(
+  actorId: string,
+  scope: { tenantId: string; orderId: string; routerId: string },
+): Promise<WorkerRun> {
+  const repo = getSuspensionService().repo;
+  const [order] = await repo.listOrders({ orderId: scope.orderId });
+  if (!order || order.tenantId !== scope.tenantId || order.routerId !== scope.routerId) {
+    throw new Error(`Orden '${scope.orderId}' no pertenece al scope indicado.`);
+  }
+  if (order.status !== 'QUEUED' || !order.effectStartedAt || order.effectConfirmedAt) {
+    throw new Error(`Orden '${scope.orderId}' no requiere conciliación manual.`);
+  }
+  await repo.updateOrder(order, {
+    effectConfirmedAt: nowIso(),
+    // Hace reclamable el post-efecto de inmediato, sin esperar cinco minutos.
+    claimedAt: new Date(0).toISOString(),
+    workerNote: `Efecto RouterOS confirmado manualmente por ${actorId}; se reanuda post-efecto.`,
+  });
+  return processPendingOrders(actorId, scope);
 }
