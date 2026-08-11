@@ -469,7 +469,7 @@ export class ContractService {
     const compensateAfterSignApplyFailure = async (): Promise<void> => {
       try {
         const current = await this.deps.repository.get(tenantId, contractId);
-        if (current?.status !== 'signed' || current.documentId !== documentId) await compensate();
+        if (current?.documentId !== documentId) await compensate();
       } catch {
         // The RPC result is uncertain and so is the confirming read. Preserve a possible signed PDF.
       }

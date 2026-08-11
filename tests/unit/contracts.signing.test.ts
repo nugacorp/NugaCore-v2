@@ -201,6 +201,25 @@ describe('ContractService signing', () => {
     expect(deps.storage.remove).not.toHaveBeenCalledWith(uploadedPath);
   });
 
+  it('conserva el PDF si la firma queda anulada antes de confirmar una respuesta perdida', async () => {
+    const realSignApply = repository.signApply.bind(repository);
+    vi.spyOn(repository, 'signApply').mockImplementation(async (command) => {
+      await realSignApply(command);
+      await repository.void(tenantId, 'contract-a', '2026-08-09T12:31:00.000Z');
+      throw new Error('rpc response lost');
+    });
+
+    await expect(service.sign(tenantId, 'contract-a', { signaturePng }, witness()))
+      .rejects.toThrow('rpc response lost');
+
+    const uploadedPath = vi.mocked(deps.storage.upload).mock.calls[0][0];
+    expect(await repository.get(tenantId, 'contract-a')).toMatchObject({
+      status: 'voided',
+      documentId: 'document-attempt-a',
+    });
+    expect(deps.storage.remove).not.toHaveBeenCalledWith(uploadedPath);
+  });
+
   it('redelivery devuelve el mismo documento/hash y conserva el primer testigo sin volver a subir', async () => {
     const first = await service.sign(tenantId, 'contract-a', { signaturePng }, witness('tech-first'));
     vi.clearAllMocks();
