@@ -2,6 +2,7 @@ import { writeFileSync } from 'node:fs';
 import { createHmac } from 'node:crypto';
 import { join } from 'node:path';
 import { tmpdir } from 'node:os';
+import { spawnSync } from 'node:child_process';
 import { describe, it, expect, beforeEach, afterEach, vi } from 'vitest';
 
 const evidencePath = join(tmpdir(), `nugacore-gl02-evidence-${process.pid}.json`);
@@ -86,5 +87,23 @@ describe('production-readiness', () => {
     const snap = productionReadinessSnapshot();
     expect(snap.blockers).toEqual([]);
     expect(snap.readyForLiveWisp).toBe(true);
+  });
+
+  it('CLI keeps local blockers non-blocking but fails in strict mode', () => {
+    const env = { ...process.env };
+    delete env.PRODUCTION_READINESS_STRICT;
+    delete env.PUBLIC_DEPLOYMENT;
+    env.NODE_ENV = 'test';
+    env.SUPABASE_URL = '';
+    env.SUPABASE_SERVICE_ROLE_KEY = '';
+
+    const relaxed = spawnSync(process.execPath, ['scripts/validate-production-readiness.mjs'], { env });
+    expect(relaxed.status).toBe(0);
+    expect(relaxed.stdout.toString()).toContain('Modo local no estricto');
+
+    const strict = spawnSync(process.execPath, ['scripts/validate-production-readiness.mjs'], {
+      env: { ...env, PRODUCTION_READINESS_STRICT: 'true' },
+    });
+    expect(strict.status).toBe(1);
   });
 });

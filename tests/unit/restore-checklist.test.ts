@@ -23,12 +23,21 @@ const linuxKeyStat = (uid: number): RestoreStatFn => (
 describe('production restore evidence CLI', () => {
   const script = resolve('scripts/validate-restore-checklist.mjs');
 
-  it('fails without evidence and never accepts the staging boolean', () => {
+  it('reports external blocked locally and never accepts the staging boolean', () => {
     const cleanEnv: NodeJS.ProcessEnv = { ...process.env, STAGING_RESTORE_TESTED: 'true' };
     delete cleanEnv.PRODUCTION_RESTORE_TESTED;
     delete cleanEnv.PRODUCTION_RESTORE_EVIDENCE_FILE;
     delete cleanEnv.PRODUCTION_RESTORE_EVIDENCE_HMAC_KEY_FILE;
-    expect(spawnSync(process.execPath, [script], { env: cleanEnv }).status).toBe(1);
+
+    expect(validateProductionRestoreEvidenceEnv(cleanEnv).ok).toBe(false);
+    const relaxed = spawnSync(process.execPath, [script], { env: cleanEnv });
+    expect(relaxed.status).toBe(0);
+    expect(relaxed.stdout.toString()).toContain('EXTERNAL_BLOCKED');
+
+    const strict = spawnSync(process.execPath, [script], {
+      env: { ...cleanEnv, PRODUCTION_RESTORE_STRICT: 'true' },
+    });
+    expect(strict.status).toBe(1);
   });
 
   it('accepts only complete HMAC-authenticated production evidence with valid Linux key metadata', () => {

@@ -65,6 +65,7 @@ docker compose -f docker-compose.dev.yml up
 ### 3.4 Con Docker (réplica de producción local)
 ```bash
 cp .env.production.example .env   # rellena secretos
+npm run docker:config:safe        # revisa compose sin expandir secretos
 docker compose -f docker-compose.prod.yml up -d --build
 curl -fsS http://localhost:3000/api/health/live
 ```
@@ -82,6 +83,7 @@ cp .env.production.example .env
 #   edita .env: NODE_ENV=production, AUTH_TRUST_HEADERS=false, MIKROTIK_CREDENTIALS_KEY=...
 
 # 3) Construye y levanta
+npm run docker:config:safe
 docker compose -f docker-compose.prod.yml up -d --build
 
 # 4) Verifica salud
@@ -93,6 +95,7 @@ docker compose -f docker-compose.prod.yml logs -f nugacore
 ```
 
 > Coloca un **reverse proxy con TLS** (Caddy/Traefik/Nginx) delante del puerto 3000, fuerza HTTPS y añade HSTS. Con Coolify esto es automático (sección 5).
+> Seguridad: no publiques salidas de `docker compose config` sin `--no-interpolate`; expanden `.env` y pueden revelar secretos. Usa `npm run docker:config:safe` para revisiones.
 
 ### Generar la clave de cifrado MikroTik
 ```bash
