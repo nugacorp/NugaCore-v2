@@ -20,6 +20,13 @@ export type OrderStatus = 'PENDING' | 'QUEUED' | 'EXECUTED' | 'FAILED' | 'CANCEL
 
 export type OrderType = 'suspension' | 'reactivation';
 
+export type SuspensionOrderSource =
+  | 'engine'
+  | 'manual'
+  | 'payment-engine'
+  | 'provisioning-center'
+  | 'service-status';
+
 export type SuspensionEventType =
   | 'evaluated'
   | 'state_changed'
@@ -91,21 +98,30 @@ export interface SuspensionEvent {
 export interface SuspensionOrder {
   id: string;
   customerId: string;
+  /** Scope obligatorio para órdenes creadas por Payments; legacy puede omitirlo. */
+  tenantId?: string;
+  /** Router ya validado por el productor de la orden. */
+  routerId?: string;
   invoiceId?: string;
   orderType: OrderType;
   status: OrderStatus;
-  source: 'engine' | 'manual' | 'payment-engine' | 'provisioning-center' | 'service-status';
+  source: SuspensionOrderSource;
   reason?: string;
   scheduledFor?: string;
   executedAt?: string;
   createdAt: string;
   /** Identidad durable del efecto de webhook (T5); nula fuera de ese flujo. */
-  tenantId?: string;
   idempotencyKey?: string;
   // ── Worker dry-run (Fase 4.6) ─────────────────────────────────────
   dryRun?: boolean;
   workerRunId?: string;
   workerNote?: string;
+  /** Lease durable del worker que ganó el claim. */
+  claimedAt?: string;
+  /** Se persiste inmediatamente antes de cruzar el límite RouterOS. */
+  effectStartedAt?: string;
+  /** Confirma que RouterOS respondió OK; permite reanudar sólo el post-efecto. */
+  effectConfirmedAt?: string;
 }
 
 /** Parche que el Worker aplica a una orden tras procesarla (dry-run). */
@@ -115,6 +131,16 @@ export interface OrderUpdate {
   dryRun?: boolean;
   workerRunId?: string;
   workerNote?: string;
+  claimedAt?: string;
+  effectStartedAt?: string;
+  effectConfirmedAt?: string;
+}
+
+export interface OrderClaimInput {
+  workerRunId: string;
+  claimedAt: string;
+  /** Un QUEUED sólo es abandonado si su lease es anterior o igual a este instante. */
+  reclaimBefore: string;
 }
 
 // ── Resultado de evaluación ────────────────────────────────────────────

@@ -64,7 +64,7 @@ describe('API — Finance operational P&L', () => {
   beforeAll(() => { app = createApp(); });
 
   it('GET /api/finance/operational/pnl -> summary', async () => {
-    const res = await request(app).get('/api/finance/operational/pnl').set(READER);
+    const res = await request(app).get('/api/finance/operational/pnl').set(ADMIN);
     expect(res.status).toBe(200);
     expect(res.body).toHaveProperty('revenueCents');
     expect(res.body).toHaveProperty('expensesCents');

@@ -27,7 +27,7 @@ describe('API v1 — Billing (lectura)', () => {
   beforeAll(() => { app = createApp(); });
 
   it('GET /api/billing/invoices → arreglo con forma EnrichedInvoice', async () => {
-    const res = await request(app).get('/api/billing/invoices').set(READER);
+    const res = await request(app).get('/api/billing/invoices').set(COBR);
     expect(res.status).toBe(200);
     expect(Array.isArray(res.body)).toBe(true);
     expect(res.body.length).toBeGreaterThan(0);
@@ -35,9 +35,9 @@ describe('API v1 — Billing (lectura)', () => {
   });
 
   it('GET /api/billing/invoices/:id/account-state → invoice + allocations', async () => {
-    const list = await request(app).get('/api/billing/invoices').set(READER);
+    const list = await request(app).get('/api/billing/invoices').set(COBR);
     const id: string = list.body[0].id;
-    const res = await request(app).get(`/api/billing/invoices/${id}/account-state`).set(READER);
+    const res = await request(app).get(`/api/billing/invoices/${id}/account-state`).set(COBR);
     expect(res.status).toBe(200);
     expect(res.body).toHaveProperty('invoice');
     expect(res.body).toHaveProperty('allocations');
@@ -45,13 +45,13 @@ describe('API v1 — Billing (lectura)', () => {
   });
 
   it('GET /api/billing/invoices/:id/account-state inexistente → 404', async () => {
-    const res = await request(app).get('/api/billing/invoices/fac-noexiste/account-state').set(READER);
+    const res = await request(app).get('/api/billing/invoices/fac-noexiste/account-state').set(COBR);
     expect(res.status).toBe(404);
     expect(res.body).toHaveProperty('error');
   });
 
   it('GET /api/billing/account-summary → totales financieros', async () => {
-    const res = await request(app).get('/api/billing/account-summary').set(READER);
+    const res = await request(app).get('/api/billing/account-summary').set(COBR);
     expect(res.status).toBe(200);
     expect(res.body).toHaveProperty('totalInvoiced');
     expect(res.body).toHaveProperty('totalCollected');
@@ -61,7 +61,7 @@ describe('API v1 — Billing (lectura)', () => {
   });
 
   it('GET /api/billing/revenue-report → byMethod + topPendingInvoices', async () => {
-    const res = await request(app).get('/api/billing/revenue-report').set(READER);
+    const res = await request(app).get('/api/billing/revenue-report').set(COBR);
     expect(res.status).toBe(200);
     expect(res.body).toHaveProperty('generatedAt');
     expect(res.body).toHaveProperty('byMethod');
@@ -207,19 +207,19 @@ describe('API v1 — Billing Foundation (invoice/:id, cancel, balance, payments,
   beforeAll(() => { app = createApp(); });
 
   it('GET /api/billing/invoices/:id → EnrichedInvoice', async () => {
-    const res = await request(app).get('/api/billing/invoices/fac-101').set(READER);
+    const res = await request(app).get('/api/billing/invoices/fac-101').set(COBR);
     expect(res.status).toBe(200);
     expectKeys(res.body, INVOICE_KEYS);
     expect(res.body.id).toBe('fac-101');
   });
 
   it('GET /api/billing/invoices/:id inexistente → 404', async () => {
-    const res = await request(app).get('/api/billing/invoices/fac-noexiste').set(READER);
+    const res = await request(app).get('/api/billing/invoices/fac-noexiste').set(COBR);
     expect(res.status).toBe(404);
   });
 
   it('GET /api/billing/payments → arreglo de PaymentRecord', async () => {
-    const res = await request(app).get('/api/billing/payments').set(READER);
+    const res = await request(app).get('/api/billing/payments').set(COBR);
     expect(res.status).toBe(200);
     expect(Array.isArray(res.body)).toBe(true);
     expect(res.body.length).toBeGreaterThan(0);
@@ -227,13 +227,13 @@ describe('API v1 — Billing Foundation (invoice/:id, cancel, balance, payments,
   });
 
   it('GET /api/billing/payments?customerId= filtra', async () => {
-    const res = await request(app).get('/api/billing/payments?customerId=c-1').set(READER);
+    const res = await request(app).get('/api/billing/payments?customerId=c-1').set(COBR);
     expect(res.status).toBe(200);
     expect(res.body.every((p: { customerId: string }) => p.customerId === 'c-1')).toBe(true);
   });
 
   it('GET /api/billing/customers/:customerId/balance → AccountBalance', async () => {
-    const res = await request(app).get('/api/billing/customers/c-1/balance').set(READER);
+    const res = await request(app).get('/api/billing/customers/c-1/balance').set(COBR);
     expect(res.status).toBe(200);
     expectKeys(res.body, ['customerId', 'customerName', 'currentBalance', 'overdueBalance', 'totalBalance', 'pendingInvoices', 'overdueInvoices', 'lastPaymentAmount', 'lastPaymentDate']);
     expect(res.body.customerId).toBe('c-1');
@@ -270,7 +270,7 @@ describe('API v1 — Billing Foundation (invoice/:id, cancel, balance, payments,
     expect(res.body.status).toBe('canceled');
 
     // la factura cancelada sigue cancelada al releerla
-    const reread = await request(app).get(`/api/billing/invoices/${id}`).set(READER);
+    const reread = await request(app).get(`/api/billing/invoices/${id}`).set(COBR);
     expect(reread.body.status).toBe('canceled');
   });
 

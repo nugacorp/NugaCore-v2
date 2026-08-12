@@ -299,7 +299,7 @@ describe('E2E WISP — ciclo de vida completo', () => {
     });
 
     it('el balance del cliente refleja pagos y cancelaciones', async () => {
-      const res = await request(app).get(`/api/billing/customers/${clientId}/balance`).set(READER);
+      const res = await request(app).get(`/api/billing/customers/${clientId}/balance`).set(COBRANZA);
       expect(res.status).toBe(200);
       expect(res.body.customerId).toBe(clientId);
       // Factura 1 pagada, factura 2 cancelada → sin pendiente.
@@ -309,7 +309,7 @@ describe('E2E WISP — ciclo de vida completo', () => {
     });
 
     it('los pagos quedan como recurso consultable por factura', async () => {
-      const res = await request(app).get(`/api/billing/payments?invoiceId=${invoiceId}`).set(READER);
+      const res = await request(app).get(`/api/billing/payments?invoiceId=${invoiceId}`).set(COBRANZA);
       expect(res.status).toBe(200);
       expect(res.body.length).toBe(2); // parcial + liquidación
     });

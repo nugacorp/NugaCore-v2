@@ -1,7 +1,10 @@
 import { NextFunction, Request, Response } from 'express';
 import { env, isHardenedRuntime } from '../config/env';
-import { readRequestedTenantId, resolveTenantIdForUser } from '../domains/tenancy/resolve-tenant';
-import { ServiceUnavailableError } from './errors';
+import {
+  readRequestedTenantId,
+  resolveTenantForUser,
+  type TenantResolutionDenied,
+} from '../domains/tenancy/resolve-tenant';
 import { logger } from './logger';
 import { isSupabaseAdminConfigured, supabaseAdmin } from '../services/supabase-admin';
 import { AppRole, normalizeRole } from './rbac';
@@ -13,6 +16,9 @@ export interface AuthContext {
   tenantId: string;
   source: 'supabase-jwt' | 'trusted-headers';
 }
+
+/** Denegación de tenant verificada; no equivale a un contexto autorizado. */
+export type AuthContextFailure = TenantResolutionDenied;
 
 const DEFAULT_ROLE: AppRole = 'solo lectura';
 
@@ -79,6 +85,7 @@ const resolveRoleFromSupabase = async (userId: string): Promise<AppRole> => {
 export const attachAuthContext = async (req: Request, _res: Response, next: NextFunction): Promise<void> => {
   const bearerToken = extractBearerToken(req.headers.authorization);
   const requestedTenantId = readRequestedTenantId(req.headers['x-tenant-id']);
+  let bearerIdentityVerified = false;
 
   if (bearerToken && isSupabaseAdminConfigured && supabaseAdmin) {
     // Express 4 does not catch rejected promises from async middleware, so an
@@ -88,48 +95,43 @@ export const attachAuthContext = async (req: Request, _res: Response, next: Next
     try {
       const { data, error } = await supabaseAdmin.auth.getUser(bearerToken);
       if (!error && data.user) {
+        bearerIdentityVerified = true;
         const role = await resolveRoleFromSupabase(data.user.id);
         // Solo app_metadata.tenant_id (service_role). Nunca user_metadata:
         // el cliente puede editarlo con supabase.auth.updateUser().
         const meta = data.user.app_metadata as Record<string, unknown> | undefined;
         const claimTenant = typeof meta?.tenant_id === 'string' ? meta.tenant_id : null;
-        // MT-02: si el tenant no se puede resolver, NO se degrada al WISP por
-        // defecto. Antes un fallo de base de datos aquí CONCEDÍA acceso a
-        // tenant-default; ahora la petición muere con 503. Fallar es la
-        // respuesta correcta: servir datos del WISP equivocado, no.
-        let tenantId: string;
-        try {
-          tenantId = await resolveTenantIdForUser({
-            userId: data.user.id,
-            // Header solo con membership; claim JWT (app_metadata) puede reparar owner.
-            requestedTenantId: requestedTenantId,
-            jwtClaimTenantId: claimTenant,
-            source: 'supabase-jwt',
-          });
-        } catch (tenantErr) {
-          logger.error('Tenant resolution failed; rejecting request', {
-            userId: data.user.id,
-            message: tenantErr instanceof Error ? tenantErr.message : String(tenantErr),
-          });
-          return next(
-            new ServiceUnavailableError(
-              'No se pudo determinar el WISP de la sesión',
-              'TENANT_RESOLUTION_FAILED',
-            ),
-          );
-        }
-        req.authContext = {
+        const tenantResolution = await resolveTenantForUser({
           userId: data.user.id,
-          role,
-          tenantId,
+          // Header solo con membership; claim JWT (app_metadata) puede reparar owner.
+          requestedTenantId,
+          jwtClaimTenantId: claimTenant,
           source: 'supabase-jwt',
-        };
+        });
+        if (!tenantResolution.ok) {
+          req.authContextFailure = tenantResolution;
+        } else {
+          req.authContext = {
+            userId: data.user.id,
+            role,
+            tenantId: tenantResolution.tenantId,
+            source: 'supabase-jwt',
+          };
+        }
       }
     } catch (err) {
       logger.error('Supabase auth validation failed', {
         message: err instanceof Error ? err.message : String(err),
       });
     }
+  }
+
+  // Una identidad JWT ya verificada nunca puede degradarse al camino de
+  // trusted-headers. Si su tenant fue denegado, los guards responderán con el
+  // 401/403 tipado; las rutas públicas pueden continuar sin authContext.
+  if (bearerIdentityVerified) {
+    next();
+    return;
   }
 
   // Trusted-header fallback: ONLY in non-production (see computeAllowTrustedHeaders).
@@ -140,35 +142,22 @@ export const attachAuthContext = async (req: Request, _res: Response, next: Next
       ? req.headers['x-user-id'][0]
       : req.headers['x-user-id'];
     const userId = (headerUserId || 'header-user').toString();
-    // Mismo criterio fail-closed que la rama JWT. Esta rama solo corre en
-    // desarrollo, pero degradar aquí enmascararía en local el fallo que en
-    // producción queremos ver.
-    let tenantId: string;
-    try {
-      tenantId = await resolveTenantIdForUser({
-        userId,
-        requestedTenantId,
-        source: 'trusted-headers',
-      });
-    } catch (tenantErr) {
-      logger.error('Tenant resolution failed (trusted-headers); rejecting request', {
-        userId,
-        message: tenantErr instanceof Error ? tenantErr.message : String(tenantErr),
-      });
-      return next(
-        new ServiceUnavailableError(
-          'No se pudo determinar el WISP de la sesión',
-          'TENANT_RESOLUTION_FAILED',
-        ),
-      );
-    }
-
-    req.authContext = {
+    const tenantResolution = await resolveTenantForUser({
       userId,
-      role,
-      tenantId,
+      requestedTenantId,
       source: 'trusted-headers',
-    };
+    });
+
+    if (!tenantResolution.ok) {
+      req.authContextFailure = tenantResolution;
+    } else {
+      req.authContext = {
+        userId,
+        role,
+        tenantId: tenantResolution.tenantId,
+        source: 'trusted-headers',
+      };
+    }
   }
 
   next();

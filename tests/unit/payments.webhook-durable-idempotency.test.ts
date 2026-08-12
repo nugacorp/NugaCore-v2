@@ -36,7 +36,11 @@ import {
   evaluateWebhookCapability,
 } from '../../backend/domains/payments/webhook-capability';
 import { PaymentService } from '../../backend/domains/payments/service';
-import type { MikrotikActionRecord, PaymentEventRecord } from '../../backend/domains/payments/types';
+import type {
+  MikrotikActionRecord,
+  PaymentEventRecord,
+  TenantOwned,
+} from '../../backend/domains/payments/types';
 import {
   StoreBillingRepository,
   SupabaseBillingRepository,
@@ -73,7 +77,7 @@ const claimedEvent = (
   id = EVENT_ID,
   tenantId = TENANT_A,
   claimToken = 'owner-a',
-): PaymentEventRecord => ({
+): TenantOwned<PaymentEventRecord> => ({
   id,
   tenantId,
   provider: 'openpay',
@@ -89,7 +93,7 @@ const claimedEvent = (
 
 const rootAction = (
   overrides: Partial<MikrotikActionRecord> = {},
-): MikrotikActionRecord => {
+): TenantOwned<MikrotikActionRecord> => {
   const customerId = overrides.customerId ?? `${PREFIX}root`;
   const paymentEventId = overrides.paymentEventId ?? EVENT_ID;
   const webhookPaymentId = overrides.webhookPaymentId ?? `payment:${paymentEventId}`;
@@ -482,6 +486,7 @@ describe('Destinos idempotentes por actionId + step', () => {
       source: 'payment-engine' as const,
       reason: 'Pago confirmado',
       tenantId: TENANT_A,
+      routerId: 'router-a',
       idempotencyKey: stepIdempotencyKey('ma-1', 'networkDispatched'),
     };
     const first = await repo.createOrder(input);
@@ -501,6 +506,7 @@ describe('Destinos idempotentes por actionId + step', () => {
       source: 'payment-engine' as const,
       reason: 'Pago confirmado',
       tenantId: TENANT_A,
+      routerId: 'router-a',
       idempotencyKey: stepIdempotencyKey('ma-1', 'networkDispatched'),
     };
     const first = await repo.createOrder(input);
@@ -510,6 +516,80 @@ describe('Destinos idempotentes por actionId + step', () => {
     expect(db.rows('reactivation_orders')).toHaveLength(1);
     expect(db.rows('reactivation_orders')[0].tenant_id).toBe(TENANT_A);
     expect(db.rows('reactivation_orders')[0].source).toBe('payment-engine');
+  });
+
+  it.each([
+    ['Store', () => new StoreSuspensionRepository()],
+    ['Supabase', () => {
+      const db = supabaseWorld();
+      return new SupabaseSuspensionRepository(asSupabaseClient<SupabaseClient>(db));
+    }],
+  ])('Claim %s: dos owners sobre PENDING producen un solo ganador', async (_kind, factory) => {
+    const repo = factory();
+    const order = await repo.createOrder({
+      customerId: `${PREFIX}claim`,
+      orderType: 'reactivation',
+      source: 'payment-engine',
+      reason: 'Pago confirmado',
+      tenantId: TENANT_A,
+      routerId: 'router-a',
+      idempotencyKey: stepIdempotencyKey('ma-claim', 'networkDispatched'),
+    });
+    const claim = {
+      claimedAt: '2026-08-09T12:00:00.000Z',
+      reclaimBefore: '2026-08-09T11:55:00.000Z',
+    };
+
+    const [ownerA, ownerB] = await Promise.all([
+      repo.claimOrder(order, { ...claim, workerRunId: 'worker-a' }),
+      repo.claimOrder(order, { ...claim, workerRunId: 'worker-b' }),
+    ]);
+
+    expect([ownerA, ownerB].filter(Boolean)).toHaveLength(1);
+    expect([ownerA?.status, ownerB?.status].filter(Boolean)).toEqual(['QUEUED']);
+  });
+
+  it('Claim Store: recupera FAILED/pre-efecto y lease vencido, pero no efecto incierto', async () => {
+    const repo = new StoreSuspensionRepository();
+    const order = await repo.createOrder({
+      customerId: `${PREFIX}claim-recovery`,
+      orderType: 'reactivation',
+      source: 'payment-engine',
+      reason: 'Pago confirmado',
+      tenantId: TENANT_A,
+      routerId: 'router-a',
+      idempotencyKey: stepIdempotencyKey('ma-claim-recovery', 'networkDispatched'),
+    });
+    const claim = {
+      workerRunId: 'worker-new',
+      claimedAt: '2026-08-09T12:00:00.000Z',
+      reclaimBefore: '2026-08-09T11:55:00.000Z',
+    };
+
+    engineStore.updateOrder(order.id, { status: 'FAILED' });
+    expect(await repo.claimOrder({ ...order, status: 'FAILED' }, claim)).toMatchObject({
+      status: 'QUEUED', workerRunId: 'worker-new',
+    });
+
+    engineStore.updateOrder(order.id, {
+      status: 'QUEUED', workerRunId: 'worker-dead',
+      claimedAt: '2026-08-09T11:00:00.000Z', effectStartedAt: undefined,
+    });
+    expect(await repo.claimOrder({
+      ...order, status: 'QUEUED', workerRunId: 'worker-dead',
+      claimedAt: '2026-08-09T11:00:00.000Z', effectStartedAt: undefined,
+    }, claim)).toMatchObject({ workerRunId: 'worker-new' });
+
+    engineStore.updateOrder(order.id, {
+      status: 'QUEUED', workerRunId: 'worker-dead',
+      claimedAt: '2026-08-09T11:00:00.000Z', effectStartedAt: '2026-08-09T11:01:00.000Z',
+      effectConfirmedAt: undefined,
+    });
+    expect(await repo.claimOrder({
+      ...order, status: 'QUEUED', workerRunId: 'worker-dead',
+      claimedAt: '2026-08-09T11:00:00.000Z', effectStartedAt: '2026-08-09T11:01:00.000Z',
+      effectConfirmedAt: undefined,
+    }, claim)).toBeNull();
   });
 
   it('Evento de suspensión Store/Supabase: una sola fila por key', async () => {
@@ -611,6 +691,7 @@ describe('Destinos idempotentes por actionId + step', () => {
       source: 'payment-engine' as const,
       reason: 'Pago A',
       tenantId: TENANT_A,
+      routerId: 'router-a',
       idempotencyKey: stepIdempotencyKey('ma-conflict', 'networkDispatched'),
     };
 

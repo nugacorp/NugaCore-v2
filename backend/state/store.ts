@@ -24,6 +24,7 @@ export interface MonitoringSnapshot {
 }
 
 export interface MikrotikLog {
+  tenantId: string;
   timestamp: string;
   message: string;
 }
@@ -65,6 +66,7 @@ export interface MikrotikRouterRegistryItem {
 
 export interface MikrotikCommandAudit {
   id: string;
+  tenantId: string;
   routerId?: string;
   routerName?: string;
   command: string;
@@ -460,10 +462,10 @@ export const store: {
     { id: 'alt-2', source: 'Rodrigo Flores Ortiz', sourceType: 'client', severity: 'critical', message: 'Cliente suspendido por falta de pago detectara portal cautivo (IP 10.100.10.45).', timestamp: '2026-05-31 03:00', acknowledged: true },
   ],
   MIKROTIK_LOGS: [
-    { timestamp: '2026-05-31 03:30:12', message: 'pppoe,info pppoe-in-sofia_rodriguez: logged in' },
-    { timestamp: '2026-05-31 03:31:00', message: 'script,info AutoSuspension trigger: user rodrigo_flores_nuga disabled, queue deactivated' },
-    { timestamp: '2026-05-31 03:35:15', message: 'system,info,account user admin logged in from 10.0.0.101 via winbox' },
-    { timestamp: '2026-05-31 03:39:50', message: 'interface,info SFP port Link-Up speed 10Gbps full-duplex' },
+    { tenantId: 'tenant-default', timestamp: '2026-05-31 03:30:12', message: 'pppoe,info pppoe-in-sofia_rodriguez: logged in' },
+    { tenantId: 'tenant-default', timestamp: '2026-05-31 03:31:00', message: 'script,info AutoSuspension trigger: user rodrigo_flores_nuga disabled, queue deactivated' },
+    { tenantId: 'tenant-default', timestamp: '2026-05-31 03:35:15', message: 'system,info,account user admin logged in from 10.0.0.101 via winbox' },
+    { tenantId: 'tenant-default', timestamp: '2026-05-31 03:39:50', message: 'interface,info SFP port Link-Up speed 10Gbps full-duplex' },
   ],
   MIKROTIK_ROUTERS: [
     {

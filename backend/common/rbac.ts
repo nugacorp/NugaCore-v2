@@ -5,6 +5,14 @@ export type AppRole = 'super admin' | 'administrador' | 'cobranza' | 'tecnico' |
 
 export const READ_ROLES: AppRole[] = ['super admin', 'administrador', 'cobranza', 'tecnico', 'soporte', 'solo lectura'];
 
+// Lectura de datos financieros (facturación, pagos, saldos, CFDI, P&L operativo):
+// solo roles de dinero. Técnico/Soporte/Solo-lectura → 403 (hardening P0 RBAC).
+export const BILLING_READ_ROLES: AppRole[] = ['super admin', 'administrador', 'cobranza'];
+
+// Lectura de operación de red (inventario/telemetría/worker MikroTik):
+// excluye Cobranza y Solo-lectura (hardening P0 RBAC).
+export const NETWORK_VIEW_ROLES: AppRole[] = ['super admin', 'administrador', 'tecnico', 'soporte'];
+
 export const normalizeRole = (value: string | string[] | undefined): AppRole | null => {
   const raw = Array.isArray(value) ? value[0] : value;
   const role = (raw || '').trim().toLowerCase();
@@ -18,14 +26,25 @@ export const normalizeRole = (value: string | string[] | undefined): AppRole | n
   return null;
 };
 
+const rejectMissingAuthContext = (req: Request, res: Response): boolean => {
+  const failure = req.authContextFailure;
+  if (failure) {
+    res.status(failure.status).json({ error: failure.message, code: failure.code });
+    return true;
+  }
+
+  if (!req.authContext?.role) {
+    res.status(401).json({ error: 'Unauthorized: missing verified auth context' });
+    return true;
+  }
+
+  return false;
+};
+
 export const requireRoles = (allowed: AppRole[]) => {
   return (req: Request, res: Response, next: NextFunction): void => {
-    const role = req.authContext?.role || null;
-
-    if (!role) {
-      res.status(401).json({ error: 'Unauthorized: missing verified auth context' });
-      return;
-    }
+    if (rejectMissingAuthContext(req, res)) return;
+    const role = req.authContext!.role;
 
     if (!allowed.includes(role)) {
       res.status(403).json({ error: 'Forbidden: role does not have permission for this action' });
@@ -38,12 +57,8 @@ export const requireRoles = (allowed: AppRole[]) => {
 
 export const requireAction = (action: ActionPermissionKey) => {
   return (req: Request, res: Response, next: NextFunction): void => {
-    const role = req.authContext?.role || null;
-
-    if (!role) {
-      res.status(401).json({ error: 'Unauthorized: missing verified auth context' });
-      return;
-    }
+    if (rejectMissingAuthContext(req, res)) return;
+    const role = req.authContext!.role;
 
     if (!hasActionPermission(role, action)) {
       res.status(403).json({ error: `Forbidden: role does not have permission for action ${action}` });

@@ -9,35 +9,49 @@ import { canAccessTab } from '../../src/lib/rbac';
 // FASE G — RBAC de Billing & Collections.
 //
 //   Super Admin / Administrador / Cobranza → billing completo (read+write).
-//   Técnico / Soporte / Solo lectura       → solo lectura billing.
+//   Técnico / Soporte / Solo lectura       → 403 (sin lectura de facturación).
 //
-// El backend es la fuente de verdad (requireRoles). Estos tests congelan
-// la matriz en el stack HTTP real (modo hermético) + el guard de UI.
+// Hardening P0 RBAC (2026-07-15): la lectura de datos financieros queda
+// restringida a roles de dinero. El backend es la fuente de verdad
+// (requireRoles → BILLING_READ_ROLES). Estos tests congelan la matriz en el
+// stack HTTP real (modo hermético) + el guard de UI.
 // ====================================================================
 
 const hdr = (role: string) => ({ 'x-user-role': role, 'x-user-id': `t-${role}` });
 
-const READ_ALL = ['super admin', 'administrador', 'cobranza', 'tecnico', 'soporte', 'solo lectura'];
+const READ_OK = ['super admin', 'administrador', 'cobranza'];
+const READ_DENY = ['tecnico', 'soporte', 'solo lectura'];
 const WRITE_OK = ['super admin', 'administrador', 'cobranza'];
 const WRITE_DENY = ['tecnico', 'soporte', 'solo lectura'];
 
-describe('RBAC Billing — lectura (todos los roles)', () => {
+const BILLING_READS = [
+  '/api/billing/invoices',
+  '/api/billing/payments',
+  '/api/billing/customers/c-1/balance',
+  '/api/billing/account-summary',
+  '/api/billing/revenue-report',
+];
+
+describe('RBAC Billing — lectura (solo roles de dinero)', () => {
   let app: Express;
   beforeAll(() => { app = createApp(); });
 
-  for (const role of READ_ALL) {
-    it(`${role} puede leer GET /api/billing/invoices`, async () => {
-      const res = await request(app).get('/api/billing/invoices').set(hdr(role));
-      expect(res.status).toBe(200);
-    });
-    it(`${role} puede leer GET /api/billing/payments`, async () => {
-      const res = await request(app).get('/api/billing/payments').set(hdr(role));
-      expect(res.status).toBe(200);
-    });
-    it(`${role} puede leer GET /api/billing/customers/:id/balance`, async () => {
-      const res = await request(app).get('/api/billing/customers/c-1/balance').set(hdr(role));
-      expect(res.status).toBe(200);
-    });
+  for (const role of READ_OK) {
+    for (const path of BILLING_READS) {
+      it(`${role} puede leer GET ${path}`, async () => {
+        const res = await request(app).get(path).set(hdr(role));
+        expect(res.status).toBe(200);
+      });
+    }
+  }
+
+  for (const role of READ_DENY) {
+    for (const path of BILLING_READS) {
+      it(`${role} NO puede leer GET ${path} → 403`, async () => {
+        const res = await request(app).get(path).set(hdr(role));
+        expect(res.status).toBe(403);
+      });
+    }
   }
 });
 

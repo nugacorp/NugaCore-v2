@@ -2,7 +2,7 @@ import { Router } from 'express';
 import { getGemini } from '../../../backend/services/gemini';
 import { encryptSecret } from '../../../backend/services/crypto';
 import { store, MikrotikRouterRegistryItem } from '../../../backend/state/store';
-import { READ_ROLES, requireRoles } from '../../common/rbac';
+import { NETWORK_VIEW_ROLES, requireRoles } from '../../common/rbac';
 import { generateApiCredential, generateApiUsername, generateProvisioningToken } from './provisioning/credentials';
 import { generateProvisioningScript } from './provisioning/script-generator';
 import { provisioningStore, toProvisionedView } from './provisioning/store';
@@ -14,7 +14,7 @@ import {
 } from './provisioning/types';
 import { asyncHandler } from '../../common/errors';
 import { logger } from '../../common/logger';
-import { processPendingOrders, readRouterSnapshot, listWorkerRuns } from './worker/worker';
+import { processPendingOrders, readRouterSnapshot, listWorkerRuns, reconcileConfirmedOrder } from './worker/worker';
 import { getWireguardService } from '../wireguard/service';
 import type { PeerCreatedOnce } from '../wireguard/types';
 import { persistMikrotikRouter } from './repository';
@@ -25,7 +25,9 @@ import { filterRoutersByTenant, findRouterForTenant } from './tenant-filter';
 const router = Router();
 
 // RBAC del provisioning (Fase 4.4)
-const PROV_VIEW_ROLES = ['super admin', 'administrador', 'tecnico', 'soporte', 'solo lectura'] as const;
+// Vista de provisioning/inventario MikroTik: excluye Cobranza y Solo-lectura
+// (hardening P0 RBAC — la lectura de red es de operación técnica).
+const PROV_VIEW_ROLES = ['super admin', 'administrador', 'tecnico', 'soporte'] as const;
 const PROV_SCRIPT_ROLES = ['super admin', 'administrador', 'tecnico'] as const;
 const PROV_ROTATE_ROLES = ['super admin', 'administrador'] as const;
 
@@ -137,6 +139,7 @@ const resolveRouterFromPayload = (routerId: string | undefined, tenantId: string
 };
 
 const logMikrotikAudit = (params: {
+  tenantId: string;
   routerId?: string;
   routerName?: string;
   command: string;
@@ -476,24 +479,27 @@ router.get('/api/mikrotik/routers/:id/read/ppp', requireRoles(['super admin', 'a
 });
 
 router.get('/api/mikrotik/command-audit', requireRoles(['super admin', 'administrador', 'tecnico']), (req, res) => {
+  const tenantId = tenantIdFromRequest(req);
   const routerId = String(req.query.routerId || '').trim();
-  const rows = routerId
-    ? store.MIKROTIK_COMMAND_AUDIT.filter((row) => row.routerId === routerId)
-    : store.MIKROTIK_COMMAND_AUDIT;
+  const rows = store.MIKROTIK_COMMAND_AUDIT.filter(
+    (row) => row.tenantId === tenantId && (!routerId || row.routerId === routerId),
+  );
   res.json(rows);
 });
 
-router.get('/api/mikrotik/logs', requireRoles(READ_ROLES), (_req, res) => {
-  res.json(store.MIKROTIK_LOGS);
+router.get('/api/mikrotik/logs', requireRoles(NETWORK_VIEW_ROLES), (req, res) => {
+  const tenantId = tenantIdFromRequest(req);
+  res.json(store.MIKROTIK_LOGS.filter((row) => row.tenantId === tenantId));
 });
 
 router.post('/api/mikrotik/command', requireRoles(['super admin', 'administrador', 'tecnico', 'soporte']), (req, res) => {
   const { command, routerId, confirmWrite } = req.body;
   if (!command) return res.status(400).json({ error: 'No query command' });
+  const tenantId = tenantIdFromRequest(req);
 
   const routerItem = resolveRouterFromPayload(
     routerId ? String(routerId) : undefined,
-    tenantIdFromRequest(req),
+    tenantId,
   );
   if (!routerItem) {
     return res.status(404).json({ error: 'Router not found' });
@@ -503,6 +509,7 @@ router.post('/api/mikrotik/command', requireRoles(['super admin', 'administrador
   const actorId = req.authContext?.userId;
   if (mode === 'write' && confirmWrite !== true) {
     logMikrotikAudit({
+      tenantId,
       routerId: routerItem.id,
       routerName: routerItem.name,
       command: String(command),
@@ -516,6 +523,7 @@ router.post('/api/mikrotik/command', requireRoles(['super admin', 'administrador
 
   if (mode === 'write' && /reboot|reset\s+configuration|system\s+reset/i.test(String(command))) {
     logMikrotikAudit({
+      tenantId,
       routerId: routerItem.id,
       routerName: routerItem.name,
       command: String(command),
@@ -528,6 +536,7 @@ router.post('/api/mikrotik/command', requireRoles(['super admin', 'administrador
   }
 
   logMikrotikAudit({
+    tenantId,
     routerId: routerItem.id,
     routerName: routerItem.name,
     command: String(command),
@@ -540,11 +549,13 @@ router.post('/api/mikrotik/command', requireRoles(['super admin', 'administrador
   const output = getSimulatedCommandOutput(String(command), routerItem.id);
 
   store.MIKROTIK_LOGS.push({
+    tenantId,
     timestamp: new Date().toISOString().replace('T', ' ').substring(0, 19),
     message: `user,info [${routerItem.name}] Command (${mode}): "${String(command)}"`,
   });
 
   logMikrotikAudit({
+    tenantId,
     routerId: routerItem.id,
     routerName: routerItem.name,
     command: String(command),
@@ -848,6 +859,21 @@ router.post('/api/mikrotik/routers/:id/test-connection', requireRoles([...PROV_S
 // Procesa las órdenes PENDING en dry-run.
 router.post('/api/mikrotik/worker/run', requireRoles([...PROV_SCRIPT_ROLES]), asyncHandler(async (req, res) => {
   const run = await processPendingOrders(req.authContext?.userId);
+  res.status(201).json(run);
+}));
+
+// Un efecto incierto nunca se reintenta automáticamente. Super admin/Admin
+// confirman primero el estado real del router y sólo entonces reanudan el post-efecto.
+router.post('/api/mikrotik/worker/orders/:id/reconcile-confirmed', requireRoles(['super admin', 'administrador']), asyncHandler(async (req, res) => {
+  const tenantId = tenantIdFromRequest(req);
+  const routerId = typeof req.body?.routerId === 'string' ? req.body.routerId.trim() : '';
+  if (!routerId) {
+    res.status(400).json({ error: 'routerId es obligatorio.', code: 'WORKER_RECONCILE_ROUTER_REQUIRED' });
+    return;
+  }
+  const run = await reconcileConfirmedOrder(req.authContext?.userId || 'unknown', {
+    tenantId, orderId: req.params.id, routerId,
+  });
   res.status(201).json(run);
 }));
 

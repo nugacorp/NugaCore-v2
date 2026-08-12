@@ -1,13 +1,13 @@
 import { Router } from 'express';
 import { asyncHandler } from '../../common/errors';
-import { READ_ROLES, requireRoles } from '../../common/rbac';
+import { BILLING_READ_ROLES, requireRoles } from '../../common/rbac';
 import { tenantIdFromRequest } from '../tenancy/tenant-scope';
 import { getFinanceOperationalService } from './service';
 
 const router = Router();
 const WRITE = ['super admin', 'administrador', 'cobranza'] as const;
 
-router.get('/api/finance/operational/expenses', requireRoles(READ_ROLES), asyncHandler(async (req, res) => {
+router.get('/api/finance/operational/expenses', requireRoles(BILLING_READ_ROLES), asyncHandler(async (req, res) => {
   res.json(await getFinanceOperationalService().listExpenses({
     category: req.query.category ? String(req.query.category) : undefined,
     from: req.query.from ? String(req.query.from) : undefined,
@@ -31,7 +31,7 @@ router.delete('/api/finance/operational/expenses/:id', requireRoles([...WRITE]),
   res.status(204).send();
 }));
 
-router.get('/api/finance/operational/pnl', requireRoles(READ_ROLES), asyncHandler(async (req, res) => {
+router.get('/api/finance/operational/pnl', requireRoles(BILLING_READ_ROLES), asyncHandler(async (req, res) => {
   res.json(await getFinanceOperationalService().getOperationalPnl(
     req.query.from ? String(req.query.from) : undefined,
     req.query.to ? String(req.query.to) : undefined,
@@ -39,7 +39,7 @@ router.get('/api/finance/operational/pnl', requireRoles(READ_ROLES), asyncHandle
   ));
 }));
 
-router.get('/api/finance/cfdi/status', requireRoles(READ_ROLES), asyncHandler(async (_req, res) => {
+router.get('/api/finance/cfdi/status', requireRoles(BILLING_READ_ROLES), asyncHandler(async (_req, res) => {
   res.json({
     enabled: false,
     provider: null,

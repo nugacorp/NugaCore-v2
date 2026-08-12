@@ -141,6 +141,7 @@ export const eventToRow = (e: SuspensionEvent): Record<string, unknown> => {
 export interface OrderRow {
   id: string;
   customer_id: string;
+  router_id?: string | null;
   invoice_id: string | null;
   status: OrderStatus;
   source: 'engine' | 'manual' | 'payment-engine' | 'provisioning-center' | 'service-status';
@@ -150,11 +151,18 @@ export interface OrderRow {
   created_at: string;
   tenant_id?: string | null;
   idempotency_key?: string | null;
+  dry_run?: boolean | null;
+  worker_run_id?: string | null;
+  worker_note?: string | null;
+  claimed_at?: string | null;
+  effect_started_at?: string | null;
+  effect_confirmed_at?: string | null;
 }
 
 export const rowToOrder = (r: OrderRow, orderType: SuspensionOrder['orderType']): SuspensionOrder => ({
   id: r.id,
   customerId: r.customer_id,
+  routerId: r.router_id || undefined,
   invoiceId: r.invoice_id || undefined,
   orderType,
   status: r.status,
@@ -165,6 +173,12 @@ export const rowToOrder = (r: OrderRow, orderType: SuspensionOrder['orderType'])
   createdAt: r.created_at,
   tenantId: r.tenant_id || undefined,
   idempotencyKey: r.idempotency_key || undefined,
+  dryRun: r.dry_run ?? undefined,
+  workerRunId: r.worker_run_id || undefined,
+  workerNote: r.worker_note || undefined,
+  claimedAt: r.claimed_at || undefined,
+  effectStartedAt: r.effect_started_at || undefined,
+  effectConfirmedAt: r.effect_confirmed_at || undefined,
 });
 
 export const orderToRow = (o: SuspensionOrder): Record<string, unknown> => {
@@ -179,6 +193,13 @@ export const orderToRow = (o: SuspensionOrder): Record<string, unknown> => {
     executed_at: o.executedAt || null,
   };
   if (o.tenantId !== undefined) row.tenant_id = o.tenantId;
+  if (o.routerId !== undefined) row.router_id = o.routerId;
   if (o.idempotencyKey !== undefined) row.idempotency_key = o.idempotencyKey;
+  if (o.dryRun !== undefined) row.dry_run = o.dryRun;
+  if (o.workerRunId !== undefined) row.worker_run_id = o.workerRunId;
+  if (o.workerNote !== undefined) row.worker_note = o.workerNote;
+  if (o.claimedAt !== undefined) row.claimed_at = o.claimedAt;
+  if (o.effectStartedAt !== undefined) row.effect_started_at = o.effectStartedAt;
+  if (o.effectConfirmedAt !== undefined) row.effect_confirmed_at = o.effectConfirmedAt;
   return row;
 };
