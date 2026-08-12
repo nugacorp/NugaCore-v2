@@ -1,6 +1,14 @@
 import { describe, it, expect, beforeAll, afterAll } from 'vitest';
 import request from 'supertest';
 import type { Express } from 'express';
+import {
+  cleanupStagingTenantMemberships,
+  cleanupStagingWarehouses,
+  ensureStagingTenantMemberships,
+  ensureStagingWarehouses,
+  stagingDbAdminHeaders,
+  STAGING_DB_TEST_USERS,
+} from '../helpers/staging-fixtures';
 
 // ====================================================================
 // Fase 5.1 — Inventario ERP contra Supabase REAL (opt-in RUN_DB_TESTS).
@@ -13,19 +21,28 @@ import type { Express } from 'express';
 
 const optIn = process.env.RUN_DB_TESTS === 'true';
 const hasSupabase = Boolean(process.env.SUPABASE_URL && process.env.SUPABASE_SERVICE_ROLE_KEY);
-const ADMIN = { 'x-user-role': 'super admin', 'x-user-id': 'test-admin' };
+const ADMIN = stagingDbAdminHeaders(STAGING_DB_TEST_USERS.inventoryAdmin);
 const DB_TIMEOUT_MS = 30000;
 
 describe.skipIf(!optIn || !hasSupabase)('Inventory ERP DB (Supabase staging)', () => {
   let app: Express;
   const createdItemIds: string[] = [];
   const createdWarehouseIds: string[] = [];
+  let fixtureMembershipIds: string[] = [];
+  let fixtureWarehouseIds: string[] = [];
   const stamp = Date.now();
   const WH_NAME = `WH Test ${stamp}`;
+  const SOURCE_WH_NAME = `Principal Test ${stamp}`;
 
   beforeAll(async () => {
     // Fuerza el modo DB del dominio y reconstruye el service (singleton).
     process.env.USE_DB_INVENTORY = 'true';
+    const { supabaseAdmin } = await import('../../backend/services/supabase-admin');
+    expect(supabaseAdmin).not.toBeNull();
+    fixtureMembershipIds = await ensureStagingTenantMemberships(supabaseAdmin!, [
+      STAGING_DB_TEST_USERS.inventoryAdmin,
+    ]);
+    fixtureWarehouseIds = await ensureStagingWarehouses(supabaseAdmin!, [SOURCE_WH_NAME]);
     const { resetInventoryService } = await import('../../backend/domains/inventory/service');
     resetInventoryService();
     const { createApp } = await import('../../backend/app');
@@ -42,6 +59,8 @@ describe.skipIf(!optIn || !hasSupabase)('Inventory ERP DB (Supabase staging)', (
       if (createdWarehouseIds.length) {
         await supabaseAdmin.from('warehouses').delete().in('id', createdWarehouseIds);
       }
+      await cleanupStagingWarehouses(supabaseAdmin, fixtureWarehouseIds);
+      await cleanupStagingTenantMemberships(supabaseAdmin, fixtureMembershipIds);
     }
     const { resetInventoryService } = await import('../../backend/domains/inventory/service');
     resetInventoryService();
@@ -59,7 +78,7 @@ describe.skipIf(!optIn || !hasSupabase)('Inventory ERP DB (Supabase staging)', (
 
   it('da de alta un item y queda persistido con estado', async () => {
     const created = await request(app).post('/api/inventory/add').set(ADMIN).send({
-      name: `Item DB ${stamp}`, category: 'Other', model: 'DB-1', brand: 'NugaDB', qty: 5, warehouse: 'Principal',
+      name: `Item DB ${stamp}`, category: 'Other', model: 'DB-1', brand: 'NugaDB', qty: 5, warehouse: SOURCE_WH_NAME,
     });
     expect(created.status).toBe(201);
     expect(created.body.operationalStatus).toBe('Disponible');

@@ -518,8 +518,20 @@ const ASSIGNMENTS = 'inventory_assignments';
 const TRANSFERS = 'inventory_transfers';
 const WAREHOUSES = 'warehouses';
 
+const databaseErrorMessage = (error: unknown): string => {
+  if (error instanceof Error) return error.message;
+  if (error && typeof error === 'object') {
+    const record = error as Record<string, unknown>;
+    const parts = [record.message, record.code, record.details, record.hint]
+      .map((value) => typeof value === 'string' ? value.trim() : '')
+      .filter(Boolean);
+    if (parts.length) return parts.join(' | ');
+  }
+  return String(error);
+};
+
 const fail = (context: string, error: unknown): never => {
-  const message = error instanceof Error ? error.message : String(error);
+  const message = databaseErrorMessage(error);
   logger.error(`Supabase inventory repository error: ${context}`, { message });
   throw new Error(`Inventory DB error (${context}): ${message}`);
 };

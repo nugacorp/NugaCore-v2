@@ -1,8 +1,8 @@
 // ====================================================================
 // Seed de usuarios de AUTH para STAGING (Fase 2).
 //
-// Crea usuarios FICTICIOS en Supabase Auth (uno por rol), su users_profile
-// y su user_roles. Idempotente. Usa la SERVICE-ROLE key (lado servidor),
+// Crea usuarios FICTICIOS en Supabase Auth (uno por rol), su users_profile,
+// user_roles y tenant_memberships. Idempotente. Usa la SERVICE-ROLE key (lado servidor),
 // NUNCA el PAT. El password se lee de STAGING_AUTH_PASSWORD (no hardcodeado).
 //
 // Uso:
@@ -31,6 +31,8 @@ if (!password) {
 const admin = createClient(url, serviceKey, {
   auth: { persistSession: false, autoRefreshToken: false },
 });
+
+const DEFAULT_TENANT_ID = 'tenant-default';
 
 // Usuarios ficticios, uno por rol (nombres de rol deben existir en public.roles).
 const USERS = [
@@ -69,6 +71,14 @@ const ensureUser = async (email) => {
 };
 
 const run = async () => {
+  const { error: tenantErr } = await admin.from('tenants').upsert({
+    id: DEFAULT_TENANT_ID,
+    name: 'Default WISP',
+    slug: 'default',
+    status: 'active',
+  }, { onConflict: 'id' });
+  if (tenantErr) throw tenantErr;
+
   // Mapa nombre de rol -> id
   const { data: roles, error: rolesErr } = await admin.from('roles').select('id, name');
   if (rolesErr) throw rolesErr;
@@ -91,6 +101,24 @@ const run = async () => {
       .from('user_roles')
       .upsert({ user_id: id, role_id: roleId }, { onConflict: 'user_id,role_id', ignoreDuplicates: true });
     if (roleErr) throw roleErr;
+
+    const membershipRole = u.role === 'Super Admin'
+      ? 'owner'
+      : u.role === 'Administrador'
+        ? 'admin'
+        : u.role === 'Solo lectura'
+          ? 'readonly'
+          : 'member';
+    const { error: membershipErr } = await admin
+      .from('tenant_memberships')
+      .upsert({
+        id: `tm-staging-${id}`,
+        tenant_id: DEFAULT_TENANT_ID,
+        user_id: id,
+        role: membershipRole,
+        status: 'active',
+      }, { onConflict: 'tenant_id,user_id' });
+    if (membershipErr) throw membershipErr;
 
     console.log(`${created ? 'creado ' : 'existe '} ${u.email.padEnd(28)} -> ${u.role}`);
   }
