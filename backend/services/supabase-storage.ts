@@ -134,3 +134,16 @@ export async function removeDocumentObject(storagePath: string): Promise<boolean
     return false;
   }
 }
+
+/** Sube bytes generados por el backend; nunca entrega path ni token al cliente. */
+export async function uploadDocumentObject(
+  storagePath: string,
+  bytes: Buffer,
+  mimeType: string,
+): Promise<void> {
+  const { error } = await admin().storage.from(CLIENT_DOCUMENTS_BUCKET).upload(storagePath, bytes, {
+    contentType: mimeType,
+    upsert: false,
+  });
+  if (error) throw error;
+}
