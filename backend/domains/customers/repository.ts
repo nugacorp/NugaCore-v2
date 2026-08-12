@@ -428,21 +428,43 @@ export class SupabaseCustomersRepository implements CustomersRepository {
     options?: TimelineWriteOptions,
   ): Promise<void> {
     const createdAt = new Date().toISOString();
+    let tenantId = options?.tenantId?.trim();
+    if (!tenantId) {
+      const { data: clientRow, error: clientError } = await this.client
+        .from(CLIENTS_TABLE)
+        .select('tenant_id')
+        .eq('id', event.clientId)
+        .maybeSingle();
+
+      if (clientError) return fail('addTimelineEvent:resolveTenant', clientError);
+
+      // Fail-closed: sin tenant legible NO se escribe. Un fallback a
+      // 'tenant-default' aquí sellaría el evento en el WISP equivocado.
+      tenantId = (clientRow as { tenant_id?: string | null } | null)?.tenant_id?.trim();
+      if (!tenantId) {
+        return fail(
+          'addTimelineEvent:resolveTenant',
+          new Error(`Cliente ${event.clientId} sin tenant_id resoluble; no se escribe el evento`),
+        );
+      }
+    }
+
     if (!options?.idempotencyKey) {
       const id = 'ct-' + Date.now() + '-' + Math.floor(Math.random() * 90 + 10);
-      const { error } = await this.client.from(TIMELINE_TABLE).insert(timelineToRow(event, id, createdAt));
+      const { error } = await this.client
+        .from(TIMELINE_TABLE)
+        .insert(timelineToRow(event, id, createdAt, tenantId));
       if (error) fail('addTimelineEvent', error);
       return;
     }
 
-    const tenantId = options.tenantId || 'tenant-default';
     const row = {
       ...timelineToRow(
         event,
         tenantScopedIdempotencyId('ct', tenantId, options.idempotencyKey),
         createdAt,
+        tenantId,
       ),
-      tenant_id: tenantId,
       idempotency_key: options.idempotencyKey,
     };
     const { error } = await this.client.from(TIMELINE_TABLE).insert(row);
