@@ -1,5 +1,5 @@
 import { Router } from 'express';
-import * as XLSX from 'xlsx';
+import writeXlsxFile, { type SheetData } from 'write-excel-file/node';
 import { asyncHandler } from '../../common/errors';
 import { requireAction } from '../../common/rbac';
 import { tenantIdFromRequest } from '../tenancy/tenant-scope';
@@ -44,6 +44,24 @@ const toCsv = (rows: Record<string, unknown>[]): string => {
     lines.push(headers.map((header) => escapeCell(row[header])).join(','));
   }
   return lines.join('\n');
+};
+
+const toXlsxValue = (value: unknown): string | number | boolean | Date => {
+  if (value instanceof Date) return value;
+  if (typeof value === 'string' || typeof value === 'number' || typeof value === 'boolean') return value;
+  if (value === null || value === undefined) return '';
+  return JSON.stringify(value);
+};
+
+const toXlsxBuffer = async (rows: Record<string, unknown>[], sheetName: string): Promise<Buffer> => {
+  const headers = rows.length > 0 ? Object.keys(rows[0]) : ['no_data'];
+  const data: SheetData = [
+    headers,
+    ...rows.map((row) => headers.map((header) => toXlsxValue(row[header]))),
+  ];
+  return writeXlsxFile(data, {
+    sheet: sheetName.substring(0, 31),
+  }).toBuffer();
 };
 
 const escapePdfText = (value: string): string => value.replace(/\\/g, '\\\\').replace(/\(/g, '\\(').replace(/\)/g, '\\)');
@@ -144,10 +162,7 @@ router.get('/api/reports/export', requireAction('reports.export'), asyncHandler(
   }
 
   if (format === 'xlsx') {
-    const wb = XLSX.utils.book_new();
-    const ws = XLSX.utils.json_to_sheet(rows);
-    XLSX.utils.book_append_sheet(wb, ws, scope.toUpperCase());
-    const buffer = XLSX.write(wb, { type: 'buffer', bookType: 'xlsx' }) as Buffer;
+    const buffer = await toXlsxBuffer(rows, scope.toUpperCase());
     res.setHeader('Content-Type', 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet');
     res.setHeader('Content-Disposition', `attachment; filename="${fileBase}.xlsx"`);
     return res.send(buffer);
