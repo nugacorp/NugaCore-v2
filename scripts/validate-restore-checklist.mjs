@@ -1,28 +1,24 @@
 #!/usr/bin/env node
-// ====================================================================
-// Checklist restore staging — OLA 0 (§14).
-//
-// Uso:
-//   STAGING_RESTORE_TESTED=true node scripts/validate-restore-checklist.mjs
-//   node scripts/vps/staging-restore-smoke.mjs  (smoke previo)
-// ====================================================================
+import { readFileSync, statSync } from 'node:fs';
+import { validateRestoreEvidence, formatMissingFields, validateSecretFileMetadata } from './lib/gl02-backup-config.mjs';
 
-console.log('\n=== Restore Checklist — OLA 0 §14 ===\n');
-
-const tested = process.env.STAGING_RESTORE_TESTED === 'true'
-  || process.env.PRODUCTION_RESTORE_TESTED === 'true';
-
-if (tested) {
-  const flag = process.env.PRODUCTION_RESTORE_TESTED === 'true' ? 'PRODUCTION_RESTORE_TESTED' : 'STAGING_RESTORE_TESTED';
-  console.log(`  ✅  ${flag}=true`);
-  console.log('  Confirmar manualmente: backup tomado, restore ejecutado, API responde.');
-  process.exit(0);
+const path = (process.env.PRODUCTION_RESTORE_EVIDENCE_FILE || '').trim();
+let evidence;
+let key;
+try {
+  if (!path) throw new Error('missing');
+  evidence = JSON.parse(readFileSync(path, 'utf8'));
+  const keyPath = (process.env.PRODUCTION_RESTORE_EVIDENCE_HMAC_KEY_FILE || '').trim();
+  if (!keyPath || (process.platform === 'linux' && validateSecretFileMetadata(statSync(keyPath)).length)) throw new Error('key');
+  key = readFileSync(keyPath, 'utf8').trim();
+} catch {
+  console.error(formatMissingFields('production-restore-evidence', ['PRODUCTION_RESTORE_EVIDENCE_AND_KEY_FILES_VALID']));
+  process.exit(1);
 }
-
-console.log('  ⚠️  STAGING_RESTORE_TESTED / PRODUCTION_RESTORE_TESTED no están en true');
-console.log('\nPasos manuales (PRODUCTION_READINESS_CHECKLIST.md §14):');
-console.log('  1. Backup completo de Supabase (schema + data)');
-console.log('  2. Restore en entorno de prueba');
-console.log('  3. Verificar GET /api/health y persistencia-status');
-console.log('  4. Exportar STAGING_RESTORE_TESTED=true en staging\n');
-process.exit(0);
+const result = validateRestoreEvidence(evidence, key);
+if (process.env.PRODUCTION_RESTORE_TESTED !== 'true') result.missing.unshift('PRODUCTION_RESTORE_TESTED_TRUE');
+if (result.missing.length) {
+  console.error(formatMissingFields('production-restore-evidence', result.missing));
+  process.exit(1);
+}
+console.log(JSON.stringify({ scope: 'production-restore-evidence', status: 'verified', backupId: evidence.backupId }));

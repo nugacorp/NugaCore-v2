@@ -12,6 +12,7 @@ import { useDbRouterEnrollment, useDbWireguard } from '../../config/feature-flag
 import { isSupabaseAdminConfigured, pingSupabase } from '../../services/supabase-admin';
 import { portalAuthStatus } from '../portal/auth';
 import { runDataConsistencyCheck } from './consistency';
+import { productionRestoreEvidenceVerified } from '../../config/restore-evidence';
 
 const CRITICAL_DOMAINS = [
   'customers', 'plans', 'billing', 'support', 'inventory', 'suspension', 'payments',
@@ -50,8 +51,7 @@ const webhookProviderConfigured = (prefix: string): boolean =>
 export async function buildProductionReadinessReport(): Promise<ProductionReadinessReport> {
   const criticalOn = CRITICAL_DOMAINS.filter((d) => featureFlags[d]);
   const mikrotikLive = asBool(process.env.MIKROTIK_WORKER_LIVE);
-  const restoreTested = asBool(process.env.PRODUCTION_RESTORE_TESTED)
-    || asBool(process.env.STAGING_RESTORE_TESTED);
+  const restoreTested = productionRestoreEvidenceVerified();
   const quickLoginEnabled = asBool(process.env.VITE_ENABLE_QUICK_LOGIN);
   const portal = portalAuthStatus();
   const dbRequired = domainsOnDb().length > 0;
@@ -156,8 +156,8 @@ export async function buildProductionReadinessReport(): Promise<ProductionReadin
       passed: restoreTested,
       severity: 'blocker',
       detail: restoreTested
-        ? 'PRODUCTION_RESTORE_TESTED o STAGING_RESTORE_TESTED=true'
-        : 'Ejecutar restore smoke y marcar flag',
+        ? 'Evidencia productiva machine-readable verificada'
+        : 'Falta evidencia productiva completa; staging no satisface este gate',
     },
     {
       id: 'webhook_secrets',
