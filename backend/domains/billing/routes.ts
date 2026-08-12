@@ -180,6 +180,8 @@ router.post(
             source: 'automation',
             actorId: req.authContext?.userId,
           });
+          // NOTA (PR-1A.2): store en memoria, no repositorio; este bloque ya
+          // muta estado simulado de forma síncrona y se persiste completo en PR-3.
           store.addClientTimelineEvent({
             clientId: client.id,
             eventType: 'status_change',

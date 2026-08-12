@@ -147,15 +147,20 @@ export class StoreCustomersRepository implements CustomersRepository {
     event: Omit<ClientTimelineEvent, 'id' | 'createdAt'>,
     options?: TimelineWriteOptions,
   ): Promise<void> {
+    const tenantId =
+      options?.tenantId?.trim()
+      ?? store.CLIENTS.find((client) => client.id === event.clientId)?.tenantId?.trim();
+    if (!tenantId) {
+      throw new Error(`Cliente ${event.clientId} sin tenant_id resoluble; no se escribe el evento`);
+    }
     if (!options?.idempotencyKey) {
-      store.addClientTimelineEvent(event);
+      store.addClientTimelineEvent({ ...event, tenantId });
       return;
     }
-    const tenantId = options.tenantId || 'tenant-default';
     // Sin `await` entre la búsqueda y la escritura: create-or-return atómico.
     const existing = store.CLIENT_TIMELINE.find(
       (row) =>
-        (row.tenantId || 'tenant-default') === tenantId
+        row.tenantId === tenantId
         && row.idempotencyKey === options.idempotencyKey,
     );
     if (existing) {
