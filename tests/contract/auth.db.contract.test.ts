@@ -1,8 +1,9 @@
-import { describe, it, expect, beforeAll } from 'vitest';
+import { describe, it, expect, beforeAll, afterAll } from 'vitest';
 import request from 'supertest';
 import { readFileSync } from 'node:fs';
 import type { Express } from 'express';
 import type { SupabaseClient } from '@supabase/supabase-js';
+import { createStagingAuthFixtures } from '../helpers/staging-fixtures';
 
 // ====================================================================
 // Prueba de AUTH REAL (Supabase JWT) — Fase 2.1. NO hermética.
@@ -23,8 +24,9 @@ import type { SupabaseClient } from '@supabase/supabase-js';
 const optIn = process.env.RUN_AUTH_TESTS === 'true';
 const URL = process.env.SUPABASE_URL;
 const ANON = process.env.SUPABASE_ANON_KEY;
+const SERVICE_ROLE = process.env.SUPABASE_SERVICE_ROLE_KEY;
 const PW = process.env.STAGING_AUTH_PASSWORD;
-const hasEnv = Boolean(URL && ANON && process.env.SUPABASE_SERVICE_ROLE_KEY && PW);
+const hasEnv = Boolean(URL && ANON && SERVICE_ROLE && PW);
 
 // Opt-in sin entorno completo -> error explícito (solo nombres, sin valores).
 if (optIn && !hasEnv) {
@@ -48,18 +50,14 @@ const NET_TEST_TIMEOUT_MS = 120000;
 
 type RoleKey = 'superadmin' | 'administrador' | 'cobranza' | 'tecnico' | 'soporte' | 'readonly';
 
-const USERS: Record<RoleKey, { email: string; expectedRole: string }> = {
-  superadmin: { email: 'superadmin@staging.nugacore.local', expectedRole: 'super admin' },
-  administrador: { email: 'admin@staging.nugacore.local', expectedRole: 'administrador' },
-  cobranza: { email: 'billing@staging.nugacore.local', expectedRole: 'cobranza' },
-  tecnico: { email: 'tech@staging.nugacore.local', expectedRole: 'tecnico' },
-  soporte: { email: 'support@staging.nugacore.local', expectedRole: 'soporte' },
-  readonly: { email: 'readonly@staging.nugacore.local', expectedRole: 'solo lectura' },
-};
+// Populated in beforeAll with per-run staging users. This avoids changing
+// shared fixture passwords while still exercising real Supabase JWT auth.
 
 describe.skipIf(!optIn || !hasEnv)('Auth real (Supabase JWT) — Fase 2.1 staging', () => {
   let app: Express;
   let anon: SupabaseClient;
+  let users: Record<RoleKey, { email: string; expectedRole: string }>;
+  let cleanupAuthFixtures: (() => Promise<void>) | null = null;
   const tokens: Partial<Record<RoleKey, string>> = {};
   const refreshTokens: Partial<Record<RoleKey, string>> = {};
 
@@ -77,8 +75,12 @@ describe.skipIf(!optIn || !hasEnv)('Auth real (Supabase JWT) — Fase 2.1 stagin
   beforeAll(async () => {
     const { createClient } = await import('@supabase/supabase-js');
     anon = createClient(URL!, ANON!, { auth: { persistSession: false, autoRefreshToken: false } });
+    const admin = createClient(URL!, SERVICE_ROLE!, { auth: { persistSession: false, autoRefreshToken: false } });
+    const fixtures = await createStagingAuthFixtures(admin, PW!);
+    users = fixtures.users;
+    cleanupAuthFixtures = fixtures.cleanup;
 
-    for (const [roleKey, user] of Object.entries(USERS) as Array<[RoleKey, { email: string; expectedRole: string }]>) {
+    for (const [roleKey, user] of Object.entries(users) as Array<[RoleKey, { email: string; expectedRole: string }]>) {
       const session = await signIn(user.email);
       tokens[roleKey] = session.accessToken;
       refreshTokens[roleKey] = session.refreshToken;
@@ -88,15 +90,19 @@ describe.skipIf(!optIn || !hasEnv)('Auth real (Supabase JWT) — Fase 2.1 stagin
     app = createApp();
   }, NET_HOOK_TIMEOUT_MS);
 
+  afterAll(async () => {
+    await cleanupAuthFixtures?.();
+  }, NET_HOOK_TIMEOUT_MS);
+
   it('login real emite JWT y refresh token para todos los roles staging', () => {
-    for (const key of Object.keys(USERS) as RoleKey[]) {
+    for (const key of Object.keys(users) as RoleKey[]) {
       expect(tokens[key]?.length).toBeGreaterThan(20);
       expect(refreshTokens[key]?.length).toBeGreaterThan(8);
     }
   });
 
   it('JWT válido -> /api/auth/me resuelve rol desde DB (source=supabase-jwt)', async () => {
-    for (const [key, user] of Object.entries(USERS) as Array<[RoleKey, { email: string; expectedRole: string }]>) {
+    for (const [key, user] of Object.entries(users) as Array<[RoleKey, { email: string; expectedRole: string }]>) {
       const res = await request(app).get('/api/auth/me').set('Authorization', `Bearer ${tokens[key]}`);
       expect(res.status).toBe(200);
       expect(res.body.email || user.email).toBeTruthy();
@@ -126,12 +132,12 @@ describe.skipIf(!optIn || !hasEnv)('Auth real (Supabase JWT) — Fase 2.1 stagin
     expect(authSession).not.toContain("from('users_profile')");
     expect(authSession).not.toContain('rest/v1/users_profile');
 
-    const freshAdmin = await signIn(USERS.administrador.email);
+    const freshAdmin = await signIn(users.administrador.email);
     const authMe = await request(app)
       .get('/api/auth/me')
       .set('Authorization', `Bearer ${freshAdmin.accessToken}`);
     expect(authMe.status).toBe(200);
-    expect(authMe.body.role).toBe(USERS.administrador.expectedRole);
+    expect(authMe.body.role).toBe(users.administrador.expectedRole);
     expect(authMe.body.source).toBe('supabase-jwt');
   });
 
@@ -139,7 +145,7 @@ describe.skipIf(!optIn || !hasEnv)('Auth real (Supabase JWT) — Fase 2.1 stagin
   it('logout invalida la sesión del cliente Supabase', async () => {
     const { createClient } = await import('@supabase/supabase-js');
     const client = createClient(URL!, ANON!, { auth: { persistSession: false, autoRefreshToken: false } });
-    const login = await client.auth.signInWithPassword({ email: USERS.readonly.email, password: PW! });
+    const login = await client.auth.signInWithPassword({ email: users.readonly.email, password: PW! });
     expect(login.error).toBeNull();
     expect(login.data.session?.access_token?.length || 0).toBeGreaterThan(20);
 
@@ -165,23 +171,27 @@ describe.skipIf(!optIn || !hasEnv)('Auth real (Supabase JWT) — Fase 2.1 stagin
   });
 
   it('lecturas sensibles exigen Bearer válido en staging/producción y no aceptan trusted-header spoofing', async () => {
-    const sensitiveReads = [
-      '/api/dashboard-stats',
-      '/api/clients',
-      '/api/plans',
-      '/api/billing/invoices',
-      '/api/network-towers',
-      '/api/olt',
-      '/api/onu',
-      '/api/tickets',
-      '/api/workorders',
-      '/api/inventory',
-      '/api/alerts',
-      '/api/mikrotik/logs',
-      '/api/naps',
+    const activeTokens: Partial<Record<RoleKey, string>> = {
+      ...tokens,
+      readonly: (await signIn(users.readonly.email)).accessToken,
+    };
+    const sensitiveReads: Array<{ path: string; role: RoleKey }> = [
+      { path: '/api/dashboard-stats', role: 'readonly' },
+      { path: '/api/clients', role: 'readonly' },
+      { path: '/api/plans', role: 'readonly' },
+      { path: '/api/billing/invoices', role: 'cobranza' },
+      { path: '/api/network-towers', role: 'readonly' },
+      { path: '/api/olt', role: 'readonly' },
+      { path: '/api/onu', role: 'readonly' },
+      { path: '/api/tickets', role: 'readonly' },
+      { path: '/api/workorders', role: 'readonly' },
+      { path: '/api/inventory', role: 'readonly' },
+      { path: '/api/alerts', role: 'readonly' },
+      { path: '/api/mikrotik/logs', role: 'tecnico' },
+      { path: '/api/naps', role: 'readonly' },
     ];
 
-    for (const path of sensitiveReads) {
+    for (const { path, role } of sensitiveReads) {
       const anonymous = await request(app).get(path);
       expect(anonymous.status, `${path} debe bloquear lectura anónima`).toBe(401);
 
@@ -190,9 +200,8 @@ describe.skipIf(!optIn || !hasEnv)('Auth real (Supabase JWT) — Fase 2.1 stagin
         .set({ 'x-user-role': 'super admin', 'x-user-id': 'spoofed-reader' });
       expect(spoofed.status, `${path} no debe aceptar trusted headers en producción`).toBe(401);
 
-      const authorizedSession = await signIn(USERS.readonly.email);
-      const authorized = await request(app).get(path).set('Authorization', `Bearer ${authorizedSession.accessToken}`);
-      expect(authorized.status, `${path} debe permitir JWT readonly válido`).toBe(200);
+      const authorized = await request(app).get(path).set('Authorization', `Bearer ${activeTokens[role]}`);
+      expect(authorized.status, `${path} debe permitir JWT valido con rol ${role}`).toBe(200);
     }
   }, NET_TEST_TIMEOUT_MS);
 
@@ -206,11 +215,11 @@ describe.skipIf(!optIn || !hasEnv)('Auth real (Supabase JWT) — Fase 2.1 stagin
       await request(app).delete(`/api/clients/${res.body.id}`).set('Authorization', `Bearer ${tokens.superadmin}`).expect(204);
     }
 
-    const freshReadonly = await signIn(USERS.readonly.email);
+    const freshReadonly = await signIn(users.readonly.email);
     const read = await request(app).get('/api/clients').set('Authorization', `Bearer ${freshReadonly.accessToken}`);
     expect(read.status).toBe(200);
 
-    const readonlyForWrite = await signIn(USERS.readonly.email);
+    const readonlyForWrite = await signIn(users.readonly.email);
     const write = await request(app)
       .post('/api/clients')
       .set('Authorization', `Bearer ${readonlyForWrite.accessToken}`)

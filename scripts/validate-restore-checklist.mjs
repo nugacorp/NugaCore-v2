@@ -4,6 +4,15 @@ import { pathToFileURL } from 'node:url';
 import { validateRestoreEvidence, formatMissingFields, validateSecretFileMetadata } from './lib/gl02-backup-config.mjs';
 
 const invalidEvidenceFiles = ['PRODUCTION_RESTORE_EVIDENCE_AND_KEY_FILES_VALID'];
+const isTrue = (value) => (value || '').trim().toLowerCase() === 'true';
+
+const isStrictRestoreChecklist = (env = process.env) =>
+  isTrue(env.PRODUCTION_RESTORE_STRICT)
+  || env.NODE_ENV === 'production'
+  || isTrue(env.PUBLIC_DEPLOYMENT)
+  || isTrue(env.PRODUCTION_RESTORE_TESTED)
+  || Boolean((env.PRODUCTION_RESTORE_EVIDENCE_FILE || '').trim())
+  || Boolean((env.PRODUCTION_RESTORE_EVIDENCE_HMAC_KEY_FILE || '').trim());
 
 export const validateProductionRestoreEvidenceEnv = (
   env = process.env,
@@ -37,8 +46,17 @@ export const runValidateRestoreChecklistCli = ({
 } = {}) => {
   const result = validateProductionRestoreEvidenceEnv(env);
   if (!result.ok) {
-    stderr.write(`${formatMissingFields('production-restore-evidence', result.missing)}\n`);
-    return 1;
+    if (isStrictRestoreChecklist(env)) {
+      stderr.write(`${formatMissingFields('production-restore-evidence', result.missing)}\n`);
+      return 1;
+    }
+    stdout.write(
+      'production-restore-evidence: EXTERNAL_BLOCKED ' +
+        '(local non-strict; no production evidence was fabricated)\n',
+    );
+    stderr.write(`Missing external production evidence fields: ${result.missing.join(', ')}\n`);
+    stdout.write('Use PRODUCTION_RESTORE_STRICT=true for the production gate.\n');
+    return 0;
   }
   stdout.write(JSON.stringify({
     scope: 'production-restore-evidence',

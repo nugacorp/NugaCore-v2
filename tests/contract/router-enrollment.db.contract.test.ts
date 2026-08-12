@@ -20,12 +20,18 @@ import { createApp } from '../../backend/app';
 import { resetEnrollmentRepository } from '../../backend/domains/router-enrollment/repository';
 import { resetWireguardService } from '../../backend/domains/wireguard/service';
 import { store } from '../../backend/state/store';
+import {
+  cleanupStagingTenantMemberships,
+  ensureStagingTenantMemberships,
+  stagingDbAdminHeaders,
+  STAGING_DB_TEST_USERS,
+} from '../helpers/staging-fixtures';
 
 const optIn = process.env.RUN_DB_TESTS === 'true';
 const hasSupabase = Boolean(process.env.SUPABASE_URL && process.env.SUPABASE_SERVICE_ROLE_KEY);
 const DB_TIMEOUT_MS = 30000;
 
-const ADMIN = { 'x-user-role': 'super admin', 'x-user-id': 'enr-db-admin' };
+const ADMIN = stagingDbAdminHeaders(STAGING_DB_TEST_USERS.enrollmentAdmin);
 const SECRET = 'PPPoEdbSecret123';
 
 if (optIn && !hasSupabase) {
@@ -42,6 +48,7 @@ describe.skipIf(!optIn || !hasSupabase)('Router Enrollment DB contract (Supabase
   let app: Express;
   let serverId: string;
   const createdIds: string[] = [];
+  let fixtureMembershipIds: string[] = [];
   // Cliente lazy: se construye en beforeAll para no ejecutarse al recolectar
   // el describe cuando la suite está skipped (sin credenciales). Tipado laxo:
   // es acceso directo de verificación a staging, no parte del contrato público.
@@ -52,6 +59,9 @@ describe.skipIf(!optIn || !hasSupabase)('Router Enrollment DB contract (Supabase
     supabase = createClient(process.env.SUPABASE_URL!, process.env.SUPABASE_SERVICE_ROLE_KEY!, {
       auth: { autoRefreshToken: false, persistSession: false },
     });
+    fixtureMembershipIds = await ensureStagingTenantMemberships(supabase, [
+      STAGING_DB_TEST_USERS.enrollmentAdmin,
+    ]);
     process.env.USE_DB_ROUTER_ENROLLMENT = 'true';
     resetEnrollmentRepository();   // reconstruye repo → Supabase
     resetWireguardService();       // WG en store (peer en memoria)
@@ -70,6 +80,7 @@ describe.skipIf(!optIn || !hasSupabase)('Router Enrollment DB contract (Supabase
     if (createdIds.length) {
       await supabase.from('router_enrollment').delete().in('id', createdIds);
     }
+    await cleanupStagingTenantMemberships(supabase, fixtureMembershipIds);
     process.env.USE_DB_ROUTER_ENROLLMENT = 'false';
     resetEnrollmentRepository();
   }, DB_TIMEOUT_MS);

@@ -7,6 +7,10 @@
 #   1. Copia .env.production.example a .env y rellena los valores.
 #   2. docker compose -f docker-compose.prod.yml up -d --build
 #
+# Para revisar la config sin imprimir secretos expandidos:
+#   npm run docker:config:safe
+# Evita publicar la salida de `docker compose config` sin `--no-interpolate`.
+#
 # Nota: las VITE_* se incrustan en build-time (build args), el resto
 #       se inyecta en runtime vía env_file.
 # ====================================================================

@@ -11,9 +11,8 @@ export default defineConfig({
     // Las pruebas de contrato comparten el store en memoria (singleton):
     // ejecutar en un solo hilo para evitar interferencias entre archivos.
     pool: 'forks',
-    poolOptions: {
-      forks: { singleFork: true },
-    },
+    fileParallelism: false,
+    maxWorkers: 1,
     reporters: 'default',
   },
 });
