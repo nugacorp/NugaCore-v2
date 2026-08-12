@@ -12,6 +12,11 @@ import { describe, it, expect, afterAll } from 'vitest';
 const optIn = process.env.RUN_DB_TESTS === 'true';
 const hasSupabase = Boolean(process.env.SUPABASE_URL && process.env.SUPABASE_SERVICE_ROLE_KEY);
 const DB_TIMEOUT_MS = 30000;
+const dateFromToday = (days: number): string => {
+  const date = new Date();
+  date.setUTCDate(date.getUTCDate() + days);
+  return date.toISOString().substring(0, 10);
+};
 
 if (optIn && !hasSupabase) {
   describe('Billing DB contract — configuración requerida', () => {
@@ -25,16 +30,18 @@ describe.skipIf(!optIn || !hasSupabase)('Billing DB contract (Supabase staging)'
   const ts = Date.now();
   const testClientId = `c-bdb-${ts}`;
   let testInvoiceId = '';
+  let overdueInvoiceId = '';
 
   afterAll(async () => {
     const { supabaseAdmin } = await import('../../backend/services/supabase-admin');
     if (!supabaseAdmin) return;
     // Limpiar en orden de FK
-    if (testInvoiceId) {
+    const invoiceIds = [testInvoiceId, overdueInvoiceId].filter(Boolean);
+    if (invoiceIds.length) {
       await supabaseAdmin
         .from('payment_applications')
         .delete()
-        .eq('invoice_id', testInvoiceId);
+        .in('invoice_id', invoiceIds);
       await supabaseAdmin
         .from('payments')
         .delete()
@@ -42,11 +49,11 @@ describe.skipIf(!optIn || !hasSupabase)('Billing DB contract (Supabase staging)'
       await supabaseAdmin
         .from('invoice_items')
         .delete()
-        .eq('invoice_id', testInvoiceId);
+        .in('invoice_id', invoiceIds);
       await supabaseAdmin
         .from('invoices')
         .delete()
-        .eq('id', testInvoiceId);
+        .in('id', invoiceIds);
     }
     await supabaseAdmin
       .from('service_subscriptions')
@@ -83,7 +90,7 @@ describe.skipIf(!optIn || !hasSupabase)('Billing DB contract (Supabase staging)'
       clientId: testClientId,
       clientName: 'Test Billing DB',
       amount: 299,
-      dueDateStr: '2026-07-10',
+      dueDateStr: dateFromToday(14),
       items: [{ description: 'Internet 20M - Test', price: 299, qty: 1 }],
     });
     testInvoiceId = invoice.id;
@@ -96,6 +103,24 @@ describe.skipIf(!optIn || !hasSupabase)('Billing DB contract (Supabase staging)'
     expect(invoice.items).toHaveLength(1);
     expect(invoice.items[0].description).toBe('Internet 20M - Test');
     expect(invoice.payments).toHaveLength(0);
+  }, DB_TIMEOUT_MS);
+
+  it('createInvoice con dueDate pasado clasifica status=overdue', async () => {
+    const { supabaseAdmin } = await import('../../backend/services/supabase-admin');
+    const { SupabaseBillingRepository } = await import('../../backend/domains/billing/repository');
+    const repo = new SupabaseBillingRepository(supabaseAdmin!);
+
+    const invoice = await repo.createInvoice({
+      clientId: testClientId,
+      clientName: 'Test Billing DB',
+      amount: 199,
+      dueDateStr: dateFromToday(-14),
+      items: [{ description: 'Internet vencido - Test', price: 199, qty: 1 }],
+    });
+    overdueInvoiceId = invoice.id;
+
+    expect(invoice.status).toBe('overdue');
+    expect(invoice.pendingAmount).toBe(199);
   }, DB_TIMEOUT_MS);
 
   it('findInvoiceById → recupera la factura creada', async () => {
@@ -173,9 +198,10 @@ describe.skipIf(!optIn || !hasSupabase)('Billing DB contract (Supabase staging)'
     const { SupabaseBillingRepository } = await import('../../backend/domains/billing/repository');
     const repo = new SupabaseBillingRepository(supabaseAdmin!);
 
-    const updated = await repo.updateInvoice(testInvoiceId, { dueDateStr: '2026-12-31' });
+    const nextDueDate = dateFromToday(30);
+    const updated = await repo.updateInvoice(testInvoiceId, { dueDateStr: nextDueDate });
     expect(updated).not.toBeNull();
-    expect(updated!.dueDateStr).toBe('2026-12-31');
+    expect(updated!.dueDateStr).toBe(nextDueDate);
   }, DB_TIMEOUT_MS);
 
   it('findInvoiceById devuelve null para id inexistente', async () => {
