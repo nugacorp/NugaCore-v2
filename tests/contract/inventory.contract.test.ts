@@ -14,8 +14,8 @@ import { createApp } from '../../backend/app';
 
 const ADMIN = { 'x-user-role': 'super admin', 'x-user-id': 'test-admin' };
 const READER = { 'x-user-role': 'solo lectura', 'x-user-id': 'test-reader' };
-const TENANT_B_ADMIN = { ...ADMIN, 'x-tenant-id': 'tenant-b' };
-const TENANT_B_READER = { ...READER, 'x-tenant-id': 'tenant-b' };
+const TENANT_B_ADMIN = { 'x-user-role': 'super admin', 'x-user-id': 'test-admin-b', 'x-tenant-id': 'tenant-b' };
+const TENANT_B_READER = { 'x-user-role': 'solo lectura', 'x-user-id': 'test-reader-b', 'x-tenant-id': 'tenant-b' };
 
 const ITEM_VIEW_KEYS = ['id', 'name', 'category', 'model', 'brand', 'qty', 'warehouse', 'serials', 'operationalStatus', 'stateUpdatedAt'];
 
@@ -153,7 +153,30 @@ describe('API v1 — Inventario: almacenes (Fase 5.1)', () => {
 describe('API v1 — Inventario: transferencias (Fase 5.1)', () => {
   let app: Express;
   beforeAll(async () => {
+    const { getTenancyService } = await import('../../backend/domains/tenancy/service');
     const { getWispOnboardingService } = await import('../../backend/domains/wisp-onboarding/service');
+    const tenancy = getTenancyService();
+    const tenants = await tenancy.listTenants();
+    if (!tenants.some((tenant) => tenant.id === 'tenant-b')) {
+      await tenancy.createTenant({
+        id: 'tenant-b',
+        name: 'WISP B',
+        slug: 'tenant-b',
+        ownerUserId: 'test-admin-b',
+      });
+    }
+    await tenancy.ensureMembership({
+      tenantId: 'tenant-b',
+      userId: 'test-reader-b',
+      role: 'readonly',
+      status: 'active',
+    });
+    await tenancy.ensureMembership({
+      tenantId: 'tenant-b',
+      userId: 'test-admin-b',
+      role: 'admin',
+      status: 'active',
+    });
     const onboarding = getWispOnboardingService() as unknown as {
       repo: { upsert(state: Record<string, unknown>): Promise<unknown> };
     };

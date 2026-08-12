@@ -1,77 +1,124 @@
-// ====================================================================
-// MT-02 (PR-1B.1) — la resolución de tenant deja de fallar abierto.
-//
-// Antes, si `resolveTenantIdForUser` lanzaba —caída de Supabase, timeout,
-// tabla inaccesible— el middleware registraba un warning y seguía con
-// `tenant-default`. Es decir: **un fallo de base de datos CONCEDÍA acceso al
-// WISP por defecto**, y el usuario veía datos que no son suyos sin que nada
-// lo delatara salvo una línea de log.
-//
-// Ahora la petición muere con 503. Fallar es la respuesta correcta; servir
-// datos del WISP equivocado, no.
-//
-// ALCANCE: esto cubre el camino de ERROR. El caso "usuario sin membership"
-// sigue devolviendo tenant-default desde resolve-tenant.ts, y NO se cambia
-// aquí a propósito: hoy 14 de 16 usuarios de staging no tienen membership y
-// pasarlo a 403 los dejaría a todos fuera. Necesita backfill previo (PR-1B.2).
-// ====================================================================
+import type { Request, Response } from 'express';
+import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
+import { logger } from '../../backend/common/logger';
+import { requireRoles } from '../../backend/common/rbac';
+import {
+  resolveTenantForUser,
+  resolveTenantIdForUser,
+  type TenantResolutionDenied,
+} from '../../backend/domains/tenancy/resolve-tenant';
+import { getTenancyService, resetTenancyService } from '../../backend/domains/tenancy/service';
+import { DEFAULT_TENANT_ID } from '../../backend/domains/tenancy/types';
 
-import { readFileSync } from 'node:fs';
-import { describe, expect, it } from 'vitest';
-import { ServiceUnavailableError } from '../../backend/common/errors';
+const ENV_KEYS = ['LEGACY_SINGLE_WISP_FALLBACK', 'PUBLIC_DEPLOYMENT', 'NODE_ENV', 'USE_DB_TENANCY'] as const;
+const savedEnv: Record<string, string | undefined> = {};
 
-const authContextSource = readFileSync('backend/common/auth-context.ts', 'utf8');
+const withAuthFailure = (failure: TenantResolutionDenied) => {
+  const status = vi.fn().mockReturnThis();
+  const json = vi.fn().mockReturnThis();
+  const next = vi.fn();
+  const req = { authContextFailure: failure } as unknown as Request;
+  const res = { status, json } as unknown as Response;
 
-describe('ServiceUnavailableError', () => {
-  it('es un 503 tipado', () => {
-    const err = new ServiceUnavailableError('x', 'TENANT_RESOLUTION_FAILED');
-    expect(err.statusCode).toBe(503);
-    expect(err.code).toBe('TENANT_RESOLUTION_FAILED');
-    expect(err.name).toBe('ServiceUnavailableError');
-  });
-});
+  requireRoles(['administrador'])(req, res, next);
 
-describe('attachAuthContext — fail-closed al resolver tenant', () => {
-  it('no inicializa el tenant a DEFAULT_TENANT_ID antes de resolver', () => {
-    // El bug era exactamente esta forma: `let tenantId = DEFAULT_TENANT_ID`
-    // seguido de un try/catch que se comía el error y dejaba el default.
-    expect(authContextSource).not.toMatch(/let tenantId = DEFAULT_TENANT_ID/);
-    expect(authContextSource).toMatch(/let tenantId: string;/);
+  return { status, json, next };
+};
+
+describe('attachAuthContext / tenancy fail-closed integration', () => {
+  beforeEach(() => {
+    for (const key of ENV_KEYS) savedEnv[key] = process.env[key];
+    delete process.env.LEGACY_SINGLE_WISP_FALLBACK;
+    process.env.PUBLIC_DEPLOYMENT = 'false';
+    process.env.NODE_ENV = 'test';
+    process.env.USE_DB_TENANCY = 'false';
+    resetTenancyService();
   });
 
-  it('ya no importa DEFAULT_TENANT_ID: no hay a qué degradar', () => {
-    expect(authContextSource).not.toContain('DEFAULT_TENANT_ID');
+  afterEach(() => {
+    vi.restoreAllMocks();
+    for (const key of ENV_KEYS) {
+      if (savedEnv[key] === undefined) delete process.env[key];
+      else process.env[key] = savedEnv[key];
+    }
+    resetTenancyService();
   });
 
-  it('ambas ramas rechazan con 503 en vez de degradar', () => {
-    const rechazos = authContextSource.match(/new ServiceUnavailableError\(/g) ?? [];
-    // Una por la rama JWT y otra por la de trusted-headers.
-    expect(rechazos).toHaveLength(2);
-    expect(authContextSource).toContain("'TENANT_RESOLUTION_FAILED'");
+  it('deniega un usuario sin memberships y no concede tenant-default', async () => {
+    const result = await resolveTenantForUser({
+      userId: 'user-sin-wisp',
+      source: 'trusted-headers',
+    });
+
+    expect(result.ok).toBe(false);
+    if (result.ok) throw new Error('unreachable');
+    expect(result.status).toBe(403);
+    expect(result.code).toBe('TENANT_MEMBERSHIP_REQUIRED');
+    expect(JSON.stringify(result)).not.toContain(DEFAULT_TENANT_ID);
   });
 
-  it('el fallo se registra como error, no como warning', () => {
-    // Un warning invita a ignorarlo; esto es una petición rechazada.
-    expect(authContextSource).not.toMatch(/Tenant resolution failed.*using default/);
-    expect(authContextSource).toMatch(/logger\.error\('Tenant resolution failed/);
+  it('un fallo tecnico de tenancy queda como denegacion tipada y se registra como error', async () => {
+    const error = vi.spyOn(logger, 'error').mockImplementation(() => undefined);
+    vi.spyOn(getTenancyService(), 'listMembershipsForUser').mockRejectedValue(new Error('db down'));
+
+    const result = await resolveTenantForUser({
+      userId: 'user-a',
+      source: 'supabase-jwt',
+    });
+
+    expect(result.ok).toBe(false);
+    if (result.ok) throw new Error('unreachable');
+    expect(result.status).toBe(401);
+    expect(result.code).toBe('TENANT_RESOLUTION_UNAVAILABLE');
+    expect(result.message).not.toContain('db down');
+    expect(error).toHaveBeenCalledWith(
+      'Tenant resolution failed (technical)',
+      expect.objectContaining({
+        code: 'TENANT_RESOLUTION_UNAVAILABLE',
+        outcome: 'denied',
+      }),
+    );
   });
 
-  it('usa next(err) y no throw: Express 4 no captura async rejections', () => {
-    // Un `throw` en middleware async se perdería y la petición colgaría.
-    expect(authContextSource).toMatch(/return next\(\s*new ServiceUnavailableError/);
-  });
-});
-
-describe('alcance pendiente de MT-02', () => {
-  it('resolve-tenant sigue devolviendo el default sin membership (PR-1B.2)', () => {
-    // Este test documenta deuda conocida, no comportamiento deseado. Cuando
-    // PR-1B.2 haga el backfill y pase a 403, este test debe cambiar.
-    const source = readFileSync('backend/domains/tenancy/resolve-tenant.ts', 'utf8');
-    expect(source).toContain('return DEFAULT_TENANT_ID;');
+  it('resolveTenantIdForUser convierte denegaciones en AppError sin fallback silencioso', async () => {
+    await expect(
+      resolveTenantIdForUser({
+        userId: 'user-sin-wisp',
+        source: 'supabase-jwt',
+      }),
+    ).rejects.toMatchObject({
+      statusCode: 403,
+      code: 'TENANT_MEMBERSHIP_REQUIRED',
+    });
   });
 
-  it('tenant-scope sigue con su fallback (PR-1B.2)', () => {
-    const source = readFileSync('backend/domains/tenancy/tenant-scope.ts', 'utf8');
-    expect(source).toMatch(/req\.authContext\?\.tenantId \|\| DEFAULT_TENANT_ID/);
+  it('los guards HTTP usan authContextFailure y no ejecutan el handler protegido', async () => {
+    const result = await resolveTenantForUser({
+      userId: 'user-sin-wisp',
+      source: 'trusted-headers',
+    });
+    if (result.ok) throw new Error('expected denial');
+
+    const { status, json, next } = withAuthFailure(result);
+
+    expect(status).toHaveBeenCalledWith(403);
+    expect(json).toHaveBeenCalledWith({
+      error: result.message,
+      code: 'TENANT_MEMBERSHIP_REQUIRED',
+    });
+    expect(next).not.toHaveBeenCalled();
+  });
+
+  it('el fallback single-WISP solo existe detras del gate legacy explicito', async () => {
+    process.env.LEGACY_SINGLE_WISP_FALLBACK = 'true';
+
+    const result = await resolveTenantForUser({
+      userId: 'user-legacy',
+      source: 'trusted-headers',
+    });
+
+    expect(result.ok).toBe(true);
+    expect(result.ok && result.tenantId).toBe(DEFAULT_TENANT_ID);
+    expect(result.ok && result.via).toBe('legacy-single-wisp');
   });
 });
