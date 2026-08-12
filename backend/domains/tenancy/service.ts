@@ -5,7 +5,7 @@
 import { BadRequestError } from '../../common/errors';
 import { logger } from '../../common/logger';
 import { isSupabaseAdminConfigured, supabaseAdmin } from '../../services/supabase-admin';
-import { isMultiTenantEnabled } from './flags';
+import { isLegacySingleWispFallbackEnabled, isMultiTenantEnabled } from './flags';
 import {
   StoreTenancyRepository,
   SupabaseTenancyRepository,
@@ -85,8 +85,18 @@ export class TenancyService {
     });
   }
 
+  /** Solo memberships ACTIVAS: es la base de la resolución de tenant. */
   listMembershipsForUser(userId: string): Promise<TenantMembership[]> {
     return this.repo.listMembershipsByUser(userId);
+  }
+
+  /** Incluye inactivas. Solo para diagnóstico de denegaciones (MT-02). */
+  listAllMembershipsForUser(userId: string): Promise<TenantMembership[]> {
+    return this.repo.listAllMembershipsByUser(userId);
+  }
+
+  getMembership(tenantId: string, userId: string): Promise<TenantMembership | null> {
+    return this.repo.findMembership(tenantId, userId);
   }
 
   listMembershipsForTenant(tenantId: string): Promise<TenantMembership[]> {
@@ -108,18 +118,20 @@ export class TenancyService {
     return this.repo.removeMembership(id);
   }
 
-  /** ¿El usuario puede operar en este tenant? */
+  /**
+   * ¿El usuario puede operar en este tenant? Fail-closed (MT-02): exige
+   * membresía ACTIVA. `tenant-default` sin memberships solo se concede bajo
+   * el gate legacy single-WISP, que está apagado en runtime endurecido.
+   */
   async userCanAccessTenant(userId: string, tenantId: string): Promise<boolean> {
-    if (!isMultiTenantEnabled()) {
-      return tenantId === DEFAULT_TENANT_ID || Boolean(tenantId);
-    }
-    if (tenantId === DEFAULT_TENANT_ID) {
-      const memberships = await this.repo.listMembershipsByUser(userId);
-      // Sin membresías explícitas, single-compat: permitir default
-      if (memberships.length === 0) return true;
-    }
+    if (!tenantId || !userId) return false;
     const m = await this.repo.findMembership(tenantId, userId);
-    return Boolean(m && m.status === 'active');
+    if (m && m.status === 'active') return true;
+    if (tenantId === DEFAULT_TENANT_ID && isLegacySingleWispFallbackEnabled()) {
+      const memberships = await this.repo.listAllMembershipsByUser(userId);
+      return memberships.length === 0;
+    }
+    return false;
   }
 }
 

@@ -1,7 +1,14 @@
 export type IntegrationProviderKey = 'stripe' | 'whatsapp' | 'telegram' | 'codi' | 'openpay';
 
 export interface IntegrationSettingsRecord {
+  /**
+   * Identidad legacy de la fila ('default' para el WISP por defecto, el propio
+   * tenant para el resto). Se mantiene coherente durante la transición, pero la
+   * autoridad de aislamiento es `tenantId`.
+   */
   id: string;
+  /** WISP dueño de la configuración. Identidad canónica (columna `tenant_id`). */
+  tenantId: string;
   stripeEnabled: boolean;
   stripePublishableKey: string;
   stripeSecretKey: string;

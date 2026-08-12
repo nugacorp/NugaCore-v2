@@ -41,6 +41,7 @@ export interface ClientRow {
 export interface TimelineRow {
   id: string;
   client_id: string;
+  tenant_id?: string | null;
   event_type: ClientTimelineEvent['eventType'];
   summary: string;
   details: string | null;
@@ -158,9 +159,11 @@ export const timelineToRow = (
   event: Omit<ClientTimelineEvent, 'id' | 'createdAt'>,
   id: string,
   createdAt: string,
+  tenantId?: string,
 ): TimelineRow => ({
   id,
   client_id: event.clientId,
+  tenant_id: tenantId ?? 'tenant-default',
   event_type: event.eventType,
   summary: event.summary,
   details: event.details ?? null,

@@ -49,6 +49,7 @@ export interface InventoryItemRow {
 
 export interface InventoryMovementRow {
   id: string;
+  tenant_id?: string;
   item_id: string;
   item_name: string;
   type: InventoryMovementLog['type'] | 'adjust';
@@ -62,6 +63,7 @@ export interface InventoryMovementRow {
 
 export interface InventoryTransferRow {
   id: string;
+  tenant_id: string;
   item_id: string;
   item_name: string;
   qty: number;
@@ -175,6 +177,7 @@ export const rowToMovement = (row: InventoryMovementRow): InventoryMovementLog =
 // --------------------------------------------------------------------
 export const rowToTransfer = (row: InventoryTransferRow): InventoryTransfer => ({
   id: row.id,
+  tenantId: row.tenant_id,
   itemId: row.item_id,
   itemName: row.item_name,
   qty: row.qty,

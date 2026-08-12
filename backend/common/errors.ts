@@ -88,7 +88,14 @@ export class IdempotencyConflictError extends AppError {
 export const opaqueFingerprint = (identity: string): string =>
   createHash('sha256').update(identity).digest('hex').slice(0, 16);
 
-/** Dependencia o capacidad no disponible: el llamador debe reintentar. */
+/**
+ * 503 - la petición no se puede resolver de forma segura ahora mismo.
+ *
+ * Se usa cuando fallar es la respuesta correcta y degradar sería inseguro:
+ * p. ej. si no se puede determinar el tenant del usuario (MT-02). Antes ese
+ * caso caía a `tenant-default`, es decir, un fallo de base de datos concedía
+ * acceso al WISP por defecto.
+ */
 export class ServiceUnavailableError extends AppError {
   constructor(message = 'Service unavailable', code = 'SERVICE_UNAVAILABLE') {
     super(503, message, code);

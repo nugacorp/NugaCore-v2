@@ -71,8 +71,11 @@ if (!runDb && !runAuth) {
     process.env[secret] = '';
   }
   // Identidad por trusted-headers (dev): las lecturas de contrato sin
-  // Bearer resuelven a 'solo lectura'. Forzado para no depender del .env.
+  // Bearer resuelven a 'solo lectura'. El fallback single-WISP también se
+  // declara de forma afirmativa: las pruebas MT-02 lo borran por caso para
+  // demostrar que el default real sigue siendo fail-closed.
   process.env.AUTH_TRUST_HEADERS = 'true';
+  process.env.LEGACY_SINGLE_WISP_FALLBACK = 'true';
   process.env.IPAM_PROVIDER = 'mock';
   process.env.NODE_ENV = 'test';
   // Los contratos de enrollment usan wgServerId explícito contra servidores de prueba.
@@ -82,6 +85,7 @@ if (!runDb && !runAuth) {
   // La suite de auth verifica que en producción los trusted-headers se
   // ignoran; sin esto, un .env de desarrollo invalidaría esas aserciones.
   process.env.NODE_ENV = 'production';
+  process.env.LEGACY_SINGLE_WISP_FALLBACK = 'false';
 }
 // runDb: entorno intacto; el .env manda (Supabase real, repositorio directo).
 

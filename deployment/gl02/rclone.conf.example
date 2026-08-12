@@ -1,0 +1,18 @@
+# Install as /root/.config/rclone/rclone.conf (root:root 0600).
+# Configure interactively with `rclone config`; never commit the result.
+#
+# The selected BACKUP_RCLONE_REMOTE must be a crypt remote backed by an
+# off-host provider. A local backing remote is rejected by the validator.
+#
+# [approved-offsite]
+# type = s3
+# provider = Other
+# endpoint =
+# access_key_id =
+# secret_access_key =
+#
+# [approved-offsite-crypt]
+# type = crypt
+# remote = approved-offsite:ALLOWLISTED_BUCKET/UNIQUE_NAMESPACE_ID
+# password =
+# password2 =

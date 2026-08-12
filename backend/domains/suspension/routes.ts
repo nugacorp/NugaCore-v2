@@ -57,10 +57,14 @@ const suspendClient = (clientId: string, reason: string, source: 'manual' | 'aut
 
   client.status = 'suspended';
   store.MIKROTIK_LOGS.push({
+    tenantId: tenantId || 'tenant-default',
     timestamp: new Date().toISOString().replace('T', ' ').substring(0, 19),
     message: `script,info Core Router Suspended PPPoE: ${client.pppoeUser || client.id} block address list active`,
   });
   store.createAlert('client', 'warning', client.name, 'Linea suspendida por politica de cobranza simulada.');
+  // NOTA (PR-1A.2): store en memoria, no repositorio — no persiste ni lleva
+  // tenant_id. `suspendClient` es síncrona y el bloque entero muta el store;
+  // persistir solo el timeline dejaría estado medio guardado. Se cierra en PR-3.
   store.addClientTimelineEvent({
     clientId: client.id,
     eventType: 'status_change',
@@ -87,10 +91,12 @@ const reactivateClient = (clientId: string, reason: string, source: 'manual' | '
 
   client.status = 'active';
   store.MIKROTIK_LOGS.push({
+    tenantId: tenantId || 'tenant-default',
     timestamp: new Date().toISOString().replace('T', ' ').substring(0, 19),
     message: `script,info Core Router Reactivated PPPoE: ${client.pppoeUser || client.id} unblocked address list`,
   });
   store.createAlert('client', 'info', client.name, 'Linea reactivada por flujo simulado de cobranza.');
+  // NOTA (PR-1A.2): store en memoria, no repositorio — ver `suspendClient`.
   store.addClientTimelineEvent({
     clientId: client.id,
     eventType: 'status_change',

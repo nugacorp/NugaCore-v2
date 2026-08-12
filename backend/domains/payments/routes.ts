@@ -135,6 +135,9 @@ router.post(
       {
         triggeredBy: req.authContext?.userId ?? 'operator',
         tenantId: tenantIdFromRequest(req),
+        idempotencyKey: typeof req.body?.idempotencyKey === 'string'
+          ? req.body.idempotencyKey
+          : undefined,
       },
     );
     res.json(result);

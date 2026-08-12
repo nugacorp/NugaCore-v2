@@ -18,8 +18,13 @@ describe('MikroTik provisioning — RBAC de lectura', () => {
   let app: Express;
   beforeAll(() => { app = createApp(); });
 
-  it('solo lectura puede listar routers (forma de provisioning)', async () => {
+  it('solo lectura NO puede listar routers (403)', async () => {
     const res = await request(app).get('/api/mikrotik/routers').set(READER);
+    expect(res.status).toBe(403);
+  });
+
+  it('técnico puede listar routers (forma de provisioning)', async () => {
+    const res = await request(app).get('/api/mikrotik/routers').set(TEC);
     expect(res.status).toBe(200);
     expect(Array.isArray(res.body)).toBe(true);
     const r = res.body[0];

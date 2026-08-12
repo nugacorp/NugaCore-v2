@@ -101,17 +101,28 @@ export class IntegrationsService {
     throw new BadRequestError(`Proveedor no soportado: ${provider}`);
   }
 
-  async notifyInvoice(invoiceId: string, tenantId?: string) {
+  /**
+   * MT-01: `tenantId` es OBLIGATORIO. Antes era opcional y solo se usaba para
+   * cargar las credenciales del WISP; la factura, el cliente, las torres y el
+   * timeline se buscaban por id a secas. Con el id de una factura ajena, un
+   * WISP leía monto, vencimiento, nombre, teléfono y telegramChatId del cliente
+   * de otro, le enviaba un mensaje real CON SUS PROPIAS credenciales y le
+   * escribía en el timeline.
+   *
+   * Toda consulta va ahora por `tenant_id + id`. Cuando el recurso existe pero
+   * es de otro WISP se responde 404, no 403: un 403 confirmaría su existencia.
+   */
+  async notifyInvoice(invoiceId: string, tenantId: string) {
     const billing = getBillingService();
-    const invoice = await billing.findInvoiceById(invoiceId);
+    const invoice = await billing.findInvoiceById(invoiceId, tenantId);
     if (!invoice) throw new NotFoundError('Factura no encontrada');
 
-    const client = await getCustomersService().getById(invoice.clientId);
+    const client = await getCustomersService().getById(invoice.clientId, tenantId);
     if (!client) throw new NotFoundError('Cliente no encontrado');
 
     const channel = client.notificationChannel || 'whatsapp';
     const settings = await this.repo.get(tenantId);
-    const billingCycleLabel = await this.resolveBillingCycleLabel(client.billingZoneId);
+    const billingCycleLabel = await this.resolveBillingCycleLabel(client.billingZoneId, tenantId);
 
     const paymentReference = `${invoice.id}-${client.id}`.toUpperCase();
     const result = await deliverInvoiceNotification(settings, {
@@ -181,13 +192,15 @@ export class IntegrationsService {
     };
   }
 
-  private async resolveBillingCycleLabel(zoneId?: string): Promise<string | undefined> {
+  private async resolveBillingCycleLabel(zoneId?: string, tenantId?: string): Promise<string | undefined> {
     if (!zoneId?.trim()) return undefined;
     try {
-      const towers = await getNetworkService().listTowers({});
+      // Acotado al WISP: sin esto la etiqueta se resolvía contra las torres de
+      // TODOS los tenants y filtraba el nombre de la torre de otro.
+      const towers = await getNetworkService().listTowers({ tenantId });
       const tower = towers.find((t) => t.id === zoneId || t.name === zoneId);
       if (!tower) return zoneId;
-      const onboarding = await getNetworkService().getTowerOnboarding(tower.id);
+      const onboarding = await getNetworkService().getTowerOnboarding(tower.id, tenantId);
       if (!onboarding?.billingCycleDay) return tower.name;
       const time = onboarding.billingCycleTime || '00:00';
       return `${tower.name} · día ${onboarding.billingCycleDay} ${time}`;

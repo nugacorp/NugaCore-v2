@@ -23,6 +23,7 @@ import {
 } from '../../state/store';
 import { BadRequestError, ConflictError, NotFoundError } from '../../common/errors';
 import { logger } from '../../common/logger';
+import { DEFAULT_TENANT_ID } from '../tenancy/types';
 import {
   InventoryItemRow,
   InventoryAssignmentRow,
@@ -87,15 +88,21 @@ export interface InventoryRepository {
   deleteWarehouse(id: string): Promise<boolean>;
   getWarehouseStock(id: string): Promise<WarehouseStock | null>;
   // Transfers
-  listTransfers(): Promise<InventoryTransfer[]>;
-  getTransfer(id: string): Promise<InventoryTransfer | null>;
-  createTransfer(input: CreateTransferInput): Promise<InventoryTransfer>;
-  completeTransfer(id: string): Promise<InventoryTransfer>;
-  cancelTransfer(id: string): Promise<InventoryTransfer>;
+  listTransfers(tenantId: string): Promise<InventoryTransfer[]>;
+  getTransfer(id: string, tenantId: string): Promise<InventoryTransfer | null>;
+  createTransfer(input: CreateTransferInput, tenantId: string): Promise<InventoryTransfer>;
+  completeTransfer(id: string, tenantId: string): Promise<InventoryTransfer>;
+  cancelTransfer(id: string, tenantId: string): Promise<InventoryTransfer>;
 }
 
 const nowStamp = () => new Date().toISOString().replace('T', ' ').substring(0, 16);
 const uid = (prefix: string) => `${prefix}-${Date.now()}-${Math.floor(Math.random() * 90 + 10)}`;
+
+const requireTransferTenant = (tenantId: string): string => {
+  const scoped = String(tenantId || '').trim();
+  if (!scoped) throw new BadRequestError('Missing tenant context', 'TENANT_REQUIRED');
+  return scoped;
+};
 
 // ====================================================================
 // Implementación STORE (en memoria). Replica la lógica que vivía en
@@ -418,17 +425,30 @@ export class StoreInventoryRepository implements InventoryRepository {
   }
 
   // --- Transfers ----------------------------------------------------
-  async listTransfers(): Promise<InventoryTransfer[]> {
-    return this.transfers.map((t) => ({ ...t }));
+  async listTransfers(tenantId: string): Promise<InventoryTransfer[]> {
+    const scoped = requireTransferTenant(tenantId);
+    return this.transfers.filter((t) => t.tenantId === scoped).map((t) => ({ ...t }));
   }
 
-  async getTransfer(id: string): Promise<InventoryTransfer | null> {
-    return this.transfers.find((t) => t.id === id) ?? null;
+  async getTransfer(id: string, tenantId: string): Promise<InventoryTransfer | null> {
+    const scoped = requireTransferTenant(tenantId);
+    const transfer = this.transfers.find((t) => t.id === id && t.tenantId === scoped);
+    return transfer ? { ...transfer } : null;
   }
 
-  async createTransfer(input: CreateTransferInput): Promise<InventoryTransfer> {
+  async createTransfer(input: CreateTransferInput, tenantId: string): Promise<InventoryTransfer> {
+    const scoped = requireTransferTenant(tenantId);
+    // El store legacy sólo contiene relaciones del tenant-default. Para otros
+    // tenants falla cerrado hasta que items/warehouses tengan store propio.
+    if (scoped !== DEFAULT_TENANT_ID) throw new NotFoundError('Inventory item not found');
     const item = store.INVENTORY.find((i) => i.id === input.itemId);
     if (!item) throw new NotFoundError('Inventory item not found');
+    if (!this.warehouses.some((warehouse) => warehouse.name === item.warehouse)) {
+      throw new NotFoundError('Origin warehouse not found');
+    }
+    if (!this.warehouses.some((warehouse) => warehouse.name === input.toWarehouse)) {
+      throw new NotFoundError('Destination warehouse not found');
+    }
     if (input.toWarehouse === item.warehouse) {
       throw new BadRequestError('Origin and destination warehouses must differ', 'SAME_WAREHOUSE');
     }
@@ -436,6 +456,7 @@ export class StoreInventoryRepository implements InventoryRepository {
 
     const transfer: InventoryTransfer = {
       id: uid('tr'),
+      tenantId: scoped,
       itemId: item.id,
       itemName: item.name,
       qty: input.qty,
@@ -450,10 +471,12 @@ export class StoreInventoryRepository implements InventoryRepository {
     return { ...transfer };
   }
 
-  async completeTransfer(id: string): Promise<InventoryTransfer> {
-    const transfer = this.transfers.find((t) => t.id === id);
+  async completeTransfer(id: string, tenantId: string): Promise<InventoryTransfer> {
+    const scoped = requireTransferTenant(tenantId);
+    const transfer = this.transfers.find((t) => t.id === id && t.tenantId === scoped);
     if (!transfer) throw new NotFoundError('Transfer not found');
     if (transfer.status !== 'pending') throw new BadRequestError('Transfer is not pending', 'INVALID_STATE');
+    if (scoped !== DEFAULT_TENANT_ID) throw new NotFoundError('Inventory item not found');
 
     // Mueve el stock al completar (mismo efecto que un movimiento de traspaso).
     await this.applyMovement({
@@ -470,8 +493,9 @@ export class StoreInventoryRepository implements InventoryRepository {
     return { ...transfer };
   }
 
-  async cancelTransfer(id: string): Promise<InventoryTransfer> {
-    const transfer = this.transfers.find((t) => t.id === id);
+  async cancelTransfer(id: string, tenantId: string): Promise<InventoryTransfer> {
+    const scoped = requireTransferTenant(tenantId);
+    const transfer = this.transfers.find((t) => t.id === id && t.tenantId === scoped);
     if (!transfer) throw new NotFoundError('Transfer not found');
     if (transfer.status !== 'pending') throw new BadRequestError('Transfer is not pending', 'INVALID_STATE');
     transfer.status = 'cancelled';
@@ -503,10 +527,25 @@ const fail = (context: string, error: unknown): never => {
 export class SupabaseInventoryRepository implements InventoryRepository {
   constructor(private readonly client: SupabaseClient) {}
 
-  private async getItemRow(id: string): Promise<InventoryItemRow | null> {
-    const { data, error } = await this.client.from(ITEMS).select('*').eq('id', id).maybeSingle();
+  private async getItemRow(id: string, tenantId?: string): Promise<InventoryItemRow | null> {
+    let query = this.client.from(ITEMS).select('*').eq('id', id);
+    if (tenantId !== undefined) query = query.eq('tenant_id', requireTransferTenant(tenantId));
+    const { data, error } = await query.maybeSingle();
     if (error) return fail('getItemRow', error);
     return (data as InventoryItemRow) ?? null;
+  }
+
+  private async hasWarehouse(name: string, tenantId: string): Promise<boolean> {
+    const scoped = requireTransferTenant(tenantId);
+    const { data, error } = await this.client
+      .from(WAREHOUSES)
+      .select('id')
+      .eq('name', name)
+      .eq('tenant_id', scoped)
+      .limit(1)
+      .maybeSingle();
+    if (error) return fail('hasWarehouse', error);
+    return Boolean(data);
   }
 
   private async insertMovement(row: Omit<InventoryMovementRow, 'created_at'>): Promise<void> {
@@ -625,9 +664,10 @@ export class SupabaseInventoryRepository implements InventoryRepository {
     };
   }
 
-  async applyMovement(input: MovementInput): Promise<InventoryItemView[]> {
+  async applyMovement(input: MovementInput, tenantId?: string): Promise<InventoryItemView[]> {
     const { itemId, type, qty, toWarehouse, reason, actorId } = input;
-    const item = await this.getItemRow(itemId);
+    const scoped = tenantId === undefined ? undefined : requireTransferTenant(tenantId);
+    const item = await this.getItemRow(itemId, scoped);
     if (!item) throw new NotFoundError('Inventory item not found');
 
     if (type === 'in') {
@@ -635,32 +675,40 @@ export class SupabaseInventoryRepository implements InventoryRepository {
         item.operational_status === 'Perdido' || item.operational_status === 'Baja'
           ? 'Disponible'
           : item.operational_status;
-      const { error } = await this.client
+      let query = this.client
         .from(ITEMS)
         .update({ qty: item.qty + qty, operational_status: nextStatus })
         .eq('id', itemId);
+      if (scoped) query = query.eq('tenant_id', scoped);
+      const { error } = await query;
       if (error) fail('applyMovement.in', error);
     } else if (type === 'out') {
       if (item.qty < qty) throw new BadRequestError('Insufficient stock', 'INSUFFICIENT_STOCK');
-      const { error } = await this.client.from(ITEMS).update({ qty: item.qty - qty }).eq('id', itemId);
+      let query = this.client.from(ITEMS).update({ qty: item.qty - qty }).eq('id', itemId);
+      if (scoped) query = query.eq('tenant_id', scoped);
+      const { error } = await query;
       if (error) fail('applyMovement.out', error);
     } else if (type === 'transfer') {
       if (!toWarehouse) throw new BadRequestError('toWarehouse is required for transfer movements', 'MISSING_FIELD');
       if (item.qty < qty) throw new BadRequestError('Insufficient stock for transfer', 'INSUFFICIENT_STOCK');
-      const upd = await this.client.from(ITEMS).update({ qty: item.qty - qty }).eq('id', itemId);
+      let sourceUpdate = this.client.from(ITEMS).update({ qty: item.qty - qty }).eq('id', itemId);
+      if (scoped) sourceUpdate = sourceUpdate.eq('tenant_id', scoped);
+      const upd = await sourceUpdate;
       if (upd.error) fail('applyMovement.transfer.src', upd.error);
 
-      const { data: dest, error: destErr } = await this.client
+      let destinationQuery = this.client
         .from(ITEMS)
         .select('*')
         .eq('name', item.name)
-        .eq('warehouse', toWarehouse)
-        .limit(1)
-        .maybeSingle();
+        .eq('warehouse', toWarehouse);
+      if (scoped) destinationQuery = destinationQuery.eq('tenant_id', scoped);
+      const { data: dest, error: destErr } = await destinationQuery.limit(1).maybeSingle();
       if (destErr) fail('applyMovement.transfer.dest', destErr);
       if (dest) {
         const destRow = dest as InventoryItemRow;
-        const e = await this.client.from(ITEMS).update({ qty: destRow.qty + qty }).eq('id', destRow.id);
+        let destinationUpdate = this.client.from(ITEMS).update({ qty: destRow.qty + qty }).eq('id', destRow.id);
+        if (scoped) destinationUpdate = destinationUpdate.eq('tenant_id', scoped);
+        const e = await destinationUpdate;
         if (e.error) fail('applyMovement.transfer.destUpdate', e.error);
       } else {
         const e = await this.client.from(ITEMS).insert({
@@ -675,6 +723,7 @@ export class SupabaseInventoryRepository implements InventoryRepository {
           operational_status: 'Disponible',
           assigned_to_type: 'warehouse',
           assigned_to_label: toWarehouse,
+          ...(scoped ? { tenant_id: scoped } : {}),
         });
         if (e.error) fail('applyMovement.transfer.destInsert', e.error);
       }
@@ -692,8 +741,14 @@ export class SupabaseInventoryRepository implements InventoryRepository {
       to_warehouse: type === 'transfer' ? (toWarehouse ?? null) : null,
       reason: reason ?? null,
       actor_id: actorId ?? null,
+      ...(scoped ? { tenant_id: scoped } : {}),
     });
 
+    if (scoped) {
+      const { data, error } = await this.client.from(ITEMS).select('*').eq('tenant_id', scoped);
+      if (error) return fail('applyMovement.listScoped', error);
+      return (data as InventoryItemRow[]).map(rowToItemView);
+    }
     return this.listItems({});
   }
 
@@ -888,21 +943,32 @@ export class SupabaseInventoryRepository implements InventoryRepository {
   }
 
   // --- Transfers ----------------------------------------------------
-  async listTransfers(): Promise<InventoryTransfer[]> {
-    const { data, error } = await this.client.from(TRANSFERS).select('*').order('created_at', { ascending: false });
+  async listTransfers(tenantId: string): Promise<InventoryTransfer[]> {
+    const scoped = requireTransferTenant(tenantId);
+    const { data, error } = await this.client.from(TRANSFERS).select('*').eq('tenant_id', scoped)
+      .order('created_at', { ascending: false });
     if (error) return fail('listTransfers', error);
     return (data as InventoryTransferRow[]).map(rowToTransfer);
   }
 
-  async getTransfer(id: string): Promise<InventoryTransfer | null> {
-    const { data, error } = await this.client.from(TRANSFERS).select('*').eq('id', id).maybeSingle();
+  async getTransfer(id: string, tenantId: string): Promise<InventoryTransfer | null> {
+    const scoped = requireTransferTenant(tenantId);
+    const { data, error } = await this.client.from(TRANSFERS).select('*').eq('id', id)
+      .eq('tenant_id', scoped).maybeSingle();
     if (error) return fail('getTransfer', error);
     return data ? rowToTransfer(data as InventoryTransferRow) : null;
   }
 
-  async createTransfer(input: CreateTransferInput): Promise<InventoryTransfer> {
-    const item = await this.getItemRow(input.itemId);
+  async createTransfer(input: CreateTransferInput, tenantId: string): Promise<InventoryTransfer> {
+    const scoped = requireTransferTenant(tenantId);
+    const item = await this.getItemRow(input.itemId, scoped);
     if (!item) throw new NotFoundError('Inventory item not found');
+    if (!(await this.hasWarehouse(item.warehouse, scoped))) {
+      throw new NotFoundError('Origin warehouse not found');
+    }
+    if (!(await this.hasWarehouse(input.toWarehouse, scoped))) {
+      throw new NotFoundError('Destination warehouse not found');
+    }
     if (input.toWarehouse === item.warehouse) {
       throw new BadRequestError('Origin and destination warehouses must differ', 'SAME_WAREHOUSE');
     }
@@ -912,6 +978,7 @@ export class SupabaseInventoryRepository implements InventoryRepository {
       .from(TRANSFERS)
       .insert({
         id: uid('tr'),
+        tenant_id: scoped,
         item_id: item.id,
         item_name: item.name,
         qty: input.qty,
@@ -927,8 +994,9 @@ export class SupabaseInventoryRepository implements InventoryRepository {
     return rowToTransfer(data as InventoryTransferRow);
   }
 
-  async completeTransfer(id: string): Promise<InventoryTransfer> {
-    const transfer = await this.getTransfer(id);
+  async completeTransfer(id: string, tenantId: string): Promise<InventoryTransfer> {
+    const scoped = requireTransferTenant(tenantId);
+    const transfer = await this.getTransfer(id, scoped);
     if (!transfer) throw new NotFoundError('Transfer not found');
     if (transfer.status !== 'pending') throw new BadRequestError('Transfer is not pending', 'INVALID_STATE');
 
@@ -939,26 +1007,29 @@ export class SupabaseInventoryRepository implements InventoryRepository {
       toWarehouse: transfer.toWarehouse,
       reason: transfer.reason ?? `Transferencia ${transfer.id}`,
       actorId: transfer.actorId,
-    });
+    }, scoped);
 
     const { data, error } = await this.client
       .from(TRANSFERS)
       .update({ status: 'completed', completed_at: new Date().toISOString() })
       .eq('id', id)
+      .eq('tenant_id', scoped)
       .select('*')
       .single();
     if (error) return fail('completeTransfer', error);
     return rowToTransfer(data as InventoryTransferRow);
   }
 
-  async cancelTransfer(id: string): Promise<InventoryTransfer> {
-    const transfer = await this.getTransfer(id);
+  async cancelTransfer(id: string, tenantId: string): Promise<InventoryTransfer> {
+    const scoped = requireTransferTenant(tenantId);
+    const transfer = await this.getTransfer(id, scoped);
     if (!transfer) throw new NotFoundError('Transfer not found');
     if (transfer.status !== 'pending') throw new BadRequestError('Transfer is not pending', 'INVALID_STATE');
     const { data, error } = await this.client
       .from(TRANSFERS)
       .update({ status: 'cancelled', cancelled_at: new Date().toISOString() })
       .eq('id', id)
+      .eq('tenant_id', scoped)
       .select('*')
       .single();
     if (error) return fail('cancelTransfer', error);

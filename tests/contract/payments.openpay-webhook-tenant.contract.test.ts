@@ -800,9 +800,10 @@ describe('Webhook OpenPay — entregas simultáneas del mismo evento', () => {
     };
     let reclaimed = false;
     vi.spyOn(StorePaymentRepository.prototype, 'updateOrderStatus').mockImplementation(
-      async (id, status, patch, tenantId) => {
+      async (id, tenantId, status, patch) => {
+        // El tenant ya no es opcional: el doble sólo alcanza la order del WISP.
         const order = orders().find(
-          (candidate) => candidate.id === id && (!tenantId || candidate.tenantId === tenantId),
+          (candidate) => candidate.id === id && candidate.tenantId === tenantId,
         ) ?? null;
         if (order) Object.assign(order, { status, ...patch, updatedAt: new Date().toISOString() });
         if (!reclaimed) {

@@ -14,6 +14,7 @@ import {
 } from '../../backend/domains/billing/repository';
 import { StorePaymentRepository } from '../../backend/domains/payments/repository';
 import { PaymentService } from '../../backend/domains/payments/service';
+import { rootActionIdempotencyKey } from '../../backend/domains/payments/idempotency';
 import { engineStore } from '../../backend/domains/suspension/engine-store';
 import { store, type MikrotikRouterRegistryItem } from '../../backend/state/store';
 import type { Client, Invoice } from '../../src/types';
@@ -439,6 +440,7 @@ describe('R2-03: la acción durable sólo referencia routers del tenant', () => 
     return new PaymentService(new StorePaymentRepository()).reactivateCustomerService(customer.id, {
       tenantId: TENANT_A,
       triggeredBy: 'webhook:openpay:r2-router',
+      idempotencyKey: rootActionIdempotencyKey(`payment:${eventId}`, customer.id),
       webhookFence: {
         eventId,
         claimToken: 'owner-r2',

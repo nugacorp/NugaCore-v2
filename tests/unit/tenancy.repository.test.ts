@@ -1,8 +1,15 @@
-import { beforeEach, describe, expect, it } from 'vitest';
+import { afterAll, beforeEach, describe, expect, it } from 'vitest';
 import { StoreTenancyRepository } from '../../backend/domains/tenancy/repository';
 import { TenancyService, resetTenancyService } from '../../backend/domains/tenancy/service';
 import { resolveTenantIdForUser } from '../../backend/domains/tenancy/resolve-tenant';
 import { DEFAULT_TENANT_ID } from '../../backend/domains/tenancy/types';
+
+const savedLegacyFallback = process.env.LEGACY_SINGLE_WISP_FALLBACK;
+
+afterAll(() => {
+  if (savedLegacyFallback === undefined) delete process.env.LEGACY_SINGLE_WISP_FALLBACK;
+  else process.env.LEGACY_SINGLE_WISP_FALLBACK = savedLegacyFallback;
+});
 
 describe('StoreTenancyRepository', () => {
   let repo: StoreTenancyRepository;
@@ -40,6 +47,7 @@ describe('StoreTenancyRepository', () => {
 describe('TenancyService status + resolve', () => {
   beforeEach(() => {
     delete process.env.MULTI_TENANT_ENABLED;
+    delete process.env.LEGACY_SINGLE_WISP_FALLBACK;
     resetTenancyService();
   });
 
@@ -56,14 +64,15 @@ describe('TenancyService status + resolve', () => {
     expect(status.multiTenantEnabled).toBe(true);
   });
 
-  it('resolveTenantIdForUser usa default si no hay memberships', async () => {
+  it('resolveTenantIdForUser deniega si no hay memberships', async () => {
     resetTenancyService();
-    const id = await resolveTenantIdForUser({
-      userId: 'any-user-without-membership',
-      requestedTenantId: null,
-      source: 'supabase-jwt',
-    });
-    expect(id).toBe(DEFAULT_TENANT_ID);
+    await expect(
+      resolveTenantIdForUser({
+        userId: 'any-user-without-membership',
+        requestedTenantId: null,
+        source: 'supabase-jwt',
+      }),
+    ).rejects.toMatchObject({ statusCode: 403, code: 'TENANT_MEMBERSHIP_REQUIRED' });
   });
 
   it('resolveTenantIdForUser respeta membership (siempre, no solo con flag)', async () => {
@@ -83,16 +92,16 @@ describe('TenancyService status + resolve', () => {
     });
     expect(resolved).toBe(tenant.id);
 
-    const denied = await resolveTenantIdForUser({
-      userId: 'owner-1',
-      requestedTenantId: 'tenant-foreign',
-      source: 'supabase-jwt',
-    });
-    // Sin membership en foreign → primera membership
-    expect(denied).toBe(tenant.id);
+    await expect(
+      resolveTenantIdForUser({
+        userId: 'owner-1',
+        requestedTenantId: 'tenant-foreign',
+        source: 'supabase-jwt',
+      }),
+    ).rejects.toMatchObject({ statusCode: 403, code: 'TENANT_NOT_AUTHORIZED' });
   });
 
-  it('resolveTenantIdForUser repara membership desde jwtClaimTenantId', async () => {
+  it('resolveTenantIdForUser no crea membership desde jwtClaimTenantId', async () => {
     resetTenancyService();
     const { getTenancyService } = await import('../../backend/domains/tenancy/service');
     const svc = getTenancyService();
@@ -101,15 +110,15 @@ describe('TenancyService status + resolve', () => {
       slug: 'claim-wisp',
     });
 
-    const resolved = await resolveTenantIdForUser({
-      userId: 'owner-claim',
-      requestedTenantId: null,
-      jwtClaimTenantId: tenant.id,
-      source: 'supabase-jwt',
-    });
-    expect(resolved).toBe(tenant.id);
-    const memberships = await svc.listMembershipsForUser('owner-claim');
-    expect(memberships.some((m) => m.tenantId === tenant.id)).toBe(true);
+    await expect(
+      resolveTenantIdForUser({
+        userId: 'owner-claim',
+        requestedTenantId: null,
+        jwtClaimTenantId: tenant.id,
+        source: 'supabase-jwt',
+      }),
+    ).rejects.toMatchObject({ statusCode: 403, code: 'TENANT_MEMBERSHIP_REQUIRED' });
+    await expect(svc.listAllMembershipsForUser('owner-claim')).resolves.toEqual([]);
   });
 
   it('resolveTenantIdForUser no eleva por x-tenant-id sin membership', async () => {
@@ -118,12 +127,13 @@ describe('TenancyService status + resolve', () => {
     const svc = getTenancyService();
     const foreign = await svc.createTenant({ name: 'Foreign', slug: 'foreign-wisp' });
 
-    const resolved = await resolveTenantIdForUser({
-      userId: 'stranger',
-      requestedTenantId: foreign.id,
-      source: 'supabase-jwt',
-    });
-    expect(resolved).toBe(DEFAULT_TENANT_ID);
+    await expect(
+      resolveTenantIdForUser({
+        userId: 'stranger',
+        requestedTenantId: foreign.id,
+        source: 'supabase-jwt',
+      }),
+    ).rejects.toMatchObject({ statusCode: 403, code: 'TENANT_NOT_AUTHORIZED' });
     expect(await svc.listMembershipsForUser('stranger')).toHaveLength(0);
   });
 });

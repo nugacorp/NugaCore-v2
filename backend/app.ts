@@ -32,6 +32,16 @@ export function createApp() {
   // Correlation ID por petición (req.requestId / req.log / X-Request-Id).
   app.use(attachRequestId);
 
+  // La firma tiene un límite propio antes del parser global: un data URL
+  // sobredimensionado nunca llega a PDFKit, Storage ni a la RPC.
+  app.use('/api/contracts/:id/sign', express.json({ limit: '80kb' }), (err: unknown, _req: express.Request, res: express.Response, next: express.NextFunction) => {
+    if (err && typeof err === 'object' && 'type' in err && err.type === 'entity.too.large') {
+      res.status(400).json({ error: 'La solicitud de firma excede el tamaño permitido', code: 'CONTRACT_SIGNATURE_BODY_TOO_LARGE' });
+      return;
+    }
+    next(err);
+  });
+
   app.use(express.json({
     limit: process.env.JSON_BODY_LIMIT || '100kb',
     verify: captureWebhookRawBody,

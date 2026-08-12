@@ -6,6 +6,7 @@ import { getBillingService } from '../billing/service';
 import { getSupportService } from '../tickets/service';
 import { getCollectionsService } from '../collections/service';
 import { getCustomersService } from '../customers/service';
+import { getContractService } from '../contracts/service';
 import { portalAuthStatus, resolvePortalAuth, type PortalAuthContext } from './auth';
 
 import { getPortalConfig, isPortalFeatureEnabled, updatePortalConfig } from './config-service';
@@ -59,6 +60,7 @@ router.get('/api/portal/:clientId/summary', asyncHandler(async (req, res) => {
   });
 
   const features = (await getPortalConfig(auth.tenantId)).features;
+  const contractStatus = await getContractService().getPortalStatus(auth.tenantId, client.id);
   res.json({
     client: { id: client.id, name: client.name, status: client.status, planId: client.planId },
     balance: features.balance ? balance : 0,
@@ -70,6 +72,7 @@ router.get('/api/portal/:clientId/summary', asyncHandler(async (req, res) => {
     serviceStatus: client.status,
     authMode: auth.mode,
     features,
+    ...(contractStatus ? { contractStatus } : {}),
   });
 }));
 

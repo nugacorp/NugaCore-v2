@@ -13,10 +13,12 @@ import { IdempotencyConflictError, IdempotencyResolutionError } from '../../comm
 import { idempotencyPayloadsEquivalent, tenantScopedIdempotencyId } from '../../common/idempotency';
 import {
   CustomerServiceState,
+  OrderClaimInput,
   OrderUpdate,
   SuspensionEvent,
   SuspensionEventType,
   SuspensionOrder,
+  SuspensionOrderSource,
   SuspensionPolicyV2,
 } from './types';
 import { engineStore } from './engine-store';
@@ -57,9 +59,10 @@ export interface CreateOrderInput {
   customerId: string;
   invoiceId?: string;
   orderType: SuspensionOrder['orderType'];
-  source: 'engine' | 'manual' | 'payment-engine' | 'provisioning-center' | 'service-status';
+  source: SuspensionOrderSource;
   reason?: string;
   tenantId?: string;
+  routerId?: string;
   idempotencyKey?: string;
 }
 
@@ -84,10 +87,19 @@ const eventIsEquivalent = (existing: SuspensionEvent, input: RecordEventInput): 
 
 const orderIsEquivalent = (existing: SuspensionOrder, input: CreateOrderInput): boolean =>
   existing.customerId === input.customerId
+  && (existing.tenantId ?? null) === (input.tenantId ?? null)
+  && (existing.routerId ?? null) === (input.routerId ?? null)
   && (existing.invoiceId ?? null) === (input.invoiceId ?? null)
   && existing.orderType === input.orderType
   && existing.source === input.source
   && (existing.reason ?? null) === (input.reason ?? null);
+
+const requirePaymentOrderScope = (input: CreateOrderInput): void => {
+  if (input.source !== 'payment-engine') return;
+  if (!input.tenantId?.trim() || !input.routerId?.trim() || !input.idempotencyKey?.trim()) {
+    throw new Error('createOrder(payment-engine): tenantId, routerId e idempotencyKey son obligatorios.');
+  }
+};
 
 export interface SuspensionRepository {
   getPolicy(): Promise<SuspensionPolicyV2>;
@@ -103,7 +115,21 @@ export interface SuspensionRepository {
   listOrders(filter?: OrderListFilter): Promise<SuspensionOrder[]>;
   openOrders(customerId: string, orderType?: SuspensionOrder['orderType']): Promise<SuspensionOrder[]>;
   createOrder(input: CreateOrderInput): Promise<SuspensionOrder>;
+  findReactivationOrderByIdempotencyKey(tenantId: string, idempotencyKey: string): Promise<SuspensionOrder | null>;
   cancelOpenOrders(customerId: string, orderType: SuspensionOrder['orderType'], reason: string, actorId?: string): Promise<number>;
+
+  /** Claim compare-and-set previo a cualquier efecto externo. */
+  claimOrder(order: SuspensionOrder, claim: OrderClaimInput): Promise<SuspensionOrder | null>;
+
+  /** Sólo el owner vigente puede avanzar/finalizar su orden QUEUED. */
+  updateClaimedOrder(
+    order: SuspensionOrder,
+    workerRunId: string,
+    patch: OrderUpdate,
+  ): Promise<SuspensionOrder | null>;
+
+  /** CAS administrativo: sólo toma un efecto incierto cuyo lease ya venció. */
+  confirmUncertainOrder(order: SuspensionOrder, reclaimBefore: string, note: string): Promise<SuspensionOrder | null>;
 
   /** Actualiza una orden (usado por el Worker dry-run). */
   updateOrder(order: SuspensionOrder, patch: OrderUpdate): Promise<SuspensionOrder>;
@@ -139,7 +165,29 @@ export class StoreSuspensionRepository implements SuspensionRepository {
   async openOrders(customerId: string, orderType?: SuspensionOrder['orderType']) {
     return engineStore.openOrders(customerId, orderType);
   }
-  async createOrder(input: CreateOrderInput) { return engineStore.createOrder(input); }
+  async createOrder(input: CreateOrderInput) {
+    requirePaymentOrderScope(input);
+    return engineStore.createOrder(input);
+  }
+  async findReactivationOrderByIdempotencyKey(tenantId: string, idempotencyKey: string) {
+    return engineStore.ORDERS.find((order) =>
+      order.orderType === 'reactivation'
+      && (order.tenantId || 'tenant-default') === tenantId
+      && order.idempotencyKey === idempotencyKey,
+    ) ?? null;
+  }
+  async claimOrder(order: SuspensionOrder, claim: OrderClaimInput) {
+    return engineStore.claimOrder(order.id, claim);
+  }
+  async updateClaimedOrder(order: SuspensionOrder, workerRunId: string, patch: OrderUpdate) {
+    return engineStore.updateClaimedOrder(order.id, workerRunId, patch);
+  }
+  async confirmUncertainOrder(order: SuspensionOrder, reclaimBefore: string, note: string) {
+    const current = engineStore.ORDERS.find((candidate) => candidate.id === order.id);
+    if (!current || current.status !== 'QUEUED' || !current.claimedAt || current.claimedAt > reclaimBefore
+      || !current.effectStartedAt || current.effectConfirmedAt) return null;
+    return engineStore.updateOrder(order.id, { effectConfirmedAt: new Date().toISOString(), claimedAt: new Date(0).toISOString(), workerNote: note });
+  }
   async cancelOpenOrders(customerId: string, orderType: SuspensionOrder['orderType'], reason: string, actorId?: string) {
     return engineStore.cancelOpenOrders(customerId, orderType, reason, actorId);
   }
@@ -254,6 +302,7 @@ export class SupabaseSuspensionRepository implements SuspensionRepository {
   }
 
   async createOrder(input: CreateOrderInput): Promise<SuspensionOrder> {
+    requirePaymentOrderScope(input);
     const isSusp = input.orderType === 'suspension';
     const durable = Boolean(input.idempotencyKey);
     const tenantId = durable ? (input.tenantId || 'tenant-default') : input.tenantId;
@@ -288,6 +337,93 @@ export class SupabaseSuspensionRepository implements SuspensionRepository {
     return existing;
   }
 
+  async findReactivationOrderByIdempotencyKey(
+    tenantId: string,
+    idempotencyKey: string,
+  ): Promise<SuspensionOrder | null> {
+    const { data, error } = await this.client
+      .from('reactivation_orders').select('*')
+      .eq('tenant_id', tenantId)
+      .eq('idempotency_key', idempotencyKey)
+      .maybeSingle();
+    if (error) throw new Error(`findReactivationOrderByIdempotencyKey: ${error.message}`);
+    return data ? rowToOrder(data as OrderRow, 'reactivation') : null;
+  }
+
+  async claimOrder(order: SuspensionOrder, claim: OrderClaimInput): Promise<SuspensionOrder | null> {
+    const table = order.orderType === 'suspension' ? 'suspension_orders' : 'reactivation_orders';
+    let query = this.client.from(table).update({
+      status: 'QUEUED',
+      worker_run_id: claim.workerRunId,
+      claimed_at: claim.claimedAt,
+      executed_at: null,
+      worker_note: `Claim adquirido por ${claim.workerRunId}.`,
+    }).eq('id', order.id);
+    if (order.tenantId) query = query.eq('tenant_id', order.tenantId);
+
+    if (order.status === 'PENDING') {
+      query = query.eq('status', 'PENDING');
+    } else if (order.status === 'FAILED' && !order.effectStartedAt) {
+      query = query.eq('status', 'FAILED').is('effect_started_at', null);
+    } else if (
+      order.status === 'QUEUED'
+      && order.claimedAt
+      && order.claimedAt <= claim.reclaimBefore
+      && (!order.effectStartedAt || order.effectConfirmedAt)
+    ) {
+      query = query.eq('status', 'QUEUED').eq('claimed_at', order.claimedAt);
+      query = order.workerRunId
+        ? query.eq('worker_run_id', order.workerRunId)
+        : query.is('worker_run_id', null);
+      if (!order.effectStartedAt) query = query.is('effect_started_at', null);
+      else query = query.eq('effect_confirmed_at', order.effectConfirmedAt!);
+    } else {
+      return null;
+    }
+
+    const { data, error } = await query.select('*').maybeSingle();
+    if (error) throw new Error(`claimOrder: ${error.message}`);
+    return data ? rowToOrder(data as OrderRow, order.orderType) : null;
+  }
+
+  async updateClaimedOrder(
+    order: SuspensionOrder,
+    workerRunId: string,
+    patch: OrderUpdate,
+  ): Promise<SuspensionOrder | null> {
+    const table = order.orderType === 'suspension' ? 'suspension_orders' : 'reactivation_orders';
+    const row: Record<string, unknown> = {};
+    if (patch.status !== undefined) row.status = patch.status;
+    if (patch.executedAt !== undefined) row.executed_at = patch.executedAt;
+    if (patch.dryRun !== undefined) row.dry_run = patch.dryRun;
+    if (patch.workerRunId !== undefined) row.worker_run_id = patch.workerRunId;
+    if (patch.workerNote !== undefined) row.worker_note = patch.workerNote;
+    if (patch.claimedAt !== undefined) row.claimed_at = patch.claimedAt;
+    if (patch.effectStartedAt !== undefined) row.effect_started_at = patch.effectStartedAt;
+    if (patch.effectConfirmedAt !== undefined) row.effect_confirmed_at = patch.effectConfirmedAt;
+    if (Object.keys(row).length === 0) return order;
+    let query = this.client.from(table).update(row)
+      .eq('id', order.id)
+      .eq('status', 'QUEUED')
+      .eq('worker_run_id', workerRunId);
+    if (order.tenantId) query = query.eq('tenant_id', order.tenantId);
+    const { data, error } = await query.select('*').maybeSingle();
+    if (error) throw new Error(`updateClaimedOrder: ${error.message}`);
+    return data ? rowToOrder(data as OrderRow, order.orderType) : null;
+  }
+
+  async confirmUncertainOrder(order: SuspensionOrder, reclaimBefore: string, note: string): Promise<SuspensionOrder | null> {
+    const table = order.orderType === 'suspension' ? 'suspension_orders' : 'reactivation_orders';
+    let query = this.client.from(table).update({
+      effect_confirmed_at: new Date().toISOString(), claimed_at: new Date(0).toISOString(), worker_note: note,
+    }).eq('id', order.id).eq('status', 'QUEUED').eq('claimed_at', order.claimedAt!)
+      .not('effect_started_at', 'is', null).is('effect_confirmed_at', null);
+    if (order.tenantId) query = query.eq('tenant_id', order.tenantId);
+    const { data, error } = await query.select('*').maybeSingle();
+    if (error) throw new Error(`confirmUncertainOrder: ${error.message}`);
+    return data ? rowToOrder(data as OrderRow, order.orderType) : null;
+  }
+
   async cancelOpenOrders(customerId: string, orderType: SuspensionOrder['orderType'], reason: string, actorId?: string): Promise<number> {
     const open = await this.openOrders(customerId, orderType);
     const table = orderType === 'suspension' ? 'suspension_orders' : 'reactivation_orders';
@@ -313,7 +449,9 @@ export class SupabaseSuspensionRepository implements SuspensionRepository {
     if (patch.workerRunId !== undefined) row.worker_run_id = patch.workerRunId;
     if (patch.workerNote !== undefined) row.worker_note = patch.workerNote;
     if (Object.keys(row).length > 0) {
-      const { error } = await this.client.from(table).update(row).eq('id', order.id);
+      let query = this.client.from(table).update(row).eq('id', order.id);
+      if (order.tenantId) query = query.eq('tenant_id', order.tenantId);
+      const { error } = await query;
       if (error) throw new Error(`updateOrder: ${error.message}`);
     }
     return { ...order, ...patch };

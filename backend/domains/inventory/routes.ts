@@ -199,8 +199,8 @@ router.delete('/api/inventory/warehouses/:id', requireRoles([...WRITE_ROLES]), a
 // ====================================================================
 // Transferencias (Fase 5.1) — ciclo pending → completed/cancelled.
 // ====================================================================
-router.get('/api/inventory/transfers', requireRoles(READ_ROLES), asyncHandler(async (_req, res) => {
-  res.json(await getInventoryService().listTransfers());
+router.get('/api/inventory/transfers', requireRoles(READ_ROLES), asyncHandler(async (req, res) => {
+  res.json(await getInventoryService().listTransfers(tenantIdFromRequest(req)));
 }));
 
 router.post('/api/inventory/transfers', requireRoles([...WRITE_ROLES]), asyncHandler(async (req, res) => {
@@ -210,12 +210,12 @@ router.post('/api/inventory/transfers', requireRoles([...WRITE_ROLES]), asyncHan
     toWarehouse: String(req.body?.toWarehouse ?? ''),
     reason: req.body?.reason !== undefined ? String(req.body.reason) : undefined,
     actorId: req.authContext?.userId,
-  });
+  }, tenantIdFromRequest(req));
   res.status(201).json(created);
 }));
 
 router.get('/api/inventory/transfers/:id', requireRoles(READ_ROLES), asyncHandler(async (req, res) => {
-  const transfer = await getInventoryService().getTransfer(req.params.id);
+  const transfer = await getInventoryService().getTransfer(req.params.id, tenantIdFromRequest(req));
   if (!transfer) {
     res.status(404).json({ error: 'Transfer not found' });
     return;
@@ -224,11 +224,11 @@ router.get('/api/inventory/transfers/:id', requireRoles(READ_ROLES), asyncHandle
 }));
 
 router.post('/api/inventory/transfers/:id/complete', requireRoles([...WRITE_ROLES]), asyncHandler(async (req, res) => {
-  res.json(await getInventoryService().completeTransfer(req.params.id));
+  res.json(await getInventoryService().completeTransfer(req.params.id, tenantIdFromRequest(req)));
 }));
 
 router.post('/api/inventory/transfers/:id/cancel', requireRoles([...WRITE_ROLES]), asyncHandler(async (req, res) => {
-  res.json(await getInventoryService().cancelTransfer(req.params.id));
+  res.json(await getInventoryService().cancelTransfer(req.params.id, tenantIdFromRequest(req)));
 }));
 
 // ====================================================================

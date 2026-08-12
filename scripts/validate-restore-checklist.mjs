@@ -1,28 +1,54 @@
 #!/usr/bin/env node
-// ====================================================================
-// Checklist restore staging — OLA 0 (§14).
-//
-// Uso:
-//   STAGING_RESTORE_TESTED=true node scripts/validate-restore-checklist.mjs
-//   node scripts/vps/staging-restore-smoke.mjs  (smoke previo)
-// ====================================================================
+import { readFileSync, statSync } from 'node:fs';
+import { pathToFileURL } from 'node:url';
+import { validateRestoreEvidence, formatMissingFields, validateSecretFileMetadata } from './lib/gl02-backup-config.mjs';
 
-console.log('\n=== Restore Checklist — OLA 0 §14 ===\n');
+const invalidEvidenceFiles = ['PRODUCTION_RESTORE_EVIDENCE_AND_KEY_FILES_VALID'];
 
-const tested = process.env.STAGING_RESTORE_TESTED === 'true'
-  || process.env.PRODUCTION_RESTORE_TESTED === 'true';
+export const validateProductionRestoreEvidenceEnv = (
+  env = process.env,
+  { platform = process.platform, readFile = readFileSync, stat = statSync } = {},
+) => {
+  const evidencePath = (env.PRODUCTION_RESTORE_EVIDENCE_FILE || '').trim();
+  let evidence;
+  let key;
+  try {
+    if (!evidencePath) throw new Error('missing');
+    evidence = JSON.parse(readFile(evidencePath, 'utf8'));
+    const keyPath = (env.PRODUCTION_RESTORE_EVIDENCE_HMAC_KEY_FILE || '').trim();
+    if (!keyPath) throw new Error('key');
+    const metadataIssues = platform === 'linux' ? validateSecretFileMetadata(stat(keyPath)) : [];
+    if (metadataIssues.length) throw new Error('key metadata');
+    key = readFile(keyPath, 'utf8').trim();
+  } catch {
+    return { ok: false, missing: invalidEvidenceFiles };
+  }
 
-if (tested) {
-  const flag = process.env.PRODUCTION_RESTORE_TESTED === 'true' ? 'PRODUCTION_RESTORE_TESTED' : 'STAGING_RESTORE_TESTED';
-  console.log(`  ✅  ${flag}=true`);
-  console.log('  Confirmar manualmente: backup tomado, restore ejecutado, API responde.');
-  process.exit(0);
+  const result = validateRestoreEvidence(evidence, key);
+  const missing = [...result.missing];
+  if (env.PRODUCTION_RESTORE_TESTED !== 'true') missing.unshift('PRODUCTION_RESTORE_TESTED_TRUE');
+  return { ok: missing.length === 0, missing, evidence };
+};
+
+export const runValidateRestoreChecklistCli = ({
+  env = process.env,
+  stdout = process.stdout,
+  stderr = process.stderr,
+} = {}) => {
+  const result = validateProductionRestoreEvidenceEnv(env);
+  if (!result.ok) {
+    stderr.write(`${formatMissingFields('production-restore-evidence', result.missing)}\n`);
+    return 1;
+  }
+  stdout.write(JSON.stringify({
+    scope: 'production-restore-evidence',
+    status: 'verified',
+    backupId: result.evidence.backupId,
+  }));
+  stdout.write('\n');
+  return 0;
+};
+
+if (process.argv[1] && import.meta.url === pathToFileURL(process.argv[1]).href) {
+  process.exit(runValidateRestoreChecklistCli());
 }
-
-console.log('  ⚠️  STAGING_RESTORE_TESTED / PRODUCTION_RESTORE_TESTED no están en true');
-console.log('\nPasos manuales (PRODUCTION_READINESS_CHECKLIST.md §14):');
-console.log('  1. Backup completo de Supabase (schema + data)');
-console.log('  2. Restore en entorno de prueba');
-console.log('  3. Verificar GET /api/health y persistencia-status');
-console.log('  4. Exportar STAGING_RESTORE_TESTED=true en staging\n');
-process.exit(0);
