@@ -1,19 +1,19 @@
 <!--
 Sync Impact Report
-Version change: N/A -> 1.0.0
+Version change: 1.0.0 -> 1.0.1
 Modified principles:
-- Template placeholders replaced with NugaCore v2 brownfield governance.
+- No principle text changed.
 Added sections:
-- Runtime And Architecture Boundaries
-- Development Workflow And Quality Gates
+- None
 Removed sections:
 - None
 Templates requiring updates:
-- .specify/templates/plan-template.md: no update in bootstrap; future PR.
-- .specify/templates/spec-template.md: no update in bootstrap; future PR.
-- .specify/templates/tasks-template.md: no update in bootstrap; future PR.
+- .specify/templates/spec-template.md: aligned in chore/spec-kit-template-alignment.
+- .specify/templates/plan-template.md: aligned in chore/spec-kit-template-alignment.
+- .specify/templates/tasks-template.md: aligned in chore/spec-kit-template-alignment.
+- .specify/templates/checklist-template.md: aligned in chore/spec-kit-template-alignment.
 Follow-up TODOs:
-- Align Spec Kit templates with this Constitution in the next governance PR before authoring feature specs.
+- Align any future custom Spec Kit overrides with this Constitution before authoring feature specs.
 -->
 
 # NugaCore v2 Constitution
@@ -106,4 +106,4 @@ Every PR review MUST check constitutional compliance for its scope. Non-complian
 
 Release managers MUST confirm the exact PR, branch, SHA, mergeability, GitHub Actions status, local worktree status, and required gate results before merge. Production deployment remains a separate authorization step from code merge.
 
-**Version**: 1.0.0 | **Ratified**: 2026-08-13 | **Last Amended**: 2026-08-13
+**Version**: 1.0.1 | **Ratified**: 2026-08-13 | **Last Amended**: 2026-08-13

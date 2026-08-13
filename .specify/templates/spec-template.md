@@ -8,6 +8,25 @@
 
 **Input**: User description: "$ARGUMENTS"
 
+## Scope & Boundaries *(mandatory)*
+
+<!--
+  Keep this section focused on WHAT and WHY. Do not include technical design,
+  schemas, APIs, file paths, or implementation strategy here.
+-->
+
+**Problem**: [User/business problem this feature solves]
+
+**Primary Actors**: [Users, roles, or systems affected]
+
+**In Scope**:
+
+- [Behavior or outcome included in this feature]
+
+**Out of Scope**:
+
+- [Behavior, integration, migration, or production operation intentionally excluded]
+
 ## User Scenarios & Testing *(mandatory)*
 
 <!--
@@ -72,11 +91,29 @@
 
 <!--
   ACTION REQUIRED: The content in this section represents placeholders.
-  Fill them out with the right edge cases.
+  Fill them out with the right edge cases, including retries/failures when relevant.
 -->
 
 - What happens when [boundary condition]?
 - How does system handle [error scenario]?
+
+## NugaCore Impact Review *(mandatory)*
+
+<!--
+  Mark each row as Applicable, N/A, or EXTERNAL_BLOCKED.
+  - N/A requires a short reason.
+  - EXTERNAL_BLOCKED means the requirement depends on external validation or
+    evidence that is not available during local development. It is not PASS.
+  - Do not use EXTERNAL_BLOCKED for deterministic local tests or requirements.
+-->
+
+| Area | Status | Requirement Impact |
+|------|--------|--------------------|
+| Security / Authorization | [Applicable/N/A] | Does this change authentication, authorization/RBAC, RLS, exposed data, or secrets? |
+| Data / Financial | [Applicable/N/A] | Does this modify persistence, invoices, balances, payments, subscriptions, or idempotency requirements? |
+| Infrastructure / External Systems | [Applicable/N/A] | Does this touch MikroTik/RouterOS, workers, providers, queues, webhooks, or public deployment behavior? |
+| External Evidence | [N/A/EXTERNAL_BLOCKED] | Which acceptance criteria require staging, production, CHR, sandbox provider, remote SQL, or restore evidence? |
+| Backwards Compatibility | [Applicable/N/A] | What existing behavior, API contract, data contract, or operator workflow must remain compatible? |
 
 ## Requirements *(mandatory)*
 
@@ -102,6 +139,10 @@
 
 - **[Entity 1]**: [What it represents, key attributes without implementation]
 - **[Entity 2]**: [What it represents, relationships to other entities]
+
+### External Validation Requirements *(include if any NugaCore Impact row is EXTERNAL_BLOCKED)*
+
+- **EV-001**: [External system/evidence required, why it cannot be proven locally, and what result will count as real evidence]
 
 ## Success Criteria *(mandatory)*
 
