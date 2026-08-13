@@ -2,6 +2,8 @@
 
 ## Confirmed Payment Trigger
 
+**Status**: **EXISTING / EXTEND**. Existing Billing and Payment records are reused; the future implementation only standardizes how their canonical identity triggers eligibility.
+
 **Purpose**: Represents a server-approved payment event or authorized server-side payment record that may start eligibility evaluation after Billing applies it.
 
 **Existing anchors**: `payment_events`, `payment_orders`, `payments`, `payment_applications`, `BillingService.recordPayment`, `BillingService.applyWebhookPayment`.
@@ -26,6 +28,8 @@
 - Cross-tenant invoice/customer/order references fail closed.
 
 ## Financial Eligibility Snapshot
+
+**Status**: **EXISTING / EXTEND**. Existing Billing invoices/balances and suspension-engine grace semantics are reused; the future implementation adds a shared snapshot contract.
 
 **Purpose**: Captures the post-payment billing condition used to decide whether automatic reactivation may proceed.
 
@@ -54,6 +58,8 @@
 
 ## Suspension Block Snapshot
 
+**Status**: **PROPOSED VIEW / NEW_REQUIRED SOURCE**. The snapshot is proposed. Current sources can inform it, but they are not sufficient as the durable active-block source of truth.
+
 **Purpose**: Captures whether the customer is suspended for a financial reason that automation may resolve, or an independent non-financial reason that automation must not override.
 
 **Existing anchors**: customer `status`, `customer_service_state`, `suspension_events`, `suspension_orders`, manual suspension routes and reasons.
@@ -81,6 +87,8 @@
 - Free-text reasons and historical event/order source values may contribute evidence but must not be the only authority for automatic reactivation.
 
 ## Customer Suspension Block
+
+**Status**: **PROPOSED**.
 
 **Purpose**: Minimal additive persistence required by the future implementation PR to distinguish active financial blocks from non-financial and unknown blocks without creating a broad suspension taxonomy.
 
@@ -118,7 +126,16 @@
 - Legacy ambiguous suspended customers must not be reclassified as financial from free text alone.
 - Clearing a financial block after payment must not clear unrelated non-financial or unknown blocks.
 
+**Compatibility and rollback**:
+
+- The table must be additive and ignored by old runtimes.
+- Automatic payment reactivation must remain disabled until the migration, RLS/grants, and DB tests pass.
+- Rollback starts by disabling automatic reactivation flags; dropping the table/indexes is a later cleanup only after no runtime depends on them.
+- Existing suspension events/orders remain historical audit evidence and are not deleted or rewritten.
+
 ## Reactivation Eligibility Decision
+
+**Status**: **PROPOSED CONTRACT / EXISTING AUDIT DESTINATION**. The decision object is new application logic; the durable audit can extend existing tenant-scoped `suspension_events`.
 
 **Purpose**: The pure decision result consumed by payment and billing flows before any downstream side effect.
 
@@ -144,6 +161,8 @@
 - The decision is auditable whether eligible or blocked, using an existing tenant-scoped `suspension_events` decision record plus any active-block evidence.
 
 ## Reactivation Family
+
+**Status**: **EXISTING / REUSE**. Existing payment-engine reactivation order/action structures enforce the family identity.
 
 **Purpose**: Durable group of effects caused by one canonical payment for one tenant and customer.
 
@@ -172,6 +191,8 @@
 - Router tenant ownership and credential readiness must be verified before live network dispatch.
 
 ## Network Restoration Evidence
+
+**Status**: **EXISTING / ADAPT**. Existing order/action/worker evidence is reused; the future implementation adds pre-RouterOS eligibility revalidation.
 
 **Purpose**: Separates reactivation request from actual RouterOS restoration.
 
@@ -212,6 +233,8 @@
 | Legacy suspended customers | ADAPT | Treat ambiguous legacy state as `unknown` unless deterministic evidence proves a current financial block. |
 
 ## Audit Evidence
+
+**Status**: **EXISTING / EXTEND**. Existing audit destinations are reused, with additional automatic-reactivation decision metadata.
 
 **Purpose**: Provides operator-visible proof without exposing secrets.
 

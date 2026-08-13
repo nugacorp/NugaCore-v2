@@ -29,9 +29,17 @@
 - Honor `reactivateOnPartialPayment` for automatic payment reactivation even with delinquency: rejected by FR-005 and FR-006.
 - Reject partial payments: rejected because Billing accepts valid partial payments and the spec requires them to remain auditable.
 
-## Decision: Non-financial holds fail closed and require structured active-block evidence
+## Decision: Suspension classification
+
+**Decision**: Financial, non-financial, unknown, and none classification cannot be computed safely from current persisted evidence alone. Classification requires structured active-block evidence, and unknown fails closed.
+
+**Evidence**: Current code has `customer.status`, `customer_service_state`, `suspension_events`, `suspension_orders`, `source`, and free-text `reason`. The suspension engine produces deterministic financial signals for delinquency (`DELINQUENT`, `suspension_order_created`, engine reason), while manual routes can suspend/reactivate with arbitrary reasons and source `manual`. Existing history is useful evidence, but it is not a durable active-block set and cannot prove all current blockers are financial when multiple blockers may coexist.
 
 **Rationale**: Current suspension records contain status, reason, source, events, and order state, but they do not durably model active blocking causes as structured data. A free-text reason, a historical order, or `customer.status = suspended` is not enough to prove that the current suspension is only financial. Payment automation should reactivate only when active evidence proves a financial/delinquency block and no active non-financial or unknown block exists. Unknown, manual, fraud, cancellation, baja, maintenance, security, administrative, or legacy ambiguous holds must block automation and leave evidence for authorized manual recovery.
+
+**Fail-closed behavior**: If available persisted evidence cannot prove that every active blocking condition relevant to the customer is financial, automatic reactivation must produce a blocked/no-network outcome.
+
+**Legacy behavior**: Ambiguous legacy suspended customers become `unknown` for automation. Manual/operator recovery remains possible through existing authorized suspension/reactivation paths. Deterministic backfill may be considered later only when billing/suspension evidence proves an active financial block without relying on free-text inference.
 
 **Alternatives considered**:
 
@@ -39,9 +47,11 @@
 - Infer classification from free-text reason/source only: rejected because localized/manual/legacy text is not a security boundary.
 - Create a broad new suspension taxonomy in Spec 001: rejected because the spec keeps taxonomy expansion out of scope.
 
-## Decision: Existing persistence is not sufficient for the complete safe feature
+## Decision: Persistence sufficiency
 
-**Answer**: **NO**. The feature cannot be implemented safely with only the currently documented persistence.
+**Decision**: **NO**. The feature cannot be implemented safely with only the currently documented persistence.
+
+**Evidence**: Existing persisted structures durably cover canonical payment identity, tenant/customer scope, webhook idempotency, reactivation orders, Mikrotik actions, idempotency keys, checkpoints, worker claims, and sanitized audit destinations. They do not durably model current active suspension blockers as financial/non-financial/unknown/none.
 
 **Rationale**: Existing persistence is sufficient for the payment and reactivation saga identity: `payments`, `payment_events`, `payment_applications`, `reactivation_orders`, `mikrotik_actions`, `suspension_events`, `client_timeline`, and `noc_alerts` already support tenant-scoped idempotency and monotonic reactivation progress. The missing persistence is the safety boundary for active suspension classification. The current schema can record historical suspension events and orders, but it cannot reliably answer "which active blocks currently prevent automatic reactivation?" when financial, manual, and unknown legacy conditions may coexist. A future implementation PR therefore needs a minimal additive schema change before runtime behavior is enabled.
 
@@ -77,7 +87,9 @@
 - Roll back payment if router dispatch fails: rejected because money state and network automation have different reliability boundaries.
 - Return success without audit: rejected because operators need to distinguish financial and network state.
 
-## Decision: Revalidate eligibility immediately before RouterOS effects
+## Decision: Revalidation before network execution
+
+**Decision**: The worker must revalidate customer eligibility after claiming a reactivation order and before any live RouterOS write.
 
 **Rationale**: Existing payment and order idempotency protect against duplicate owners, and the Mikrotik worker uses durable claims plus `effectStartedAt`/`effectConfirmedAt` to avoid unsafe retries after uncertain RouterOS effects. However, the worker currently plans and executes a queued reactivation order without rechecking whether a manual or non-financial block appeared after order creation. The future implementation must add a final eligibility revalidation boundary after the worker claim and before live RouterOS command execution. If the latest active-block state is non-financial or unknown, the order must fail closed or be cancelled with audit evidence and no RouterOS write.
 

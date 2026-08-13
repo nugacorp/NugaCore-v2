@@ -100,7 +100,7 @@ interface AutomaticPaymentReactivationResult {
 | Missing canonical payment identity in webhook path | `missing_identity` or existing service error before reactivation effects |
 | Customer has remaining beyond-grace debt | `blocked_financial` |
 | Customer has independent non-financial block | `blocked_non_financial` |
-| Customer has ambiguous/legacy active suspension evidence | `blocked_non_financial` or fail-closed `unknown` classification without RouterOS effects |
+| Customer has ambiguous/legacy active suspension evidence | `blocked_non_financial` with `blockReasonCategory = 'unknown'`; no RouterOS effects |
 | Automation policy disabled | `automation_disabled` |
 | Customer already active | `already_active`, unless resuming an existing durable family |
 | Router missing or unavailable | `router_deferred` or existing retryable service error after audit |

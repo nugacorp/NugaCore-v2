@@ -42,6 +42,7 @@ The next implementation PR should reuse the current Express backend domains (`pa
 | Persistence and migrations | PASS WITH PLANNED WORK | No migration in this PR. Final persistence decision is `NO` for the complete feature until a minimal active-block model is added in a future implementation PR. |
 | Billing, payments, and idempotency | PASS WITH PLANNED WORK | Billing authority and existing payment/order/action idempotency are reused. Future work must add decision audit and active-block integration tests. |
 | MikroTik, RouterOS, workers, and external providers | PASS WITH PLANNED WORK | Router effects remain queued/dry-run by default and use worker semantics. Future work must add a pre-RouterOS eligibility revalidation boundary. |
+| External validation and readiness truth | EXTERNAL_BLOCKED | Provider sandbox, CHR/RouterOS lab, staging/live parity, production strict readiness, and restore evidence require separate authorized evidence outside this plan-only PR. |
 | Feature flags and runtime configuration | PASS WITH PLANNED WORK | Existing `reactivateOnPayment`, `autoReactivate`, `PAYMENTS_ROUTER_LIVE`, `MIKROTIK_WORKER_LIVE`, and `MIKROTIK_WORKER_COMMIT` route behavior; future implementation must persist disabled/no-op decisions. |
 | Secrets and sensitive data | PASS | Plan requires sanitized fingerprints and no raw provider/router payloads in evidence. |
 | Observability, audit, and restore evidence | PASS WITH PLANNED WORK | Design requires explicit decision evidence for eligible, blocked, disabled, dry-run, queued, failed, and restored states. External restore/live evidence remains separate from this plan-only PR. |
@@ -160,6 +161,38 @@ Existing persistence is sufficient for:
 
 Existing persistence is not sufficient for the security-critical question: "Does this suspended customer currently have only a financial block that this payment regularized?" The future implementation PR must add a minimal active-block model, tentatively `customer_suspension_blocks`, before automatic reactivation is enabled. That model must be additive, tenant-scoped, RLS/grant protected, and able to represent multiple concurrent active blocks.
 
+| Required Concept | Existing Durable Source | Sufficient | Gap / Planned Change |
+|------------------|-------------------------|------------|----------------------|
+| Canonical automatic reactivation family | `reactivation_orders`, `mikrotik_actions`, tenant-scoped `idempotency_key` | YES | Reuse root family key. |
+| Triggering canonical payment | `payments`, `payment_events.webhook_payment_id`, `payment_applications` | YES | Reuse Billing canonical payment identity. |
+| Tenant | Existing `tenant_id` on payment, event, order, action, timeline, alert paths | YES | Future active-block table must include required `tenant_id`. |
+| Customer | Existing customer/client IDs on Billing, suspension, order, action, timeline paths | YES | Future active-block table must include required `customer_id`. |
+| Eligibility outcome | `suspension_events` with idempotency key and metadata | YES | Extend decision audit shape; no new decision table required. |
+| Reason for eligibility denial | `suspension_events.reason` plus sanitized metadata | YES | Standardize operator-safe reason values in implementation. |
+| Financial/non-financial/unknown blocking classification | Historical `customer.status`, `customer_service_state`, `suspension_events`, `suspension_orders` | NO | Add minimal active-block persistence. |
+| Automatic-reactivation disabled outcome | `suspension_events` decision audit | YES | Persist disabled/no-op outcome with deterministic decision key. |
+| Reactivation requested | `reactivation_orders`, `mikrotik_actions`, timeline/event/alert evidence | YES | Reuse existing saga. |
+| Queued/dry-run | `reactivation_orders.status`, `dry_run`, `mikrotik_actions.dry_run`, worker note | YES | Reuse existing worker/order evidence. |
+| Network execution succeeded | `reactivation_orders.executed_at`, `effect_confirmed_at`, `worker_run_id`, action result | YES | Reuse; do not claim live restoration without worker evidence. |
+| Network execution failed | `reactivation_orders.status`, `worker_note`, action result | YES | Reuse; preserve payment success. |
+| Cancelled/manual intervention | `suspension_events` cancellation events, order status/reason, manual routes | YES | Future active blocks must be cleared only by authorized paths. |
+| Retry/recovery | Payment claim/reclaim, checkpoint RPC, order claim/effect fields | YES | Reuse existing durable retry semantics. |
+| Already-completed/no-op behavior | Existing action/order lookup by idempotency key and checkpoint state | YES | Reuse and record no-op decision audit where no new effect is needed. |
+
+Minimum future schema work:
+
+- **Entity/table**: `public.customer_suspension_blocks`.
+- **Purpose**: durable active blocker set for automatic reactivation safety.
+- **Tenant relationship**: required `tenant_id` with tenant FK/ownership checks consistent with existing tenant-owned tables.
+- **Minimal record**: `id`, `tenant_id`, `customer_id`, `category`, `source`, `reason`, optional `evidence_type`, optional `evidence_id`, `created_at`, `cleared_at`, `cleared_by`, `clear_reason`.
+- **Category invariant**: `category IN ('financial','non_financial','unknown')`; absence of active rows means `none`.
+- **Active invariant**: `cleared_at IS NULL` means the block is active.
+- **Uniqueness**: index active lookups by `(tenant_id, customer_id)` and `(tenant_id, customer_id, category)` where `cleared_at IS NULL`; use a partial unique index on `(tenant_id, evidence_type, evidence_id)` where `evidence_id IS NOT NULL` if the same durable evidence can be replayed.
+- **Backwards compatibility**: additive nullable/independent table; existing payments, suspension orders, events, and manual recovery continue to work while automatic reactivation stays gated.
+- **Legacy treatment**: do not infer financial blocks from free text. Ambiguous legacy suspended customers remain `unknown` for automation unless deterministic evidence proves financial origin.
+- **Rollback concept**: disable automatic reactivation flags first; old runtime ignores the additive table; table/index rollback only after verifying no enabled runtime depends on it.
+- **DB tests required**: migration replay, RLS/grants, tenant isolation, active lookup indexes, duplicate evidence idempotency, legacy unknown behavior, coexistence of financial plus non-financial blocks, and clearing only the intended financial block.
+
 ## G. Idempotency Design
 
 | Flow | Design |
@@ -195,6 +228,17 @@ Rules for the future implementation:
 
 Eligibility requires customer status `suspended`, automation policy enabled, no blocking overdue debt after payment, and no active `non_financial` or `unknown` block. If financial and non-financial blocks coexist, payment may clear/record the financial result but automatic reactivation remains blocked.
 
+| Existing Evidence | Classification | Confidence |
+|-------------------|----------------|------------|
+| Customer is not suspended and no active block rows exist | `none` | High after active-block model exists. |
+| Active block row `category = financial` from deterministic suspension-engine/billing evidence | `financial` | High. |
+| Active block row `category = non_financial` from manual/admin/security/fraud/cancellation/maintenance/baja source | `non_financial` | High. |
+| Active block row `category = unknown` | `unknown` | High; fail closed. |
+| Only `customer.status = suspended` | `unknown` | High confidence that it is not enough; fail closed. |
+| Only free-text `reason` or localized text | `unknown` | High confidence that it is not enough; fail closed. |
+| Historical `suspension_order_created` with source `engine` and `billingStatus = DELINQUENT`, but no active-block row | `unknown` for automation | Medium as evidence, insufficient as current active state. |
+| Historical manual suspension/reactivation events without structured active clear state | `unknown` | Medium/high; requires operator recovery or deterministic migration evidence. |
+
 ## Post-Design Constitution Re-Check
 
 | Check | Status | Evidence / Required Action |
@@ -205,6 +249,7 @@ Eligibility requires customer status `suspended`, automation policy enabled, no 
 | Persistence and migrations | PASS WITH PLANNED WORK | Final decision is `NO` for existing persistence alone; future implementation needs a minimal additive active-block migration. |
 | Billing, payments, and idempotency | PASS WITH PLANNED WORK | Design preserves Billing authority, canonical payment identity, webhook fencing, and checkpoint semantics; future work adds idempotent decision audit. |
 | MikroTik, RouterOS, workers, and external providers | PASS WITH PLANNED WORK | Design keeps RouterOS behind dry-run/live worker gates and requires worker pre-effect revalidation. |
+| External validation and readiness truth | EXTERNAL_BLOCKED | Provider sandbox, CHR/RouterOS lab, staging/live parity, production strict readiness, and restore evidence require separate authorized evidence outside this plan-only PR. |
 | Feature flags and runtime configuration | PASS WITH PLANNED WORK | Design uses flags to route behavior while payment/accountability remain server-side; disabled outcomes must be persisted. |
 | Secrets and sensitive data | PASS | Evidence fields are sanitized IDs/fingerprints, not raw secrets or payloads. |
 | Observability, audit, and restore evidence | PASS WITH PLANNED WORK | Data model and contract require auditable decision/state outputs; implementation must add concrete persisted evidence. |
