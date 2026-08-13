@@ -22,7 +22,10 @@
     "test:db:postgres17": "node scripts/run-postgres17-fixture.mjs",
     "test:auth": "node scripts/run-tests.mjs auth",
     "validate-production-readiness": "node -r dotenv/config scripts/validate-production-readiness.mjs",
+    "validate-production-readiness:strict": "node -r dotenv/config --input-type=module -e \"process.env.PRODUCTION_READINESS_STRICT='true'; await import('./scripts/validate-production-readiness.mjs')\"",
     "validate-restore-checklist": "node -r dotenv/config scripts/validate-restore-checklist.mjs",
+    "validate-restore-checklist:strict": "node -r dotenv/config --input-type=module -e \"process.env.PRODUCTION_RESTORE_STRICT='true'; const { runValidateRestoreChecklistCli } = await import('./scripts/validate-restore-checklist.mjs'); process.exit(runValidateRestoreChecklistCli())\"",
+    "report-migration-drift": "node -r dotenv/config scripts/report-migration-drift.mjs",
     "docker:config:safe": "docker compose -f docker-compose.prod.yml config --no-interpolate",
     "ftth:export-samples": "node scripts/ftth/export-import-samples.mjs",
     "lint:fix": "eslint . --fix"
