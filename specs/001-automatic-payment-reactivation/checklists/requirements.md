@@ -21,6 +21,16 @@
 - [x] Edge cases are identified
 - [x] Scope is clearly bounded
 - [x] Dependencies and assumptions identified
+- [x] Partial payments are covered as valid payments that may not satisfy reactivation eligibility
+- [x] Full settlement and remaining blocking overdue customer debt are covered
+- [x] Duplicate provider events, retries, and concurrent processing are covered
+- [x] Non-financial suspension blocks are covered without inventing a new taxonomy
+- [x] Multiple services are explicitly limited to current customer-level behavior
+- [x] Overpayment is covered without introducing a new credit/refund system
+- [x] RouterOS unavailable/failure behavior is covered
+- [x] Manual concurrency and existing server-side authorization are covered
+- [x] Feature flag behavior is covered
+- [x] Local vs external validation is separated
 
 ## Feature Readiness
 
@@ -28,8 +38,9 @@
 - [x] User scenarios cover primary flows
 - [x] Feature meets measurable outcomes defined in Success Criteria
 - [x] No implementation details leak into specification
+- [x] Explicit out-of-scope items prevent scope creep
 
 ## Notes
 
-- Product decisions intentionally remain as `NEEDS_HUMAN_DECISION` entries, not Spec Kit clarification markers, because the user requested unresolved product decisions to be carried forward for human ownership.
+- The six human decisions have been incorporated into the spec as resolved decisions.
 - This checklist was created as part of `speckit-specify`; the separate `speckit-checklist` workflow was not executed.

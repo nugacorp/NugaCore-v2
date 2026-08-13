@@ -28,20 +28,31 @@
 | Duplicate webhook protection | EXISTS | Atomic claim/reclaim behavior and tenant-scoped event identity exist. |
 | Canonical payment identity | EXISTS | Billing/webhook payment idempotency can own downstream reactivation identity. |
 | Invoice settlement | EXISTS | Pending amount and settlement-winner behavior exist for invoice-level settlement. |
-| Customer balance scope | PARTIAL | Account balance projection exists, but eligibility across multiple open invoices needs product decision. |
-| Partial payment behavior | PARTIAL | Suspension policy has partial-payment flag; product threshold/contract is not fully decided. |
+| Customer balance scope | PARTIAL | Current brownfield behavior has account balance and overdue/delinquent concepts. Spec 001 decision: automatic reactivation requires no blocking overdue customer balance beyond grace after payment application. Exact calculation belongs to plan. |
+| Partial payment behavior | PARTIAL | Current brownfield behavior can record partial payments and has a partial reactivation policy flag. Spec 001 decision: partial payment is valid but does not auto-reactivate while blocking overdue debt remains. |
 | Logical customer reactivation | EXISTS | Payment service can reactivate customer state and record side effects. |
 | Reactivation order | EXISTS | Suspension engine and repository have reactivation order concepts. |
+| Manual suspension/reactivation permission | EXISTS | Current brownfield routes and tests show server-side suspension evaluate roles for manual suspend/reactivate behavior. Spec 001 reuses this permission family and does not introduce new roles. |
 | Worker / router apply | PARTIAL | Worker and command planning exist, but current default remains dry-run/read-only and live evidence is external. |
-| Service/subscription granularity | NEEDS_HUMAN_DECISION | Current data model is mostly customer/client/plan oriented. |
+| Service/subscription granularity | OUT_OF_SCOPE | Current data model is mostly customer/client/plan oriented. Spec 001 decision: preserve customer-level reactivation; service/subscription-level behavior requires a future spec. |
 | Audit trail | PARTIAL | Multiple audit records exist, but operator-facing end-to-end proof should be validated in the later plan. |
+
+## Current Brownfield Behavior vs Spec 001 Decisions
+
+| Topic | Current Brownfield Behavior | Spec 001 Decision |
+|-------|-----------------------------|-------------------|
+| Debt scope | Payment service currently uses invoice settlement in the webhook flow; billing service also exposes customer/account balance projections and suspension engine aggregates overdue/delinquent state. | Reactivation eligibility requires no blocking overdue customer balance beyond the applicable grace period after payment is applied. |
+| Partial payment | Billing can record partial payment; suspension policy includes partial-payment reactivation capability. | Partial payment remains a valid payment, but it does not trigger automatic reactivation while blocking overdue debt remains. |
+| Subject granularity | Runtime evidence is customer/client/plan oriented rather than per-service billing/reactivation. | Spec 001 remains customer-level; per-service/per-subscription behavior is out of scope. |
+| Non-financial suspension | Current code has customer status and suspension events/reasons but no complete accepted taxonomy. | Payment may clear financial blocking conditions but must not override independent non-financial blocks; taxonomy details are deferred to plan or a future spec. |
+| Overpayment/credit | Billing currently rejects payment amounts above pending invoice balance in the inspected route; no formal wallet/credit domain is established in this spec. | Overpayment must not duplicate reactivation. Credit/refund/wallet handling is existing behavior or future scope, not Spec 001. |
+| Manual recovery permissions | Server routes use existing suspension roles for manual suspend/reactivate and tests verify denied roles. | Reuse existing server-side suspension/reactivation permission where applicable; do not create new roles. |
 
 ## Main Risks For Planning
 
-- Eligibility debt scope is not fully decided.
-- Partial-payment reactivation is policy-capable but product-ambiguous.
-- Multiple-service customers may require subject-level identity beyond current customer-level behavior.
-- Non-financial suspension reasons need a canonical taxonomy before auto-reactivation can be safely generalized.
+- Translating the resolved customer-level blocking overdue debt rule into existing billing/suspension data without scope creep.
+- Reconciling current invoice-level webhook settlement with the Spec 001 customer-level eligibility rule.
+- Mapping existing suspension evidence to financial vs independent non-financial blocking categories.
 - Live RouterOS restoration requires CHR/lab evidence and explicit operator authorization; this spec does not authorize it.
 - Existing route-level reactivation coupling should be handled carefully if implementation later extracts or consolidates behavior.
 
