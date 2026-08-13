@@ -40,7 +40,36 @@
 
 *GATE: Must pass before Phase 0 research. Re-check after Phase 1 design.*
 
-[Gates determined based on constitution file]
+<!--
+  Evaluate this plan against .specify/memory/constitution.md. Keep this short
+  and actionable. Do not copy the Constitution in full.
+
+  Status values:
+  - PASS: plan complies or area is not affected
+  - NEEDS DESIGN: plan must add concrete design before implementation
+  - HUMAN DECISION REQUIRED: plan intentionally violates or may violate a principle
+  - EXTERNAL_BLOCKED: real validation depends on unavailable external evidence
+-->
+
+| Check | Status | Evidence / Required Action |
+|-------|--------|----------------------------|
+| Existing architecture and brownfield boundaries | [PASS/NEEDS DESIGN] | [How the plan preserves the React SPA + Express API, hermetic local mode, and existing domain boundaries] |
+| Production safety | [PASS/NEEDS DESIGN/HUMAN DECISION REQUIRED] | [No production operation, destructive data change, or live external write without explicit approval] |
+| Auth, RBAC, RLS, and tenant isolation | [PASS/NEEDS DESIGN] | [Tenant context, deny-by-default behavior, service-role filtering, and tests] |
+| Persistence and migrations | [PASS/NEEDS DESIGN/HUMAN DECISION REQUIRED/N/A] | [Migration need, preflight, rollback, drift impact, and DB verification] |
+| Billing, payments, and idempotency | [PASS/NEEDS DESIGN/N/A] | [Invoice/balance/payment state, webhook retries, duplicate protection, audit] |
+| MikroTik, RouterOS, workers, and external providers | [PASS/NEEDS DESIGN/HUMAN DECISION REQUIRED/N/A] | [Read-only vs write, worker path, dry-run, commit gate, retry/error handling] |
+| Feature flags and runtime configuration | [PASS/NEEDS DESIGN/N/A] | [Flags route behavior without weakening accountability] |
+| Secrets and sensitive data | [PASS/NEEDS DESIGN/N/A] | [No secrets in repo/logs/evidence; redaction/fingerprint approach] |
+| Observability, audit, and restore evidence | [PASS/NEEDS DESIGN/EXTERNAL_BLOCKED/N/A] | [Logs/reports/evidence required; restore or external validation status] |
+| Backwards compatibility | [PASS/NEEDS DESIGN] | [Existing user workflow, API/data contract, migration replay, or operator workflow compatibility] |
+| Test strategy and CI gates | [PASS/NEEDS DESIGN] | [Unit, contract, DB, auth, billing, browser, readiness, audit, or build gates required by scope] |
+| Deployment and rollback | [PASS/NEEDS DESIGN/EXTERNAL_BLOCKED/N/A] | [How release is staged, rolled back, or externally validated] |
+
+**Constitution Violations**:
+
+- [If none, state "None."]
+- [If any principle is violated or may be violated: name it, justify why, classify as HUMAN DECISION REQUIRED, and describe the safer alternative rejected.]
 
 ## Project Structure
 

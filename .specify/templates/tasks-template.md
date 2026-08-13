@@ -17,7 +17,27 @@ description: "Task list template for feature implementation"
 
 - **[P]**: Can run in parallel (different files, no dependencies)
 - **[Story]**: Which user story this task belongs to (e.g., US1, US2, US3)
+- **[EXTERNAL]**: Requires external evidence or an approved external system; not a normal code task
 - Include exact file paths in descriptions
+
+## NugaCore Task Guardrails
+
+<!--
+  Derive tasks from spec.md + plan.md only. Avoid generic tasks such as
+  "Improve security", "Update tests", or "Handle errors".
+
+  Use [EXTERNAL] only when validation/action depends on production, staging SQL,
+  CHR/RouterOS real devices, payment-provider sandbox, restore evidence, or
+  another external system unavailable during local development. EXTERNAL_BLOCKED
+  is not PASS and must remain traceable as pending evidence.
+-->
+
+- Separate implementation, migration, authorization, tests, observability, documentation, rollback, and external-evidence tasks when they are all in scope.
+- For DB work, include versioned migration, read-only preflight, rollback notes, and DB test/verification tasks.
+- For auth/RBAC/RLS work, include deny-by-default and tenant-isolation tests.
+- For billing/payment work, include idempotency, duplicate/retry, partial/full payment, and audit tasks.
+- For MikroTik/RouterOS/workers, distinguish read-only, dry-run, queued worker, live write gate, retry/error handling, and audit tasks.
+- For feature flags, include runtime configuration and regression tasks proving flags do not weaken tenant isolation or readiness gates.
 
 ## Path Conventions
 
@@ -69,6 +89,8 @@ Examples of foundational tasks (adjust based on your project):
 - [ ] T007 Create base models/entities that all stories depend on
 - [ ] T008 Configure error handling and logging infrastructure
 - [ ] T009 Setup environment configuration management
+- [ ] TXXX Document required feature flags and safe defaults in [path]
+- [ ] TXXX [EXTERNAL] Capture required external evidence plan in [runbook/checklist path]
 
 **Checkpoint**: Foundation ready - user story implementation can now begin in parallel
 
@@ -95,6 +117,8 @@ Examples of foundational tasks (adjust based on your project):
 - [ ] T015 [US1] Implement [endpoint/feature] in src/[location]/[file].py
 - [ ] T016 [US1] Add validation and error handling
 - [ ] T017 [US1] Add logging for user story 1 operations
+- [ ] TXXX [US1] Add tenant/auth/RBAC guard for [operation] in [path] (if applicable)
+- [ ] TXXX [US1] Add idempotency/audit behavior for [operation] in [path] (if applicable)
 
 **Checkpoint**: At this point, User Story 1 should be fully functional and testable independently
 
@@ -155,7 +179,9 @@ Examples of foundational tasks (adjust based on your project):
 - [ ] TXXX Code cleanup and refactoring
 - [ ] TXXX Performance optimization across all stories
 - [ ] TXXX [P] Additional unit tests (if requested) in tests/unit/
-- [ ] TXXX Security hardening
+- [ ] TXXX Security, tenant isolation, and secret-redaction review
+- [ ] TXXX Update runbook/rollback notes for operator-visible changes
+- [ ] TXXX [EXTERNAL] Record EXTERNAL_BLOCKED validation evidence request for [system] in [path]
 - [ ] TXXX Run quickstart.md validation
 
 ---
