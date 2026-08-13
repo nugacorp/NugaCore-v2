@@ -276,11 +276,24 @@ export function evaluateCriticalTenantTables(columnsByTable) {
   });
 }
 
-export function buildMigrationDriftReport({
-  env = process.env,
-  local = listLocalMigrations(),
-  remoteState,
-} = {}) {
+/**
+ * @param {{
+ *   env?: Record<string, string | undefined>,
+ *   local?: ReturnType<typeof listLocalMigrations>,
+ *   remoteState?: null | {
+ *     status?: string,
+ *     reason?: string,
+ *     migrationVersions?: string[],
+ *     columnsByTable?: Record<string, string[]>
+ *   }
+ * }} [options]
+ */
+export function buildMigrationDriftReport(options = {}) {
+  const {
+    env = process.env,
+    local = listLocalMigrations(),
+    remoteState,
+  } = options;
   const remote = remoteState === undefined ? queryRemoteStateFromPsql(env) : remoteState;
   const knownDuplicates = local.duplicateVersions
     .filter((duplicate) => duplicate.known)
