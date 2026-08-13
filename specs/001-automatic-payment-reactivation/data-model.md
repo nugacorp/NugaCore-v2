@@ -58,6 +58,8 @@
 
 **Existing anchors**: customer `status`, `customer_service_state`, `suspension_events`, `suspension_orders`, manual suspension routes and reasons.
 
+**Persistence decision**: **NEW_REQUIRED**. Existing anchors are useful evidence, but they are not sufficient as the durable source of truth for active blocking causes.
+
 **Fields**:
 
 - `tenantId`
@@ -73,8 +75,48 @@
 
 - Already active customers produce no reactivation action unless an existing durable family is being resumed.
 - `lead` and `baja` are not serviceable for automatic reactivation.
-- Known or unknown independent non-financial blocks prevent automatic payment reactivation.
+- Known non-financial blocks and unknown active blocks prevent automatic payment reactivation.
+- Financial eligibility is not enough by itself. The active-block snapshot must also prove that no non-financial or unknown block is currently active.
 - Manual recovery remains possible through existing server-side suspension/reactivation permissions.
+- Free-text reasons and historical event/order source values may contribute evidence but must not be the only authority for automatic reactivation.
+
+## Customer Suspension Block
+
+**Purpose**: Minimal additive persistence required by the future implementation PR to distinguish active financial blocks from non-financial and unknown blocks without creating a broad suspension taxonomy.
+
+**Status**: **NEW_REQUIRED** in a future implementation PR. No migration is created by this plan-only PR.
+
+**Tentative table**: `public.customer_suspension_blocks`
+
+**Fields**:
+
+- `id`: Durable identifier.
+- `tenantId`: Required tenant scope.
+- `customerId`: Required customer scope.
+- `category`: `financial`, `non_financial`, or `unknown`.
+- `source`: Sanitized producer/source identifier such as `suspension-engine`, `manual`, `automation`, `payment-engine`, `system`, or `legacy`.
+- `reason`: Operator-safe reason, not raw provider/router payload.
+- `evidenceType`: Optional reference type, such as `suspension_event`, `suspension_order`, `reactivation_order`, `billing_snapshot`, or `manual_action`.
+- `evidenceId`: Optional durable evidence ID.
+- `createdAt`
+- `clearedAt`: Null means the block is active.
+- `clearedBy`
+- `clearReason`
+
+**Indexes and constraints**:
+
+- Index active lookup by `(tenantId, customerId)` where `clearedAt IS NULL`.
+- Index active lookup by `(tenantId, customerId, category)` where `clearedAt IS NULL`.
+- Optional unique partial index on `(tenantId, evidenceType, evidenceId)` where `evidenceId IS NOT NULL` to prevent duplicate blocks from the same durable evidence.
+- RLS/grants must preserve tenant isolation and least privilege. Service writes are allowed only through trusted backend paths.
+
+**Validation rules**:
+
+- Multiple active blocks may coexist for the same customer.
+- Automatic reactivation is allowed only when all active blocks are financial and the post-payment financial snapshot is regularized.
+- Any active `non_financial` or `unknown` block blocks automatic reactivation.
+- Legacy ambiguous suspended customers must not be reclassified as financial from free text alone.
+- Clearing a financial block after payment must not clear unrelated non-financial or unknown blocks.
 
 ## Reactivation Eligibility Decision
 
@@ -97,9 +139,9 @@
 **Validation rules**:
 
 - `canonicalPaymentId` is required for webhook-driven automatic effects.
-- `eligible` requires no blocking overdue debt, no independent non-financial block, customer status `suspended`, policy `autoReactivate=true`, and policy `reactivateOnPayment=true`.
+- `eligible` requires no blocking overdue debt, active blocks limited to financial blocks that the payment regularized, customer status `suspended`, policy `autoReactivate=true`, and policy `reactivateOnPayment=true`.
 - A disabled automation policy records a non-reactivation decision without preventing payment success.
-- The decision is auditable whether eligible or blocked.
+- The decision is auditable whether eligible or blocked, using an existing tenant-scoped `suspension_events` decision record plus any active-block evidence.
 
 ## Reactivation Family
 
@@ -153,7 +195,21 @@
 
 - Payment confirmation, eligibility, and logical reactivation do not imply live network restoration.
 - Live restoration is claimable only when worker/RouterOS evidence confirms execution.
+- The worker must revalidate the latest active-block state after claiming an order and before live RouterOS commands. A new non-financial or unknown block cancels/fails the automatic effect before RouterOS mutation.
 - Failed or uncertain RouterOS effects require operator-visible recovery evidence and must not duplicate payment effects.
+
+## Persistence Fit Matrix
+
+| Requirement | Decision | Evidence / Required Work |
+|-------------|----------|--------------------------|
+| Canonical payment identity | REUSE | Existing `payments`, `payment_events`, `payment_applications`, provider transaction identity, and `webhook_payment_id`. |
+| Tenant/customer/payment scope | REUSE | Existing tenant-scoped Billing, Payment, Suspension, Customer, Router, order, and action paths. |
+| Reactivation family identity | REUSE | Existing root key `payment:${canonicalPaymentId}:reactivate:${customerId}` plus tenant-scoped unique idempotency indexes. |
+| Exactly-once order/action progress | REUSE | Existing `reactivation_orders`, `mikrotik_actions`, checkpoint RPC, claim fields, and worker recovery fields. |
+| Decision audit | EXTEND | Existing `suspension_events` can store evaluated/blocked/disabled/no-op outcomes with idempotency keys and sanitized metadata. |
+| Active suspension classification | NEW_REQUIRED | Add a minimal active-block model. Existing status/reason/event/order history is not sufficient as a safety boundary. |
+| Worker pre-RouterOS safety | ADAPT | Existing worker claim/effect fields remain, but the future implementation must add final eligibility revalidation before live commands. |
+| Legacy suspended customers | ADAPT | Treat ambiguous legacy state as `unknown` unless deterministic evidence proves a current financial block. |
 
 ## Audit Evidence
 

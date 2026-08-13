@@ -23,17 +23,26 @@ This guide is for the future implementation PR. It does not authorize production
 4. Customer has no blocking financial debt but has an independent non-financial hold.
    - Expected: outcome is `blocked_non_financial`, no automatic reactivation starts, manual recovery remains available to authorized roles.
 
-5. Duplicate approved webhook deliveries are processed concurrently.
+5. Customer is suspended with ambiguous legacy evidence and no structured active financial block.
+   - Expected: outcome fails closed as `blocked_non_financial` with block category `unknown`, no automatic reactivation starts, and the report explains that manual review or structured block migration is required.
+
+6. Customer has both a financial block and a manual/admin block.
+   - Expected: payment is recorded and financial debt may be regularized, but automatic reactivation remains blocked until the non-financial block is cleared by an authorized path.
+
+7. Duplicate approved webhook deliveries are processed concurrently.
    - Expected: one financial result, one canonical payment identity, one reactivation family, monotonic progress, and no duplicate timeline/event/alert/network effect.
 
-6. Same provider event identifier appears for two tenants.
+8. Same provider event identifier appears for two tenants.
    - Expected: tenant-scoped idempotency allows independent processing and prevents cross-tenant invoice, customer, router, action, or audit access.
 
-7. Payment clears debt while RouterOS execution is disabled.
+9. Payment clears debt while RouterOS execution is disabled.
    - Expected: payment success remains durable, reactivation request is visible, and network restoration is not claimed as live.
 
-8. Customer is already active when an eligible payment is processed.
+10. Customer is already active when an eligible payment is processed.
    - Expected: no new unnecessary reactivation action; existing durable family may be resumed if one already exists.
+
+11. Manual/admin hold is added after payment eligibility but before worker execution.
+   - Expected: worker revalidates active blocks after claim, stops before live RouterOS mutation, and records cancellation/failure evidence.
 
 ## Suggested Targeted Commands
 
@@ -44,6 +53,14 @@ npm run test:unit -- tests/unit/suspension.engine.test.ts
 npm run test:unit -- tests/unit/payments.webhook-idempotency-claim.test.ts
 npm run test:unit -- tests/unit/payments.reactivation-durable-saga.test.ts
 npm run test:integration -- tests/contract/suspension.scenarios.contract.test.ts
+```
+
+Add new focused coverage before merge of the implementation PR:
+
+```powershell
+npm run test:unit -- tests/unit/automatic-payment-reactivation.eligibility.test.ts
+npm run test:unit -- tests/unit/automatic-payment-reactivation.concurrency.test.ts
+npm run test:db -- --runInBand
 ```
 
 Then run broader gates:

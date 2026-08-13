@@ -38,16 +38,16 @@ The next implementation PR should reuse the current Express backend domains (`pa
 |-------|--------|----------------------------|
 | Existing architecture and brownfield boundaries | PASS | Plan keeps React SPA + Express API, domain repositories, Store/Supabase parity, and customer-level model. |
 | Production safety | PASS | Plan-only PR; later implementation must remain non-production and keep provider/router writes gated. |
-| Auth, RBAC, RLS, and tenant isolation | PASS | Design requires `tenantId` on payment, billing, customer, router, action, event, timeline, and alert paths, and reuses existing suspension/reactivation permissions. |
-| Persistence and migrations | PASS | No migration in this PR. Later tasks should first verify whether existing `reactivation_orders`, `mikrotik_actions`, `payment_events`, `payments`, `suspension_events`, and `client_timeline` columns already cover the needed evidence. |
-| Billing, payments, and idempotency | PASS | Plan centers Billing as source of truth and reuses webhook claim, canonical payment identity, idempotency keys, and checkpointed reactivation effects. |
-| MikroTik, RouterOS, workers, and external providers | PASS | Router effects remain queued/dry-run by default and use `processNetworkOrder`/worker semantics rather than direct unsafe writes. |
-| Feature flags and runtime configuration | PASS | Existing `reactivateOnPayment`, `autoReactivate`, `PAYMENTS_ROUTER_LIVE`, `MIKROTIK_WORKER_LIVE`, and `MIKROTIK_WORKER_COMMIT` route behavior without weakening accountability. |
+| Auth, RBAC, RLS, and tenant isolation | PASS WITH PLANNED WORK | Existing tenant-scoped paths are reused. The future active-block persistence must add RLS/grants and tenant-scoped tests before runtime enablement. |
+| Persistence and migrations | PASS WITH PLANNED WORK | No migration in this PR. Final persistence decision is `NO` for the complete feature until a minimal active-block model is added in a future implementation PR. |
+| Billing, payments, and idempotency | PASS WITH PLANNED WORK | Billing authority and existing payment/order/action idempotency are reused. Future work must add decision audit and active-block integration tests. |
+| MikroTik, RouterOS, workers, and external providers | PASS WITH PLANNED WORK | Router effects remain queued/dry-run by default and use worker semantics. Future work must add a pre-RouterOS eligibility revalidation boundary. |
+| Feature flags and runtime configuration | PASS WITH PLANNED WORK | Existing `reactivateOnPayment`, `autoReactivate`, `PAYMENTS_ROUTER_LIVE`, `MIKROTIK_WORKER_LIVE`, and `MIKROTIK_WORKER_COMMIT` route behavior; future implementation must persist disabled/no-op decisions. |
 | Secrets and sensitive data | PASS | Plan requires sanitized fingerprints and no raw provider/router payloads in evidence. |
-| Observability, audit, and restore evidence | PASS | Design requires explicit decision evidence for eligible, blocked, disabled, dry-run, queued, failed, and restored states. External restore/live evidence remains separate from this plan-only PR. |
-| Backwards compatibility | PASS | Manual payment and webhook flows continue to record money first; existing manual recovery remains authorized through current suspension routes. |
-| Test strategy and CI gates | PASS | Later implementation must add unit, contract, DB/billing, auth, and existing release gates before merge. |
-| Deployment and rollback | PASS | No deployable runtime change here. Later release should use staged flags and rollback by disabling automatic reactivation/network gates before code rollback if needed. |
+| Observability, audit, and restore evidence | PASS WITH PLANNED WORK | Design requires explicit decision evidence for eligible, blocked, disabled, dry-run, queued, failed, and restored states. External restore/live evidence remains separate from this plan-only PR. |
+| Backwards compatibility | PASS WITH PLANNED WORK | Manual payment and webhook flows continue to record money first. Legacy ambiguous suspended customers must fail closed as `unknown` until structured evidence exists. |
+| Test strategy and CI gates | PASS WITH PLANNED WORK | Later implementation must add unit, contract, DB/billing, auth, concurrency, active-block, and release gates before merge. |
+| Deployment and rollback | PASS WITH PLANNED WORK | No deployable runtime change here. Later release should use additive migration, staged flags, and rollback by disabling automatic reactivation/network gates before code rollback if needed. |
 
 **Constitution Violations**:
 
@@ -120,11 +120,80 @@ Detailed entity design is recorded in [data-model.md](data-model.md), the integr
 
 Implementation shape for the next PR:
 
-1. Add a pure eligibility result contract that classifies `eligible`, `blocked_financial`, `blocked_non_financial`, `automation_disabled`, `already_active`, `missing_identity`, and `deferred_network`.
-2. Introduce one shared server-side eligibility path invoked after `BillingService.applyWebhookPayment` and after authorized manual/server payment recording.
-3. Replace direct invoice-settlement-only reactivation with customer balance/status evaluation using tenant-scoped invoices and suspension policy.
-4. Preserve durable payment success before downstream effects; downstream failures become audit/pending states, not payment rollback.
-5. Reuse the existing reactivation saga for exactly-once action, order, timeline, suspension-event, and alert effects.
+1. Add a pure eligibility result contract that classifies `eligible`, `blocked_financial`, `blocked_non_financial`, `automation_disabled`, `already_active`, `missing_identity`, and `router_deferred`.
+2. Add minimal active-block persistence before runtime enablement so financial, non-financial, and unknown suspension blocks can coexist and be cleared independently.
+3. Introduce one shared server-side eligibility path invoked after `BillingService.applyWebhookPayment` and after authorized manual/server payment recording.
+4. Replace direct invoice-settlement-only reactivation with customer balance/status evaluation using tenant-scoped invoices and suspension policy.
+5. Preserve durable payment success before downstream effects; downstream failures become audit/pending states, not payment rollback.
+6. Reuse the existing reactivation saga for exactly-once action, order, timeline, suspension-event, and alert effects.
+7. Add worker-side revalidation immediately before live RouterOS commands.
+
+## D. Brownfield Architecture Reuse
+
+| Area | Decision | Reason |
+|------|----------|--------|
+| React SPA + single Express backend | REUSE | Spec 001 is backend decision logic and should not introduce a new runtime boundary. |
+| Billing payment recording/application | REUSE | Billing remains the money source of truth; reactivation runs only after durable payment application. |
+| Payment webhook claim/canonical payment identity | REUSE | Existing webhook fences, `webhook_payment_id`, provider transaction identity, and canonical payment ID already close duplicate-delivery risk. |
+| Root reactivation idempotency | REUSE | Existing `rootActionIdempotencyKey(canonicalPaymentId, customerId)` plus tenant scope defines one family per payment/customer. |
+| Reactivation orders and Mikrotik actions | REUSE | Existing tenant-scoped unique partial indexes and create-or-get behavior enforce exactly-once order/action identity. |
+| Checkpoint RPC and payment saga progress | REUSE | Existing monotonic checkpointing prevents duplicate or regressed reactivation effects. |
+| Mikrotik worker claim/effect recovery | EXTEND | Current claim and uncertain-effect handling is strong; it needs a final eligibility revalidation before live RouterOS writes. |
+| Suspension/billing grace semantics | EXTEND | Existing `CURRENT`, `DUE_SOON`, `OVERDUE`, and `DELINQUENT` aggregation should become the shared financial eligibility input. |
+| Manual suspension/reactivation routes | ADAPT | Existing permissions remain, but manual/admin holds must write/clear structured active blocks in the future implementation. |
+| Suspension reason/source history | ADAPT | Existing history is evidence, not authority. Legacy ambiguity must map to `unknown` and fail closed. |
+| Active suspension-block persistence | NEW_REQUIRED | Current schema cannot safely represent multiple active financial/non-financial/unknown blockers. |
+
+## F. Persistence Decision
+
+**Final answer**: **NO**. The complete safe feature cannot be implemented with existing persistence alone.
+
+Existing persistence is sufficient for:
+
+- canonical payment identity and duplicate provider delivery convergence,
+- tenant/customer/payment scope,
+- one reactivation family per `tenantId + canonicalPaymentId + customerId`,
+- durable action/order idempotency,
+- monotonic payment reactivation checkpoints,
+- RouterOS worker claim, retry, and uncertain-effect recovery,
+- sanitized decision/audit events when extended through existing `suspension_events`.
+
+Existing persistence is not sufficient for the security-critical question: "Does this suspended customer currently have only a financial block that this payment regularized?" The future implementation PR must add a minimal active-block model, tentatively `customer_suspension_blocks`, before automatic reactivation is enabled. That model must be additive, tenant-scoped, RLS/grant protected, and able to represent multiple concurrent active blocks.
+
+## G. Idempotency Design
+
+| Flow | Design |
+|------|--------|
+| Payment | Reuse Billing webhook idempotency by provider/transaction and canonical `webhook_payment_id`; payment recording remains durable even if reactivation fails later. |
+| Eligibility decision | Use a deterministic decision idempotency key derived from `tenantId + canonicalPaymentId + customerId`; persist blocked/disabled/no-op decisions as tenant-scoped audit events without creating network effects. |
+| Canonical reactivation | Reuse `payment:${canonicalPaymentId}:reactivate:${customerId}` as the root family key. This is `DURABLY_ENFORCED` by tenant-scoped unique indexes on reactivation/action destinations. |
+| Worker | Reuse order claim, `worker_run_id`, `claimed_at`, `effect_started_at`, and `effect_confirmed_at` semantics. After uncertain RouterOS effects, retry must not resend commands unless reconciliation confirms the effect state. |
+| Router action | Reuse `mikrotik_actions` create-or-return idempotency and monotonic checkpoints. Direct RouterOS writes from payment request paths remain forbidden. |
+
+## H. Concurrency Strategy
+
+| Scenario | Strategy |
+|----------|----------|
+| Duplicate webhook deliveries | Existing webhook claim and canonical payment identity converge to one payment and one reactivation family. |
+| Concurrent approved events for the same canonical charge | Billing canonicalization and tenant-scoped idempotency must return or resume the existing result, not create a second family. |
+| Manual payment vs webhook for same customer | Money writes remain Billing-authoritative. Eligibility is evaluated after each durable payment but reactivation family identity remains canonical payment/customer scoped. |
+| Manual/admin hold appears after payment eligibility | Future worker revalidation must see the new non-financial/unknown active block and stop before RouterOS mutation. |
+| Retry after successful logical reactivation | Existing action/order lookup and checkpoints resume/return the already completed family. |
+| Retry after RouterOS uncertain effect | Existing `effect_started_at` without confirmation prevents blind resend; operator reconciliation is required. |
+| Retry after confirmed RouterOS success but before post-effect status update | Existing `effect_confirmed_at` lets the worker resume post-effect updates without sending RouterOS commands again. |
+
+## I. Suspension Classification
+
+Automatic payment reactivation must classify suspension from structured active-block evidence, not from customer status or free-text reason alone.
+
+Rules for the future implementation:
+
+- `financial`: active block produced by deterministic billing/suspension-engine delinquency evidence and cleared only when post-payment status is no longer `DELINQUENT`.
+- `non_financial`: active block from manual/admin/security/fraud/cancellation/maintenance/baja or any independent operational hold. Payment must not clear it.
+- `unknown`: legacy or ambiguous suspended state where current durable evidence cannot prove the block is financial. Payment automation fails closed.
+- `none`: no active blocks.
+
+Eligibility requires customer status `suspended`, automation policy enabled, no blocking overdue debt after payment, and no active `non_financial` or `unknown` block. If financial and non-financial blocks coexist, payment may clear/record the financial result but automatic reactivation remains blocked.
 
 ## Post-Design Constitution Re-Check
 
@@ -132,16 +201,20 @@ Implementation shape for the next PR:
 |-------|--------|----------------------------|
 | Existing architecture and brownfield boundaries | PASS | Artifacts identify existing files and do not propose a rewrite or new runtime boundary. |
 | Production safety | PASS | Artifacts are plan-only and require explicit later authorization for staging/production/provider/router operations. |
-| Auth, RBAC, RLS, and tenant isolation | PASS | Contract requires tenant-scoped inputs and existing server-side suspension permission for operator recovery. |
-| Persistence and migrations | PASS | No migration is authored; data model first reuses existing entities and flags migration review as a future task only if evidence fields are insufficient. |
-| Billing, payments, and idempotency | PASS | Design preserves Billing authority, canonical payment identity, webhook fencing, and checkpoint semantics. |
-| MikroTik, RouterOS, workers, and external providers | PASS | Design keeps RouterOS behind dry-run/live worker gates and distinguishes queued/restored evidence. |
-| Feature flags and runtime configuration | PASS | Design uses flags to route behavior while payment/accountability remain server-side. |
+| Auth, RBAC, RLS, and tenant isolation | PASS WITH PLANNED WORK | Contract requires tenant-scoped inputs and existing server-side suspension permission. Future active-block persistence must add RLS/grants/tests. |
+| Persistence and migrations | PASS WITH PLANNED WORK | Final decision is `NO` for existing persistence alone; future implementation needs a minimal additive active-block migration. |
+| Billing, payments, and idempotency | PASS WITH PLANNED WORK | Design preserves Billing authority, canonical payment identity, webhook fencing, and checkpoint semantics; future work adds idempotent decision audit. |
+| MikroTik, RouterOS, workers, and external providers | PASS WITH PLANNED WORK | Design keeps RouterOS behind dry-run/live worker gates and requires worker pre-effect revalidation. |
+| Feature flags and runtime configuration | PASS WITH PLANNED WORK | Design uses flags to route behavior while payment/accountability remain server-side; disabled outcomes must be persisted. |
 | Secrets and sensitive data | PASS | Evidence fields are sanitized IDs/fingerprints, not raw secrets or payloads. |
-| Observability, audit, and restore evidence | PASS | Data model and contract require auditable decision/state outputs. |
-| Backwards compatibility | PASS | Manual and webhook payment recording remain valid when automation is disabled or downstream systems fail. |
-| Test strategy and CI gates | PASS | Quickstart lists targeted and broad gates for the implementation PR. |
-| Deployment and rollback | PASS | Feature can be disabled by policy/flags; live router execution remains separately gated. |
+| Observability, audit, and restore evidence | PASS WITH PLANNED WORK | Data model and contract require auditable decision/state outputs; implementation must add concrete persisted evidence. |
+| Backwards compatibility | PASS WITH PLANNED WORK | Manual and webhook payment recording remain valid; ambiguous legacy suspensions must fail closed as `unknown`. |
+| Test strategy and CI gates | PASS WITH PLANNED WORK | Quickstart lists targeted and broad gates; implementation must add DB/RLS/concurrency coverage for active blocks. |
+| Deployment and rollback | PASS WITH PLANNED WORK | Feature can be disabled by policy/flags; future migration must be additive and live router execution remains separately gated. |
+
+## M. Constitution Check Outcome
+
+The plan has no `VIOLATION`. Several checks are intentionally `PASS WITH PLANNED WORK` because this PR is documentation-only and the architecture now requires future additive persistence, RLS/grant tests, decision audit, and worker revalidation before runtime enablement. No item should be treated as production-ready implementation approval from CI alone.
 
 ## Complexity Tracking
 
