@@ -13,5 +13,8 @@ describe('package readiness scripts', () => {
     expect(pkg.scripts?.['validate-restore-checklist:strict']).toBe(
       'node -r dotenv/config --input-type=module -e "process.env.PRODUCTION_RESTORE_STRICT=\'true\'; const { runValidateRestoreChecklistCli } = await import(\'./scripts/validate-restore-checklist.mjs\'); process.exit(runValidateRestoreChecklistCli())"',
     );
+    expect(pkg.scripts?.['report-migration-drift']).toBe(
+      'node -r dotenv/config scripts/report-migration-drift.mjs',
+    );
   });
 });
