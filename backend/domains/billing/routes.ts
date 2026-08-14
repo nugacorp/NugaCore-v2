@@ -7,8 +7,10 @@ import { getBillingService } from './service';
 import { getBillingCycleService } from './cycle';
 import { getCustomersService } from '../customers/service';
 import { getPaymentService } from '../payments/service';
-import { rootActionIdempotencyKey } from '../payments/idempotency';
-import { getSuspensionService } from '../suspension/service';
+import {
+  evaluateAutomaticPaymentReactivation,
+  recordAutomaticReactivationDecision,
+} from '../payments/automatic-reactivation';
 import { tenantIdFromRequest } from '../tenancy/tenant-scope';
 import { logger } from '../../common/logger';
 
@@ -149,22 +151,21 @@ router.post(
     // convertir la mutación financiera exitosa en un 5xx que invite a repetirla.
     try {
       if (isDomainOnDb('billing')) {
-        const policy = await getSuspensionService().repo.getPolicy();
-        if (policy.reactivateOnPayment) {
-          const client = await getCustomersService().getById(invoice.clientId, tenantId);
-          if (client?.status === 'suspended') {
-            await getPaymentService().reactivateCustomerService(invoice.clientId, {
-              triggeredBy: req.authContext?.userId,
-              invoiceId: invoice.id,
-              // Sin tenant explícito la reactivación caía en `tenant-default` y
-              // podía crear la acción en el WISP equivocado.
-              tenantId,
-              idempotencyKey: rootActionIdempotencyKey(
-                `billing:${paymentInput.transactionId}`,
-                invoice.clientId,
-              ),
-            });
-          }
+        const decision = await evaluateAutomaticPaymentReactivation({
+          tenantId,
+          customerId: invoice.clientId,
+          canonicalPaymentId: `billing:${paymentInput.transactionId}`,
+          invoiceId: invoice.id,
+          origin: 'manual',
+        });
+        await recordAutomaticReactivationDecision(decision);
+        if (decision.eligible) {
+          await getPaymentService().reactivateCustomerService(invoice.clientId, {
+            triggeredBy: req.authContext?.userId,
+            invoiceId: invoice.id,
+            tenantId,
+            idempotencyKey: decision.reactivationIdempotencyKey,
+          });
         }
       } else {
         const client = store.CLIENTS.find(

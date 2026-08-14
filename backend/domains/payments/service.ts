@@ -50,6 +50,7 @@ import {
 import { getAlertSink } from '../noc/alert-sink';
 import {
   CreatePaymentOrderInput,
+  AutomaticReactivationDecision,
   MikrotikActionRecord,
   MikrotikActionView,
   PaymentEventRecord,
@@ -71,6 +72,10 @@ import {
   stepIdempotencyKey,
   webhookPaymentIdempotencyKey,
 } from './idempotency';
+import {
+  evaluateAutomaticPaymentReactivation,
+  recordAutomaticReactivationDecision,
+} from './automatic-reactivation';
 import { assertWebhookCapability } from './webhook-capability';
 import {
   mikrotikActionToView,
@@ -126,6 +131,19 @@ export class PaymentService {
     if (!claimToken || !await this.repo.renewEventClaim(eventId, tenantId, claimToken)) {
       throw new ClaimOwnershipLostError();
     }
+  }
+
+  private async shouldRunAutomaticReactivation(
+    decision: AutomaticReactivationDecision | undefined,
+  ): Promise<boolean> {
+    if (!decision) return false;
+    if (decision.eligible) return true;
+    if (decision.outcome !== 'already_active') return false;
+    const existing = await this.repo.findActionByIdempotencyKey(
+      decision.tenantId,
+      decision.reactivationIdempotencyKey,
+    );
+    return Boolean(existing);
   }
 
   /** El cierre sigue siendo un CAS condicionado por el mismo epoch. */
@@ -349,10 +367,8 @@ export class PaymentService {
             triggeredBy: `webhook:${provider}:${opaqueFingerprint(providerEventId)}`,
             invoiceId: order.invoiceId,
             tenantId: orderTenantId,
-            idempotencyKey: rootActionIdempotencyKey(
-              invoiceResult.canonicalPaymentId!,
-              order.customerId,
-            ),
+            idempotencyKey: invoiceResult.reactivationDecision?.reactivationIdempotencyKey
+              ?? rootActionIdempotencyKey(invoiceResult.canonicalPaymentId!, order.customerId),
             webhookFence: {
               ...webhookFence,
               canonicalPaymentId: invoiceResult.canonicalPaymentId,
@@ -428,16 +444,28 @@ export class PaymentService {
         );
         invoiceUpdated = true;
 
-        if (paymentResult.settlementWinner) {
+        let reactivationDecision: AutomaticReactivationDecision | undefined;
+        if (paymentResult.canonicalPaymentId) {
+          reactivationDecision = await evaluateAutomaticPaymentReactivation({
+            tenantId: invoiceTenantId,
+            customerId: invoice.clientId,
+            canonicalPaymentId: paymentResult.canonicalPaymentId,
+            invoiceId: invoice.id,
+            origin: 'webhook',
+          });
+          await this.renewOrThrow(eventId, tenantId, claimToken);
+          await recordAutomaticReactivationDecision(reactivationDecision);
+        }
+
+        const shouldReactivate = Boolean(paymentResult.settlementWinner)
+          && await this.shouldRunAutomaticReactivation(reactivationDecision);
+        if (shouldReactivate && reactivationDecision) {
           await this.renewOrThrow(eventId, tenantId, claimToken);
           const reactivation = await this.reactivateCustomerService(invoice.clientId, {
             triggeredBy: `webhook:codi:${opaqueFingerprint(providerEventId)}`,
             invoiceId: invoice.id,
             tenantId: invoiceTenantId,
-            idempotencyKey: rootActionIdempotencyKey(
-              paymentResult.canonicalPaymentId!,
-              invoice.clientId,
-            ),
+            idempotencyKey: reactivationDecision.reactivationIdempotencyKey,
             webhookFence: {
               beforeMutation: () => this.renewOrThrow(eventId, tenantId, claimToken),
               eventId,
@@ -508,6 +536,7 @@ export class PaymentService {
     invoice: EnrichedInvoice | null;
     shouldReactivate: boolean;
     canonicalPaymentId?: string;
+    reactivationDecision?: AutomaticReactivationDecision;
   }> {
     const billing = getBillingService();
     const effectiveTenantId = tenantId || order.tenantId || 'tenant-default';
@@ -529,16 +558,32 @@ export class PaymentService {
       transactionId,
     });
 
+    let reactivationDecision: AutomaticReactivationDecision | undefined;
+    if (paymentResult.canonicalPaymentId) {
+      reactivationDecision = await evaluateAutomaticPaymentReactivation({
+        tenantId: effectiveTenantId,
+        customerId: order.customerId,
+        canonicalPaymentId: paymentResult.canonicalPaymentId,
+        invoiceId: order.invoiceId,
+        origin: 'webhook',
+      });
+      await webhookFence?.beforeMutation();
+      await recordAutomaticReactivationDecision(reactivationDecision);
+    }
+
     logger.info('PaymentEngine: cobro conciliado con Billing', {
       invoiceId: order.invoiceId,
       tenantId: effectiveTenantId,
       invoiceSettled: isInvoiceSettled(paymentResult.invoice),
+      automaticReactivationOutcome: reactivationDecision?.outcome,
     });
     return {
       updated: true,
       invoice: paymentResult.invoice,
-      shouldReactivate: paymentResult.settlementWinner,
+      shouldReactivate: Boolean(paymentResult.settlementWinner)
+        && await this.shouldRunAutomaticReactivation(reactivationDecision),
       canonicalPaymentId: paymentResult.canonicalPaymentId ?? undefined,
+      reactivationDecision,
     };
   }
 

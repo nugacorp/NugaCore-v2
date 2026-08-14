@@ -190,6 +190,32 @@ export interface WebhookProcessResult {
   message: string;
 }
 
+export type AutomaticReactivationDecisionOutcome =
+  | 'eligible'
+  | 'blocked_overdue'
+  | 'blocked_non_financial'
+  | 'blocked_unknown'
+  | 'automation_disabled'
+  | 'already_active'
+  | 'customer_not_found'
+  | 'not_serviceable';
+
+export interface AutomaticReactivationDecision {
+  tenantId: string;
+  customerId: string;
+  canonicalPaymentId: string;
+  invoiceId?: string;
+  origin: 'webhook' | 'manual';
+  eligible: boolean;
+  outcome: AutomaticReactivationDecisionOutcome;
+  reason: string;
+  billingStatus?: string;
+  blockingDebt: boolean;
+  activeBlockCategories: string[];
+  reactivationIdempotencyKey: string;
+  idempotencyKey: string;
+}
+
 // ── Resultado de reactivación lógica ─────────────────────────────────
 
 export interface ReactivationResult {

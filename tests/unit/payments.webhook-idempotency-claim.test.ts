@@ -34,6 +34,7 @@ import { logger } from '../../backend/common/logger';
 import { getBillingService } from '../../backend/domains/billing/service';
 import { engineStore } from '../../backend/domains/suspension/engine-store';
 import { getSuspensionService } from '../../backend/domains/suspension/service';
+import type { SuspensionEvent } from '../../backend/domains/suspension/types';
 import { store } from '../../backend/state/store';
 import type { Client } from '../../src/types';
 
@@ -60,6 +61,13 @@ const candidate = (
 });
 
 const events = () => store.PAYMENT_EVENTS as PaymentEventRecord[];
+
+const isAutomaticReactivationDecisionEvent = (event: SuspensionEvent): boolean =>
+  event.eventType === 'evaluated'
+  && event.metadata?.kind === 'automatic_payment_reactivation';
+
+const isReactivationOrderEvent = (event: SuspensionEvent): boolean =>
+  event.eventType === 'reactivation_order_created';
 
 beforeEach(() => {
   store.PAYMENT_EVENTS.length = 0;
@@ -915,7 +923,9 @@ describe('PaymentService — ownership antes de efectos', () => {
       expect(actionsAfterFirst).toHaveLength(1);
       expect(actionsAfterFirst[0].triggeredBy).toBe(triggeredBy);
       expect(store.CLIENT_TIMELINE.filter((event) => event.clientId === customerId)).toHaveLength(0);
-      expect(engineStore.EVENTS.filter((event) => event.customerId === customerId)).toHaveLength(0);
+      const suspensionEventsAfterFirst = engineStore.EVENTS.filter((event) => event.customerId === customerId);
+      expect(suspensionEventsAfterFirst.filter(isAutomaticReactivationDecisionEvent)).toHaveLength(1);
+      expect(suspensionEventsAfterFirst.filter(isReactivationOrderEvent)).toHaveLength(0);
 
       const second = await new PaymentService(fakeRepo).processWebhook(input);
       const actionsAfterSecond = await actionRepo.listActions({ customerId, tenantId: TENANT_A });
@@ -1041,9 +1051,9 @@ describe('PaymentService — ownership antes de efectos', () => {
       return created;
     });
     vi.spyOn(suspensionRepo, 'recordEvent').mockImplementation(async (input) => {
-      suspensionCalls += 1;
+      if (input.eventType === 'reactivation_order_created') suspensionCalls += 1;
       const created = await originalRecordEvent(input);
-      if (handoff === 'suspension-event' && suspensionCalls === 1) {
+      if (handoff === 'suspension-event' && input.eventType === 'reactivation_order_created' && suspensionCalls === 1) {
         currentOwner = 'owner-b';
         persistedStoreEvent.claimToken = 'owner-b';
       }
@@ -1222,7 +1232,7 @@ describe('PaymentService — ownership antes de efectos', () => {
       return originalCreateOrder(input);
     });
     vi.spyOn(suspensionRepo, 'recordEvent').mockImplementation(async (input) => {
-      suspensionCalls += 1;
+      if (input.eventType === 'reactivation_order_created') suspensionCalls += 1;
       return originalRecordEvent(input);
     });
 
@@ -1279,7 +1289,8 @@ describe('PaymentService — ownership antes de efectos', () => {
     expect(result.dispatchCalls).toBe(2);
     expect(result.networkOrders).toHaveLength(1);
     expect(result.timeline).toHaveLength(1);
-    expect(result.suspensionEvents).toHaveLength(1);
+    expect(result.suspensionEvents.filter(isAutomaticReactivationDecisionEvent)).toHaveLength(1);
+    expect(result.suspensionEvents.filter(isReactivationOrderEvent)).toHaveLength(1);
     expect(result.alerts).toHaveLength(1);
     expect(result.closes).toBe(1);
     expect(result.customer.status).toBe('active');
@@ -1294,7 +1305,8 @@ describe('PaymentService — ownership antes de efectos', () => {
     expect(result.dispatchCalls).toBe(2);
     expect(result.networkOrders).toHaveLength(1);
     expect(result.suspensionCalls).toBe(2);
-    expect(result.suspensionEvents).toHaveLength(1);
+    expect(result.suspensionEvents.filter(isAutomaticReactivationDecisionEvent)).toHaveLength(2);
+    expect(result.suspensionEvents.filter(isReactivationOrderEvent)).toHaveLength(1);
     expect(result.timeline).toHaveLength(1);
     expect(result.alerts).toHaveLength(1);
     expect(result.closes).toBe(1);
@@ -1312,7 +1324,8 @@ describe('PaymentService — ownership antes de efectos', () => {
     expect.soft(result.dispatchCalls).toBe(2);
     expect.soft(result.networkOrders).toHaveLength(1);
     expect.soft(result.timeline).toHaveLength(1);
-    expect.soft(result.suspensionEvents).toHaveLength(1);
+    expect.soft(result.suspensionEvents.filter(isAutomaticReactivationDecisionEvent)).toHaveLength(2);
+    expect.soft(result.suspensionEvents.filter(isReactivationOrderEvent)).toHaveLength(1);
     expect.soft(result.alerts).toHaveLength(1);
     expect.soft(result.closes).toBe(1);
     expect.soft(result.progressAfterB).toEqual({
@@ -1335,7 +1348,8 @@ describe('PaymentService — ownership antes de efectos', () => {
     expect.soft(result.dispatchCalls).toBe(2);
     expect.soft(result.networkOrders).toHaveLength(1);
     expect.soft(result.suspensionCalls).toBe(2);
-    expect.soft(result.suspensionEvents).toHaveLength(1);
+    expect.soft(result.suspensionEvents.filter(isAutomaticReactivationDecisionEvent)).toHaveLength(2);
+    expect.soft(result.suspensionEvents.filter(isReactivationOrderEvent)).toHaveLength(1);
     expect.soft(result.timeline).toHaveLength(1);
     expect.soft(result.alerts).toHaveLength(1);
     expect.soft(result.closes).toBe(1);
@@ -1428,12 +1442,13 @@ describe('PaymentService — ownership antes de efectos', () => {
     let claimCount = 0;
     let closes = 0;
     const counters = { billing: 0, reactivation: 0 };
+    const customerId = `${INTERNAL_FENCING_CUSTOMER_PREFIX}codi-direct`;
     const event = {
       ...candidate('pe-codi-direct', 'evt-codi-direct-fenced'),
       provider: 'codi' as const,
       eventType: 'payment.completed',
       claimToken: 'owner-a',
-      payload: { status: 'paid', reference: 'INV-customer-1', amount: 100 },
+      payload: { status: 'paid', reference: `INV-${customerId}`, amount: 100 },
     };
     const fakeRepo = {
       nextEventId: async () => 'pe-codi-direct-candidate',
@@ -1453,8 +1468,23 @@ describe('PaymentService — ownership antes de efectos', () => {
       },
     } as unknown as PaymentRepository;
     const billing = getBillingService();
+    store.CLIENTS.push({
+      id: customerId,
+      tenantId: TENANT_A,
+      name: 'Cliente CoDi directo',
+      type: 'residential',
+      status: 'suspended',
+      email: 'codi-direct@example.test',
+      phone: '0000000000',
+      address: 'Test',
+      city: 'Test',
+      lat: 0,
+      lng: 0,
+      planId: 'plan-test',
+      ip: '192.0.2.5',
+    });
     const invoice = {
-      id: 'INV', tenantId: TENANT_A, clientId: 'customer-1', status: 'pending',
+      id: 'INV', tenantId: TENANT_A, clientId: customerId, status: 'pending',
       amount: 100, pendingAmount: 100, payments: [],
     };
     vi.spyOn(billing, 'listInvoices').mockResolvedValue([invoice as never]);

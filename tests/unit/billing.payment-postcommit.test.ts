@@ -9,6 +9,9 @@ const mocks = vi.hoisted(() => ({
   recordPayment: vi.fn(),
   getPolicy: vi.fn(),
   getCustomer: vi.fn(),
+  loadInvoices: vi.fn(),
+  listSuspensionBlocks: vi.fn(),
+  recordEvent: vi.fn(),
   reactivate: vi.fn(),
 }));
 
@@ -26,10 +29,17 @@ vi.mock('../../backend/domains/billing/cycle', () => ({
   getBillingCycleService: () => ({}),
 }));
 vi.mock('../../backend/domains/suspension/service', () => ({
-  getSuspensionService: () => ({ repo: { getPolicy: mocks.getPolicy } }),
-}));
-vi.mock('../../backend/domains/customers/service', () => ({
-  getCustomersService: () => ({ getById: mocks.getCustomer }),
+  getSuspensionService: () => ({
+    repo: {
+      getPolicy: mocks.getPolicy,
+      listSuspensionBlocks: mocks.listSuspensionBlocks,
+      recordEvent: mocks.recordEvent,
+    },
+    data: {
+      getCustomer: mocks.getCustomer,
+      loadInvoices: mocks.loadInvoices,
+    },
+  }),
 }));
 vi.mock('../../backend/domains/payments/service', () => ({
   getPaymentService: () => ({ reactivateCustomerService: mocks.reactivate }),
@@ -73,8 +83,22 @@ describe('Billing: frontera post-commit de reactivación', () => {
       return { amount: 100, method: 'SPEI', transactionId: 'manual-stable' };
     });
     mocks.recordPayment.mockResolvedValue(paid);
-    mocks.getPolicy.mockResolvedValue({ reactivateOnPayment: true });
+    mocks.getPolicy.mockResolvedValue({
+      id: 'default',
+      name: 'default',
+      enabled: true,
+      graceDays: 3,
+      suspendAfterDue: true,
+      reactivateOnPayment: true,
+      reactivateOnPartialPayment: false,
+      autoReactivate: true,
+      dueSoonDays: 3,
+      updatedAt: '2026-08-01T00:00:00.000Z',
+    });
     mocks.getCustomer.mockResolvedValue({ id: invoice.clientId, status: 'suspended' });
+    mocks.loadInvoices.mockResolvedValue([paid]);
+    mocks.listSuspensionBlocks.mockResolvedValue([]);
+    mocks.recordEvent.mockResolvedValue({ id: 'sev-postcommit' });
     mocks.reactivate.mockRejectedValue(new Error('router unavailable after payment commit'));
   });
 
