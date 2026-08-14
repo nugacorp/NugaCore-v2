@@ -166,18 +166,18 @@
 
 **Purpose**: Prove constitutional planned work, external evidence boundaries, and release readiness without pretending external blockers are local PASS.
 
-- [ ] T065 [P] Document automatic reactivation runtime flags, disabled defaults, and payment-preserving behavior in `docs/operations/automatic-payment-reactivation.md`.
-- [ ] T066 Document operator retry, cancel, manual recovery, uncertain RouterOS effect reconciliation, and no-secret evidence in `docs/operations/automatic-payment-reactivation.md`.
-- [ ] T067 Document rollback strategy in `docs/operations/automatic-payment-reactivation.md`: disable feature first, preserve valid payments, recover network state, and avoid destructive financial rollback.
-- [ ] T068 Add release validation checklist for local gates, DB gates, billing gates, auth gates, readiness, and restore in `docs/operations/automatic-payment-reactivation.md`.
+- [X] T065 [P] Document automatic reactivation runtime flags, disabled defaults, and payment-preserving behavior in `docs/operations/automatic-payment-reactivation.md`.
+- [X] T066 Document operator retry, cancel, manual recovery, uncertain RouterOS effect reconciliation, and no-secret evidence in `docs/operations/automatic-payment-reactivation.md`.
+- [X] T067 Document rollback strategy in `docs/operations/automatic-payment-reactivation.md`: disable feature first, preserve valid payments, recover network state, and avoid destructive financial rollback.
+- [X] T068 Add release validation checklist for local gates, DB gates, billing gates, auth gates, readiness, and restore in `docs/operations/automatic-payment-reactivation.md`.
 - [ ] T069 [EXTERNAL] Capture provider sandbox evidence request for signed approved webhook, duplicate retry, failed/pending/malformed events, and real payment confirmation in `docs/operations/automatic-payment-reactivation.md` with initial status `EXTERNAL_BLOCKED`.
 - [ ] T070 [EXTERNAL] Capture CHR/RouterOS lab evidence request for dry-run, controlled write, duplicate/retry behavior, cleanup verification, and no production routers in `docs/operations/automatic-payment-reactivation.md` with initial status `EXTERNAL_BLOCKED`.
 - [ ] T071 [EXTERNAL] Capture staging Supabase parity and migration drift evidence for payment, billing, suspension, tenant, and idempotency persistence in `docs/operations/automatic-payment-reactivation.md` with initial status `EXTERNAL_BLOCKED`.
 - [ ] T072 [EXTERNAL] Capture production strict readiness evidence request separately from local/staging PASS claims in `docs/operations/automatic-payment-reactivation.md` with initial status `EXTERNAL_BLOCKED`.
 - [ ] T073 [EXTERNAL] Capture restore/readiness evidence request for future durable payment/reactivation artifacts in `docs/operations/automatic-payment-reactivation.md` with initial status `EXTERNAL_BLOCKED`.
-- [ ] T074 Run broad local gates after implementation scope is complete: `npm run lint`, `npm run typecheck`, `npm test`, `npm run build`, `npm run test:auth`, `npm run test:db`, `npm run test:db:billing`, `npm audit --omit=dev`, `npm run validate-production-readiness`, and `npm run validate-restore-checklist`.
-- [ ] T075 Perform security validation for RLS, cross-tenant denial, server-side RBAC, secret redaction, Router gates, idempotency, and fail-closed unknown behavior across `tests/unit/`, `tests/contract/`, and `tests/db/`.
-- [ ] T076 Verify scope exclusions before implementation PR merge: no per-service billing, no new RBAC roles, no credit ledger, no new queue framework, no large suspension taxonomy, and no new payment provider in `specs/001-automatic-payment-reactivation/tasks.md` review notes.
+- [X] T074 Run broad local gates after implementation scope is complete: `npm run lint`, `npm run typecheck`, `npm test`, `npm run build`, `npm run test:auth`, `npm run test:db`, `npm run test:db:billing`, `npm audit --omit=dev`, `npm run validate-production-readiness`, and `npm run validate-restore-checklist`.
+- [X] T075 Perform security validation for RLS, cross-tenant denial, server-side RBAC, secret redaction, Router gates, idempotency, and fail-closed unknown behavior across `tests/unit/`, `tests/contract/`, and `tests/db/`.
+- [X] T076 Verify scope exclusions before implementation PR merge: no per-service billing, no new RBAC roles, no credit ledger, no new queue framework, no large suspension taxonomy, and no new payment provider in `specs/001-automatic-payment-reactivation/tasks.md` review notes.
 
 ---
 
@@ -241,3 +241,8 @@ foundation
 - Do not use `supabase db push` for migration application.
 - Do not claim production readiness, provider sandbox PASS, or CHR/RouterOS PASS without authorized external evidence.
 - Do not allow stale eligibility to trigger unconditional RouterOS writes.
+
+## PR4 Review Notes
+
+- T069-T073 evidence requests are documented in `docs/operations/automatic-payment-reactivation.md`, but remain `EXTERNAL_BLOCKED` and intentionally unchecked until separately authorized external validation exists.
+- Scope exclusions verified for PR4 documentation: no per-service billing, no new RBAC roles, no credit ledger/wallet/refund subsystem, no new queue framework, no large suspension taxonomy, no new payment provider, and no direct RouterOS writes from payment request paths.
