@@ -4,7 +4,7 @@
 -- REMOTE NAME: multi_tenant_complete_ssot
 --
 -- Historical retimestamp of:
---   20260717050000_multi_tenant_complete_ssot.sql
+--   20260717050001_multi_tenant_complete_ssot.sql
 --
 -- Additional mitigation:
 --   20260730120000_multi_tenant_complete_ssot_reapply.sql

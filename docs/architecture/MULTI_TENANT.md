@@ -83,6 +83,6 @@ API: `tenantIdFromRequest(req)` + `.eq('tenant_id', …)` / stamp en create. No 
 
 - `supabase/migrations/20260716200000_multi_tenant_foundation.sql` — tenants, memberships, SSOT base
 - `supabase/migrations/20260717040000_*.sql` — mikrotik_routers / router_enrollment
-- `supabase/migrations/20260717050000_multi_tenant_complete_ssot.sql` — tickets, payments,
+- `supabase/migrations/20260717050001_multi_tenant_complete_ssot.sql` — tickets, payments,
   suspension, inventory, FTTH, commercial, client-360 tables, etc. (+ `commercial_quotes`,
   `mikrotik_actions`)
