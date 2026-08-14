@@ -12,8 +12,10 @@ import type { SupabaseClient } from '@supabase/supabase-js';
 import { IdempotencyConflictError, IdempotencyResolutionError } from '../../common/errors';
 import { idempotencyPayloadsEquivalent, tenantScopedIdempotencyId } from '../../common/idempotency';
 import {
+  CustomerSuspensionBlock,
   CustomerServiceState,
   OrderClaimInput,
+  SuspensionBlockCategory,
   OrderUpdate,
   SuspensionEvent,
   SuspensionEventType,
@@ -26,14 +28,17 @@ import {
   EventRow,
   OrderRow,
   PolicyRow,
+  SuspensionBlockRow,
   StateRow,
   eventToRow,
   orderToRow,
   policyToRow,
+  rowToSuspensionBlock,
   rowToEvent,
   rowToOrder,
   rowToPolicy,
   rowToState,
+  suspensionBlockToRow,
   stateToRow,
 } from './mappers';
 
@@ -73,6 +78,33 @@ export interface OrderListFilter {
   orderId?: string;
 }
 
+export interface CreateSuspensionBlockInput {
+  id?: string;
+  tenantId: string;
+  customerId: string;
+  category: SuspensionBlockCategory;
+  source: string;
+  reason?: string;
+  evidenceType?: string;
+  evidenceId?: string;
+  createdAt?: string;
+}
+
+export interface SuspensionBlockListFilter {
+  tenantId: string;
+  customerId?: string;
+  category?: SuspensionBlockCategory;
+  activeOnly?: boolean;
+}
+
+export interface ClearSuspensionBlockInput {
+  tenantId: string;
+  blockId: string;
+  clearedAt?: string;
+  clearedBy?: string;
+  clearReason?: string;
+}
+
 const isUniqueViolation = (error: { code?: string; message?: string }): boolean =>
   String(error?.code) === '23505' || /duplicate key|already exists/i.test(String(error?.message ?? ''));
 
@@ -108,6 +140,10 @@ export interface SuspensionRepository {
   getState(customerId: string): Promise<CustomerServiceState | null>;
   upsertState(state: CustomerServiceState): Promise<CustomerServiceState>;
   listStates(): Promise<CustomerServiceState[]>;
+
+  createSuspensionBlock(input: CreateSuspensionBlockInput): Promise<CustomerSuspensionBlock>;
+  listSuspensionBlocks(filter: SuspensionBlockListFilter): Promise<CustomerSuspensionBlock[]>;
+  clearSuspensionBlock(input: ClearSuspensionBlockInput): Promise<CustomerSuspensionBlock | null>;
 
   recordEvent(input: RecordEventInput): Promise<SuspensionEvent>;
   listEvents(customerId?: string): Promise<SuspensionEvent[]>;
@@ -148,6 +184,21 @@ export class StoreSuspensionRepository implements SuspensionRepository {
   async getState(customerId: string) { return engineStore.getState(customerId) ?? null; }
   async upsertState(state: CustomerServiceState) { return engineStore.upsertState(state); }
   async listStates() { return engineStore.listStates(); }
+
+  async createSuspensionBlock(input: CreateSuspensionBlockInput) {
+    return engineStore.createBlock(input);
+  }
+  async listSuspensionBlocks(filter: SuspensionBlockListFilter) {
+    let rows = engineStore.listBlocks(filter);
+    if (filter.category) rows = rows.filter((block) => block.category === filter.category);
+    return rows;
+  }
+  async clearSuspensionBlock(input: ClearSuspensionBlockInput) {
+    return engineStore.clearBlock({
+      ...input,
+      clearedAt: input.clearedAt || new Date().toISOString(),
+    });
+  }
 
   async recordEvent(input: RecordEventInput) { return engineStore.recordEvent(input); }
   async listEvents(customerId?: string) {
@@ -237,6 +288,77 @@ export class SupabaseSuspensionRepository implements SuspensionRepository {
     const { data, error } = await this.client.from('customer_service_state').select('*');
     if (error) throw new Error(`listStates: ${error.message}`);
     return (data || []).map((r) => rowToState(r as StateRow));
+  }
+
+  async createSuspensionBlock(input: CreateSuspensionBlockInput): Promise<CustomerSuspensionBlock> {
+    if (input.evidenceId && !input.evidenceType) {
+      throw new Error('createSuspensionBlock: evidenceType is required when evidenceId is provided');
+    }
+    const now = new Date().toISOString();
+    const block: CustomerSuspensionBlock = {
+      id: input.id || tenantScopedIdempotencyId(
+        'csb',
+        input.tenantId,
+        input.evidenceId ? `${input.evidenceType || 'evidence'}:${input.evidenceId}` : `${input.customerId}:${now}`,
+      ),
+      tenantId: input.tenantId,
+      customerId: input.customerId,
+      category: input.category,
+      source: input.source,
+      reason: input.reason,
+      evidenceType: input.evidenceType,
+      evidenceId: input.evidenceId,
+      createdAt: input.createdAt || now,
+      updatedAt: input.createdAt || now,
+    };
+    const { error } = await this.client.from('customer_suspension_blocks').insert(suspensionBlockToRow(block));
+    if (!error) return block;
+    if (!isUniqueViolation(error) || !input.evidenceId) {
+      throw new Error(`createSuspensionBlock: ${error.message}`);
+    }
+    const { data, error: readError } = await this.client
+      .from('customer_suspension_blocks')
+      .select('*')
+      .eq('tenant_id', input.tenantId)
+      .eq('evidence_type', input.evidenceType)
+      .eq('evidence_id', input.evidenceId)
+      .maybeSingle();
+    if (readError) throw new Error(`createSuspensionBlock(read): ${readError.message}`);
+    if (!data) throw new IdempotencyResolutionError('customer_suspension_blocks', input.evidenceId);
+    return rowToSuspensionBlock(data as SuspensionBlockRow);
+  }
+
+  async listSuspensionBlocks(filter: SuspensionBlockListFilter): Promise<CustomerSuspensionBlock[]> {
+    let q = this.client
+      .from('customer_suspension_blocks')
+      .select('*')
+      .eq('tenant_id', filter.tenantId)
+      .order('created_at', { ascending: false });
+    if (filter.customerId) q = q.eq('customer_id', filter.customerId);
+    if (filter.category) q = q.eq('category', filter.category);
+    if (filter.activeOnly) q = q.is('cleared_at', null);
+    const { data, error } = await q;
+    if (error) throw new Error(`listSuspensionBlocks: ${error.message}`);
+    return (data || []).map((r) => rowToSuspensionBlock(r as SuspensionBlockRow));
+  }
+
+  async clearSuspensionBlock(input: ClearSuspensionBlockInput): Promise<CustomerSuspensionBlock | null> {
+    const clearedAt = input.clearedAt || new Date().toISOString();
+    const { data, error } = await this.client
+      .from('customer_suspension_blocks')
+      .update({
+        cleared_at: clearedAt,
+        cleared_by: input.clearedBy || null,
+        clear_reason: input.clearReason || null,
+        updated_at: clearedAt,
+      })
+      .eq('tenant_id', input.tenantId)
+      .eq('id', input.blockId)
+      .is('cleared_at', null)
+      .select('*')
+      .maybeSingle();
+    if (error) throw new Error(`clearSuspensionBlock: ${error.message}`);
+    return data ? rowToSuspensionBlock(data as SuspensionBlockRow) : null;
   }
 
   async recordEvent(input: RecordEventInput): Promise<SuspensionEvent> {
@@ -460,6 +582,7 @@ export class SupabaseSuspensionRepository implements SuspensionRepository {
   async purgeCustomer(customerId: string): Promise<void> {
     // Idempotente: borra las filas del motor del cliente (orden indiferente,
     // sin FKs entre estas tablas).
+    await this.client.from('customer_suspension_blocks').delete().eq('customer_id', customerId);
     await this.client.from('suspension_orders').delete().eq('customer_id', customerId);
     await this.client.from('reactivation_orders').delete().eq('customer_id', customerId);
     await this.client.from('suspension_events').delete().eq('customer_id', customerId);

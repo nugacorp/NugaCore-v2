@@ -105,6 +105,14 @@ const CASES = {
     fixture: 'tests/db/suspension-claim-postgres17.sql',
     fixtureLabel: 'fixture: un solo claim concurrente',
   },
+  'customer-suspension-blocks': {
+    label: 'Bloqueos activos de suspensión · tenant, RLS y lifecycle',
+    db: 'csblocks',
+    migrations: ['supabase/migrations/20260814050000_customer_suspension_blocks.sql'],
+    bootstrap: 'tests/db/customer-suspension-blocks-postgres17-bootstrap.sql',
+    fixture: 'tests/db/customer-suspension-blocks-postgres17.sql',
+    fixtureLabel: 'fixture: ACL, RLS, FK, lifecycle y dedup',
+  },
   'contract-sign': {
     label: 'Contrato presencial · firma atómica y evidencia append-only',
     db: 'contractsign',

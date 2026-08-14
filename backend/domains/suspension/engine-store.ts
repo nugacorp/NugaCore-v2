@@ -9,6 +9,7 @@
 
 import {
   CustomerServiceState,
+  CustomerSuspensionBlock,
   DEFAULT_SUSPENSION_POLICY,
   SuspensionEvent,
   SuspensionEventType,
@@ -33,6 +34,7 @@ const copyDurableEvent = (event: SuspensionEvent): SuspensionEvent => ({
 export const engineStore = {
   POLICY: { ...DEFAULT_SUSPENSION_POLICY } as SuspensionPolicyV2,
   CUSTOMER_STATE: new Map<string, CustomerServiceState>(),
+  BLOCKS: [] as CustomerSuspensionBlock[],
   EVENTS: [] as SuspensionEvent[],
   ORDERS: [] as SuspensionOrder[],
 
@@ -47,6 +49,49 @@ export const engineStore = {
 
   listStates(): CustomerServiceState[] {
     return [...this.CUSTOMER_STATE.values()];
+  },
+
+  createBlock(input: Omit<CustomerSuspensionBlock, 'id' | 'createdAt' | 'updatedAt'> & {
+    id?: string;
+    createdAt?: string;
+    updatedAt?: string;
+  }): CustomerSuspensionBlock {
+    const now = nowIso();
+    const existing = input.evidenceId
+      ? this.BLOCKS.find((block) =>
+        block.tenantId === input.tenantId
+        && block.evidenceType === input.evidenceType
+        && block.evidenceId === input.evidenceId)
+      : undefined;
+    if (existing) return { ...existing };
+    const block: CustomerSuspensionBlock = {
+      id: input.id || `csb-${this.BLOCKS.length + 1}`,
+      createdAt: input.createdAt || now,
+      updatedAt: input.updatedAt || now,
+      ...input,
+    };
+    this.BLOCKS.unshift(block);
+    return { ...block };
+  },
+
+  listBlocks(filter: { tenantId: string; customerId?: string; activeOnly?: boolean }): CustomerSuspensionBlock[] {
+    return this.BLOCKS
+      .filter((block) => block.tenantId === filter.tenantId)
+      .filter((block) => !filter.customerId || block.customerId === filter.customerId)
+      .filter((block) => !filter.activeOnly || !block.clearedAt)
+      .map((block) => ({ ...block }));
+  },
+
+  clearBlock(input: { tenantId: string; blockId: string; clearedAt: string; clearedBy?: string; clearReason?: string }): CustomerSuspensionBlock | null {
+    const block = this.BLOCKS.find((candidate) => candidate.id === input.blockId && candidate.tenantId === input.tenantId);
+    if (!block) return null;
+    Object.assign(block, {
+      clearedAt: input.clearedAt,
+      clearedBy: input.clearedBy,
+      clearReason: input.clearReason,
+      updatedAt: input.clearedAt,
+    });
+    return { ...block };
   },
 
   recordEvent(input: {
@@ -234,6 +279,7 @@ export const engineStore = {
   /** Elimina TODO el estado del motor para un cliente (cleanup test-tools). */
   purgeCustomer(customerId: string): void {
     this.CUSTOMER_STATE.delete(customerId);
+    this.BLOCKS = this.BLOCKS.filter((block) => block.customerId !== customerId);
     this.EVENTS = this.EVENTS.filter((e) => e.customerId !== customerId);
     this.ORDERS = this.ORDERS.filter((o) => o.customerId !== customerId);
   },
@@ -242,6 +288,7 @@ export const engineStore = {
   reset(): void {
     this.POLICY = { ...DEFAULT_SUSPENSION_POLICY, updatedAt: nowIso() };
     this.CUSTOMER_STATE = new Map();
+    this.BLOCKS = [];
     this.EVENTS = [];
     this.ORDERS = [];
     eventSeq = 1;

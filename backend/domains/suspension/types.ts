@@ -36,6 +36,24 @@ export type SuspensionEventType =
 
 export const OPEN_ORDER_STATUSES: OrderStatus[] = ['PENDING', 'QUEUED'];
 
+export type SuspensionBlockCategory = 'financial' | 'non_financial' | 'unknown';
+
+export interface CustomerSuspensionBlock {
+  id: string;
+  tenantId: string;
+  customerId: string;
+  category: SuspensionBlockCategory;
+  source: string;
+  reason?: string;
+  evidenceType?: string;
+  evidenceId?: string;
+  createdAt: string;
+  clearedAt?: string;
+  clearedBy?: string;
+  clearReason?: string;
+  updatedAt: string;
+}
+
 // ── Política ───────────────────────────────────────────────────────────
 export interface SuspensionPolicyV2 {
   id: string;
