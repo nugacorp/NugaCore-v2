@@ -128,6 +128,10 @@ const router = (): MikrotikRouterRegistryItem => ({
   lastHealthCheckAt: new Date().toISOString(),
 });
 
+const seedFinancialBlock = () => {
+  engineStore.createBlock({ tenantId: TENANT, customerId: CUSTOMER, category: 'financial', source: 'billing' });
+};
+
 const processCodi = (providerEventId: string, payload: Record<string, unknown>) =>
   new PaymentService(new StorePaymentRepository()).processWebhook({
     provider: 'codi', providerEventId, eventType: 'payment.completed', tenantId: TENANT,
@@ -151,6 +155,7 @@ beforeEach(() => {
   store.MIKROTIK_ROUTERS = [];
   engineStore.EVENTS = [];
   engineStore.ORDERS = [];
+  engineStore.BLOCKS = [];
 });
 
 afterEach(() => {
@@ -190,6 +195,7 @@ describe('Fixup 06 · CoDi sin importe sobre factura sin pendiente', () => {
 
   it('un pendiente > 0 sigue resolviendo el importe sin que el webhook lo traiga', async () => {
     store.CLIENTS.push(client());
+    seedFinancialBlock();
     store.INVOICES.push(invoice([{ date: '2026-08-02', amount: 40, method: 'Efectivo' }]));
     store.MIKROTIK_ROUTERS.push(router());
 
@@ -202,6 +208,7 @@ describe('Fixup 06 · CoDi sin importe sobre factura sin pendiente', () => {
 
   it('la redelivery del mismo cobro CoDi ya aplicado se resuelve por el pago existente', async () => {
     store.CLIENTS.push(client());
+    seedFinancialBlock();
     store.INVOICES.push(invoice());
     store.MIKROTIK_ROUTERS.push(router());
 

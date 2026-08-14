@@ -194,7 +194,6 @@ export type AutomaticReactivationDecisionOutcome =
   | 'eligible'
   | 'blocked_overdue'
   | 'blocked_non_financial'
-  | 'blocked_unknown'
   | 'automation_disabled'
   | 'already_active'
   | 'customer_not_found'
@@ -211,7 +210,13 @@ export interface AutomaticReactivationDecision {
   reason: string;
   billingStatus?: string;
   blockingDebt: boolean;
+  blockReasonCategory: 'financial' | 'non_financial' | 'unknown' | 'none';
   activeBlockCategories: string[];
+  activeBlocks: Array<{
+    category: 'financial' | 'non_financial' | 'unknown';
+    evidenceType?: string;
+    evidenceId?: string;
+  }>;
   reactivationIdempotencyKey: string;
   idempotencyKey: string;
 }

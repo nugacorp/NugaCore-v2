@@ -211,7 +211,7 @@ router.post('/api/suspension/run', requireRoles([...SUSP_EVALUATE_ROLES]), (req,
   });
 });
 
-router.post('/api/suspension/clients/:id/suspend', requireRoles([...SUSP_EVALUATE_ROLES]), (req, res) => {
+router.post('/api/suspension/clients/:id/suspend', requireRoles([...SUSP_EVALUATE_ROLES]), asyncHandler(async (req, res) => {
   if (legacySuspensionDisabled()) return rejectLegacySuspension(res);
   const clientId = req.params.id;
   const tenantId = tenantIdFromRequest(req);
@@ -222,10 +222,19 @@ router.post('/api/suspension/clients/:id/suspend', requireRoles([...SUSP_EVALUAT
     return res.status(404).json({ error: 'Customer not found' });
   }
 
-  res.json(client);
-});
+  await getSuspensionService().repo.createSuspensionBlock({
+    tenantId,
+    customerId: clientId,
+    category: 'non_financial',
+    source: 'manual',
+    reason,
+    evidenceType: 'manual_action',
+  });
 
-router.post('/api/suspension/clients/:id/reactivate', requireRoles([...SUSP_EVALUATE_ROLES]), (req, res) => {
+  res.json(client);
+}));
+
+router.post('/api/suspension/clients/:id/reactivate', requireRoles([...SUSP_EVALUATE_ROLES]), asyncHandler(async (req, res) => {
   if (legacySuspensionDisabled()) return rejectLegacySuspension(res);
   const clientId = req.params.id;
   const tenantId = tenantIdFromRequest(req);
@@ -236,8 +245,19 @@ router.post('/api/suspension/clients/:id/reactivate', requireRoles([...SUSP_EVAL
     return res.status(404).json({ error: 'Customer not found' });
   }
 
+  const repo = getSuspensionService().repo;
+  const activeBlocks = await repo.listSuspensionBlocks({ tenantId, customerId: clientId, activeOnly: true });
+  for (const block of activeBlocks) {
+    await repo.clearSuspensionBlock({
+      tenantId,
+      blockId: block.id,
+      clearedBy: req.authContext?.userId ?? 'manual-reactivation',
+      clearReason: reason,
+    });
+  }
+
   res.json(client);
-});
+}));
 
 // ════════════════════════════════════════════════════════════════════
 // MOTOR DE SUSPENSIONES (Fase 4.5) — decide y emite ÓRDENES. No ejecuta.

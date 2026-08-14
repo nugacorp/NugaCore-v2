@@ -11,6 +11,7 @@ const mocks = vi.hoisted(() => ({
   getCustomer: vi.fn(),
   loadInvoices: vi.fn(),
   listSuspensionBlocks: vi.fn(),
+  clearSuspensionBlock: vi.fn(),
   recordEvent: vi.fn(),
   reactivate: vi.fn(),
 }));
@@ -33,6 +34,7 @@ vi.mock('../../backend/domains/suspension/service', () => ({
     repo: {
       getPolicy: mocks.getPolicy,
       listSuspensionBlocks: mocks.listSuspensionBlocks,
+      clearSuspensionBlock: mocks.clearSuspensionBlock,
       recordEvent: mocks.recordEvent,
     },
     data: {
@@ -97,7 +99,16 @@ describe('Billing: frontera post-commit de reactivación', () => {
     });
     mocks.getCustomer.mockResolvedValue({ id: invoice.clientId, status: 'suspended' });
     mocks.loadInvoices.mockResolvedValue([paid]);
-    mocks.listSuspensionBlocks.mockResolvedValue([]);
+    mocks.listSuspensionBlocks.mockResolvedValue([{
+      id: 'block-postcommit-financial',
+      tenantId: invoice.tenantId,
+      customerId: invoice.clientId,
+      category: 'financial',
+      source: 'billing',
+      createdAt: '2026-08-01T00:00:00.000Z',
+      updatedAt: '2026-08-01T00:00:00.000Z',
+    }]);
+    mocks.clearSuspensionBlock.mockResolvedValue({ id: 'block-postcommit-financial', clearedAt: '2026-08-01T00:00:00.000Z' });
     mocks.recordEvent.mockResolvedValue({ id: 'sev-postcommit' });
     mocks.reactivate.mockRejectedValue(new Error('router unavailable after payment commit'));
   });

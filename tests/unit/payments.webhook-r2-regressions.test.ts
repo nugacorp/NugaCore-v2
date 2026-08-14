@@ -100,6 +100,10 @@ const seedClaim = (eventId: string, claimToken = 'owner-r2') => {
   });
 };
 
+const seedFinancialBlock = () => {
+  engineStore.createBlock({ tenantId: TENANT_A, customerId: CUSTOMER_ID, category: 'financial', source: 'billing' });
+};
+
 beforeEach(() => {
   vi.stubEnv('USE_DB_PAYMENTS', 'false');
   vi.stubEnv('USE_DB_BILLING', 'false');
@@ -117,6 +121,7 @@ beforeEach(() => {
   store.MIKROTIK_ROUTERS = [];
   engineStore.EVENTS = [];
   engineStore.ORDERS = [];
+  engineStore.BLOCKS = [];
 });
 
 afterEach(() => {
@@ -127,6 +132,7 @@ afterEach(() => {
 describe('R2-01: el ledger decide la identidad tenant+provider+transaction', () => {
   it('pago manual parcial y OpenPay con el mismo texto registran dos cobros antes de reactivar', async () => {
     store.CLIENTS.push(client());
+    seedFinancialBlock();
     store.INVOICES.push(invoice());
     store.MIKROTIK_ROUTERS.push(router('router-a', TENANT_A));
     await new StoreBillingRepository().recordPayment(INVOICE_ID, {
@@ -174,6 +180,7 @@ describe('R2-01: el ledger decide la identidad tenant+provider+transaction', () 
 
   it('un cobro CoDi parcial no satisface una order OpenPay con el mismo transactionId', async () => {
     store.CLIENTS.push(client());
+    seedFinancialBlock();
     store.INVOICES.push(invoice());
     store.MIKROTIK_ROUTERS.push(router('router-a', TENANT_A));
     seedClaim('evt-r2-seed-codi');
@@ -211,6 +218,7 @@ describe('R2-01: el ledger decide la identidad tenant+provider+transaction', () 
   it('CoDi directo no confunde un cobro OpenPay parcial con la misma transacción', async () => {
     const directInvoiceId = 'INV';
     store.CLIENTS.push(client());
+    seedFinancialBlock();
     store.INVOICES.push(invoice({ id: directInvoiceId }));
     store.MIKROTIK_ROUTERS.push(router('router-a', TENANT_A));
     seedClaim('evt-r2-seed-openpay');
@@ -348,6 +356,7 @@ describe('R3-01: Billing gobierna si el webhook puede reactivar', () => {
 
   it('el pago total conserva la reactivación después de saldar Billing', async () => {
     store.CLIENTS.push(client());
+    seedFinancialBlock();
     store.INVOICES.push(invoice());
     store.MIKROTIK_ROUTERS.push(router('router-a', TENANT_A));
     store.PAYMENT_ORDERS.push({

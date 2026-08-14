@@ -66,6 +66,12 @@ beforeEach(() => {
   store.INVOICES = [];
   engineStore.reset();
   engineStore.POLICY = { ...DEFAULT_SUSPENSION_POLICY, graceDays: 3 };
+  engineStore.createBlock({
+    tenantId: TENANT,
+    customerId: CUSTOMER,
+    category: 'financial',
+    source: 'billing',
+  });
   resetSuspensionService();
 });
 
@@ -161,12 +167,6 @@ describe('automatic payment reactivation eligibility', () => {
 
   it('bloqueos no financieros y unknown fallan cerrado; financial solo no bloquea', async () => {
     store.INVOICES = [invoice({ status: 'paid', pendingAmount: 0, paidAmount: 100 })];
-    await engineStore.createBlock({
-      tenantId: TENANT,
-      customerId: CUSTOMER,
-      category: 'financial',
-      source: 'billing',
-    });
     expect((await evaluate('pay-financial')).outcome).toBe('eligible');
 
     await engineStore.createBlock({
@@ -184,6 +184,8 @@ describe('automatic payment reactivation eligibility', () => {
       category: 'unknown',
       source: 'legacy',
     });
-    expect((await evaluate('pay-unknown')).outcome).toBe('blocked_unknown');
+    const unknown = await evaluate('pay-unknown');
+    expect(unknown.outcome).toBe('blocked_non_financial');
+    expect(unknown.blockReasonCategory).toBe('unknown');
   });
 });

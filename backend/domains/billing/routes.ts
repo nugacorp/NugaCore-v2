@@ -8,6 +8,7 @@ import { getBillingCycleService } from './cycle';
 import { getCustomersService } from '../customers/service';
 import { getPaymentService } from '../payments/service';
 import {
+  clearFinancialSuspensionBlocksForDecision,
   evaluateAutomaticPaymentReactivation,
   recordAutomaticReactivationDecision,
 } from '../payments/automatic-reactivation';
@@ -160,6 +161,10 @@ router.post(
         });
         await recordAutomaticReactivationDecision(decision);
         if (decision.eligible) {
+          await clearFinancialSuspensionBlocksForDecision(
+            decision,
+            req.authContext?.userId ?? 'manual-billing-route',
+          );
           await getPaymentService().reactivateCustomerService(invoice.clientId, {
             triggeredBy: req.authContext?.userId,
             invoiceId: invoice.id,

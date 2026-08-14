@@ -128,6 +128,18 @@ const seedCustomer = (tenantId: string): string => {
     connectionType: 'WISP',
     routerId: `${TEST_ROUTER_PREFIX}${tenantId}`,
   } as (typeof store.CLIENTS)[number]);
+  engineStore.createBlock({
+    id: `csb-fin-openpay-${tenantId}`,
+    tenantId,
+    customerId: id,
+    category: 'financial',
+    source: 'suspension-engine',
+    reason: 'Fixture financiero de suspension por cobranza.',
+    evidenceType: 'billing_snapshot',
+    evidenceId: `fac-${tenantId}`,
+    createdAt: new Date().toISOString(),
+    updatedAt: new Date().toISOString(),
+  });
   return id;
 };
 
@@ -164,6 +176,7 @@ const reset = () => {
   store.PAYMENT_ALLOCATIONS.length = 0;
   engineStore.EVENTS.length = 0;
   engineStore.ORDERS.length = 0;
+  engineStore.BLOCKS.length = 0;
   store.CLIENTS = store.CLIENTS.filter((c) => !c.id.startsWith('c-tenant-'));
   store.INVOICES = store.INVOICES.filter((invoice) => !invoice.id.startsWith('fac-tenant-'));
   store.MIKROTIK_ROUTERS = store.MIKROTIK_ROUTERS.filter(

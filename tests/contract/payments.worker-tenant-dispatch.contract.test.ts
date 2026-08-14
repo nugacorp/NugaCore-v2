@@ -115,6 +115,8 @@ beforeEach(() => {
   store.MIKROTIK_ACTIONS.length = 0;
   store.CLIENT_TIMELINE.length = 0;
   engineStore.reset();
+  engineStore.createBlock({ tenantId: TENANT_A, customerId: CUSTOMER_A, category: 'financial', source: 'billing' });
+  engineStore.createBlock({ tenantId: TENANT_B, customerId: CUSTOMER_B, category: 'financial', source: 'billing' });
   workerStore.reset();
   resetSuspensionService();
   executePlannedCommandsMock.mockClear();
@@ -197,6 +199,56 @@ describe('MT-04-F2 — Payments → dispatcher → worker tenant-scoped', () => 
     expect(durable?.effectConfirmedAt).toBeUndefined();
   });
 
+  it('RouterOS unavailable/fallido conserva outcome failed sin completar la orden', async () => {
+    process.env.MIKROTIK_WORKER_COMMIT = 'true';
+    process.env.MIKROTIK_WORKER_LIVE = 'true';
+    executePlannedCommandsMock.mockResolvedValueOnce({
+      ok: false,
+      executed: 0,
+      errors: ['router unavailable'],
+    });
+    const order = unsafePaymentOrder({
+      customerId: CUSTOMER_A,
+      tenantId: TENANT_A,
+      routerId: ROUTER_A,
+      idempotencyKey: 'f4:router-unavailable',
+    });
+
+    const run = await processPendingOrders('worker-router-fail', {
+      orderId: order.id, tenantId: TENANT_A, routerId: ROUTER_A,
+    });
+
+    expect(run.results[0]).toMatchObject({ outcome: 'failed', targetRouterId: ROUTER_A });
+    expect(engineStore.ORDERS.find((candidate) => candidate.id === order.id)).toMatchObject({
+      status: 'QUEUED',
+      workerNote: expect.stringMatching(/incierto|router unavailable/i),
+    });
+    expect(executePlannedCommandsMock).toHaveBeenCalledTimes(1);
+  });
+
+  it('cliente ya activo antes del worker produce no-op seguro para orden no payment-engine', async () => {
+    process.env.MIKROTIK_WORKER_COMMIT = 'true';
+    process.env.MIKROTIK_WORKER_LIVE = 'true';
+    store.CLIENTS = store.CLIENTS.map((client) =>
+      client.id === CUSTOMER_A ? { ...client, status: 'active' } : client);
+    const order = engineStore.createOrder({
+      customerId: CUSTOMER_A,
+      tenantId: TENANT_A,
+      routerId: ROUTER_A,
+      orderType: 'reactivation',
+      source: 'engine',
+      reason: 'fixture already active',
+    });
+
+    const run = await processPendingOrders('worker-active-noop', {
+      orderId: order.id, tenantId: TENANT_A, routerId: ROUTER_A,
+    });
+
+    expect(run.results[0]).toMatchObject({ outcome: 'skipped', plannedCommands: [] });
+    expect(engineStore.ORDERS.find((candidate) => candidate.id === order.id)?.status).toBe('CANCELLED');
+    expect(executePlannedCommandsMock).not.toHaveBeenCalled();
+  });
+
   it('un lease vencido con efecto confirmado reanuda sólo el post-efecto', async () => {
     process.env.MIKROTIK_WORKER_COMMIT = 'true';
     process.env.MIKROTIK_WORKER_LIVE = 'true';
@@ -222,6 +274,36 @@ describe('MT-04-F2 — Payments → dispatcher → worker tenant-scoped', () => 
     expect(executePlannedCommandsMock).not.toHaveBeenCalled();
     expect(store.CLIENTS.find((client) => client.id === CUSTOMER_A)?.status).toBe('active');
     expect(engineStore.ORDERS.find((candidate) => candidate.id === order.id)?.status).toBe('EXECUTED');
+  });
+
+  it('stale eligibility: hold manual agregado antes del worker cancela sin RouterOS write', async () => {
+    process.env.MIKROTIK_WORKER_COMMIT = 'true';
+    process.env.MIKROTIK_WORKER_LIVE = 'true';
+    const order = unsafePaymentOrder({
+      customerId: CUSTOMER_A,
+      tenantId: TENANT_A,
+      routerId: ROUTER_A,
+      idempotencyKey: 'f4:stale-manual-hold',
+    });
+    await engineStore.createBlock({
+      tenantId: TENANT_A,
+      customerId: CUSTOMER_A,
+      category: 'non_financial',
+      source: 'manual',
+      reason: 'operator hold after payment',
+    });
+
+    const run = await processPendingOrders('worker-stale-hold', {
+      orderId: order.id, tenantId: TENANT_A, routerId: ROUTER_A,
+    });
+
+    expect(run.results[0]).toMatchObject({
+      outcome: 'skipped',
+      plannedCommands: [],
+      note: expect.stringMatching(/non_financial|bloqueo/i),
+    });
+    expect(engineStore.ORDERS.find((candidate) => candidate.id === order.id)?.status).toBe('CANCELLED');
+    expect(executePlannedCommandsMock).not.toHaveBeenCalled();
   });
 
   it('FAILED antes del efecto puede reclamarse y completar en un retry explícito', async () => {

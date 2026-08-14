@@ -36,6 +36,9 @@ describe('Worker MikroTik tenant-scoped en commit mode', () => {
     vi.stubEnv('MIKROTIK_WORKER_COMMIT', 'true');
     vi.stubEnv('MIKROTIK_WORKER_LIVE', 'true');
     engineStore.ORDERS = [];
+    engineStore.BLOCKS = [];
+    engineStore.createBlock({ tenantId: 'tenant-a', customerId: 'customer-a', category: 'financial', source: 'billing' });
+    engineStore.createBlock({ tenantId: 'tenant-b', customerId: 'customer-b', category: 'financial', source: 'billing' });
     store.CLIENTS = [];
     store.MIKROTIK_ROUTERS = [router('router-a', 'tenant-a'), router('router-b', 'tenant-b')];
     executeMock.mockClear();
@@ -43,6 +46,7 @@ describe('Worker MikroTik tenant-scoped en commit mode', () => {
 
   afterEach(() => {
     engineStore.ORDERS = [];
+    engineStore.BLOCKS = [];
     store.CLIENTS = [];
     store.MIKROTIK_ROUTERS = [];
     vi.unstubAllEnvs();

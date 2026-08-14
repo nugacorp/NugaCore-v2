@@ -113,19 +113,19 @@
 
 ### Tests for User Story 3
 
-- [ ] T040 [P] [US3] Add decision audit tests for eligible, blocked, disabled, already-active, dry-run, queued, failed, and no-op outcomes in `tests/unit/automatic-payment-reactivation.audit.test.ts`.
-- [ ] T041 [P] [US3] Add RouterOS unavailable and pending/failed network outcome tests in `tests/contract/payments.worker-tenant-dispatch.contract.test.ts`.
-- [ ] T042 [US3] Add already-active before worker safe no-op tests in `tests/contract/payments.worker-tenant-dispatch.contract.test.ts`.
-- [ ] T043 [US3] Add duplicate worker delivery and retry-after-confirmed-success tests in `tests/contract/payments.worker-tenant-dispatch.contract.test.ts`.
+- [X] T040 [P] [US3] Add decision audit tests for eligible, blocked, disabled, already-active, dry-run, queued, failed, and no-op outcomes in `tests/unit/automatic-payment-reactivation.audit.test.ts`.
+- [X] T041 [P] [US3] Add RouterOS unavailable and pending/failed network outcome tests in `tests/contract/payments.worker-tenant-dispatch.contract.test.ts`.
+- [X] T042 [US3] Add already-active before worker safe no-op tests in `tests/contract/payments.worker-tenant-dispatch.contract.test.ts`.
+- [X] T043 [US3] Add duplicate worker delivery and retry-after-confirmed-success tests in `tests/contract/payments.worker-tenant-dispatch.contract.test.ts`.
 
 ### Implementation for User Story 3
 
-- [ ] T044 [US3] Extend audit metadata for automatic eligibility decisions in `backend/domains/suspension/repository.ts` without storing provider secrets, webhook secrets, Router credentials, or raw sensitive payloads.
-- [ ] T045 [US3] Ensure timeline and alert effects distinguish logical reactivation requested from network restored in `backend/domains/payments/service.ts`.
-- [ ] T046 [US3] Extend `backend/domains/mikrotik/worker/worker.ts` to record cancellation, blocked, failed, uncertain, and no-op worker outcomes through existing order/action evidence.
-- [ ] T047 [US3] Preserve durable payment success when audit, timeline, alert, reactivation order, or network dispatch fails in `backend/domains/payments/service.ts`.
-- [ ] T048 [US3] Ensure retry after confirmed RouterOS success resumes only post-effect bookkeeping and never resends commands in `backend/domains/mikrotik/worker/worker.ts`.
-- [ ] T049 [US3] Run targeted validation commands `npm run test:unit -- tests/unit/automatic-payment-reactivation.audit.test.ts` and `npm run test:integration -- tests/contract/payments.worker-tenant-dispatch.contract.test.ts`.
+- [X] T044 [US3] Extend audit metadata for automatic eligibility decisions in `backend/domains/suspension/repository.ts` without storing provider secrets, webhook secrets, Router credentials, or raw sensitive payloads.
+- [X] T045 [US3] Ensure timeline and alert effects distinguish logical reactivation requested from network restored in `backend/domains/payments/service.ts`.
+- [X] T046 [US3] Extend `backend/domains/mikrotik/worker/worker.ts` to record cancellation, blocked, failed, uncertain, and no-op worker outcomes through existing order/action evidence.
+- [X] T047 [US3] Preserve durable payment success when audit, timeline, alert, reactivation order, or network dispatch fails in `backend/domains/payments/service.ts`.
+- [X] T048 [US3] Ensure retry after confirmed RouterOS success resumes only post-effect bookkeeping and never resends commands in `backend/domains/mikrotik/worker/worker.ts`.
+- [X] T049 [US3] Run targeted validation commands `npm run test:unit -- tests/unit/automatic-payment-reactivation.audit.test.ts` and `npm run test:integration -- tests/contract/payments.worker-tenant-dispatch.contract.test.ts`.
 
 **Checkpoint**: User Story 3 is independently testable for operator-visible financial and network truth.
 
@@ -139,24 +139,24 @@
 
 ### Tests for User Story 4
 
-- [ ] T050 [P] [US4] Add classification evaluator tests for `financial`, `non_financial`, `unknown`, and `none` in `tests/unit/automatic-payment-reactivation.classification.test.ts`.
-- [ ] T051 [US4] Add unknown fail-closed tests proving `customer.status = suspended` alone never implies `financial` in `tests/unit/automatic-payment-reactivation.classification.test.ts`.
-- [ ] T052 [P] [US4] Add multiple blocker tests where financial debt resolves but non-financial block remains in `tests/unit/automatic-payment-reactivation.eligibility.test.ts`.
-- [ ] T053 [P] [US4] Add legacy ambiguous suspension tests mapping to `unknown` and manual/operator recovery in `tests/contract/suspension.scenarios.contract.test.ts`.
-- [ ] T054 [P] [US4] Add stale eligibility worker test `T1 eligible, T2 operator adds non-financial hold, T3 worker executes` expecting no RouterOS write in `tests/contract/payments.worker-tenant-dispatch.contract.test.ts`.
-- [ ] T055 [P] [US4] Add manual versus automatic concurrency tests proving coherent final state, no duplicate RouterOS write, and origin-specific audit in `tests/unit/automatic-payment-reactivation.concurrency.test.ts`.
-- [ ] T056 [P] [US4] Add auth/RBAC tests for retry, override, cancel, and manual reactivation using existing roles in `tests/contract/auth.db.contract.test.ts`.
+- [X] T050 [P] [US4] Add classification evaluator tests for `financial`, `non_financial`, `unknown`, and `none` in `tests/unit/automatic-payment-reactivation.classification.test.ts`.
+- [X] T051 [US4] Add unknown fail-closed tests proving `customer.status = suspended` alone never implies `financial` in `tests/unit/automatic-payment-reactivation.classification.test.ts`.
+- [X] T052 [P] [US4] Add multiple blocker tests where financial debt resolves but non-financial block remains in `tests/unit/automatic-payment-reactivation.eligibility.test.ts`.
+- [X] T053 [P] [US4] Add legacy ambiguous suspension tests mapping to `unknown` and manual/operator recovery in `tests/contract/suspension.scenarios.contract.test.ts`.
+- [X] T054 [P] [US4] Add stale eligibility worker test `T1 eligible, T2 operator adds non-financial hold, T3 worker executes` expecting no RouterOS write in `tests/contract/payments.worker-tenant-dispatch.contract.test.ts`.
+- [X] T055 [P] [US4] Add manual versus automatic concurrency tests proving coherent final state, no duplicate RouterOS write, and origin-specific audit in `tests/unit/automatic-payment-reactivation.concurrency.test.ts`.
+- [X] T056 [P] [US4] Add auth/RBAC tests for retry, override, cancel, and manual reactivation using existing roles in `tests/contract/auth.db.contract.test.ts`.
 
 ### Implementation for User Story 4
 
-- [ ] T057 [US4] Implement the active suspension classification evaluator in `backend/domains/suspension/engine.ts` or a small `backend/domains/suspension/` module using `customer_suspension_blocks` as authority.
-- [ ] T058 [US4] Ensure unknown classification fails closed in `backend/domains/payments/service.ts` and maps to `blocked_non_financial` with `blockReasonCategory = 'unknown'`.
-- [ ] T059 [US4] Ensure active non-financial blockers prevent automatic reactivation even when financial debt is resolved in `backend/domains/payments/service.ts`.
-- [ ] T060 [US4] Ensure financial block clearing only clears intended financial active blocks and never clears unrelated non-financial or unknown blocks in `backend/domains/suspension/repository.ts`.
-- [ ] T061 [US4] Extend manual suspension and manual reactivation routes in `backend/domains/suspension/routes.ts` to create and clear structured active blocks using existing server-side permissions.
-- [ ] T062 [US4] Extend worker pre-RouterOS revalidation in `backend/domains/mikrotik/worker/worker.ts` to verify financial state still eligible, no `non_financial` blocker, no `unknown` blocker, customer still eligible, automation enabled, and live gates still allow write.
-- [ ] T063 [US4] Ensure failed pre-Router revalidation records a safe no-op, cancelled, or blocked outcome and does not call `executePlannedCommands` in `backend/domains/mikrotik/worker/worker.ts`.
-- [ ] T064 [US4] Run targeted validation commands `npm run test:unit -- tests/unit/automatic-payment-reactivation.classification.test.ts`, `npm run test:unit -- tests/unit/automatic-payment-reactivation.concurrency.test.ts`, `npm run test:auth`, and `npm run test:db`.
+- [X] T057 [US4] Implement the active suspension classification evaluator in `backend/domains/suspension/engine.ts` or a small `backend/domains/suspension/` module using `customer_suspension_blocks` as authority.
+- [X] T058 [US4] Ensure unknown classification fails closed in `backend/domains/payments/service.ts` and maps to `blocked_non_financial` with `blockReasonCategory = 'unknown'`.
+- [X] T059 [US4] Ensure active non-financial blockers prevent automatic reactivation even when financial debt is resolved in `backend/domains/payments/service.ts`.
+- [X] T060 [US4] Ensure financial block clearing only clears intended financial active blocks and never clears unrelated non-financial or unknown blocks in `backend/domains/suspension/repository.ts`.
+- [X] T061 [US4] Extend manual suspension and manual reactivation routes in `backend/domains/suspension/routes.ts` to create and clear structured active blocks using existing server-side permissions.
+- [X] T062 [US4] Extend worker pre-RouterOS revalidation in `backend/domains/mikrotik/worker/worker.ts` to verify financial state still eligible, no `non_financial` blocker, no `unknown` blocker, customer still eligible, automation enabled, and live gates still allow write.
+- [X] T063 [US4] Ensure failed pre-Router revalidation records a safe no-op, cancelled, or blocked outcome and does not call `executePlannedCommands` in `backend/domains/mikrotik/worker/worker.ts`.
+- [X] T064 [US4] Run targeted validation commands `npm run test:unit -- tests/unit/automatic-payment-reactivation.classification.test.ts`, `npm run test:unit -- tests/unit/automatic-payment-reactivation.concurrency.test.ts`, `npm run test:auth`, and `npm run test:db`.
 
 **Checkpoint**: User Story 4 is independently testable for fail-closed blocker safety and manual recovery.
 

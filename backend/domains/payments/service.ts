@@ -73,6 +73,7 @@ import {
   webhookPaymentIdempotencyKey,
 } from './idempotency';
 import {
+  clearFinancialSuspensionBlocksForDecision,
   evaluateAutomaticPaymentReactivation,
   recordAutomaticReactivationDecision,
 } from './automatic-reactivation';
@@ -138,12 +139,27 @@ export class PaymentService {
   ): Promise<boolean> {
     if (!decision) return false;
     if (decision.eligible) return true;
-    if (decision.outcome !== 'already_active') return false;
     const existing = await this.repo.findActionByIdempotencyKey(
       decision.tenantId,
       decision.reactivationIdempotencyKey,
     );
-    return Boolean(existing);
+    if (existing) return true;
+    const existingOrder = await getSuspensionService().repo.findReactivationOrderByIdempotencyKey(
+      decision.tenantId,
+      decision.reactivationIdempotencyKey,
+    );
+    if (!existingOrder) return false;
+    return decision.outcome === 'already_active'
+      || (decision.outcome === 'blocked_non_financial' && decision.blockReasonCategory === 'unknown');
+  }
+
+  private async recordAutomaticReactivationDecisionOnce(
+    decision: AutomaticReactivationDecision | undefined,
+    shouldReactivate: boolean,
+  ): Promise<void> {
+    if (!decision) return;
+    if (shouldReactivate && !decision.eligible) return;
+    await recordAutomaticReactivationDecision(decision);
   }
 
   /** El cierre sigue siendo un CAS condicionado por el mismo epoch. */
@@ -363,6 +379,12 @@ export class PaymentService {
 
         if (invoiceResult.shouldReactivate) {
           await this.renewOrThrow(eventId, tenantId, claimToken);
+          if (invoiceResult.reactivationDecision) {
+            await clearFinancialSuspensionBlocksForDecision(
+              invoiceResult.reactivationDecision,
+              `webhook:${provider}:${opaqueFingerprint(providerEventId)}`,
+            );
+          }
           const reactivation = await this.reactivateCustomerService(order.customerId, {
             triggeredBy: `webhook:${provider}:${opaqueFingerprint(providerEventId)}`,
             invoiceId: order.invoiceId,
@@ -453,14 +475,15 @@ export class PaymentService {
             invoiceId: invoice.id,
             origin: 'webhook',
           });
-          await this.renewOrThrow(eventId, tenantId, claimToken);
-          await recordAutomaticReactivationDecision(reactivationDecision);
         }
 
         const shouldReactivate = Boolean(paymentResult.settlementWinner)
           && await this.shouldRunAutomaticReactivation(reactivationDecision);
+        await this.renewOrThrow(eventId, tenantId, claimToken);
+        await this.recordAutomaticReactivationDecisionOnce(reactivationDecision, shouldReactivate);
         if (shouldReactivate && reactivationDecision) {
           await this.renewOrThrow(eventId, tenantId, claimToken);
+          await clearFinancialSuspensionBlocksForDecision(reactivationDecision, `webhook:codi:${opaqueFingerprint(providerEventId)}`);
           const reactivation = await this.reactivateCustomerService(invoice.clientId, {
             triggeredBy: `webhook:codi:${opaqueFingerprint(providerEventId)}`,
             invoiceId: invoice.id,
@@ -567,9 +590,12 @@ export class PaymentService {
         invoiceId: order.invoiceId,
         origin: 'webhook',
       });
-      await webhookFence?.beforeMutation();
-      await recordAutomaticReactivationDecision(reactivationDecision);
     }
+
+    const shouldReactivate = Boolean(paymentResult.settlementWinner)
+      && await this.shouldRunAutomaticReactivation(reactivationDecision);
+    await webhookFence?.beforeMutation();
+    await this.recordAutomaticReactivationDecisionOnce(reactivationDecision, shouldReactivate);
 
     logger.info('PaymentEngine: cobro conciliado con Billing', {
       invoiceId: order.invoiceId,
@@ -580,8 +606,7 @@ export class PaymentService {
     return {
       updated: true,
       invoice: paymentResult.invoice,
-      shouldReactivate: Boolean(paymentResult.settlementWinner)
-        && await this.shouldRunAutomaticReactivation(reactivationDecision),
+      shouldReactivate,
       canonicalPaymentId: paymentResult.canonicalPaymentId ?? undefined,
       reactivationDecision,
     };
