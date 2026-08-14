@@ -35,6 +35,27 @@ describe('Suspension test-tools — candados', () => {
   });
 });
 
+describe('Automatic reactivation suspension-block fixtures', () => {
+  const blockFixtures = {
+    financial: [{ category: 'financial', clearedAt: null }],
+    nonFinancial: [{ category: 'non_financial', clearedAt: null }],
+    unknown: [{ category: 'unknown', clearedAt: null }],
+    none: [],
+    multiple: [
+      { category: 'financial', clearedAt: null },
+      { category: 'non_financial', clearedAt: null },
+    ],
+  } as const;
+
+  it('models every approved active-block classification without adding a broad taxonomy', () => {
+    expect(blockFixtures.financial).toMatchObject([{ category: 'financial' }]);
+    expect(blockFixtures.nonFinancial).toMatchObject([{ category: 'non_financial' }]);
+    expect(blockFixtures.unknown).toMatchObject([{ category: 'unknown' }]);
+    expect(blockFixtures.none).toEqual([]);
+    expect(blockFixtures.multiple.map((block) => block.category)).toEqual(['financial', 'non_financial']);
+  });
+});
+
 describe('Escenario A — activo + factura vencida → SuspensionOrder', () => {
   let app: Express;
   beforeAll(() => { app = createApp(); });

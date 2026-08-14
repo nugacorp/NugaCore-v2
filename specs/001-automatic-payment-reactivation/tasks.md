@@ -18,11 +18,11 @@
 
 **Purpose**: Confirm existing brownfield seams and create no runtime behavior.
 
-- [ ] T001 Verify the implementation branch is based on `origin/main` and confirm Spec 001 artifacts exist in `specs/001-automatic-payment-reactivation/` before editing.
-- [ ] T002 [P] Map existing payment webhook entry points in `backend/domains/payments/service.ts` and billing manual payment entry points in `backend/domains/billing/routes.ts` to the post-payment eligibility contract.
-- [ ] T003 [P] Map existing suspension state, order, event, and policy repository seams in `backend/domains/suspension/engine.ts`, `backend/domains/suspension/repository.ts`, and `backend/domains/suspension/types.ts`.
-- [ ] T004 [P] Map existing RouterOS worker claim, dry-run, live gate, and effect recovery seams in `backend/domains/mikrotik/worker/worker.ts` and `backend/bridges/network-order-dispatch.ts`.
-- [ ] T005 [P] Map existing durable idempotency sources in `backend/domains/payments/idempotency.ts`, `backend/domains/payments/repository.ts`, `backend/domains/suspension/repository.ts`, and `supabase/migrations/20260730150000_webhook_durable_idempotency.sql`.
+- [X] T001 Verify the implementation branch is based on `origin/main` and confirm Spec 001 artifacts exist in `specs/001-automatic-payment-reactivation/` before editing.
+- [X] T002 [P] Map existing payment webhook entry points in `backend/domains/payments/service.ts` and billing manual payment entry points in `backend/domains/billing/routes.ts` to the post-payment eligibility contract.
+- [X] T003 [P] Map existing suspension state, order, event, and policy repository seams in `backend/domains/suspension/engine.ts`, `backend/domains/suspension/repository.ts`, and `backend/domains/suspension/types.ts`.
+- [X] T004 [P] Map existing RouterOS worker claim, dry-run, live gate, and effect recovery seams in `backend/domains/mikrotik/worker/worker.ts` and `backend/bridges/network-order-dispatch.ts`.
+- [X] T005 [P] Map existing durable idempotency sources in `backend/domains/payments/idempotency.ts`, `backend/domains/payments/repository.ts`, `backend/domains/suspension/repository.ts`, and `supabase/migrations/20260730150000_webhook_durable_idempotency.sql`.
 
 **Checkpoint**: Current seams are known; no feature code, migration, or tests have been changed yet.
 
@@ -34,18 +34,18 @@
 
 **Critical**: These tasks block all user stories.
 
-- [ ] T006 Create DB contract tests for `public.customer_suspension_blocks` migration replay, additive shape, and rollback assumptions in `tests/db/customer-suspension-blocks-postgres17.sql`.
-- [ ] T007 Create unit/static migration tests for the future `customer_suspension_blocks` migration in `tests/unit/customer-suspension-blocks-migration.test.ts` covering columns, check constraints, active indexes, uniqueness, non-destructive rollout, and no `supabase db push`.
-- [ ] T008 Create a versioned additive Supabase migration for `public.customer_suspension_blocks` in `supabase/migrations/` with `tenant_id`, `customer_id`, `category`, `source`, sanitized `reason`, optional evidence references, active lifecycle timestamps, and audit timestamps.
-- [ ] T009 Add active lookup indexes and optional duplicate-evidence protection for `customer_suspension_blocks` in the same `supabase/migrations/` migration using partial indexes for `cleared_at IS NULL`.
-- [ ] T010 Add deny-by-default RLS, tenant-scoped policies, least-privilege grants, and service-role behavior for `customer_suspension_blocks` in the same `supabase/migrations/` migration.
-- [ ] T011 Add DB tests for valid insert, active block lookup, lifecycle clearing, duplicate evidence handling, and backwards compatibility in `tests/db/customer-suspension-blocks-postgres17.sql`.
-- [ ] T012 Add DB tests for tenant isolation, cross-tenant denial, RLS behavior, and service-role explicit tenant filters in `tests/db/customer-suspension-blocks-postgres17.sql`.
-- [ ] T013 Add migration validation tasks to `scripts/` or existing migration validation docs so future implementation uses migration replay, drift reporting, and staging preflight without `supabase db push`.
-- [ ] T014 [P] Add TypeScript domain types for suspension block categories and lifecycle records in `backend/domains/suspension/types.ts`.
-- [ ] T015 Add Store and Supabase repository contracts for suspension block create/list/clear operations in `backend/domains/suspension/repository.ts`.
-- [ ] T016 Add repository tests for Store and Supabase-shaped suspension block behavior in `tests/unit/suspension-blocks.repository.test.ts`.
-- [ ] T017 Add contract fixtures for financial, non-financial, unknown, none, and multiple active blockers in `tests/contract/suspension.scenarios.contract.test.ts`.
+- [X] T006 Create DB contract tests for `public.customer_suspension_blocks` migration replay, additive shape, and rollback assumptions in `tests/db/customer-suspension-blocks-postgres17.sql`.
+- [X] T007 Create unit/static migration tests for the future `customer_suspension_blocks` migration in `tests/unit/customer-suspension-blocks-migration.test.ts` covering columns, check constraints, active indexes, uniqueness, non-destructive rollout, and no `supabase db push`.
+- [X] T008 Create a versioned additive Supabase migration for `public.customer_suspension_blocks` in `supabase/migrations/` with `tenant_id`, `customer_id`, `category`, `source`, sanitized `reason`, optional evidence references, active lifecycle timestamps, and audit timestamps.
+- [X] T009 Add active lookup indexes and optional duplicate-evidence protection for `customer_suspension_blocks` in the same `supabase/migrations/` migration using partial indexes for `cleared_at IS NULL`.
+- [X] T010 Add deny-by-default RLS, tenant-scoped policies, least-privilege grants, and service-role behavior for `customer_suspension_blocks` in the same `supabase/migrations/` migration.
+- [X] T011 Add DB tests for valid insert, active block lookup, lifecycle clearing, duplicate evidence handling, and backwards compatibility in `tests/db/customer-suspension-blocks-postgres17.sql`.
+- [X] T012 Add DB tests for tenant isolation, cross-tenant denial, RLS behavior, and service-role explicit tenant filters in `tests/db/customer-suspension-blocks-postgres17.sql`.
+- [X] T013 Add migration validation tasks to `scripts/` or existing migration validation docs so future implementation uses migration replay, drift reporting, and staging preflight without `supabase db push`.
+- [X] T014 [P] Add TypeScript domain types for suspension block categories and lifecycle records in `backend/domains/suspension/types.ts`.
+- [X] T015 Add Store and Supabase repository contracts for suspension block create/list/clear operations in `backend/domains/suspension/repository.ts`.
+- [X] T016 Add repository tests for Store and Supabase-shaped suspension block behavior in `tests/unit/suspension-blocks.repository.test.ts`.
+- [X] T017 Add contract fixtures for financial, non-financial, unknown, none, and multiple active blockers in `tests/contract/suspension.scenarios.contract.test.ts`.
 
 **Checkpoint**: The active-block persistence boundary is specified, tested, tenant-scoped, and ready to support classification.
 

@@ -6,6 +6,7 @@
 
 import {
   CustomerServiceState,
+  CustomerSuspensionBlock,
   ServiceStatus,
   BillingStatus,
   SuspensionEvent,
@@ -88,6 +89,54 @@ export const stateToRow = (s: CustomerServiceState): Record<string, unknown> => 
   last_suspension_at: s.lastSuspensionAt || null,
   last_reactivation_at: s.lastReactivationAt || null,
   current_reason: s.currentReason || null,
+});
+
+export interface SuspensionBlockRow {
+  id: string;
+  tenant_id: string;
+  customer_id: string;
+  category: CustomerSuspensionBlock['category'];
+  source: string;
+  reason: string | null;
+  evidence_type: string | null;
+  evidence_id: string | null;
+  created_at: string;
+  cleared_at: string | null;
+  cleared_by: string | null;
+  clear_reason: string | null;
+  updated_at: string;
+}
+
+export const rowToSuspensionBlock = (r: SuspensionBlockRow): CustomerSuspensionBlock => ({
+  id: r.id,
+  tenantId: r.tenant_id,
+  customerId: r.customer_id,
+  category: r.category,
+  source: r.source,
+  reason: r.reason || undefined,
+  evidenceType: r.evidence_type || undefined,
+  evidenceId: r.evidence_id || undefined,
+  createdAt: r.created_at,
+  clearedAt: r.cleared_at || undefined,
+  clearedBy: r.cleared_by || undefined,
+  clearReason: r.clear_reason || undefined,
+  updatedAt: r.updated_at,
+});
+
+export const suspensionBlockToRow = (block: CustomerSuspensionBlock): Record<string, unknown> => ({
+  id: block.id,
+  tenant_id: block.tenantId,
+  customer_id: block.customerId,
+  category: block.category,
+  source: block.source,
+  reason: block.reason || null,
+  evidence_type: block.evidenceType || null,
+  evidence_id: block.evidenceId || null,
+  created_at: block.createdAt,
+  cleared_at: block.clearedAt || null,
+  cleared_by: block.clearedBy || null,
+  clear_reason: block.clearReason || null,
+  updated_at: block.updatedAt,
 });
 
 // ── Evento ──────────────────────────────────────────────────────────────
