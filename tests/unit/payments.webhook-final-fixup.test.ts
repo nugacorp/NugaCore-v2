@@ -250,7 +250,11 @@ describe('Fixup final: ganador atómico de liquidación', () => {
       wasSettledBefore: false,
       isSettledAfter: true,
       settlementWinner: input.transactionId === 'tx-60',
+      canonicalPaymentId: `payment:${input.transactionId}`,
     } as never));
+    store.CLIENTS = [manualClient()];
+    store.INVOICES = [paid];
+    engineStore.EVENTS = [];
     const service = new PaymentService(new StorePaymentRepository());
     const order = (transactionId: string, amountCents: number): PaymentOrderRecord => ({
       id: `order-${transactionId}`,
@@ -326,7 +330,7 @@ describe('Fixup final: ganador atómico de liquidación', () => {
     expect(store.PAYMENT_ALLOCATIONS.filter((allocation) => allocation.settlementWinner)).toHaveLength(1);
     expect(store.MIKROTIK_ACTIONS).toHaveLength(1);
     expect(store.CLIENT_TIMELINE).toHaveLength(1);
-    expect(engineStore.EVENTS).toHaveLength(1);
+    expect(engineStore.EVENTS).toHaveLength(3);
     expect(store.NOC_ALERTS).toHaveLength(1);
     vi.unstubAllEnvs();
   });

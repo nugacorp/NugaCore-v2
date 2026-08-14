@@ -59,21 +59,21 @@
 
 ### Tests for User Story 1
 
-- [ ] T018 [P] [US1] Add blocking overdue evaluator tests for current, due soon, overdue within grace, delinquent, and multiple invoices in `tests/unit/automatic-payment-reactivation.eligibility.test.ts`.
-- [ ] T019 [US1] Add partial payment tests where payment remains valid but blocking debt remains in `tests/unit/automatic-payment-reactivation.eligibility.test.ts`.
-- [ ] T020 [US1] Add full-settlement and overpayment eligibility tests at customer scope in `tests/unit/automatic-payment-reactivation.eligibility.test.ts`.
-- [ ] T021 [P] [US1] Add billing DB integration tests proving customer-level invoice aggregation after payment application in `tests/contract/billing.db.contract.test.ts`.
+- [X] T018 [P] [US1] Add blocking overdue evaluator tests for current, due soon, overdue within grace, delinquent, and multiple invoices in `tests/unit/automatic-payment-reactivation.eligibility.test.ts`.
+- [X] T019 [US1] Add partial payment tests where payment remains valid but blocking debt remains in `tests/unit/automatic-payment-reactivation.eligibility.test.ts`.
+- [X] T020 [US1] Add full-settlement and overpayment eligibility tests at customer scope in `tests/unit/automatic-payment-reactivation.eligibility.test.ts`.
+- [X] T021 [P] [US1] Add billing DB integration tests proving customer-level invoice aggregation after payment application in `tests/contract/billing.db.contract.test.ts`.
 
 ### Implementation for User Story 1
 
-- [ ] T022 [US1] Extract or reuse the grace-aware blocking overdue evaluator from `backend/domains/suspension/engine.ts` without duplicating Billing formulas.
-- [ ] T023 [US1] Add a pure financial eligibility snapshot builder in `backend/domains/suspension/engine.ts` or a small shared module under `backend/domains/suspension/`.
-- [ ] T024 [US1] Add automatic payment eligibility result types in `backend/domains/payments/types.ts` matching `contracts/automatic-payment-reactivation.md`.
-- [ ] T025 [US1] Implement the automatic eligibility evaluator in `backend/domains/payments/service.ts` or a small payments/suspension integration module, combining durable payment, customer status, financial snapshot, active block snapshot, and feature flags.
-- [ ] T026 [US1] Replace invoice `settlementWinner`-only reactivation gating in `backend/domains/payments/service.ts` with post-application customer-level eligibility evaluation.
-- [ ] T027 [US1] Update authorized manual/server payment post-commit reactivation path in `backend/domains/billing/routes.ts` to call the same eligibility evaluator after `BillingService.recordPayment`.
-- [ ] T028 [US1] Ensure automation disabled leaves payment application durable and records a non-reactivation outcome in `backend/domains/payments/service.ts`.
-- [ ] T029 [US1] Run targeted validation commands `npm run test:unit -- tests/unit/automatic-payment-reactivation.eligibility.test.ts` and `npm run test:db:billing`.
+- [X] T022 [US1] Extract or reuse the grace-aware blocking overdue evaluator from `backend/domains/suspension/engine.ts` without duplicating Billing formulas.
+- [X] T023 [US1] Add a pure financial eligibility snapshot builder in `backend/domains/suspension/engine.ts` or a small shared module under `backend/domains/suspension/`.
+- [X] T024 [US1] Add automatic payment eligibility result types in `backend/domains/payments/types.ts` matching `contracts/automatic-payment-reactivation.md`.
+- [X] T025 [US1] Implement the automatic eligibility evaluator in `backend/domains/payments/service.ts` or a small payments/suspension integration module, combining durable payment, customer status, financial snapshot, active block snapshot, and feature flags.
+- [X] T026 [US1] Replace invoice `settlementWinner`-only reactivation gating in `backend/domains/payments/service.ts` with post-application customer-level eligibility evaluation.
+- [X] T027 [US1] Update authorized manual/server payment post-commit reactivation path in `backend/domains/billing/routes.ts` to call the same eligibility evaluator after `BillingService.recordPayment`.
+- [X] T028 [US1] Ensure automation disabled leaves payment application durable and records a non-reactivation outcome in `backend/domains/payments/service.ts`.
+- [X] T029 [US1] Run targeted validation commands `npm run test:unit -- tests/unit/automatic-payment-reactivation.eligibility.test.ts` and `npm run test:db:billing`.
 
 **Checkpoint**: User Story 1 is independently testable without live network effects.
 
@@ -87,19 +87,19 @@
 
 ### Tests for User Story 2
 
-- [ ] T030 [P] [US2] Add duplicate webhook tests for one financial result and one logical reactivation family in `tests/unit/payments.webhook-idempotency-claim.test.ts`.
-- [ ] T031 [P] [US2] Add concurrent automatic evaluation tests for same `tenantId + canonicalPaymentId + customerId` in `tests/unit/automatic-payment-reactivation.concurrency.test.ts`.
-- [ ] T032 [P] [US2] Add tenant isolation tests where provider identifiers collide across tenants in `tests/contract/payments.openpay-webhook-tenant.contract.test.ts`.
-- [ ] T033 [P] [US2] Add retry-after-success and already-completed/no-op tests in `tests/unit/payments.reactivation-durable-saga.test.ts`.
+- [X] T030 [P] [US2] Add duplicate webhook tests for one financial result and one logical reactivation family in `tests/unit/payments.webhook-idempotency-claim.test.ts`.
+- [X] T031 [P] [US2] Add concurrent automatic evaluation tests for same `tenantId + canonicalPaymentId + customerId` in `tests/unit/automatic-payment-reactivation.concurrency.test.ts`.
+- [X] T032 [P] [US2] Add tenant isolation tests where provider identifiers collide across tenants in `tests/contract/payments.openpay-webhook-tenant.contract.test.ts`.
+- [X] T033 [P] [US2] Add retry-after-success and already-completed/no-op tests in `tests/unit/payments.reactivation-durable-saga.test.ts`.
 
 ### Implementation for User Story 2
 
-- [ ] T034 [US2] Preserve `rootActionIdempotencyKey(canonicalPaymentId, customerId)` as the automatic reactivation family key in `backend/domains/payments/idempotency.ts`.
-- [ ] T035 [US2] Ensure eligible automatic reactivation uses existing `findActionByIdempotencyKey`, `findReactivationOrderByIdempotencyKey`, `createOrGetNetworkOrder`, and `createActionIdempotent` paths in `backend/domains/payments/service.ts`.
-- [ ] T036 [US2] Persist blocked, disabled, already-active, and no-op eligibility decisions idempotently through existing `suspension_events` or approved audit destinations in `backend/domains/suspension/repository.ts`.
-- [ ] T037 [US2] Ensure cross-tenant payment, customer, reactivation order, action, router, event, timeline, and alert access fails closed in `backend/domains/payments/service.ts`.
-- [ ] T038 [US2] Add conflict handling so the same tenant/key with different payload fails closed instead of creating a second reactivation family in `backend/domains/payments/repository.ts`.
-- [ ] T039 [US2] Run targeted validation commands `npm run test:unit -- tests/unit/payments.webhook-idempotency-claim.test.ts`, `npm run test:unit -- tests/unit/automatic-payment-reactivation.concurrency.test.ts`, and `npm run test:db`.
+- [X] T034 [US2] Preserve `rootActionIdempotencyKey(canonicalPaymentId, customerId)` as the automatic reactivation family key in `backend/domains/payments/idempotency.ts`.
+- [X] T035 [US2] Ensure eligible automatic reactivation uses existing `findActionByIdempotencyKey`, `findReactivationOrderByIdempotencyKey`, `createOrGetNetworkOrder`, and `createActionIdempotent` paths in `backend/domains/payments/service.ts`.
+- [X] T036 [US2] Persist blocked, disabled, already-active, and no-op eligibility decisions idempotently through existing `suspension_events` or approved audit destinations in `backend/domains/suspension/repository.ts`.
+- [X] T037 [US2] Ensure cross-tenant payment, customer, reactivation order, action, router, event, timeline, and alert access fails closed in `backend/domains/payments/service.ts`.
+- [X] T038 [US2] Add conflict handling so the same tenant/key with different payload fails closed instead of creating a second reactivation family in `backend/domains/payments/repository.ts`.
+- [X] T039 [US2] Run targeted validation commands `npm run test:unit -- tests/unit/payments.webhook-idempotency-claim.test.ts`, `npm run test:unit -- tests/unit/automatic-payment-reactivation.concurrency.test.ts`, and `npm run test:db`.
 
 **Checkpoint**: User Story 2 is independently testable for idempotency, concurrency, and tenant safety.
 

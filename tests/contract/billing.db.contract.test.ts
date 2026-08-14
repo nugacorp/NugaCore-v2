@@ -1,4 +1,6 @@
 import { describe, it, expect, afterAll } from 'vitest';
+import { aggregateBillingStatus } from '../../backend/domains/suspension/engine';
+import { DEFAULT_SUSPENSION_POLICY } from '../../backend/domains/suspension/types';
 
 // ====================================================================
 // Prueba de contrato del dominio Billing contra Supabase real.
@@ -179,6 +181,26 @@ describe.skipIf(!optIn || !hasSupabase)('Billing DB contract (Supabase staging)'
     expect(state!.allocations).toHaveLength(2);
     expect(state!.allocations[0].amount).toBe(150);
     expect(state!.allocations[1].remainingAfterPayment).toBe(0);
+  }, DB_TIMEOUT_MS);
+
+  it('recordPayment sobre factura vencida actualiza la agregación customer-level', async () => {
+    const { supabaseAdmin } = await import('../../backend/services/supabase-admin');
+    const { SupabaseBillingRepository } = await import('../../backend/domains/billing/repository');
+    const repo = new SupabaseBillingRepository(supabaseAdmin!);
+
+    const before = (await repo.listInvoices()).filter((invoice) => invoice.clientId === testClientId);
+    expect(aggregateBillingStatus(before, DEFAULT_SUSPENSION_POLICY).billingStatus).toBe('DELINQUENT');
+
+    const overdue = await repo.findInvoiceById(overdueInvoiceId);
+    expect(overdue).not.toBeNull();
+    await repo.recordPayment(overdueInvoiceId, {
+      amount: overdue!.pendingAmount,
+      method: 'SPEI',
+      transactionId: `TXN-BDBTEST-OVERDUE-${ts}`,
+    });
+
+    const after = (await repo.listInvoices()).filter((invoice) => invoice.clientId === testClientId);
+    expect(aggregateBillingStatus(after, DEFAULT_SUSPENSION_POLICY).billingStatus).toBe('CURRENT');
   }, DB_TIMEOUT_MS);
 
   it('listInvoices devuelve arreglo de EnrichedInvoice', async () => {
