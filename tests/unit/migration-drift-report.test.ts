@@ -29,19 +29,19 @@ describe('migration drift report', () => {
     expect(report.criticalTenantTables.every((check) => check.status === 'EXTERNAL_BLOCKED')).toBe(true);
   });
 
-  it('keeps documented historical drift as warnings, not blocking failures', () => {
+  it('does not report bridged historical rows as remote-only drift', () => {
     const local = listLocalMigrations();
     const report = buildMigrationDriftReport({
       local,
       remoteState: {
-        migrationVersions: [...local.uniqueVersions, '20260619033952'],
+        migrationVersions: local.uniqueVersions,
         columnsByTable: completeCriticalColumns(),
       },
     });
 
     expect(report.status).toBe('WARNING');
     expect(report.remote.extraBlocking).toEqual([]);
-    expect(report.remote.extraKnown).toEqual(['20260619033952']);
+    expect(report.remote.extraKnown).toEqual([]);
     expect(report.criticalTenantTables.every((check) => check.status === 'PASS')).toBe(true);
   });
 
