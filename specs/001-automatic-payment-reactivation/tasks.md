@@ -60,8 +60,8 @@
 ### Tests for User Story 1
 
 - [ ] T018 [P] [US1] Add blocking overdue evaluator tests for current, due soon, overdue within grace, delinquent, and multiple invoices in `tests/unit/automatic-payment-reactivation.eligibility.test.ts`.
-- [ ] T019 [P] [US1] Add partial payment tests where payment remains valid but blocking debt remains in `tests/unit/automatic-payment-reactivation.eligibility.test.ts`.
-- [ ] T020 [P] [US1] Add full-settlement and overpayment eligibility tests at customer scope in `tests/unit/automatic-payment-reactivation.eligibility.test.ts`.
+- [ ] T019 [US1] Add partial payment tests where payment remains valid but blocking debt remains in `tests/unit/automatic-payment-reactivation.eligibility.test.ts`.
+- [ ] T020 [US1] Add full-settlement and overpayment eligibility tests at customer scope in `tests/unit/automatic-payment-reactivation.eligibility.test.ts`.
 - [ ] T021 [P] [US1] Add billing DB integration tests proving customer-level invoice aggregation after payment application in `tests/contract/billing.db.contract.test.ts`.
 
 ### Implementation for User Story 1
@@ -115,8 +115,8 @@
 
 - [ ] T040 [P] [US3] Add decision audit tests for eligible, blocked, disabled, already-active, dry-run, queued, failed, and no-op outcomes in `tests/unit/automatic-payment-reactivation.audit.test.ts`.
 - [ ] T041 [P] [US3] Add RouterOS unavailable and pending/failed network outcome tests in `tests/contract/payments.worker-tenant-dispatch.contract.test.ts`.
-- [ ] T042 [P] [US3] Add already-active before worker safe no-op tests in `tests/contract/payments.worker-tenant-dispatch.contract.test.ts`.
-- [ ] T043 [P] [US3] Add duplicate worker delivery and retry-after-confirmed-success tests in `tests/contract/payments.worker-tenant-dispatch.contract.test.ts`.
+- [ ] T042 [US3] Add already-active before worker safe no-op tests in `tests/contract/payments.worker-tenant-dispatch.contract.test.ts`.
+- [ ] T043 [US3] Add duplicate worker delivery and retry-after-confirmed-success tests in `tests/contract/payments.worker-tenant-dispatch.contract.test.ts`.
 
 ### Implementation for User Story 3
 
@@ -140,7 +140,7 @@
 ### Tests for User Story 4
 
 - [ ] T050 [P] [US4] Add classification evaluator tests for `financial`, `non_financial`, `unknown`, and `none` in `tests/unit/automatic-payment-reactivation.classification.test.ts`.
-- [ ] T051 [P] [US4] Add unknown fail-closed tests proving `customer.status = suspended` alone never implies `financial` in `tests/unit/automatic-payment-reactivation.classification.test.ts`.
+- [ ] T051 [US4] Add unknown fail-closed tests proving `customer.status = suspended` alone never implies `financial` in `tests/unit/automatic-payment-reactivation.classification.test.ts`.
 - [ ] T052 [P] [US4] Add multiple blocker tests where financial debt resolves but non-financial block remains in `tests/unit/automatic-payment-reactivation.eligibility.test.ts`.
 - [ ] T053 [P] [US4] Add legacy ambiguous suspension tests mapping to `unknown` and manual/operator recovery in `tests/contract/suspension.scenarios.contract.test.ts`.
 - [ ] T054 [P] [US4] Add stale eligibility worker test `T1 eligible, T2 operator adds non-financial hold, T3 worker executes` expecting no RouterOS write in `tests/contract/payments.worker-tenant-dispatch.contract.test.ts`.
@@ -167,15 +167,17 @@
 **Purpose**: Prove constitutional planned work, external evidence boundaries, and release readiness without pretending external blockers are local PASS.
 
 - [ ] T065 [P] Document automatic reactivation runtime flags, disabled defaults, and payment-preserving behavior in `docs/operations/automatic-payment-reactivation.md`.
-- [ ] T066 [P] Document operator retry, cancel, manual recovery, uncertain RouterOS effect reconciliation, and no-secret evidence in `docs/operations/automatic-payment-reactivation.md`.
-- [ ] T067 [P] Document rollback strategy in `docs/operations/automatic-payment-reactivation.md`: disable feature first, preserve valid payments, recover network state, and avoid destructive financial rollback.
-- [ ] T068 [P] Add release validation checklist for local gates, DB gates, billing gates, auth gates, readiness, and restore in `docs/operations/automatic-payment-reactivation.md`.
+- [ ] T066 Document operator retry, cancel, manual recovery, uncertain RouterOS effect reconciliation, and no-secret evidence in `docs/operations/automatic-payment-reactivation.md`.
+- [ ] T067 Document rollback strategy in `docs/operations/automatic-payment-reactivation.md`: disable feature first, preserve valid payments, recover network state, and avoid destructive financial rollback.
+- [ ] T068 Add release validation checklist for local gates, DB gates, billing gates, auth gates, readiness, and restore in `docs/operations/automatic-payment-reactivation.md`.
 - [ ] T069 [EXTERNAL] Capture provider sandbox evidence request for signed approved webhook, duplicate retry, failed/pending/malformed events, and real payment confirmation in `docs/operations/automatic-payment-reactivation.md` with initial status `EXTERNAL_BLOCKED`.
 - [ ] T070 [EXTERNAL] Capture CHR/RouterOS lab evidence request for dry-run, controlled write, duplicate/retry behavior, cleanup verification, and no production routers in `docs/operations/automatic-payment-reactivation.md` with initial status `EXTERNAL_BLOCKED`.
-- [ ] T071 [EXTERNAL] Capture staging Supabase parity, migration drift, production strict readiness, and restore evidence requests in `docs/operations/automatic-payment-reactivation.md` with initial status `EXTERNAL_BLOCKED`.
-- [ ] T072 Run broad local gates after implementation scope is complete: `npm run lint`, `npm run typecheck`, `npm test`, `npm run build`, `npm run test:auth`, `npm run test:db`, `npm run test:db:billing`, `npm audit --omit=dev`, `npm run validate-production-readiness`, and `npm run validate-restore-checklist`.
-- [ ] T073 Perform security validation for RLS, cross-tenant denial, server-side RBAC, secret redaction, Router gates, idempotency, and fail-closed unknown behavior across `tests/unit/`, `tests/contract/`, and `tests/db/`.
-- [ ] T074 Verify scope exclusions before implementation PR merge: no per-service billing, no new RBAC roles, no credit ledger, no new queue framework, no large suspension taxonomy, and no new payment provider in `specs/001-automatic-payment-reactivation/tasks.md` review notes.
+- [ ] T071 [EXTERNAL] Capture staging Supabase parity and migration drift evidence for payment, billing, suspension, tenant, and idempotency persistence in `docs/operations/automatic-payment-reactivation.md` with initial status `EXTERNAL_BLOCKED`.
+- [ ] T072 [EXTERNAL] Capture production strict readiness evidence request separately from local/staging PASS claims in `docs/operations/automatic-payment-reactivation.md` with initial status `EXTERNAL_BLOCKED`.
+- [ ] T073 [EXTERNAL] Capture restore/readiness evidence request for future durable payment/reactivation artifacts in `docs/operations/automatic-payment-reactivation.md` with initial status `EXTERNAL_BLOCKED`.
+- [ ] T074 Run broad local gates after implementation scope is complete: `npm run lint`, `npm run typecheck`, `npm test`, `npm run build`, `npm run test:auth`, `npm run test:db`, `npm run test:db:billing`, `npm audit --omit=dev`, `npm run validate-production-readiness`, and `npm run validate-restore-checklist`.
+- [ ] T075 Perform security validation for RLS, cross-tenant denial, server-side RBAC, secret redaction, Router gates, idempotency, and fail-closed unknown behavior across `tests/unit/`, `tests/contract/`, and `tests/db/`.
+- [ ] T076 Verify scope exclusions before implementation PR merge: no per-service billing, no new RBAC roles, no credit ledger, no new queue framework, no large suspension taxonomy, and no new payment provider in `specs/001-automatic-payment-reactivation/tasks.md` review notes.
 
 ---
 
@@ -212,8 +214,8 @@ foundation
 - T006-T007 can run before T008 because they define migration tests.
 - T014 and T017 can run in parallel after the migration contract is understood.
 - Tests within each user story marked `[P]` can be created in parallel.
-- T065-T068 documentation tasks can run in parallel after core behavior names stabilize.
-- External evidence tasks T069-T071 can be prepared in parallel but remain `EXTERNAL_BLOCKED` until separately authorized.
+- T065-T068 documentation tasks should be sequenced because they update the same operations document.
+- External evidence tasks T069-T073 can be prepared in parallel but remain `EXTERNAL_BLOCKED` until separately authorized.
 
 ---
 
