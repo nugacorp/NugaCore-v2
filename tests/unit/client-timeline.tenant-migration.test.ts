@@ -81,13 +81,11 @@ describe('client_timeline.tenant_id — invariantes estáticas', () => {
 
 describe('versiones de migración', () => {
   it('ningún prefijo de versión está duplicado', async () => {
-    // El drift que costó 39 tablas sin tenant_id empezó exactamente así.
-    // PR-2A llevará esta comprobación a CI; mientras tanto vive aquí.
     const { readdirSync } = await import('fs');
     const versions = readdirSync(new URL('../../supabase/migrations', import.meta.url))
       .filter((f) => f.endsWith('.sql'))
       .map((f) => f.split('_')[0]);
     const dupes = versions.filter((v, i) => versions.indexOf(v) !== i);
-    expect([...new Set(dupes)], 'prefijos duplicados').toEqual(['20260717040000', '20260717050000']);
+    expect([...new Set(dupes)], 'prefijos duplicados').toEqual([]);
   });
 });

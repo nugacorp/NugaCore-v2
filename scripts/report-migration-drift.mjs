@@ -13,18 +13,7 @@ import { readdirSync } from 'node:fs';
 import { basename, resolve } from 'node:path';
 import { pathToFileURL } from 'node:url';
 
-export const KNOWN_DUPLICATE_VERSIONS = {
-  20260717040000: {
-    status: 'WARNING',
-    reason: 'Historical timestamp collision: mikrotik_router_tenant + onboarding_status_fail_closed.',
-    mitigation: 'Covered by 20260718175423_mikrotik_router_enrollment_tenant_id_reapply.sql.',
-  },
-  20260717050000: {
-    status: 'WARNING',
-    reason: 'Historical timestamp collision: multi_tenant_complete_ssot + olt_devices.',
-    mitigation: 'Covered by 20260730120000_multi_tenant_complete_ssot_reapply.sql.',
-  },
-};
+export const KNOWN_DUPLICATE_VERSIONS = {};
 
 export const KNOWN_REMOTE_EXTRA_VERSIONS = {
   20260619033952: {

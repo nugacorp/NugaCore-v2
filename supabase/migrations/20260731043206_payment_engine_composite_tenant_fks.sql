@@ -10,7 +10,7 @@
 --
 -- Gate explicito pendiente:
 --   mikrotik_actions -> clients/mikrotik_routers NO se modifica aqui.
---   La migracion 20260717050000_multi_tenant_complete_ssot.sql comparte
+--   La migracion 20260717050001_multi_tenant_complete_ssot.sql historicamente compartia
 --   version con 20260717050000_olt_devices.sql y puede haber quedado
 --   sombreada. En ese estado real mikrotik_actions no tiene tenant_id
 --   canonico; inferirlo de customer_id o router_id podria ser ambiguo.

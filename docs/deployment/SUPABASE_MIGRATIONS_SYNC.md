@@ -47,7 +47,7 @@ Estado previo: **3 pendientes** sobre 48 registradas.
 |---|---|---|
 | 20260725210000 | integration_settings_openpay_webhook_token | **Aplicada y registrada.** Añade `wisp_integration_settings.openpay_webhook_token` (texto opaco, no secreto: forma la URL de webhook por WISP). Aditiva e idempotente. |
 | 20260728120000 | payment_events_tenant_idempotency | **Aplicada y registrada.** `payment_events`: `tenant_id` (NOT NULL, backfill `tenant-default`, FK a `tenants` RESTRICT validada), `claimed_at` y `claim_token`; sustituye la unicidad global `uq_provider_event` por `uq_payment_events_tenant_provider_event (tenant_id, provider, provider_event_id)`. Añade el índice único parcial del token de webhook. |
-| 20260730120000 | multi_tenant_complete_ssot_reapply | **Nueva. Aplicada y registrada.** Reaplica el cuerpo de `20260717050000_multi_tenant_complete_ssot` bajo versión propia — ver "Drift resuelto" abajo. Backfill real: **39 tablas** pasaron a tener `tenant_id`. |
+| 20260730120000 | multi_tenant_complete_ssot_reapply | **Nueva. Aplicada y registrada.** Reaplica el cuerpo histórico de `multi_tenant_complete_ssot` bajo versión propia — ver "Drift resuelto" abajo. Backfill real: **39 tablas** pasaron a tener `tenant_id`. |
 
 Verificación posterior (contra `information_schema`):
 

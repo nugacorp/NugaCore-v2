@@ -7,14 +7,11 @@ import {
 } from '../../scripts/report-migration-drift.mjs';
 
 describe('migration drift report', () => {
-  it('reports local migration totals and known duplicate versions', () => {
+  it('reports local migration totals with no active duplicate versions', () => {
     const snapshot = listLocalMigrations();
 
     expect(snapshot.totalFiles).toBeGreaterThan(60);
-    expect(snapshot.duplicateVersions.map((d) => d.version)).toEqual([
-      '20260717040000',
-      '20260717050000',
-    ]);
+    expect(snapshot.duplicateVersions.map((d) => d.version)).toEqual([]);
   });
 
   it('marks remote checks external blocked when no SQL URL is configured', () => {
@@ -39,7 +36,7 @@ describe('migration drift report', () => {
       },
     });
 
-    expect(report.status).toBe('WARNING');
+    expect(report.status).toBe('PASS');
     expect(report.remote.extraBlocking).toEqual([]);
     expect(report.remote.extraKnown).toEqual([]);
     expect(report.criticalTenantTables.every((check) => check.status === 'PASS')).toBe(true);

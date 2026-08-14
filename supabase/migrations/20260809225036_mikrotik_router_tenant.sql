@@ -4,7 +4,7 @@
 -- REMOTE NAME: mikrotik_router_tenant
 --
 -- Historical retimestamp of:
---   20260717040000_mikrotik_router_tenant.sql
+--   20260717040001_mikrotik_router_tenant.sql
 --
 -- Additional mitigation:
 --   20260718175423_mikrotik_router_enrollment_tenant_id_reapply.sql

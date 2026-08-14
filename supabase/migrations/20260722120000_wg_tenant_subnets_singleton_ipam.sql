@@ -6,7 +6,7 @@
 -- Cierra B-05 (IPAM atómico), C-01 (singleton global), C-02 (tenant_id real).
 --
 -- ADITIVA e IDEMPOTENTE (patrón de reconciliación ADD COLUMN/IF NOT EXISTS).
--- Aplicar DESPUÉS de 20260717050000_multi_tenant_complete_ssot.sql (que ya
+-- Aplicar DESPUÉS de 20260717050001_multi_tenant_complete_ssot.sql (que ya
 -- añadió tenant_id a wireguard_ip_allocations / wireguard_key_rotations).
 --
 -- Nada de esto cambia comportamiento en runtime por sí solo: el backend sigue
