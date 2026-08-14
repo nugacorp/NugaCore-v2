@@ -42,6 +42,15 @@ const manualClient = (): Client => ({
   pppoeUser: 'final-user',
 });
 
+const seedFinancialBlock = () => {
+  engineStore.createBlock({
+    tenantId: TENANT,
+    customerId: 'client-final-manual',
+    category: 'financial',
+    source: 'billing',
+  });
+};
+
 const invoice = (payments: Invoice['payments'] = []): Invoice => ({
   id: INVOICE,
   tenantId: TENANT,
@@ -193,6 +202,8 @@ describe('Fixup final: compatibilidad manual sin router', () => {
     vi.stubEnv('USE_DB_SUSPENSION', 'false');
     vi.stubEnv('PAYMENTS_ROUTER_LIVE', 'false');
     store.CLIENTS = [manualClient()];
+    engineStore.BLOCKS = [];
+    seedFinancialBlock();
     store.MIKROTIK_ROUTERS = [];
     store.MIKROTIK_ACTIONS = [];
     store.CLIENT_TIMELINE = [];
@@ -255,6 +266,8 @@ describe('Fixup final: ganador atómico de liquidación', () => {
     store.CLIENTS = [manualClient()];
     store.INVOICES = [paid];
     engineStore.EVENTS = [];
+    engineStore.BLOCKS = [];
+    seedFinancialBlock();
     const service = new PaymentService(new StorePaymentRepository());
     const order = (transactionId: string, amountCents: number): PaymentOrderRecord => ({
       id: `order-${transactionId}`,
@@ -308,6 +321,8 @@ describe('Fixup final: ganador atómico de liquidación', () => {
     }];
     engineStore.EVENTS = [];
     engineStore.ORDERS = [];
+    engineStore.BLOCKS = [];
+    seedFinancialBlock();
     const repo = new StorePaymentRepository();
     const service = new PaymentService(repo);
     const orders: Array<PaymentOrderRecord & { tenantId: string }> = [

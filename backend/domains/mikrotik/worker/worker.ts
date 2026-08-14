@@ -8,6 +8,8 @@
 
 import { getCustomersService } from '../../customers/service';
 import { getSuspensionService } from '../../suspension/service';
+import { aggregateBillingStatus } from '../../suspension/engine';
+import { classifyActiveSuspension } from '../../suspension/classification';
 import { inventoryRoutersRepository } from '../../inventory/routers/repository';
 import { productionGates } from '../../../config/production-gates';
 import { executePlannedCommands } from './command-executor';
@@ -51,7 +53,9 @@ export async function processPendingOrders(
 ): Promise<WorkerRun> {
   const startedAt = nowIso();
   const runId = workerStore.nextRunId();
-  const repo = getSuspensionService().repo;
+  const suspension = getSuspensionService();
+  const repo = suspension.repo;
+  const data = suspension.data;
   const customers = getCustomersService();
   const commitEnabled = productionGates.mikrotikWorkerCommit();
 
@@ -97,6 +101,53 @@ export async function processPendingOrders(
       orderId: order.id, orderType: order.orderType, customerId: order.customerId,
       dryRun: !commitEnabled, outcome: 'failed', plannedCommands: [], note,
     };
+  };
+
+  const skipBeforePlanning = async (
+    order: SuspensionOrder,
+    note: string,
+    persist: (patch: Parameters<SuspensionRepository['updateOrder']>[1]) => Promise<SuspensionOrder>,
+  ): Promise<OrderProcessResult> => {
+    await persist({
+      status: 'CANCELLED', executedAt: nowIso(), dryRun: !commitEnabled, workerRunId: runId, workerNote: note,
+    });
+    return {
+      orderId: order.id, orderType: order.orderType, customerId: order.customerId,
+      dryRun: !commitEnabled, outcome: 'skipped', plannedCommands: [], note,
+    };
+  };
+
+  const preRouterRevalidationFailure = async (
+    order: SuspensionOrder,
+    tenantId: string,
+    client: Awaited<ReturnType<typeof customers.getById>>,
+  ): Promise<string | null> => {
+    if (order.orderType !== 'reactivation') return null;
+    if (order.source !== 'payment-engine') return null;
+    if (!client) return `Orden ${order.id} bloqueada: cliente no pertenece al tenant.`;
+    if (client.status !== 'active' && client.status !== 'suspended') {
+      return `Orden ${order.id} bloqueada: cliente no serviceable (${client.status}).`;
+    }
+    const [policy, invoices, activeBlocks] = await Promise.all([
+      repo.getPolicy(),
+      data.loadInvoices(tenantId),
+      repo.listSuspensionBlocks({ tenantId, customerId: order.customerId, activeOnly: true }),
+    ]);
+    if (!policy.enabled || !policy.autoReactivate || !policy.reactivateOnPayment) {
+      return `Orden ${order.id} cancelada: automatizacion de reactivacion deshabilitada.`;
+    }
+    const { billingStatus } = aggregateBillingStatus(
+      invoices.filter((invoice) => invoice.clientId === order.customerId),
+      policy,
+    );
+    if (billingStatus === 'DELINQUENT') {
+      return `Orden ${order.id} bloqueada: deuda financiera bloqueante sigue vigente.`;
+    }
+    const classification = classifyActiveSuspension(client, activeBlocks);
+    if (classification.blockReasonCategory === 'non_financial' || classification.blockReasonCategory === 'unknown') {
+      return `Orden ${order.id} bloqueada: bloqueo ${classification.blockReasonCategory} activo antes de RouterOS.`;
+    }
+    return null;
   };
 
   for (const order of pending) {
@@ -147,6 +198,19 @@ export async function processPendingOrders(
         `Orden ${order.id} rechazada: cliente no pertenece al tenant de la orden.`,
         persist,
       ));
+      continue;
+    }
+    if (order.orderType === 'reactivation' && order.source !== 'payment-engine' && client.status === 'active') {
+      results.push(await skipBeforePlanning(
+        order,
+        `Orden ${order.id} omitida: cliente ya activo antes del worker.`,
+        persist,
+      ));
+      continue;
+    }
+    const revalidationFailure = await preRouterRevalidationFailure(order, effectiveTenantId, client);
+    if (revalidationFailure) {
+      results.push(await skipBeforePlanning(order, revalidationFailure, persist));
       continue;
     }
     const router = requiresTenantScope && routerId

@@ -41,6 +41,10 @@ const seedClaim = (id: string, token: string) => {
   });
 };
 
+const seedFinancialBlock = (customerId = CUSTOMER) => {
+  engineStore.createBlock({ tenantId: TENANT, customerId, category: 'financial', source: 'billing' });
+};
+
 beforeEach(() => {
   vi.stubEnv('USE_DB_PAYMENTS', 'false');
   vi.stubEnv('USE_DB_BILLING', 'false');
@@ -58,6 +62,7 @@ beforeEach(() => {
   store.MIKROTIK_ROUTERS = [];
   engineStore.EVENTS = [];
   engineStore.ORDERS = [];
+  engineStore.BLOCKS = [];
 });
 
 afterEach(() => {
@@ -125,6 +130,7 @@ describe('Fixup 05: identidad canónica del charge', () => {
   ])('dos eventos del mismo charge terminan con un ledger, una raiz y una familia ($mode)', async ({ live }) => {
     vi.stubEnv('PAYMENTS_ROUTER_LIVE', live ? 'true' : 'false');
     store.CLIENTS.push(client());
+    seedFinancialBlock();
     store.INVOICES.push(invoice());
     store.MIKROTIK_ROUTERS.push(router());
     store.PAYMENT_ORDERS.push({
@@ -179,6 +185,7 @@ describe('Fixup 05: referencia CoDi completa y no ambigua', () => {
 
   it('resuelve fac-103 + c-1 desde FAC-103-C-1 y la redelivery no duplica', async () => {
     store.CLIENTS.push(client());
+    seedFinancialBlock();
     store.INVOICES.push(invoice());
     store.MIKROTIK_ROUTERS.push(router());
 
@@ -192,6 +199,7 @@ describe('Fixup 05: referencia CoDi completa y no ambigua', () => {
 
   it('prefiere una order CoDi aunque la referencia llegue con casing distinto', async () => {
     store.CLIENTS.push(client());
+    seedFinancialBlock();
     store.INVOICES.push(invoice());
     store.MIKROTIK_ROUTERS.push(router());
     store.PAYMENT_ORDERS.push({

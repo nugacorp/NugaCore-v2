@@ -56,6 +56,8 @@ beforeEach(() => {
   store.CLIENTS = [client(TENANT_A), client(TENANT_B)];
   store.INVOICES = [paidInvoice(TENANT_A), paidInvoice(TENANT_B)];
   engineStore.reset();
+  engineStore.createBlock({ tenantId: TENANT_A, customerId: CUSTOMER, category: 'financial', source: 'billing' });
+  engineStore.createBlock({ tenantId: TENANT_B, customerId: CUSTOMER, category: 'financial', source: 'billing' });
   resetSuspensionService();
 });
 
@@ -97,5 +99,28 @@ describe('automatic payment reactivation concurrency', () => {
     expect(engineStore.EVENTS).toHaveLength(2);
     expect(new Set(engineStore.EVENTS.map((event) => event.tenantId))).toEqual(new Set([TENANT_A, TENANT_B]));
   });
-});
 
+  it('manual hold concurrente conserva estado coherente y origen automatico auditado', async () => {
+    const automatic = await decide(TENANT_A);
+    await engineStore.createBlock({
+      tenantId: TENANT_A,
+      customerId: CUSTOMER,
+      category: 'non_financial',
+      source: 'manual',
+      reason: 'operator hold',
+    });
+    const blocked = await evaluateAutomaticPaymentReactivation({
+      tenantId: TENANT_A,
+      customerId: CUSTOMER,
+      canonicalPaymentId: `${PAYMENT}-retry`,
+      invoiceId: `invoice-${TENANT_A}`,
+      origin: 'webhook',
+    });
+    await recordAutomaticReactivationDecision(blocked);
+
+    expect(automatic.outcome).toBe('eligible');
+    expect(blocked.outcome).toBe('blocked_non_financial');
+    expect(engineStore.EVENTS.map((event) => event.metadata?.origin)).toEqual(['webhook', 'webhook']);
+    expect(engineStore.EVENTS.some((event) => event.metadata?.blockReasonCategory === 'non_financial')).toBe(true);
+  });
+});

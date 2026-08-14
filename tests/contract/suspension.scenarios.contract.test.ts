@@ -2,6 +2,7 @@ import { describe, it, expect, beforeAll } from 'vitest';
 import request from 'supertest';
 import type { Express } from 'express';
 import { createApp } from '../../backend/app';
+import { classifyActiveSuspension } from '../../backend/domains/suspension/classification';
 
 // ====================================================================
 // Fase 4.5.1 — Escenarios A/B end-to-end vía la herramienta de staging.
@@ -13,6 +14,7 @@ import { createApp } from '../../backend/app';
 
 const ADMIN = { 'x-user-role': 'super admin', 'x-user-id': 'test-admin' };
 const COBR = { 'x-user-role': 'cobranza', 'x-user-id': 'test-cobr' };
+const READONLY = { 'x-user-role': 'solo lectura', 'x-user-id': 'test-readonly' };
 
 const createScenario = (app: Express, scenario: 'A' | 'B') =>
   request(app).post('/api/suspension/test-tools/scenario').set(ADMIN).send({ confirm: true, scenario });
@@ -53,6 +55,53 @@ describe('Automatic reactivation suspension-block fixtures', () => {
     expect(blockFixtures.unknown).toMatchObject([{ category: 'unknown' }]);
     expect(blockFixtures.none).toEqual([]);
     expect(blockFixtures.multiple.map((block) => block.category)).toEqual(['financial', 'non_financial']);
+  });
+
+  it('legacy ambiguous suspended state maps to unknown and manual recovery, not automatic financial', () => {
+    const result = classifyActiveSuspension({ status: 'suspended' }, []);
+
+    expect(result.blockReasonCategory).toBe('unknown');
+    expect(result.reason).toMatch(/falla cerrado/i);
+  });
+});
+
+describe('Suspension RBAC — recovery controls', () => {
+  let app: Express;
+  beforeAll(() => { app = createApp(); });
+
+  it('solo lectura puede inspeccionar pero no evaluar ni recuperar manualmente', async () => {
+    const created = await createScenario(app, 'B');
+    const { customerId } = created.body;
+
+    expect((await request(app).get('/api/suspension/policies').set(READONLY)).status).toBe(200);
+    expect((await request(app).get(`/api/suspension/orders?customerId=${customerId}`).set(READONLY)).status).toBe(200);
+
+    const evaluate = await request(app).post(`/api/suspension/evaluate/${customerId}`).set(READONLY).send({});
+    expect(evaluate.status).toBe(403);
+
+    const manualRecovery = await request(app)
+      .post(`/api/suspension/clients/${customerId}/reactivate`)
+      .set(READONLY)
+      .send({ reason: 'readonly should not recover' });
+    expect(manualRecovery.status).toBe(403);
+
+    const policyWrite = await request(app).put('/api/suspension/policies').set(READONLY).send({ autoReactivate: false });
+    expect(policyWrite.status).toBe(403);
+  });
+
+  it('cobranza conserva permisos server-side para evaluar y recuperar manualmente', async () => {
+    const created = await createScenario(app, 'B');
+    const { customerId } = created.body;
+
+    const evaluate = await request(app).post(`/api/suspension/evaluate/${customerId}`).set(COBR).send({});
+    expect(evaluate.status).toBe(200);
+
+    const manualRecovery = await request(app)
+      .post(`/api/suspension/clients/${customerId}/reactivate`)
+      .set(COBR)
+      .send({ reason: 'Recuperacion manual autorizada por cobranza.' });
+    expect(manualRecovery.status).toBe(200);
+    expect(manualRecovery.body.status).toBe('active');
   });
 });
 

@@ -1,6 +1,6 @@
 import { aggregateBillingStatus } from '../suspension/engine';
+import { classifyActiveSuspension } from '../suspension/classification';
 import { getSuspensionService } from '../suspension/service';
-import type { SuspensionBlockCategory } from '../suspension/types';
 import { rootActionIdempotencyKey } from './idempotency';
 import type {
   AutomaticReactivationDecision,
@@ -22,17 +22,10 @@ const decisionReason: Record<AutomaticReactivationDecisionOutcome, string> = {
   eligible: 'Pago confirmado y deuda bloqueante liquidada; procede reactivacion automatica.',
   blocked_overdue: 'Pago confirmado, pero el cliente conserva deuda vencida bloqueante.',
   blocked_non_financial: 'Pago confirmado, pero existe un bloqueo no financiero activo.',
-  blocked_unknown: 'Pago confirmado, pero existe un bloqueo de clasificacion desconocida.',
   automation_disabled: 'Pago confirmado, pero la automatizacion de reactivacion esta deshabilitada.',
   already_active: 'Pago confirmado, pero el cliente ya esta activo.',
   customer_not_found: 'Pago confirmado, pero el cliente no existe en el tenant.',
   not_serviceable: 'Pago confirmado, pero el cliente no esta suspendido ni activo.',
-};
-
-const categoryOf = (categories: SuspensionBlockCategory[]): AutomaticReactivationDecisionOutcome | null => {
-  if (categories.includes('unknown')) return 'blocked_unknown';
-  if (categories.includes('non_financial')) return 'blocked_non_financial';
-  return null;
 };
 
 export async function evaluateAutomaticPaymentReactivation(
@@ -52,7 +45,8 @@ export async function evaluateAutomaticPaymentReactivation(
 
   const customerInvoices = invoices.filter((invoice) => invoice.clientId === input.customerId);
   const { billingStatus } = aggregateBillingStatus(customerInvoices, policy);
-  const activeBlockCategories = activeBlocks.map((block) => block.category);
+  const classification = classifyActiveSuspension(customer, activeBlocks);
+  const activeBlockCategories = classification.activeBlocks.map((block) => block.category);
   const rootKey = rootActionIdempotencyKey(input.canonicalPaymentId, input.customerId);
   let outcome: AutomaticReactivationDecisionOutcome;
 
@@ -61,7 +55,9 @@ export async function evaluateAutomaticPaymentReactivation(
   else if (customer.status !== 'suspended') outcome = 'not_serviceable';
   else if (!policy.enabled || !policy.autoReactivate || !policy.reactivateOnPayment) outcome = 'automation_disabled';
   else if (isBlockingBillingStatus(billingStatus)) outcome = 'blocked_overdue';
-  else outcome = categoryOf(activeBlockCategories) ?? 'eligible';
+  else if (classification.blockReasonCategory === 'non_financial' || classification.blockReasonCategory === 'unknown') {
+    outcome = 'blocked_non_financial';
+  } else outcome = 'eligible';
 
   return {
     tenantId: input.tenantId,
@@ -71,13 +67,46 @@ export async function evaluateAutomaticPaymentReactivation(
     origin: input.origin,
     eligible: outcome === 'eligible',
     outcome,
-    reason: decisionReason[outcome],
+    reason: classification.blockReasonCategory === 'unknown' && outcome === 'blocked_non_financial'
+      ? 'Pago confirmado, pero la suspension activa es ambigua o desconocida.'
+      : decisionReason[outcome],
     billingStatus,
     blockingDebt: isBlockingBillingStatus(billingStatus),
+    blockReasonCategory: classification.blockReasonCategory,
     activeBlockCategories,
+    activeBlocks: classification.activeBlocks.map((block) => ({
+      category: block.category,
+      evidenceType: block.evidenceType,
+      evidenceId: block.evidenceId,
+    })),
     reactivationIdempotencyKey: rootKey,
     idempotencyKey: `${rootKey}:eligibility:${outcome}`,
   };
+}
+
+export async function clearFinancialSuspensionBlocksForDecision(
+  decision: AutomaticReactivationDecision,
+  actorId = 'automatic-payment-reactivation',
+): Promise<number> {
+  if (!decision.eligible) return 0;
+  const { repo } = getSuspensionService();
+  const activeFinancial = await repo.listSuspensionBlocks({
+    tenantId: decision.tenantId,
+    customerId: decision.customerId,
+    category: 'financial',
+    activeOnly: true,
+  });
+  let cleared = 0;
+  for (const block of activeFinancial) {
+    const result = await repo.clearSuspensionBlock({
+      tenantId: decision.tenantId,
+      blockId: block.id,
+      clearedBy: actorId,
+      clearReason: `Pago confirmado ${decision.canonicalPaymentId}; deuda bloqueante regularizada.`,
+    });
+    if (result) cleared += 1;
+  }
+  return cleared;
 }
 
 export async function recordAutomaticReactivationDecision(
@@ -99,7 +128,10 @@ export async function recordAutomaticReactivationDecision(
       canonicalPaymentId: decision.canonicalPaymentId,
       billingStatus: decision.billingStatus,
       blockingDebt: decision.blockingDebt,
+      blockReasonCategory: decision.blockReasonCategory,
       activeBlockCategories: decision.activeBlockCategories,
+      activeBlocks: decision.activeBlocks,
+      networkState: decision.eligible ? 'requested' : 'not_requested',
     },
     idempotencyKey: decision.idempotencyKey,
   });

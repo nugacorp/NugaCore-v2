@@ -69,6 +69,10 @@ const isAutomaticReactivationDecisionEvent = (event: SuspensionEvent): boolean =
 const isReactivationOrderEvent = (event: SuspensionEvent): boolean =>
   event.eventType === 'reactivation_order_created';
 
+const seedFinancialBlock = (customerId: string, tenantId = TENANT_A) => {
+  engineStore.createBlock({ tenantId, customerId, category: 'financial', source: 'billing' });
+};
+
 beforeEach(() => {
   store.PAYMENT_EVENTS.length = 0;
   store.MIKROTIK_ROUTERS.push({
@@ -100,6 +104,9 @@ afterEach(() => {
   );
   engineStore.ORDERS = engineStore.ORDERS.filter(
     (order) => !order.customerId.startsWith(INTERNAL_FENCING_CUSTOMER_PREFIX),
+  );
+  engineStore.BLOCKS = engineStore.BLOCKS.filter(
+    (block) => !block.customerId.startsWith(INTERNAL_FENCING_CUSTOMER_PREFIX),
   );
   store.NOC_ALERTS = store.NOC_ALERTS.filter(
     (alert) => !alert.source.startsWith('Cliente fencing') && !alert.source.startsWith('Cliente checkpoint'),
@@ -846,6 +853,7 @@ describe('PaymentService — ownership antes de efectos', () => {
         pppoeUser: `pppoe-${provider}`,
       };
       store.CLIENTS.push(customer);
+      seedFinancialBlock(customerId);
       const actionRepo = new StorePaymentRepository();
       const persistedStoreEvent = {
         ...persisted,
@@ -989,6 +997,7 @@ describe('PaymentService — ownership antes de efectos', () => {
       pppoeUser: `pppoe-checkpoint-${handoff}`,
     };
     store.CLIENTS.push(customer);
+    seedFinancialBlock(customerId);
     const actionRepo = new StorePaymentRepository();
     const persistedStoreEvent = {
       ...persisted,
@@ -1153,6 +1162,7 @@ describe('PaymentService — ownership antes de efectos', () => {
       pppoeUser: `pppoe-checkpoint-concurrent-${handoff}`,
     };
     store.CLIENTS.push(customer);
+    seedFinancialBlock(customerId);
 
     const actionRepo = new StorePaymentRepository();
     const persistedStoreEvent = {
@@ -1305,7 +1315,7 @@ describe('PaymentService — ownership antes de efectos', () => {
     expect(result.dispatchCalls).toBe(2);
     expect(result.networkOrders).toHaveLength(1);
     expect(result.suspensionCalls).toBe(2);
-    expect(result.suspensionEvents.filter(isAutomaticReactivationDecisionEvent)).toHaveLength(2);
+    expect(result.suspensionEvents.filter(isAutomaticReactivationDecisionEvent)).toHaveLength(1);
     expect(result.suspensionEvents.filter(isReactivationOrderEvent)).toHaveLength(1);
     expect(result.timeline).toHaveLength(1);
     expect(result.alerts).toHaveLength(1);
@@ -1324,7 +1334,7 @@ describe('PaymentService — ownership antes de efectos', () => {
     expect.soft(result.dispatchCalls).toBe(2);
     expect.soft(result.networkOrders).toHaveLength(1);
     expect.soft(result.timeline).toHaveLength(1);
-    expect.soft(result.suspensionEvents.filter(isAutomaticReactivationDecisionEvent)).toHaveLength(2);
+    expect.soft(result.suspensionEvents.filter(isAutomaticReactivationDecisionEvent)).toHaveLength(1);
     expect.soft(result.suspensionEvents.filter(isReactivationOrderEvent)).toHaveLength(1);
     expect.soft(result.alerts).toHaveLength(1);
     expect.soft(result.closes).toBe(1);
@@ -1348,7 +1358,7 @@ describe('PaymentService — ownership antes de efectos', () => {
     expect.soft(result.dispatchCalls).toBe(2);
     expect.soft(result.networkOrders).toHaveLength(1);
     expect.soft(result.suspensionCalls).toBe(2);
-    expect.soft(result.suspensionEvents.filter(isAutomaticReactivationDecisionEvent)).toHaveLength(2);
+    expect.soft(result.suspensionEvents.filter(isAutomaticReactivationDecisionEvent)).toHaveLength(1);
     expect.soft(result.suspensionEvents.filter(isReactivationOrderEvent)).toHaveLength(1);
     expect.soft(result.timeline).toHaveLength(1);
     expect.soft(result.alerts).toHaveLength(1);
@@ -1483,6 +1493,7 @@ describe('PaymentService — ownership antes de efectos', () => {
       planId: 'plan-test',
       ip: '192.0.2.5',
     });
+    seedFinancialBlock(customerId);
     const invoice = {
       id: 'INV', tenantId: TENANT_A, clientId: customerId, status: 'pending',
       amount: 100, pendingAmount: 100, payments: [],
