@@ -52,6 +52,63 @@ Use existing server-side RBAC and routes. Do not introduce ad hoc DB edits for n
 
 Unknown classification fails closed. A customer with `status = suspended` and no structured deterministic financial block is not eligible for automatic reactivation. The operator path is manual review, then authorized manual reactivation or a future approved data repair/migration.
 
+## Structured Financial Blocks (Who Creates Them)
+
+`public.customer_suspension_blocks` is the only structured authority on why a customer is currently blocked. Two producers exist, and they are deliberately different:
+
+| Producer | Path | Category | Evidence |
+| --- | --- | --- | --- |
+| Suspension engine | `applyEvaluation` in `backend/domains/suspension/engine.ts`, via `ensureEngineFinancialBlock` in `backend/domains/suspension/financial-blocks.ts` | `financial` | `evidence_type = 'suspension_order'`, `evidence_id = <id of the engine suspension order>` |
+| Manual operator suspension | `POST /api/suspension/clients/:id/suspend` | `non_financial` | `evidence_type = 'manual_action'` |
+
+The engine creates a `financial` block only when it emits a suspension order for `DELINQUENT` billing — that is, debt beyond the applicable grace window. Debt still inside grace (`OVERDUE`) produces no order and no block. A disabled policy produces neither.
+
+`source` is `suspension-engine`, which distinguishes automation-produced evidence from an operator action. `reason` is operator-safe text; it never carries provider payloads, router output, or secrets.
+
+### Idempotency
+
+The block's identity is `(tenant_id, evidence_type, evidence_id)`, protected by the unique partial index `uq_customer_suspension_blocks_evidence`. Creation is therefore create-or-return in both persistence modes:
+
+- Store (`USE_DB_SUSPENSION=false`): the in-memory store returns the existing block when the evidence matches.
+- Supabase (`USE_DB_SUSPENSION=true`): the insert conflicts with `23505` and the existing row is read back.
+
+Re-evaluating the same customer converges to the same order and the same block. It never creates a second one.
+
+### Reconciliation After A Partial Failure
+
+The order is written first, because the order *is* the evidence. If the block write then fails, the evaluation fails visibly and the suspension order stays open.
+
+An open engine suspension order makes `decideServiceStatus` return `action: 'none'`, so without an explicit reconciliation path the retry could never repair the missing block. The engine therefore also ensures the block when it finds, for a `DELINQUENT` customer, an already-open engine suspension order. That converges idempotently:
+
+```text
+existing open suspension order + missing financial block
+  -> next evaluation
+  -> block created from the same order id
+  -> no second order
+```
+
+This is convergence, not atomicity. Order and block are two writes and there is no transaction spanning them. The residual window is narrow but real: if the block write fails **and** the worker executes the suspension order before the next evaluation, the order leaves the open set and that customer keeps no structured evidence. Such a customer stays `unknown` and fail-closed, exactly like any other legacy case, and needs the manual path below.
+
+### Legacy Suspended Customers
+
+Customers suspended before this behavior existed — or suspended outside the engine — have no structured evidence. They stay `unknown` and fail closed. This is intentional:
+
+- No backfill is executed. The engine never infers a financial cause from `status = 'suspended'` alone.
+- The recovery path is manual review followed by authorized manual reactivation.
+- A future repair could deterministically derive `financial` evidence from historical `source='engine'` suspension orders tied to delinquency. That is a **proposal only**; it requires separate authorization, a migration plan, preflight, and evidence, and it is not part of this change.
+
+### Tenant Scope
+
+Block, order, customer, and invoices all belong to the same tenant. Engine evaluations that produce effects resolve their tenant before doing anything else and fail closed when tenant isolation is active (multi-tenant enabled, hardened runtime, or suspension/customers/billing on the database). The historical single-WISP `tenant-default` fallback survives only in the fully hermetic local mode.
+
+The `suspension-cycle` job has no HTTP request to inherit a tenant from. It requires an explicit `SUSPENSION_CYCLE_TENANT_ID` and fails closed otherwise; it must never evaluate every tenant as if they were one. A per-tenant authoritative enumeration for that job does not exist yet and remains open work.
+
+### Clearing
+
+Only the payment path clears financial blocks, through `clearFinancialSuspensionBlocksForDecision`, and only when the decision is `eligible`. It never clears `non_financial` or `unknown` blocks. Clearing is an update, not a delete: `cleared_at`, `cleared_by`, and `clear_reason` preserve the audit trail, and repeating it is a no-op.
+
+The engine does not clear financial blocks when it emits a reactivation order. A stale active `financial` block does not block anything — `classifyActiveSuspension` only blocks on `non_financial` and `unknown` — whereas clearing it early would turn the customer's classification into `unknown` and could fail a later payment evaluation closed.
+
 ## Rollback Strategy
 
 Rollback order:
