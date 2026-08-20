@@ -217,9 +217,12 @@ export const engineStore = {
     orderType: SuspensionOrder['orderType'],
     reason: string,
     actorId?: string,
+    tenantId?: string,
   ): number {
     let cancelled = 0;
-    for (const o of this.openOrders(customerId, orderType)) {
+    const candidates = this.openOrders(customerId, orderType)
+      .filter((o) => !tenantId || (o.tenantId || 'tenant-default') === tenantId);
+    for (const o of candidates) {
       o.status = 'CANCELLED';
       cancelled += 1;
       this.recordEvent({
