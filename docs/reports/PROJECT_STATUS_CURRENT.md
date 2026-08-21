@@ -91,9 +91,9 @@ La ruta HTTP `/api/payments/webhook/mercadopago` va sin guion bajo y es correcta
 
 ### Base de Release Engineering
 
-`VERIFICADO EN CÓDIGO/CI`
+`VERIFICADO EN CÓDIGO/CI`, con un release candidate ya `VERIFICADO EN STAGING`/publicado
 
-Pipeline de publicación inmutable listo, **sin haberlo ejecutado todavía**:
+Pipeline de publicación inmutable:
 
 - Contrato tag ↔ versión (`npm run validate:release-tag`): sólo `vX.Y.Z` y `vX.Y.Z-rc.N` con N ≥ 1, y coincidencia exacta con `package.json` y `package-lock.json`.
 - Workflow de release disparado sólo por tags `v*`, con permisos mínimos, actions fijadas a SHA completo y autenticación en GHCR únicamente con `GITHUB_TOKEN`.
@@ -102,7 +102,22 @@ Pipeline de publicación inmutable listo, **sin haberlo ejecutado todavía**:
 - build-once / deploy-many: la configuración pública de Supabase sale del bundle y se sirve en `/runtime-config.js`, así que un mismo digest se promueve entre ambientes.
 - Smoke hermético de contenedor en CI: construye, arranca, comprueba `/api/health/live` y `/runtime-config.js`, e inyecta un marcador de secreto para demostrar que no se filtra.
 
-`REQUIERE AUTORIZACIÓN`: **no se ha creado ningún tag, ningún GitHub Release ni ninguna imagen en GHCR.** El package de GHCR no existe todavía; se creará en la primera publicación real. `v2.0.0-rc.1` es el primer candidato previsto y `v2.0.0` estable sigue bloqueado por T069–T073 y por las decisiones de alcance. Ver [`../operations/RELEASING.md`](../operations/RELEASING.md).
+**`v2.0.0-rc.1` está publicado** — hecho demostrado, no previsto:
+
+- Tag anotado `v2.0.0-rc.1`, source SHA `802544ca3aae9c3b1e266825cbd4fb1fe2bed663`.
+- GitHub Release publicado como **prerelease** (no `latest`), con `release-manifest.json` adjunto.
+- Imagen en GHCR, digest `sha256:8707a98cde486bc13697e138856c453fb7a30f2a025d3a24a49df4af6df392ff`, `linux/amd64` + `linux/arm64`, con provenance y SBOM verificados.
+- T071 (paridad de migraciones en staging) cerrada sobre este mismo SHA: ver blocker 3 más abajo.
+
+`REQUIERE AUTORIZACIÓN`: esto **no** implica que staging esté desplegado con esta imagen, ni que `v2.0.0` estable esté cerca — sigue bloqueado por T069, T070, T072, T073 y por las decisiones de alcance. Ver [`../operations/RELEASING.md`](../operations/RELEASING.md).
+
+### Protección de la rama `main`
+
+`VERIFICADO EN CÓDIGO/CI` — verificado consultando el ruleset efectivo por API, no asumido.
+
+`main` tiene un repository ruleset activo, sin exclusiones, aplicado exclusivamente a `refs/heads/main`: exige pull request para cualquier cambio, bloquea force push (`non_fast_forward`) y bloquea el borrado de la rama. **Cero bypasses, incluida la cuenta propietaria** (`current_user_can_bypass: never`, igual que los dos rulesets de tags `v*`). No exige revisión aprobatoria humana (`required_approving_review_count: 0`): este repositorio lo opera una sola cuenta, y exigir una aprobación que nadie más puede dar habría hecho imposible fusionar sin un bypass — lo que habría contradicho el cero-bypass. Sí exige resolver los hilos de conversación abiertos antes de fusionar.
+
+Nueve de los checks de `production-gates.yml` quedaron como required status checks (los seis fixtures PostgreSQL 17, el smoke de contenedor, security contract tests y production readiness local). El job `Lint · Typecheck · Test · Build` **no** quedó como required: ese nombre literal existe, idéntico, tanto en `ci.yml` como en `production-gates.yml`; GitHub sólo exige que **uno** de los dos con ese nombre pase, no ambos, así que exigirlo habría sido un requisito ambiguo, no una protección real. Queda como deuda inmediata: renombrar uno de los dos jobs para desambiguar antes de poder exigirlo con seguridad.
 
 ## Estado por área
 
@@ -189,7 +204,7 @@ Aparece en documentos de planificación como integración futura; no hay código
 
 Explícitamente, y por falta de evidencia:
 
-- **No** afirma que `20260814050000_customer_suspension_blocks` esté aplicada en staging.
+- **Sí** afirma, con evidencia de T071 (2026-08-21, `docs/results/STAGING_MIGRATION_PARITY_V2.0.0_RC1_RESULT.md`), que `20260814050000_customer_suspension_blocks` está entre las 76 migraciones confirmadas aplicadas en staging (76 locales / 76 remotas, cero faltantes). Sigue **sin** afirmar que staging esté desplegado con la imagen `v2.0.0-rc.1`.
 - **No** afirma que ningún proveedor de pagos esté validado en sandbox.
 - **No** afirma que la escritura RouterOS esté validada contra hardware.
 - **No** afirma que exista un restore probado.
@@ -211,7 +226,9 @@ Ejecutados localmente sobre la rama de esta fase, en modo hermético. No son res
 
 Los 11 archivos omitidos son suites de contrato que requieren una Supabase real; se omiten por diseño y no son fallos.
 
-**No ejecutados** (requieren infraestructura externa): `test:db`, `test:db:billing`, `test:auth`, `test:db:postgres17` local (los fixtures PG17 sí corren en CI), `validate-production-readiness`, `validate-restore-checklist`, `report-migration-drift` contra staging.
+**No ejecutados** (requieren infraestructura externa): `test:db`, `test:db:billing`, `test:auth`, `test:db:postgres17` local (los fixtures PG17 sí corren en CI), `validate-production-readiness`, `validate-restore-checklist`.
+
+`report-migration-drift` contra staging **sí se ejecutó** (T071, 2026-08-21): `status: PASS`, ver `docs/results/STAGING_MIGRATION_PARITY_V2.0.0_RC1_RESULT.md`. Eso no cubre `validate-production-readiness` ni `validate-restore-checklist`, que siguen sin ejecutarse contra ningún ambiente real.
 
 ## Fuentes canónicas
 
