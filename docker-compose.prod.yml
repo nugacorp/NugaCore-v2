@@ -11,25 +11,31 @@
 #   npm run docker:config:safe
 # Evita publicar la salida de `docker compose config` sin `--no-interpolate`.
 #
-# Nota: las VITE_* se incrustan en build-time (build args), el resto
-#       se inyecta en runtime vía env_file.
+# BUILD-ONCE / DEPLOY-MANY: la imagen ya NO recibe configuración de Supabase
+# en build-time. La URL y la anon key se sirven en runtime desde
+# /runtime-config.js, así que el mismo digest se promueve entre ambientes
+# cambiando sólo variables del contenedor. Ver docs/operations/RELEASING.md.
 # ====================================================================
 
 services:
   nugacore:
+    # Referencia local. En un despliegue real se usa la imagen publicada POR
+    # DIGEST (ghcr.io/nugacorp/nugacore-v2@sha256:...), nunca una etiqueta
+    # mutable. Ver docs/operations/RELEASING.md.
     build:
       context: .
       dockerfile: Dockerfile
-      args:
-        VITE_SUPABASE_URL: "${VITE_SUPABASE_URL:-}"
-        VITE_SUPABASE_ANON_KEY: "${VITE_SUPABASE_ANON_KEY:-}"
-    image: nugacore:latest
+    image: nugacore:local
     container_name: nugacore
     env_file:
       - .env
     environment:
       NODE_ENV: production
       PORT: "3000"
+      # Configuración PÚBLICA servida al navegador en /runtime-config.js.
+      # Son los únicos valores del entorno que el cliente llega a ver.
+      SUPABASE_URL: "${SUPABASE_URL:-}"
+      SUPABASE_ANON_KEY: "${SUPABASE_ANON_KEY:-}"
     ports:
       - "3000:3000"
     restart: unless-stopped
