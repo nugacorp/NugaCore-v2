@@ -62,6 +62,7 @@ Estados usados:
 | Billing | ✅ Operativa | 🟡 Validar saldos reales/backups | No cargar seeds/mock a producción. |
 | Payment Engine | ✅ Operativa | 🟡 Validar proveedor real/webhooks | Requiere conciliación real e idempotencia validada. |
 | Suspension Engine | ✅ Operativa | 🔴 No activar contra routers reales | Mantener dry-run/lógico hasta Worker seguro. |
+| Reactivación automática por pago (Spec 001 / B1) | ✅ Implementada y probada en local/CI | 🔴 Sin validación externa | El motor emite el bloqueo financiero estructurado (`customer_suspension_blocks`); el worker no puede cortar sin esa evidencia persistida. Falta sandbox de proveedor (T069) y laboratorio CHR (T070). Ver `docs/operations/automatic-payment-reactivation.md`. |
 | Service Status SSOT | ✅ Operativa (Pre-PROD-7) | 🟢 Read-only + dryRun seguro | Fuente oficial de `serviceStatus`; KPI "Suspendidos". No ejecuta nada real. Ver `docs/SERVICE_STATUS_SSOT_RESULT.md`. |
 | Provisioning Engine Foundation | ✅ Operativa (PROD-7) · Hermes ✅ | 🟢 Dry-run seguro | Calcula y audita acciones; no toca RouterOS ni Worker Live. Validada en staging. Ver `docs/PROVISIONING_ENGINE_FOUNDATION_RESULT.md`, `docs/PROVISIONING_ENGINE_FOUNDATION_STAGING_RESULT.md`. |
 | Automation Engine Foundation | ✅ Operativa (PROD-8) · 🟡 pendiente Hermes | 🟢 Decisión / dry-run | El cerebro: recibe eventos, evalúa reglas y devuelve decisiones + executionPreview. No ejecuta nada. Falta `STAGING_RESULT`. Ver `docs/AUTOMATION_ENGINE_FOUNDATION_RESULT.md`. |
