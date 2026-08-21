@@ -289,3 +289,62 @@ describe('CLAUDE.md clasifica correctamente las suites de prueba', () => {
     expect(claude).toMatch(/docs?[^\n]*(CLAUDE\.md|agent)|agent[^\n]*docs?/i);
   });
 });
+
+describe('el estado actual no reincide en afirmaciones superadas por v2.0.0-rc.1', () => {
+  // v2.0.0-rc.1 se publicó (tag, Release, imagen GHCR) el 2026-08-21. Antes
+  // de eso el documento afirmaba correctamente que nada existía todavía; esa
+  // misma afirmación, sin actualizar, pasó a ser falsa. Estas guardas
+  // bloquean exactamente esa clase de regresión — no exigen un texto exacto,
+  // sólo que la afirmación superada no reaparezca y que el hecho actual sí
+  // esté presente.
+  it('no afirma que no se ha creado ningún tag/Release/imagen GHCR', () => {
+    expect(status).not.toMatch(/no se ha creado ning[uú]n tag/i);
+    expect(status).not.toMatch(/no existe ning[uú]n(a)? (github release|imagen)/i);
+  });
+
+  it('no presenta v2.0.0-rc.1 como un candidato todavía no publicado', () => {
+    // La frase retirada exacta, no la palabra suelta: "no previsto" es
+    // justamente la negación correcta que reemplaza a esta afirmación.
+    expect(status).not.toMatch(/es el primer candidato previsto/i);
+    expect(status).not.toMatch(/v2\.0\.0-rc\.1[^\n]*todav[ií]a no/i);
+    expect(status).toMatch(/v2\.0\.0-rc\.1[^\n]*(est[aá] publicado|publicad[oa])/i);
+  });
+
+  it('declara el tag, el source SHA y el digest exactos de v2.0.0-rc.1', () => {
+    expect(status).toContain('802544ca3aae9c3b1e266825cbd4fb1fe2bed663');
+    expect(status).toContain('sha256:8707a98cde486bc13697e138856c453fb7a30f2a025d3a24a49df4af6df392ff');
+  });
+
+  it('afirma, con evidencia de T071, que customer_suspension_blocks está aplicada en staging', () => {
+    expect(status).not.toMatch(/no afirma que `?20260814050000_customer_suspension_blocks`? est[eé] aplicada/i);
+    expect(status).toMatch(/20260814050000_customer_suspension_blocks[^\n]*(aplicada|confirmad)/i);
+  });
+
+  it('no presenta report-migration-drift contra staging como no ejecutado', () => {
+    const idx = status.indexOf('No ejecutados');
+    expect(idx, "falta la lista de 'No ejecutados'").toBeGreaterThan(-1);
+    // Sólo la línea/oración de la lista misma, no el párrafo completo: la
+    // corrección agrega una oración APARTE que sí menciona el comando en
+    // sentido positivo, y no debe contaminar esta aserción negativa.
+    const listLine = status.slice(idx, status.indexOf('\n', idx));
+    expect(listLine).not.toContain('report-migration-drift');
+    expect(status).toMatch(/report-migration-drift[^\n]*(s[ií] se ejecut|PASS)/i);
+  });
+});
+
+describe('main aparece protegida sólo tras verificar el ruleset efectivo', () => {
+  it('documenta la protección de main como verificada, no asumida', () => {
+    const idx = status.indexOf('Protección de la rama `main`');
+    expect(idx, 'falta la sección de protección de main').toBeGreaterThan(-1);
+    const section = status.slice(idx, idx + 900);
+    expect(section).toMatch(/verificad[oa][^\n]*(API|ruleset)|ruleset[^\n]*(por API|efectivo)/i);
+    expect(section).toMatch(/cero bypasses|current_user_can_bypass.*never/i);
+  });
+
+  it('reconoce el nombre de check duplicado como deuda, no como protegido', () => {
+    const idx = status.indexOf('Protección de la rama `main`');
+    const section = status.slice(idx, idx + 1600);
+    expect(section).toMatch(/Lint · Typecheck · Test · Build/);
+    expect(section).toMatch(/deuda|pendiente|no qued[oó]/i);
+  });
+});
