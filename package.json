@@ -25,6 +25,7 @@
     "validate-production-readiness:strict": "node -r dotenv/config --input-type=module -e \"process.env.PRODUCTION_READINESS_STRICT='true'; await import('./scripts/validate-production-readiness.mjs')\"",
     "validate-restore-checklist": "node -r dotenv/config scripts/validate-restore-checklist.mjs",
     "validate-restore-checklist:strict": "node -r dotenv/config --input-type=module -e \"process.env.PRODUCTION_RESTORE_STRICT='true'; const { runValidateRestoreChecklistCli } = await import('./scripts/validate-restore-checklist.mjs'); process.exit(runValidateRestoreChecklistCli())\"",
+    "validate:migration-files": "node scripts/validate-migration-files.mjs",
     "report-migration-drift": "node -r dotenv/config scripts/report-migration-drift.mjs",
     "docker:config:safe": "docker compose -f docker-compose.prod.yml config --no-interpolate",
     "ftth:export-samples": "node scripts/ftth/export-import-samples.mjs",

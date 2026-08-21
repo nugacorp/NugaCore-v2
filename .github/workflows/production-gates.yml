@@ -17,6 +17,8 @@ jobs:
           node-version: 22
           cache: npm
       - run: npm ci
+      - name: Validate migration filenames and unique versions
+        run: npm run validate:migration-files
       - run: npx eslint .
       - run: npm run typecheck
       - run: npm test
