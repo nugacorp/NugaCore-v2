@@ -122,9 +122,16 @@ IPAM_PROVIDER=mock
 
 ```env
 MP_ACCESS_TOKEN=__SECRET__
-WEBHOOK_SECRET_MERCADOPAGO=__SECRET__
+WEBHOOK_SECRET_MERCADO_PAGO=__SECRET__
 WEBHOOK_SECRET_OPENPAY=__SECRET__
 ```
+
+> El nombre lleva guion bajo entre `MERCADO` y `PAGO`. El backend resuelve el
+> secreto como `WEBHOOK_SECRET_${provider.toUpperCase()}` y el proveedor
+> interno es `mercado_pago`, asi que un nombre sin guion bajo no lo lee nadie:
+> en runtime endurecido el webhook responde 503 y los cobros se rompen en
+> silencio. La ruta HTTP `/api/payments/webhook/mercadopago` SI va sin guion
+> bajo; es una ruta, no una variable.
 
 - [ ] `AUTH_TRUST_HEADERS=false` confirmado en contenedor (`docker exec … env | grep AUTH`)
 - [ ] `SUPABASE_SERVICE_ROLE_KEY` / `SUPABASE_SECRET_KEY` **no** están como `VITE_*`

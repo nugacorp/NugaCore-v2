@@ -716,18 +716,24 @@ Toda operación debe quedar preconfigurada con tenant.
 
 ## PR-2A — Migration Version Validation
 
-Agregar CI que falle si existen prefijos duplicados.
+**ESTADO: IMPLEMENTADO** (validado en CI, no requiere ambiente externo).
 
-Ejecutar:
+El validador hermético `scripts/validate-migration-files.mjs` corre como
+`npm run validate:migration-files` y se ejecuta en `ci.yml` y en
+`production-gates.yml` **antes** de lint, pruebas y build. Sólo lee nombres de
+archivo: no toca variables de base de datos ni Supabase.
+
+Rechaza prefijos de versión duplicados, prefijos que no tengan 14 dígitos,
+descripciones ausentes, mayúsculas, espacios, guiones y una lista vacía de
+migraciones (que casi siempre significa ruta incorrecta, no repo limpio).
+
+Comprobación manual equivalente:
 
 ```bash
-ls supabase/migrations |
-sed -E 's/_.*//' |
-sort |
-uniq -d
+npm run validate:migration-files
 ```
 
-Debe devolver vacío.
+Debe salir con código 0 y reportar versiones únicas.
 
 También validar:
 
