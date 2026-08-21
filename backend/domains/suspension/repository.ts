@@ -146,13 +146,20 @@ export interface SuspensionRepository {
   clearSuspensionBlock(input: ClearSuspensionBlockInput): Promise<CustomerSuspensionBlock | null>;
 
   recordEvent(input: RecordEventInput): Promise<SuspensionEvent>;
-  listEvents(customerId?: string): Promise<SuspensionEvent[]>;
+  /** Con `tenantId` la lectura nunca devuelve eventos de otro WISP. */
+  listEvents(customerId?: string, tenantId?: string): Promise<SuspensionEvent[]>;
 
   listOrders(filter?: OrderListFilter): Promise<SuspensionOrder[]>;
-  openOrders(customerId: string, orderType?: SuspensionOrder['orderType']): Promise<SuspensionOrder[]>;
+  /**
+   * `tenantId` es opcional por compatibilidad con los callers históricos, pero
+   * el motor SIEMPRE lo envía: dos WISPs pueden compartir customerId y una
+   * orden ajena no debe contar como orden abierta de este cliente.
+   */
+  openOrders(customerId: string, orderType?: SuspensionOrder['orderType'], tenantId?: string): Promise<SuspensionOrder[]>;
   createOrder(input: CreateOrderInput): Promise<SuspensionOrder>;
   findReactivationOrderByIdempotencyKey(tenantId: string, idempotencyKey: string): Promise<SuspensionOrder | null>;
-  cancelOpenOrders(customerId: string, orderType: SuspensionOrder['orderType'], reason: string, actorId?: string): Promise<number>;
+  /** Con `tenantId` la cancelación nunca alcanza órdenes de otro WISP. */
+  cancelOpenOrders(customerId: string, orderType: SuspensionOrder['orderType'], reason: string, actorId?: string, tenantId?: string): Promise<number>;
 
   /** Claim compare-and-set previo a cualquier efecto externo. */
   claimOrder(order: SuspensionOrder, claim: OrderClaimInput): Promise<SuspensionOrder | null>;
@@ -201,8 +208,10 @@ export class StoreSuspensionRepository implements SuspensionRepository {
   }
 
   async recordEvent(input: RecordEventInput) { return engineStore.recordEvent(input); }
-  async listEvents(customerId?: string) {
-    return customerId ? engineStore.EVENTS.filter((e) => e.customerId === customerId) : engineStore.EVENTS;
+  async listEvents(customerId?: string, tenantId?: string) {
+    return engineStore.EVENTS
+      .filter((e) => !customerId || e.customerId === customerId)
+      .filter((e) => !tenantId || (e.tenantId || 'tenant-default') === tenantId);
   }
 
   async listOrders(filter?: OrderListFilter) {
@@ -213,8 +222,10 @@ export class StoreSuspensionRepository implements SuspensionRepository {
     if (filter?.orderId) rows = rows.filter((o) => o.id === filter.orderId);
     return rows;
   }
-  async openOrders(customerId: string, orderType?: SuspensionOrder['orderType']) {
-    return engineStore.openOrders(customerId, orderType);
+  async openOrders(customerId: string, orderType?: SuspensionOrder['orderType'], tenantId?: string) {
+    const rows = engineStore.openOrders(customerId, orderType);
+    if (!tenantId) return rows;
+    return rows.filter((order) => (order.tenantId || 'tenant-default') === tenantId);
   }
   async createOrder(input: CreateOrderInput) {
     requirePaymentOrderScope(input);
@@ -239,8 +250,8 @@ export class StoreSuspensionRepository implements SuspensionRepository {
       || !current.effectStartedAt || current.effectConfirmedAt) return null;
     return engineStore.updateOrder(order.id, { effectConfirmedAt: new Date().toISOString(), claimedAt: new Date(0).toISOString(), workerNote: note });
   }
-  async cancelOpenOrders(customerId: string, orderType: SuspensionOrder['orderType'], reason: string, actorId?: string) {
-    return engineStore.cancelOpenOrders(customerId, orderType, reason, actorId);
+  async cancelOpenOrders(customerId: string, orderType: SuspensionOrder['orderType'], reason: string, actorId?: string, tenantId?: string) {
+    return engineStore.cancelOpenOrders(customerId, orderType, reason, actorId, tenantId);
   }
   async updateOrder(order: SuspensionOrder, patch: OrderUpdate) {
     return engineStore.updateOrder(order.id, patch) ?? { ...order, ...patch };
@@ -391,9 +402,10 @@ export class SupabaseSuspensionRepository implements SuspensionRepository {
     return existing;
   }
 
-  async listEvents(customerId?: string): Promise<SuspensionEvent[]> {
+  async listEvents(customerId?: string, tenantId?: string): Promise<SuspensionEvent[]> {
     let q = this.client.from('suspension_events').select('*').order('created_at', { ascending: false });
     if (customerId) q = q.eq('customer_id', customerId);
+    if (tenantId) q = q.eq('tenant_id', tenantId);
     const { data, error } = await q;
     if (error) throw new Error(`listEvents: ${error.message}`);
     return (data || []).map((r) => rowToEvent(r as EventRow));
@@ -418,8 +430,8 @@ export class SupabaseSuspensionRepository implements SuspensionRepository {
     return [...susp, ...react].sort((a, b) => (a.createdAt < b.createdAt ? 1 : -1));
   }
 
-  async openOrders(customerId: string, orderType?: SuspensionOrder['orderType']): Promise<SuspensionOrder[]> {
-    const all = await this.listOrders({ customerId });
+  async openOrders(customerId: string, orderType?: SuspensionOrder['orderType'], tenantId?: string): Promise<SuspensionOrder[]> {
+    const all = await this.listOrders({ customerId, tenantId });
     return all.filter((o) => OPEN.includes(o.status) && (!orderType || o.orderType === orderType));
   }
 
@@ -546,16 +558,20 @@ export class SupabaseSuspensionRepository implements SuspensionRepository {
     return data ? rowToOrder(data as OrderRow, order.orderType) : null;
   }
 
-  async cancelOpenOrders(customerId: string, orderType: SuspensionOrder['orderType'], reason: string, actorId?: string): Promise<number> {
-    const open = await this.openOrders(customerId, orderType);
+  async cancelOpenOrders(customerId: string, orderType: SuspensionOrder['orderType'], reason: string, actorId?: string, tenantId?: string): Promise<number> {
+    const open = await this.openOrders(customerId, orderType, tenantId);
     const table = orderType === 'suspension' ? 'suspension_orders' : 'reactivation_orders';
     let cancelled = 0;
     for (const o of open) {
-      const { error } = await this.client.from(table).update({ status: 'CANCELLED' }).eq('id', o.id);
+      // El filtro por tenant también viaja al UPDATE: leer con scope y
+      // escribir sin él dejaría la puerta abierta a una fila ajena.
+      let update = this.client.from(table).update({ status: 'CANCELLED' }).eq('id', o.id);
+      if (tenantId) update = update.eq('tenant_id', tenantId);
+      const { error } = await update;
       if (error) throw new Error(`cancelOpenOrders: ${error.message}`);
       cancelled += 1;
       await this.recordEvent({
-        customerId, invoiceId: o.invoiceId, eventType: 'order_cancelled',
+        customerId, tenantId: tenantId || o.tenantId, invoiceId: o.invoiceId, eventType: 'order_cancelled',
         reason, automatic: true, actorId, metadata: { orderId: o.id, orderType },
       });
     }

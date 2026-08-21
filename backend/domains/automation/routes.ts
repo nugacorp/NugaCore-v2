@@ -9,6 +9,7 @@
 import { Router } from 'express';
 import { asyncHandler } from '../../common/errors';
 import { READ_ROLES, requireRoles } from '../../common/rbac';
+import { tenantIdFromRequest } from '../tenancy/tenant-scope';
 import { automationService } from './service';
 import { automationNotifyBridge } from './notify-bridge';
 import { listAudit } from './audit';
@@ -45,7 +46,9 @@ router.get('/api/automation/summary', requireRoles(READ_ROLES), asyncHandler(asy
 // Simulacion dry-run: recibe { event, customerId, payload } y devuelve
 // { rulesMatched, decisions, executionPreview, dryRun:true }. Nunca ejecuta.
 router.post('/api/automation/simulate', requireRoles(READ_ROLES), asyncHandler(async (req, res) => {
-  res.json(automationService.simulate(req.body ?? {}, actorOf(req)));
+  // El tenant de la petición viaja hasta el ejecutor: sin él, una decisión
+  // live de suspensión se omite en vez de evaluarse en el WISP equivocado.
+  res.json(automationService.simulate(req.body ?? {}, actorOf(req), tenantIdFromRequest(req)));
 }));
 
 // PROD-8 → PROD-9: convierte una decisión pendiente en preview/mensaje dry-run.

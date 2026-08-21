@@ -8,8 +8,17 @@
 // ====================================================================
 
 import { Invoice } from '../../../src/types';
+import { isHardenedRuntimeNow } from '../../config/env';
+import { isDomainOnDb } from '../../config/feature-flags';
+import { isMultiTenantEnabled } from '../tenancy/flags';
+import { DEFAULT_TENANT_ID } from '../tenancy/types';
 import { getSuspensionService } from './service';
 import { CustomerLite } from './data-provider';
+import {
+  ensureEngineFinancialBlock,
+  findDeterministicEngineFinancialOrder,
+  findEngineFinancialOrder,
+} from './financial-blocks';
 import { SuspensionRepository } from './repository';
 import {
   BillingStatus,
@@ -154,6 +163,38 @@ export function decideServiceStatus(params: {
 // ── Infraestructura (async) ───────────────────────────────────────────
 const SERVICEABLE = new Set(['active', 'suspended']);
 
+// ── Tenant de una evaluación CON EFECTOS ──────────────────────────────
+//
+// El motor escribe órdenes, eventos y —desde B1— bloqueos financieros. Todos
+// son filas tenant-scoped, así que una evaluación sin identidad de tenant no
+// puede seguir cayendo en silencio a `tenant-default`: mezclaría WISPs.
+//
+// El fallback histórico sobrevive SOLO en el modo hermético single-WISP
+// (todo en memoria, sin multi-tenant y sin runtime endurecido), que es donde
+// nació. En cuanto hay aislamiento real que respetar, falla cerrado.
+export const requiresExplicitTenantScope = (): boolean =>
+  isHardenedRuntimeNow()
+  || isMultiTenantEnabled()
+  || isDomainOnDb('suspension')
+  || isDomainOnDb('customers')
+  || isDomainOnDb('billing');
+
+export function resolveEvaluationTenantId(
+  tenantId: string | undefined,
+  caller: string,
+): string {
+  const scoped = (tenantId || '').trim();
+  if (scoped) return scoped;
+  if (requiresExplicitTenantScope()) {
+    throw new Error(
+      `${caller}: tenantId es obligatorio cuando hay aislamiento por tenant activo `
+      + '(multi-tenant, runtime endurecido o dominios en DB). Una evaluación con efectos '
+      + 'no puede asumir tenant-default.',
+    );
+  }
+  return DEFAULT_TENANT_ID;
+}
+
 const groupInvoices = (invoices: Invoice[]): Map<string, Invoice[]> => {
   const m = new Map<string, Invoice[]>();
   for (const inv of invoices) {
@@ -172,6 +213,7 @@ async function applyEvaluation(
   policy: SuspensionPolicyV2,
   actorId: string | undefined,
   now: number,
+  tenantId: string,
 ): Promise<EvaluationResult> {
   const iso = new Date(now).toISOString();
   const { billingStatus, worstInvoiceId, partialPaid } = aggregateBillingStatus(invoices, policy, now);
@@ -199,7 +241,10 @@ async function applyEvaluation(
     };
   }
 
-  const open = await repo.openOrders(customer.id);
+  // Las órdenes abiertas se leen SIEMPRE dentro del tenant: dos WISPs pueden
+  // compartir el mismo customerId y la orden de uno no debe suprimir ni
+  // cancelar la del otro.
+  const open = await repo.openOrders(customer.id, undefined, tenantId);
   const decision = decideServiceStatus({
     networkStatus: customer.status,
     billingStatus,
@@ -210,22 +255,59 @@ async function applyEvaluation(
   });
 
   let orderId: string | undefined;
+  // Orden del motor que debe respaldar el bloqueo financiero de este cliente.
+  let financialEvidenceOrder: SuspensionOrder | undefined;
   if (decision.action === 'create_suspension') {
-    await repo.cancelOpenOrders(customer.id, 'reactivation', 'Reemplazada por nueva orden de suspensión.', actorId);
-    const order = await repo.createOrder({ customerId: customer.id, invoiceId: worstInvoiceId, orderType: 'suspension', source: 'engine', reason: decision.reason });
+    await repo.cancelOpenOrders(customer.id, 'reactivation', 'Reemplazada por nueva orden de suspensión.', actorId, tenantId);
+    const order = await repo.createOrder({ customerId: customer.id, tenantId, invoiceId: worstInvoiceId, orderType: 'suspension', source: 'engine', reason: decision.reason });
     orderId = order.id;
-    await repo.recordEvent({ customerId: customer.id, invoiceId: worstInvoiceId, eventType: 'suspension_order_created', reason: decision.reason, automatic: true, actorId, metadata: { orderId: order.id, billingStatus } });
+    financialEvidenceOrder = order;
+    await repo.recordEvent({ customerId: customer.id, tenantId, invoiceId: worstInvoiceId, eventType: 'suspension_order_created', reason: decision.reason, automatic: true, actorId, metadata: { orderId: order.id, billingStatus } });
   } else if (decision.action === 'create_reactivation') {
-    await repo.cancelOpenOrders(customer.id, 'suspension', 'Reemplazada por nueva orden de reactivación.', actorId);
-    const order = await repo.createOrder({ customerId: customer.id, invoiceId: worstInvoiceId, orderType: 'reactivation', source: 'engine', reason: decision.reason });
+    await repo.cancelOpenOrders(customer.id, 'suspension', 'Reemplazada por nueva orden de reactivación.', actorId, tenantId);
+    const order = await repo.createOrder({ customerId: customer.id, tenantId, invoiceId: worstInvoiceId, orderType: 'reactivation', source: 'engine', reason: decision.reason });
     orderId = order.id;
-    await repo.recordEvent({ customerId: customer.id, invoiceId: worstInvoiceId, eventType: 'reactivation_order_created', reason: decision.reason, automatic: true, actorId, metadata: { orderId: order.id, billingStatus } });
+    await repo.recordEvent({ customerId: customer.id, tenantId, invoiceId: worstInvoiceId, eventType: 'reactivation_order_created', reason: decision.reason, automatic: true, actorId, metadata: { orderId: order.id, billingStatus } });
+  } else if (billingStatus === 'DELINQUENT') {
+    // Reconciliación (B1): la orden de corte ya existe pero su bloqueo pudo no
+    // haberse persistido (fallo parcial en una evaluación anterior).
+    //
+    //   1. Orden aún abierta: `decideServiceStatus` devuelve 'none', así que
+    //      sin esta rama el reintento nunca podría reparar el bloqueo.
+    //   2. Orden ya cerrada por el worker: se reconcilia SÓLO cuando la
+    //      asociación es inequívoca — una única orden del motor ligada a la
+    //      misma factura que hoy sigue impagada. No es un backfill: un
+    //      suspendido sin orden del motor no obtiene evidencia por aquí.
+    financialEvidenceOrder = findEngineFinancialOrder(open, tenantId, customer.id);
+    if (!financialEvidenceOrder) {
+      const history = await repo.listOrders({ customerId: customer.id, tenantId });
+      financialEvidenceOrder = findDeterministicEngineFinancialOrder(
+        history,
+        tenantId,
+        customer.id,
+        worstInvoiceId,
+      );
+    }
+  }
+
+  // Convergencia idempotente: create-or-return por (tenant, evidencia). Se
+  // ejecuta después de que la orden sea durable, porque la orden ES la
+  // evidencia. Si falla, la evaluación falla de forma visible y la orden
+  // queda abierta para que el siguiente intento reconcilie.
+  if (financialEvidenceOrder) {
+    await ensureEngineFinancialBlock(repo, {
+      tenantId,
+      customerId: customer.id,
+      order: financialEvidenceOrder,
+      billingStatus,
+      graceDays: policy.graceDays,
+    });
   }
 
   const changed = previousServiceStatus !== decision.serviceStatus;
   if (changed) {
     await repo.recordEvent({
-      customerId: customer.id, invoiceId: worstInvoiceId, eventType: 'state_changed',
+      customerId: customer.id, tenantId, invoiceId: worstInvoiceId, eventType: 'state_changed',
       reason: `${previousServiceStatus ?? 'NUEVO'} -> ${decision.serviceStatus}: ${decision.reason}`,
       automatic: true, actorId, metadata: { from: previousServiceStatus, to: decision.serviceStatus, billingStatus },
     });
@@ -271,29 +353,33 @@ export async function evaluateCustomerById(
   actorId?: string,
   tenantId?: string,
 ): Promise<EvaluationResult | null> {
+  // El tenant se resuelve ANTES de construir el service: una evaluación sin
+  // scope debe fallar por su propia causa, no por un error de configuración.
+  const scopedTenantId = resolveEvaluationTenantId(tenantId, 'evaluateCustomerById');
   const { repo, data } = getSuspensionService();
-  const customer = await data.getCustomer(customerId, tenantId);
+  const customer = await data.getCustomer(customerId, scopedTenantId);
   if (!customer) return null;
   const policy = await repo.getPolicy();
-  const invoices = (await data.loadInvoices(tenantId)).filter((i) => i.clientId === customerId);
-  return applyEvaluation(repo, customer, invoices, policy, actorId, Date.now());
+  const invoices = (await data.loadInvoices(scopedTenantId)).filter((i) => i.clientId === customerId);
+  return applyEvaluation(repo, customer, invoices, policy, actorId, Date.now(), scopedTenantId);
 }
 
 export async function evaluateAllCustomers(
   actorId?: string,
   tenantId?: string,
 ): Promise<EvaluationResult[]> {
+  const scopedTenantId = resolveEvaluationTenantId(tenantId, 'evaluateAllCustomers');
   const { repo, data } = getSuspensionService();
   const policy = await repo.getPolicy();
   const now = Date.now();
   const [customers, invoices] = await Promise.all([
-    data.loadCustomers(tenantId),
-    data.loadInvoices(tenantId),
+    data.loadCustomers(scopedTenantId),
+    data.loadInvoices(scopedTenantId),
   ]);
   const byCustomer = groupInvoices(invoices);
   const results: EvaluationResult[] = [];
   for (const customer of customers) {
-    results.push(await applyEvaluation(repo, customer, byCustomer.get(customer.id) ?? [], policy, actorId, now));
+    results.push(await applyEvaluation(repo, customer, byCustomer.get(customer.id) ?? [], policy, actorId, now, scopedTenantId));
   }
   return results;
 }

@@ -8,8 +8,9 @@
 
 import { getCustomersService } from '../../customers/service';
 import { getSuspensionService } from '../../suspension/service';
-import { aggregateBillingStatus } from '../../suspension/engine';
+import { aggregateBillingStatus, requiresExplicitTenantScope } from '../../suspension/engine';
 import { classifyActiveSuspension } from '../../suspension/classification';
+import { ensureEngineFinancialBlock, isEngineFinancialSuspensionOrder } from '../../suspension/financial-blocks';
 import { inventoryRoutersRepository } from '../../inventory/routers/repository';
 import { productionGates } from '../../../config/production-gates';
 import { executePlannedCommands } from './command-executor';
@@ -47,9 +48,42 @@ const resolveRouterForCustomer = (tenantId: string, routerId?: string) => {
   return routers.find((r) => r.encryptedPassword || r.hasCredentials) ?? routers[0];
 };
 
+/** Despacho de UNA orden concreta ya persistida. */
+export interface OrderDispatchScope {
+  tenantId: string;
+  orderId: string;
+  routerId: string;
+}
+
+/** Barrido bulk acotado a un WISP. */
+export interface TenantBulkScope {
+  tenantId: string;
+}
+
+type WorkerScope = OrderDispatchScope | TenantBulkScope;
+
+const isOrderScope = (scope: WorkerScope | undefined): scope is OrderDispatchScope =>
+  Boolean(scope && 'orderId' in scope);
+
+/**
+ * Barrido bulk de UN solo WISP. Es la forma correcta de disparar el worker
+ * desde un job o desde una petición: `processPendingOrders` sin scope carga
+ * las órdenes de TODOS los tenants.
+ */
+export async function processPendingOrdersForTenant(
+  actorId: string | undefined,
+  tenantId: string,
+): Promise<WorkerRun> {
+  const scoped = (tenantId || '').trim();
+  if (!scoped) {
+    throw new Error('processPendingOrdersForTenant: tenantId es obligatorio.');
+  }
+  return processPendingOrders(actorId, { tenantId: scoped });
+}
+
 export async function processPendingOrders(
   actorId?: string,
-  scope?: { tenantId: string; orderId: string; routerId: string },
+  scope?: WorkerScope,
 ): Promise<WorkerRun> {
   const startedAt = nowIso();
   const runId = workerStore.nextRunId();
@@ -65,7 +99,7 @@ export async function processPendingOrders(
     return scoped;
   };
   let pending: SuspensionOrder[];
-  if (scope) {
+  if (isOrderScope(scope)) {
     const orderId = requireScope(scope.orderId, 'orderId');
     const tenantId = requireScope(scope.tenantId, 'tenantId');
     const routerId = requireScope(scope.routerId, 'routerId');
@@ -79,11 +113,22 @@ export async function processPendingOrders(
     }
     pending = ['PENDING', 'FAILED', 'QUEUED'].includes(order.status) ? [order] : [];
   } else {
+    // Un barrido bulk SIN tenant carga las órdenes de todos los WISPs. Sólo
+    // sobrevive en el modo hermético single-WISP; con aislamiento real activo
+    // falla cerrado en vez de tocar filas ajenas.
+    const bulkTenantId = (scope?.tenantId || '').trim();
+    if (!bulkTenantId && requiresExplicitTenantScope()) {
+      throw new Error(
+        'processPendingOrders: un barrido bulk sin tenantId no puede procesar órdenes '
+        + 'cuando hay aislamiento por tenant activo. Usa processPendingOrdersForTenant.',
+      );
+    }
+    const bulkFilter = bulkTenantId ? { tenantId: bulkTenantId } : {};
     const [pendingOrders, queuedOrders] = await Promise.all([
-      repo.listOrders({ status: 'PENDING' }),
+      repo.listOrders({ ...bulkFilter, status: 'PENDING' }),
       // `claimOrder` acepta sólo leases vencidos que no sean inciertos. Se
       // cargan aquí para rescatar un worker muerto, no para reintentar RouterOS.
-      repo.listOrders({ status: 'QUEUED' }),
+      repo.listOrders({ ...bulkFilter, status: 'QUEUED' }),
     ]);
     pending = [...pendingOrders, ...queuedOrders];
   }
@@ -150,8 +195,66 @@ export async function processPendingOrders(
     return null;
   };
 
+  // ── Invariante orden → bloqueo → RouterOS ───────────────────────────
+  //
+  // Una orden de suspensión del motor NO puede enviar comandos, marcar
+  // `effectStartedAt` ni terminar en EXECUTED mientras no exista su bloqueo
+  // financiero ACTIVO con la evidencia exacta de esa orden.
+  //
+  // Antes de esto quedaba una ventana: si el write del bloqueo fallaba en la
+  // evaluación y el worker ejecutaba el corte, el cliente quedaba suspendido
+  // sin evidencia — es decir, código nuevo seguía fabricando clientes legacy.
+  //
+  // Devuelve una nota cuando la orden debe detenerse como no-op seguro. Un
+  // fallo de PERSISTENCIA no se captura: propaga, la orden conserva su claim
+  // sin `effectStartedAt` y el reintento es seguro.
+  const ensureFinancialBlockBeforeRouter = async (
+    order: SuspensionOrder,
+    tenantId: string,
+    client: Awaited<ReturnType<typeof customers.getById>>,
+  ): Promise<string | null> => {
+    if (!isEngineFinancialSuspensionOrder(order)) return null;
+    if (!client) return `Orden ${order.id} bloqueada: cliente no pertenece al tenant.`;
+    if (order.customerId !== client.id) {
+      return `Orden ${order.id} bloqueada: la orden no corresponde al cliente resuelto.`;
+    }
+    if ((order.tenantId || 'tenant-default') !== tenantId) {
+      return `Orden ${order.id} bloqueada: la orden pertenece a otro tenant.`;
+    }
+
+    const [policy, invoices] = await Promise.all([
+      repo.getPolicy(),
+      data.loadInvoices(tenantId),
+    ]);
+    const { billingStatus } = aggregateBillingStatus(
+      invoices.filter((invoice) => invoice.clientId === order.customerId),
+      policy,
+    );
+    // Si la deuda dejó de ser bloqueante (el cliente pagó entre la orden y el
+    // worker), cortar sería un error: no se crea bloqueo y no se ejecuta.
+    if (billingStatus !== 'DELINQUENT') {
+      return `Orden ${order.id} cancelada: la deuda ya no es bloqueante (${billingStatus}).`;
+    }
+
+    // Reutiliza el contrato del motor; no lo duplica. Es create-or-return por
+    // (tenant, suspension_order, order.id).
+    const block = await ensureEngineFinancialBlock(repo, {
+      tenantId,
+      customerId: order.customerId,
+      order,
+      billingStatus,
+      graceDays: policy.graceDays,
+    });
+    if (block.clearedAt) {
+      // La evidencia existe pero su episodio ya fue resuelto. No se resucita
+      // el bloqueo ni se cruza RouterOS con evidencia inactiva.
+      return `Orden ${order.id} cancelada: su bloqueo financiero ya fue liquidado.`;
+    }
+    return null;
+  };
+
   for (const order of pending) {
-    const requiresTenantScope = order.source === 'payment-engine' || scope !== undefined;
+    const requiresTenantScope = order.source === 'payment-engine' || isOrderScope(scope);
     // Cada orden cruza el mismo límite no idempotente de RouterOS. El claim no
     // depende de su productor: sin él, sweeps concurrentes pueden ejecutar dos
     // veces tanto suspensiones como reactivaciones de cualquier origen.
@@ -211,6 +314,13 @@ export async function processPendingOrders(
     const revalidationFailure = await preRouterRevalidationFailure(order, effectiveTenantId, client);
     if (revalidationFailure) {
       results.push(await skipBeforePlanning(order, revalidationFailure, persist));
+      continue;
+    }
+    // Se ejecuta ANTES de planificar y antes del atajo dry-run: ni siquiera
+    // una orden simulada puede pasar a EXECUTED sin su bloqueo persistido.
+    const missingBlockFailure = await ensureFinancialBlockBeforeRouter(order, effectiveTenantId, client);
+    if (missingBlockFailure) {
+      results.push(await skipBeforePlanning(order, missingBlockFailure, persist));
       continue;
     }
     const router = requiresTenantScope && routerId

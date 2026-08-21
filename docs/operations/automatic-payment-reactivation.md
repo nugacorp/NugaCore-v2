@@ -52,6 +52,97 @@ Use existing server-side RBAC and routes. Do not introduce ad hoc DB edits for n
 
 Unknown classification fails closed. A customer with `status = suspended` and no structured deterministic financial block is not eligible for automatic reactivation. The operator path is manual review, then authorized manual reactivation or a future approved data repair/migration.
 
+## Structured Financial Blocks (Who Creates Them)
+
+`public.customer_suspension_blocks` is the only structured authority on why a customer is currently blocked. Two producers exist, and they are deliberately different:
+
+| Producer | Path | Category | Evidence |
+| --- | --- | --- | --- |
+| Suspension engine | `applyEvaluation` in `backend/domains/suspension/engine.ts`, via `ensureEngineFinancialBlock` in `backend/domains/suspension/financial-blocks.ts` | `financial` | `evidence_type = 'suspension_order'`, `evidence_id = <id of the engine suspension order>` |
+| Manual operator suspension | `POST /api/suspension/clients/:id/suspend` | `non_financial` | `evidence_type = 'manual_action'` |
+
+The engine creates a `financial` block only when it emits a suspension order for `DELINQUENT` billing — that is, debt beyond the applicable grace window. Debt still inside grace (`OVERDUE`) produces no order and no block. A disabled policy produces neither.
+
+`source` is `suspension-engine`, which distinguishes automation-produced evidence from an operator action. `reason` is operator-safe text; it never carries provider payloads, router output, or secrets.
+
+### Idempotency
+
+The block's identity is `(tenant_id, evidence_type, evidence_id)`, protected by the unique partial index `uq_customer_suspension_blocks_evidence`. Creation is therefore create-or-return in both persistence modes:
+
+- Store (`USE_DB_SUSPENSION=false`): the in-memory store returns the existing block when the evidence matches.
+- Supabase (`USE_DB_SUSPENSION=true`): the insert conflicts with `23505` and the existing row is read back.
+
+Re-evaluating the same customer converges to the same order and the same block. It never creates a second one.
+
+### Reconciliation After A Partial Failure
+
+The order is written first, because the order *is* the evidence. If the block write then fails, the evaluation fails visibly and the suspension order stays open.
+
+An open engine suspension order makes `decideServiceStatus` return `action: 'none'`, so without an explicit reconciliation path the retry could never repair the missing block. The engine therefore also ensures the block when it finds, for a `DELINQUENT` customer, an already-open engine suspension order. That converges idempotently:
+
+```text
+existing open suspension order + missing financial block
+  -> next evaluation
+  -> block created from the same order id
+  -> no second order
+```
+
+This is convergence, not atomicity: order and block are two writes with no transaction spanning them. Two further mechanisms close the window that convergence alone left open.
+
+**Deterministic reconciliation of a closed order.** If the worker already executed the order, it is no longer in the open set. This path is deliberately the strictest one, because it is the only place where a *past* order can become present evidence.
+
+It accepts a candidate only when the order proves a **real, confirmed RouterOS suspension**. All five durable fields are required together:
+
+| Field | Required value | Why |
+| --- | --- | --- |
+| `status` | `EXECUTED` | The order finished. |
+| `dryRun` | exactly `false` | A simulated run also reaches `EXECUTED`; it never suspended anyone. An absent/unknown value is rejected. |
+| `executedAt` | present | The worker stamped a completion time. |
+| `effectStartedAt` | present | Written immediately before the commands crossed to RouterOS. |
+| `effectConfirmedAt` | present | Written only after RouterOS answered OK. |
+
+`status = 'EXECUTED'` alone is **not** sufficient. Without the effect checkpoints, a `CANCELLED`, `FAILED`, `PENDING`, `QUEUED`, or dry-run-only order could be turned into `financial` evidence later. The dangerous shape is concrete: a customer suspended for a legacy or non-financial reason, still `DELINQUENT`, with an old aborted engine order for that invoice — reconciliation would manufacture a `financial` block, a payment would then make them `eligible`, and the service would be restored on a suspension that was never financial. That contradicts the fail-closed guarantee for ambiguous suspensions.
+
+On top of the execution evidence, the association must still be **unambiguous**: exactly one candidate, in this tenant, for this customer, tied to the same invoice that is still unpaid. Zero or several candidates produce no block — the engine does not guess.
+
+These conditions are never relaxed for historical rows. An order without sufficient evidence of real execution stays fail-closed and requires manual review. There is no automatic backfill for incomplete historical evidence.
+
+**Pre-RouterOS invariant.** An engine suspension order cannot send commands, set `effectStartedAt`, or reach `EXECUTED` until its active financial block exists. Before planning any command — and before the dry-run shortcut, since `EXECUTED` would close the order and remove it from the reconcilable set — the worker verifies tenant, customer, order type and source, re-checks that the debt is still `DELINQUENT`, and ensures the block through the same `ensureEngineFinancialBlock` contract.
+
+The consequences are deliberate:
+
+- If the debt is no longer blocking (the customer paid between the order and the worker), the order is cancelled as a safe no-op and no cut happens.
+- If the block cannot be persisted, the error propagates. Nothing is caught or hidden, no command is sent, and the order keeps its claim with `effectStartedAt` unset, so the standard expired-lease recovery retries it safely.
+- If the evidence exists but was already cleared, the order is cancelled rather than crossing RouterOS with inactive evidence.
+
+Together these mean new code no longer produces legacy customers: a customer cut by the engine always has structured evidence by the time the cut reaches the router.
+
+### Legacy Suspended Customers
+
+Customers suspended before this behavior existed — or suspended outside the engine — have no structured evidence. They stay `unknown` and fail closed. This is intentional:
+
+- No backfill is executed. The engine never infers a financial cause from `status = 'suspended'` alone.
+- The recovery path is manual review followed by authorized manual reactivation.
+- Reconciliation from a closed engine order is limited to the unambiguous, tenant-scoped, same-invoice case described above, and only when the order carries confirmed RouterOS execution evidence. It repairs the engine's own partial failures; it does not sweep historical data.
+- Open-order reconciliation (`PENDING` / `QUEUED`) is a different, earlier path: it repairs the block *before* any effect reaches the router, so it does not require execution evidence — there is nothing executed yet to prove. The pre-RouterOS invariant then guarantees the block exists before the cut happens.
+- A broader repair over historical suspensions remains a **proposal only**. It requires separate authorization, a migration plan, preflight, and evidence, and it is not part of this change.
+
+### Tenant Scope
+
+Block, order, customer, and invoices all belong to the same tenant. Engine evaluations that produce effects resolve their tenant before doing anything else and fail closed when tenant isolation is active (multi-tenant enabled, hardened runtime, or suspension/customers/billing on the database). The historical single-WISP `tenant-default` fallback survives only in the fully hermetic local mode.
+
+The `suspension-cycle` job has no HTTP request to inherit a tenant from. It requires an explicit `SUSPENSION_CYCLE_TENANT_ID` and fails closed otherwise; it must never evaluate every tenant as if they were one. A per-tenant authoritative enumeration for that job does not exist yet and remains open work.
+
+The worker is scoped the same way. `processPendingOrdersForTenant(actor, tenantId)` is the correct way to sweep from a job or a request, because a bare `processPendingOrders()` loads every tenant's `PENDING` and `QUEUED` orders. `POST /api/suspension/evaluate-all`, `POST /api/mikrotik/worker/run`, and `suspension-cycle` all pass an explicit tenant, and a bulk sweep without one fails closed whenever tenant isolation is active. Single-order dispatch keeps its full `{ tenantId, orderId, routerId }` scope. An order belonging to tenant A can never be claimed, cancelled, updated, or executed by a run for tenant B.
+
+Engine events (`suspension_order_created`, `reactivation_order_created`, `state_changed`, `order_cancelled`) are stamped with the evaluation's tenant, and `GET /api/suspension/orders` and `GET /api/suspension/events` filter by the requesting tenant in both persistence modes — in Supabase the filter travels to the `SELECT` and to the cancellation `UPDATE`.
+
+### Clearing
+
+Only the payment path clears financial blocks, through `clearFinancialSuspensionBlocksForDecision`, and only when the decision is `eligible`. It never clears `non_financial` or `unknown` blocks. Clearing is an update, not a delete: `cleared_at`, `cleared_by`, and `clear_reason` preserve the audit trail, and repeating it is a no-op.
+
+The engine does not clear financial blocks when it emits a reactivation order. A stale active `financial` block does not block anything — `classifyActiveSuspension` only blocks on `non_financial` and `unknown` — whereas clearing it early would turn the customer's classification into `unknown` and could fail a later payment evaluation closed.
+
 ## Rollback Strategy
 
 Rollback order:

@@ -9,15 +9,30 @@ import { evaluateCustomerById } from '../suspension/engine';
 import { notificationService } from '../notifications/service';
 import type { AutomationDecision, DecisionRecord } from './types';
 
-export async function executeAutomationDecision(decision: DecisionRecord, actor: string): Promise<void> {
+export async function executeAutomationDecision(
+  decision: DecisionRecord,
+  actor: string,
+  tenantId?: string,
+): Promise<void> {
   if (!productionGates.automationExecute()) return;
   if (!decision.customerId) return;
 
   const customerId = decision.customerId;
+  const scopedTenantId = (tenantId || '').trim();
 
   switch (decision.decision as AutomationDecision) {
     case 'REQUEST_SUSPENSION':
-      await evaluateCustomerById(customerId, actor);
+      // La evaluación del motor escribe órdenes, eventos y bloqueos
+      // financieros tenant-scoped. Sin identidad de tenant no se ejecuta:
+      // adivinar `tenant-default` mezclaría WISPs.
+      if (!scopedTenantId) {
+        logger.warn('Automation live: suspensión omitida por falta de tenant', {
+          decisionId: decision.id,
+          ruleId: decision.ruleId,
+        });
+        return;
+      }
+      await evaluateCustomerById(customerId, actor, scopedTenantId);
       break;
     case 'REQUEST_REACTIVATION': {
       await dispatchNetworkOrder({

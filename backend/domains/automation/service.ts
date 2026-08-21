@@ -114,7 +114,7 @@ export const automationService = {
 
   // Corazon del motor: evalua un evento y devuelve decisiones descriptivas.
   // dryRun siempre. No muta ningun sistema real.
-  simulate(input: SimulationInput, actor: string): SimulationResult {
+  simulate(input: SimulationInput, actor: string, tenantId?: string): SimulationResult {
     const event = normalizeEvent(input.event);
     const customerId = optionalCustomerId(input.customerId);
     const payload = normalizePayload(input.payload);
@@ -145,7 +145,7 @@ export const automationService = {
     decisions.forEach((decision) => automationStore.recordDecision(decision));
     if (productionGates.automationExecute()) {
       for (const decision of decisions) {
-        void executeAutomationDecision(decision, actor);
+        void executeAutomationDecision(decision, actor, tenantId);
       }
     }
     automationStore.markSimulationRun();
