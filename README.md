@@ -14,6 +14,7 @@ Este repositorio distingue de forma deliberada **implementado** de **validado en
 - Arquitectura: [docs/architecture/ARCHITECTURE.md](./docs/architecture/ARCHITECTURE.md)
 - Checklist de producción: [docs/deployment/PRODUCTION_READINESS_CHECKLIST.md](./docs/deployment/PRODUCTION_READINESS_CHECKLIST.md)
 - Reactivación automática por pago (Spec 001): [docs/operations/automatic-payment-reactivation.md](./docs/operations/automatic-payment-reactivation.md)
+- Publicación de versiones: [docs/operations/RELEASING.md](./docs/operations/RELEASING.md)
 
 Los documentos bajo [`docs/results/`](./docs/results/) son **evidencia histórica** fechada de validaciones concretas. No describen el estado de hoy; consérvalos como registro, no como estado actual.
 
@@ -44,6 +45,10 @@ Los dominios núcleo soportados —clientes, planes, facturación, pagos, suspen
 El patrón **no es universal**. Varios dominios siguen exclusivamente en memoria y no tienen repositorio Supabase, en algunos casos pese a que sus tablas ya existen en migraciones. La lista vigente está en [docs/reports/PROJECT_STATUS_CURRENT.md](./docs/reports/PROJECT_STATUS_CURRENT.md).
 
 El modo de desarrollo por defecto es **hermético**: todos los flags en `false`, sin red ni secretos.
+
+### build-once / deploy-many
+
+La imagen OCI no se construye por ambiente. La configuración pública de Supabase (URL y anon key) se entrega en runtime desde `/runtime-config.js`, no incrustada en el bundle, así que el mismo digest validado en un ambiente puede promoverse a otro cambiando sólo variables del contenedor. Sólo esos dos valores llegan al navegador: el endpoint usa una allowlist explícita y nunca recorre el entorno. Ver [docs/operations/RELEASING.md](./docs/operations/RELEASING.md).
 
 ### Gates de ejecución real
 
