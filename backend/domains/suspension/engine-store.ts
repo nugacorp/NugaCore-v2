@@ -227,6 +227,7 @@ export const engineStore = {
       cancelled += 1;
       this.recordEvent({
         customerId,
+        tenantId: tenantId || o.tenantId,
         invoiceId: o.invoiceId,
         eventType: 'order_cancelled',
         reason,

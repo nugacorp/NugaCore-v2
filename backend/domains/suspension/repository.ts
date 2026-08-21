@@ -146,7 +146,8 @@ export interface SuspensionRepository {
   clearSuspensionBlock(input: ClearSuspensionBlockInput): Promise<CustomerSuspensionBlock | null>;
 
   recordEvent(input: RecordEventInput): Promise<SuspensionEvent>;
-  listEvents(customerId?: string): Promise<SuspensionEvent[]>;
+  /** Con `tenantId` la lectura nunca devuelve eventos de otro WISP. */
+  listEvents(customerId?: string, tenantId?: string): Promise<SuspensionEvent[]>;
 
   listOrders(filter?: OrderListFilter): Promise<SuspensionOrder[]>;
   /**
@@ -207,8 +208,10 @@ export class StoreSuspensionRepository implements SuspensionRepository {
   }
 
   async recordEvent(input: RecordEventInput) { return engineStore.recordEvent(input); }
-  async listEvents(customerId?: string) {
-    return customerId ? engineStore.EVENTS.filter((e) => e.customerId === customerId) : engineStore.EVENTS;
+  async listEvents(customerId?: string, tenantId?: string) {
+    return engineStore.EVENTS
+      .filter((e) => !customerId || e.customerId === customerId)
+      .filter((e) => !tenantId || (e.tenantId || 'tenant-default') === tenantId);
   }
 
   async listOrders(filter?: OrderListFilter) {
@@ -399,9 +402,10 @@ export class SupabaseSuspensionRepository implements SuspensionRepository {
     return existing;
   }
 
-  async listEvents(customerId?: string): Promise<SuspensionEvent[]> {
+  async listEvents(customerId?: string, tenantId?: string): Promise<SuspensionEvent[]> {
     let q = this.client.from('suspension_events').select('*').order('created_at', { ascending: false });
     if (customerId) q = q.eq('customer_id', customerId);
+    if (tenantId) q = q.eq('tenant_id', tenantId);
     const { data, error } = await q;
     if (error) throw new Error(`listEvents: ${error.message}`);
     return (data || []).map((r) => rowToEvent(r as EventRow));
@@ -567,7 +571,7 @@ export class SupabaseSuspensionRepository implements SuspensionRepository {
       if (error) throw new Error(`cancelOpenOrders: ${error.message}`);
       cancelled += 1;
       await this.recordEvent({
-        customerId, invoiceId: o.invoiceId, eventType: 'order_cancelled',
+        customerId, tenantId: tenantId || o.tenantId, invoiceId: o.invoiceId, eventType: 'order_cancelled',
         reason, automatic: true, actorId, metadata: { orderId: o.id, orderType },
       });
     }
