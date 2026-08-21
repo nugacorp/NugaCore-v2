@@ -143,11 +143,22 @@ Eso no se arregla borrando el tag Git y volviéndolo a empujar. Reutilizar el ta
 
 La segunda consulta el registro por HTTP y sólo continúa ante un **404 inequívoco**. Un `200` significa que la etiqueta existe y aborta. Un `401`, `403`, rate limit, timeout, `5xx` o cualquier respuesta indeterminada **también aborta**: un error de acceso no prueba que la etiqueta esté libre. Nada se borra ni se sobrescribe, y no hay ningún `|| true` que esconda un fallo.
 
-### Proteger el patrón de tags antes del primer RC
+### La protección del patrón `v*` está activa
 
-Un administrador debería configurar la protección del patrón de tags Git `v*` para impedir que se borren o se muevan, si las reglas del repositorio lo permiten.
+El repositorio tiene **dos repository rulesets activos** sobre `refs/tags/v*`, sin exclusiones. Son dos y no uno porque responden a preguntas distintas —*quién puede empezar un release* y *qué puede pasarle después*— y esa segunda respuesta debe ser «nada», también para quien tenga permiso para lo primero.
 
-**Esa regla todavía no está configurada.** Esta fase no consulta ni modifica los settings del repositorio. Queda como acción manual pendiente antes del primer release candidate.
+| Ruleset | Regla | Bypass |
+| --- | --- | --- |
+| `Release tags v* - authorized creation` | `creation` | la cuenta `nugacorp`, en modo `always` |
+| `Release tags v* - immutable` | `update`, `deletion` | **ninguno** |
+
+El primero limita quién puede **crear** un tag `v*`. El segundo hace que, una vez creado, ese tag **no se pueda mover ni borrar**: no tiene actores de bypass, y la API confirma `current_user_can_bypass: never` incluso para una cuenta con permiso de administración. Un tag `v*` publicado es, a efectos prácticos, permanente.
+
+Eso es deliberado. La alternativa —dejarse una salida de emergencia— convierte «los tags no se mueven» en una convención, y una convención se rompe justo el día en que hay prisa. Si un release sale mal, el procedimiento sigue siendo publicar `rc.N+1`; la regla existe precisamente para que borrar el tag no sea una opción disponible bajo presión.
+
+**No se creó ningún tag para verificar esto.** Un tag `v*` dispara el workflow de release, así que la comprobación se hizo leyendo la configuración efectiva por la API REST, ruleset por ruleset.
+
+Esta protección **no sustituye** al contrato tag ↔ versión ni a los gates del workflow, que siguen siendo indispensables. Los rulesets sólo gobiernan la referencia Git: no saben nada de si `package.json` coincide con el tag, de si CI pasó sobre ese SHA, ni de si la etiqueta OCI ya existe en GHCR. Impiden **rehacer** un release; no impiden **publicar uno malo**. De eso se encargan las comprobaciones descritas arriba.
 
 ### Desplegar por digest, nunca por etiqueta móvil
 
