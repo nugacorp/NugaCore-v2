@@ -89,7 +89,23 @@ existing open suspension order + missing financial block
 
 This is convergence, not atomicity: order and block are two writes with no transaction spanning them. Two further mechanisms close the window that convergence alone left open.
 
-**Deterministic reconciliation of a closed order.** If the worker already executed the order, it is no longer in the open set. The engine then looks for a single unambiguous candidate: exactly one engine suspension order, in this tenant, for this customer, tied to the same invoice that is still unpaid. Zero or several candidates produce no block — the engine does not guess. This is not a legacy backfill: a suspended customer with no engine order gets no evidence from this path.
+**Deterministic reconciliation of a closed order.** If the worker already executed the order, it is no longer in the open set. This path is deliberately the strictest one, because it is the only place where a *past* order can become present evidence.
+
+It accepts a candidate only when the order proves a **real, confirmed RouterOS suspension**. All five durable fields are required together:
+
+| Field | Required value | Why |
+| --- | --- | --- |
+| `status` | `EXECUTED` | The order finished. |
+| `dryRun` | exactly `false` | A simulated run also reaches `EXECUTED`; it never suspended anyone. An absent/unknown value is rejected. |
+| `executedAt` | present | The worker stamped a completion time. |
+| `effectStartedAt` | present | Written immediately before the commands crossed to RouterOS. |
+| `effectConfirmedAt` | present | Written only after RouterOS answered OK. |
+
+`status = 'EXECUTED'` alone is **not** sufficient. Without the effect checkpoints, a `CANCELLED`, `FAILED`, `PENDING`, `QUEUED`, or dry-run-only order could be turned into `financial` evidence later. The dangerous shape is concrete: a customer suspended for a legacy or non-financial reason, still `DELINQUENT`, with an old aborted engine order for that invoice — reconciliation would manufacture a `financial` block, a payment would then make them `eligible`, and the service would be restored on a suspension that was never financial. That contradicts the fail-closed guarantee for ambiguous suspensions.
+
+On top of the execution evidence, the association must still be **unambiguous**: exactly one candidate, in this tenant, for this customer, tied to the same invoice that is still unpaid. Zero or several candidates produce no block — the engine does not guess.
+
+These conditions are never relaxed for historical rows. An order without sufficient evidence of real execution stays fail-closed and requires manual review. There is no automatic backfill for incomplete historical evidence.
 
 **Pre-RouterOS invariant.** An engine suspension order cannot send commands, set `effectStartedAt`, or reach `EXECUTED` until its active financial block exists. Before planning any command — and before the dry-run shortcut, since `EXECUTED` would close the order and remove it from the reconcilable set — the worker verifies tenant, customer, order type and source, re-checks that the debt is still `DELINQUENT`, and ensures the block through the same `ensureEngineFinancialBlock` contract.
 
@@ -107,7 +123,8 @@ Customers suspended before this behavior existed — or suspended outside the en
 
 - No backfill is executed. The engine never infers a financial cause from `status = 'suspended'` alone.
 - The recovery path is manual review followed by authorized manual reactivation.
-- Reconciliation from a closed engine order is limited to the unambiguous, tenant-scoped, same-invoice case described above. It repairs the engine's own partial failures; it does not sweep historical data.
+- Reconciliation from a closed engine order is limited to the unambiguous, tenant-scoped, same-invoice case described above, and only when the order carries confirmed RouterOS execution evidence. It repairs the engine's own partial failures; it does not sweep historical data.
+- Open-order reconciliation (`PENDING` / `QUEUED`) is a different, earlier path: it repairs the block *before* any effect reaches the router, so it does not require execution evidence — there is nothing executed yet to prove. The pre-RouterOS invariant then guarantees the block exists before the cut happens.
 - A broader repair over historical suspensions remains a **proposal only**. It requires separate authorization, a migration plan, preflight, and evidence, and it is not part of this change.
 
 ### Tenant Scope

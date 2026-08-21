@@ -60,16 +60,50 @@ export const findEngineFinancialOrder = (
   );
 
 /**
+ * ¿Esta orden demuestra un corte REAL ya confirmado en RouterOS?
+ *
+ * `status = 'EXECUTED'` por sí solo NO alcanza: el atajo dry-run también marca
+ * EXECUTED con `executedAt`, y una orden simulada nunca suspendió a nadie.
+ * La prueba de que el efecto cruzó de verdad son los checkpoints durables que
+ * el worker escribe alrededor del límite RouterOS:
+ *
+ *   effectStartedAt   → justo antes de enviar los comandos
+ *   effectConfirmedAt → sólo cuando RouterOS respondió OK
+ *
+ * Se exigen los cinco campos a la vez. Una fila histórica sin ellos (o con
+ * `dryRun` indefinido) queda fuera a propósito: sin evidencia suficiente,
+ * fail-closed y revisión manual.
+ */
+export const hasConfirmedRouterExecution = (order: SuspensionOrder): boolean =>
+  order.status === 'EXECUTED'
+  && order.dryRun === false
+  && Boolean(order.executedAt)
+  && Boolean(order.effectStartedAt)
+  && Boolean(order.effectConfirmedAt);
+
+/**
  * Reconciliación de una orden que YA NO está abierta (el worker la ejecutó
  * antes de que su bloqueo llegara a persistir).
  *
- * Sólo devuelve una orden cuando la asociación es INEQUÍVOCA: exactamente una
- * orden de suspensión del motor, en este tenant, para este cliente y ligada a
- * la MISMA factura que hoy sigue impagada. Si hay cero o varias candidatas
- * devuelve `undefined` en vez de adivinar.
+ * Dos filtros acumulativos:
  *
- * No es un backfill de clientes legacy: un suspendido sin orden del motor no
- * produce evidencia por este camino y sigue siendo `unknown`/fail-closed.
+ *   1. Evidencia REAL de ejecución (`hasConfirmedRouterExecution`). Una orden
+ *      CANCELLED, FAILED, PENDING, QUEUED sin efecto confirmado o ejecutada
+ *      sólo en dry-run nunca se convierte en evidencia `financial`. Sin esto,
+ *      un cliente suspendido por una causa legacy o no financiera, con una
+ *      orden vieja abortada para la misma factura, podría volverse elegible
+ *      tras un pago — exactamente lo contrario del fail-closed.
+ *
+ *   2. Asociación INEQUÍVOCA: exactamente una candidata en este tenant, para
+ *      este cliente y ligada a la MISMA factura que hoy sigue impagada. Cero
+ *      o varias devuelven `undefined` en vez de adivinar.
+ *
+ * No es un backfill de clientes legacy: un suspendido sin una orden del motor
+ * realmente ejecutada no produce evidencia por este camino y sigue siendo
+ * `unknown`/fail-closed.
+ *
+ * La reparación ANTES del efecto no pasa por aquí: la cubre
+ * `findEngineFinancialOrder` sobre las órdenes abiertas.
  */
 export const findDeterministicEngineFinancialOrder = (
   orders: SuspensionOrder[],
@@ -82,7 +116,8 @@ export const findDeterministicEngineFinancialOrder = (
     (order) => isEngineFinancialSuspensionOrder(order)
       && order.customerId === customerId
       && resolveTenant(order.tenantId) === tenantId
-      && order.invoiceId === invoiceId,
+      && order.invoiceId === invoiceId
+      && hasConfirmedRouterExecution(order),
   );
   return candidates.length === 1 ? candidates[0] : undefined;
 };

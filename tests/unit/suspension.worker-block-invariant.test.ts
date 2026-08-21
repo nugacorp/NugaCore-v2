@@ -17,9 +17,14 @@ import {
 } from '../../backend/domains/mikrotik/worker/worker';
 import { evaluateCustomerById } from '../../backend/domains/suspension/engine';
 import { engineStore } from '../../backend/domains/suspension/engine-store';
-import { ENGINE_FINANCIAL_BLOCK_EVIDENCE_TYPE } from '../../backend/domains/suspension/financial-blocks';
+import {
+  ENGINE_FINANCIAL_BLOCK_EVIDENCE_TYPE,
+  findDeterministicEngineFinancialOrder,
+  hasConfirmedRouterExecution,
+} from '../../backend/domains/suspension/financial-blocks';
 import { getSuspensionService, resetSuspensionService } from '../../backend/domains/suspension/service';
 import { DEFAULT_SUSPENSION_POLICY } from '../../backend/domains/suspension/types';
+import type { SuspensionOrder } from '../../backend/domains/suspension/types';
 import { store } from '../../backend/state/store';
 import type { Client, Invoice } from '../../src/types';
 
@@ -203,15 +208,33 @@ describe('invariante orden → bloqueo → RouterOS', () => {
 });
 
 describe('reconciliación determinista de una orden ya cerrada', () => {
-  it('orden EXECUTED + bloqueo ausente + misma deuda DELINQUENT → reconcilia sin nueva orden', async () => {
+  /**
+   * Checkpoints que el worker escribe SÓLO cuando el corte cruzó RouterOS de
+   * verdad: `effectStartedAt` antes de enviar y `effectConfirmedAt` cuando el
+   * router respondió OK. El atajo dry-run no escribe ninguno de los dos.
+   */
+  const confirmedExecution = {
+    status: 'EXECUTED' as const,
+    dryRun: false,
+    executedAt: '2026-02-01T00:02:00.000Z',
+    effectStartedAt: '2026-02-01T00:01:00.000Z',
+    effectConfirmedAt: '2026-02-01T00:01:30.000Z',
+  };
+
+  /** Deja al cliente suspendido y sin bloqueo, con la orden ya cerrada. */
+  const closeOrderAs = async (
+    patch: Partial<SuspensionOrder>,
+  ): Promise<SuspensionOrder> => {
     await evaluateCustomerById(CUSTOMER_A, 'tester', TENANT_A);
     const order = orderOf(CUSTOMER_A)!;
-
-    // El worker ejecutó el corte y el bloqueo se perdió: la orden ya no está
-    // abierta, así que la reconciliación por orden abierta no aplica.
-    engineStore.updateOrder(order.id, { status: 'EXECUTED' });
+    engineStore.updateOrder(order.id, patch);
     engineStore.BLOCKS = [];
     store.CLIENTS[0].status = 'suspended';
+    return order;
+  };
+
+  it('orden con ejecución REAL confirmada reconcilia sin crear otra orden', async () => {
+    const order = await closeOrderAs(confirmedExecution);
 
     const result = await evaluateCustomerById(CUSTOMER_A, 'tester', TENANT_A);
 
@@ -220,17 +243,44 @@ describe('reconciliación determinista de una orden ya cerrada', () => {
     expect(blocks).toHaveLength(1);
     expect(blocks[0].category).toBe('financial');
     expect(blocks[0].evidenceId).toBe(order.id);
-    // Y no apareció una segunda orden de corte.
     expect(engineStore.ORDERS.filter((o) => o.orderType === 'suspension')).toHaveLength(1);
   });
 
-  it('no reconcilia cuando la asociación es ambigua (dos órdenes para la misma factura)', async () => {
-    await evaluateCustomerById(CUSTOMER_A, 'tester', TENANT_A);
-    const first = orderOf(CUSTOMER_A)!;
-    engineStore.updateOrder(first.id, { status: 'EXECUTED' });
-    // Una segunda orden histórica ligada a la MISMA factura hace ambigua la
-    // evidencia: el motor no adivina.
-    engineStore.createOrder({
+  // Cada caso describe una orden que NO prueba una suspensión real. Ninguno
+  // puede convertirse en evidencia financial: el cliente sigue fail-closed.
+  const rejected: Array<[string, Partial<SuspensionOrder>]> = [
+    ['CANCELLED', { status: 'CANCELLED', dryRun: false, executedAt: confirmedExecution.executedAt }],
+    ['FAILED', { status: 'FAILED', dryRun: false, executedAt: confirmedExecution.executedAt }],
+    ['EXECUTED en dry-run', {
+      status: 'EXECUTED',
+      dryRun: true,
+      executedAt: confirmedExecution.executedAt,
+    }],
+    ['EXECUTED sin executedAt', { ...confirmedExecution, executedAt: undefined }],
+    ['EXECUTED sin effectConfirmedAt', { ...confirmedExecution, effectConfirmedAt: undefined }],
+    ['EXECUTED sin effectStartedAt', { ...confirmedExecution, effectStartedAt: undefined }],
+    ['EXECUTED sin marca dryRun (fila histórica)', {
+      status: 'EXECUTED',
+      dryRun: undefined,
+      executedAt: confirmedExecution.executedAt,
+      effectStartedAt: confirmedExecution.effectStartedAt,
+      effectConfirmedAt: confirmedExecution.effectConfirmedAt,
+    }],
+  ];
+
+  for (const [label, patch] of rejected) {
+    it(`no reconcilia una orden ${label}`, async () => {
+      await closeOrderAs(patch);
+
+      await evaluateCustomerById(CUSTOMER_A, 'tester', TENANT_A);
+
+      expect(await activeBlocks(TENANT_A, CUSTOMER_A)).toHaveLength(0);
+    });
+  }
+
+  it('no reconcilia con dos órdenes ejecutadas para la misma factura (ambiguo)', async () => {
+    const first = await closeOrderAs(confirmedExecution);
+    const duplicate = engineStore.createOrder({
       customerId: CUSTOMER_A,
       tenantId: TENANT_A,
       invoiceId: first.invoiceId,
@@ -238,9 +288,26 @@ describe('reconciliación determinista de una orden ya cerrada', () => {
       source: 'engine',
       reason: 'duplicada historica',
     });
-    engineStore.ORDERS.forEach((o) => { if (o.status === 'PENDING') o.status = 'CANCELLED'; });
-    engineStore.BLOCKS = [];
-    store.CLIENTS[0].status = 'suspended';
+    engineStore.updateOrder(duplicate.id, confirmedExecution);
+
+    await evaluateCustomerById(CUSTOMER_A, 'tester', TENANT_A);
+
+    expect(await activeBlocks(TENANT_A, CUSTOMER_A)).toHaveLength(0);
+  });
+
+  it('no reconcilia con una orden ejecutada de OTRO tenant', async () => {
+    const order = await closeOrderAs(confirmedExecution);
+    // La única candidata pertenece a otro WISP.
+    engineStore.updateOrder(order.id, { tenantId: TENANT_B });
+
+    await evaluateCustomerById(CUSTOMER_A, 'tester', TENANT_A);
+
+    expect(await activeBlocks(TENANT_A, CUSTOMER_A)).toHaveLength(0);
+  });
+
+  it('no reconcilia con una orden ejecutada para OTRA factura', async () => {
+    const order = await closeOrderAs(confirmedExecution);
+    engineStore.updateOrder(order.id, { invoiceId: 'inv-de-otro-periodo' });
 
     await evaluateCustomerById(CUSTOMER_A, 'tester', TENANT_A);
 
@@ -254,6 +321,112 @@ describe('reconciliación determinista de una orden ya cerrada', () => {
 
     expect(await activeBlocks(TENANT_A, CUSTOMER_A)).toHaveLength(0);
     expect(engineStore.ORDERS.filter((o) => o.orderType === 'suspension')).toHaveLength(0);
+  });
+
+  it('la reparación de una orden ABIERTA sigue funcionando (antes del efecto)', async () => {
+    // PENDING y QUEUED sin efecto se reparan por findEngineFinancialOrder,
+    // que es el camino previo al worker y NO exige ejecución confirmada.
+    for (const openStatus of ['PENDING', 'QUEUED'] as const) {
+      engineStore.reset();
+      engineStore.POLICY = { ...DEFAULT_SUSPENSION_POLICY, graceDays: 3 };
+      store.CLIENTS = [client(CUSTOMER_A, TENANT_A, 'router-inv-a')];
+      resetSuspensionService();
+
+      await evaluateCustomerById(CUSTOMER_A, 'tester', TENANT_A);
+      const order = orderOf(CUSTOMER_A)!;
+      engineStore.updateOrder(order.id, { status: openStatus });
+      engineStore.BLOCKS = [];
+
+      await evaluateCustomerById(CUSTOMER_A, 'tester', TENANT_A);
+
+      const blocks = await activeBlocks(TENANT_A, CUSTOMER_A);
+      expect(blocks, `estado ${openStatus}`).toHaveLength(1);
+      expect(blocks[0].evidenceId).toBe(order.id);
+    }
+  });
+});
+
+describe('findDeterministicEngineFinancialOrder · exige ejecución confirmada', () => {
+  // Nivel de función pura: aquí se comprueba el predicado de la ruta CERRADA
+  // sin mezclarlo con la reparación de órdenes abiertas.
+  const INVOICE = 'inv-det-1';
+
+  const base: SuspensionOrder = {
+    id: 'sord-det-1',
+    tenantId: TENANT_A,
+    customerId: CUSTOMER_A,
+    invoiceId: INVOICE,
+    orderType: 'suspension',
+    source: 'engine',
+    status: 'EXECUTED',
+    dryRun: false,
+    executedAt: '2026-02-01T00:02:00.000Z',
+    effectStartedAt: '2026-02-01T00:01:00.000Z',
+    effectConfirmedAt: '2026-02-01T00:01:30.000Z',
+    createdAt: '2026-02-01T00:00:00.000Z',
+  };
+
+  const find = (orders: SuspensionOrder[]) =>
+    findDeterministicEngineFinancialOrder(orders, TENANT_A, CUSTOMER_A, INVOICE);
+
+  it('acepta la orden con ejecución real confirmada', () => {
+    expect(find([base])?.id).toBe(base.id);
+    expect(hasConfirmedRouterExecution(base)).toBe(true);
+  });
+
+  const rejections: Array<[string, Partial<SuspensionOrder>]> = [
+    ['CANCELLED', { status: 'CANCELLED' }],
+    ['FAILED', { status: 'FAILED' }],
+    ['PENDING', { status: 'PENDING', dryRun: undefined, executedAt: undefined, effectStartedAt: undefined, effectConfirmedAt: undefined }],
+    ['QUEUED sin efecto confirmado', { status: 'QUEUED', effectConfirmedAt: undefined }],
+    ['EXECUTED en dry-run', { dryRun: true }],
+    ['EXECUTED sin marca dryRun', { dryRun: undefined }],
+    ['EXECUTED sin executedAt', { executedAt: undefined }],
+    ['EXECUTED sin effectStartedAt', { effectStartedAt: undefined }],
+    ['EXECUTED sin effectConfirmedAt', { effectConfirmedAt: undefined }],
+    ['origen manual', { source: 'manual' }],
+    ['orden de reactivación', { orderType: 'reactivation' }],
+  ];
+
+  for (const [label, patch] of rejections) {
+    it(`rechaza una orden ${label}`, () => {
+      const order = { ...base, ...patch } as SuspensionOrder;
+      expect(find([order])).toBeUndefined();
+    });
+  }
+
+  it('rechaza una orden ejecutada de otro tenant', () => {
+    expect(find([{ ...base, tenantId: TENANT_B }])).toBeUndefined();
+  });
+
+  it('rechaza una orden ejecutada de otro cliente', () => {
+    expect(find([{ ...base, customerId: CUSTOMER_B }])).toBeUndefined();
+  });
+
+  it('rechaza una orden ejecutada de otra factura', () => {
+    expect(find([{ ...base, invoiceId: 'inv-otro-periodo' }])).toBeUndefined();
+  });
+
+  it('rechaza cuando no hay candidatas', () => {
+    expect(find([])).toBeUndefined();
+  });
+
+  it('rechaza cuando hay dos candidatas confirmadas (ambiguo)', () => {
+    expect(find([base, { ...base, id: 'sord-det-2' }])).toBeUndefined();
+  });
+
+  it('rechaza cuando no se conoce la factura de la deuda', () => {
+    expect(findDeterministicEngineFinancialOrder([base], TENANT_A, CUSTOMER_A, undefined))
+      .toBeUndefined();
+  });
+
+  it('la única confirmada gana aunque haya ruido no confirmado alrededor', () => {
+    const noise: SuspensionOrder[] = [
+      { ...base, id: 'sord-noise-1', status: 'CANCELLED' },
+      { ...base, id: 'sord-noise-2', dryRun: true },
+      { ...base, id: 'sord-noise-3', effectConfirmedAt: undefined },
+    ];
+    expect(find([...noise, base])?.id).toBe(base.id);
   });
 });
 
