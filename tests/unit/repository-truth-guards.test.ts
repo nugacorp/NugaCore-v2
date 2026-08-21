@@ -16,6 +16,7 @@ const readme = readFileSync('README.md', 'utf8');
 const status = readFileSync('docs/reports/PROJECT_STATUS_CURRENT.md', 'utf8');
 const ciWorkflow = readFileSync('.github/workflows/ci.yml', 'utf8');
 const gatesWorkflow = readFileSync('.github/workflows/production-gates.yml', 'utf8');
+const claude = readFileSync('CLAUDE.md', 'utf8');
 
 describe('el README no reincide en las afirmaciones de Fase 0', () => {
   const retired = [
@@ -144,5 +145,72 @@ describe('package.json expone el validador con un nombre inequívoco', () => {
     );
     // El reporte de drift sigue siendo otra cosa: ese sí puede tocar una DB.
     expect(pkg.scripts['report-migration-drift']).toContain('report-migration-drift.mjs');
+  });
+});
+
+// ====================================================================
+// CLAUDE.md — el incidente que motiva estas guardas.
+//
+// La primera versión clasificó `test:db`/`test:db:billing`/`test:auth` como
+// "skipped, not failed" (son opt-in que FALLA cerrado sin credenciales, según
+// scripts/run-tests.mjs y el bloque `if (optIn && !hasSupabase)` de cada
+// suite .db.contract.test.ts), agrupó `test:db:postgres17` con ese mismo
+// comportamiento (requiere un daemon Docker real y falla si no está, según
+// scripts/run-postgres17-fixture.mjs), y puso `report-migration-drift` bajo
+// "hermetic, no network" pese a que puede abrir una conexión psql real a una
+// URL configurada (scripts/report-migration-drift.mjs, EXTERNAL_BLOCKED sólo
+// sin URL). Un agente que confiara en esas frases correría un comando
+// pensando que no toca nada externo, y tocaría algo externo.
+//
+// El mismo incidente de esta fase — un "commit separado" terminó siendo push
+// directo a `origin/main` — mostró que la ambigüedad no es sólo documental:
+// afecta lo que un agente hace con el repositorio real.
+// ====================================================================
+
+describe('CLAUDE.md clasifica correctamente las suites de prueba', () => {
+  it('distingue `npm test` hermético de los comandos opt-in', () => {
+    expect(claude).toMatch(/npm test\b[^\n]*heretic|npm test\b[^\n]*hermetic/i);
+    expect(claude).toMatch(/opt-in/i);
+  });
+
+  it('declara que test:db, test:db:billing y test:auth FALLAN sin credenciales, no que se omiten', () => {
+    for (const script of ['test:db', 'test:db:billing', 'test:auth']) {
+      expect(claude, `falta mención de ${script}`).toContain(script);
+    }
+
+    // La afirmación errónea que esta guarda bloquea explícitamente.
+    expect(claude).not.toMatch(/test:db[^\n]*skipped, not failed/i);
+    expect(claude).not.toMatch(/opt-in;\s*skipped/i);
+
+    // La afirmación correcta: activar el opt-in sin configuración falla.
+    expect(claude).toMatch(/fail(s|ed)? closed|fails? (explicitly|if|when)|falla(n)? (cerrado|si|cuando)/i);
+  });
+
+  it('declara que test:db:postgres17 requiere Docker y no se omite silenciosamente si falta', () => {
+    const idx = claude.indexOf('test:db:postgres17');
+    expect(idx, 'test:db:postgres17 no aparece en CLAUDE.md').toBeGreaterThan(-1);
+
+    const around = claude.slice(Math.max(0, idx - 400), idx + 400);
+    expect(around).toMatch(/docker/i);
+    expect(around).toMatch(/fail|requiere|required|requires/i);
+    // No debe seguir agrupado bajo la misma promesa de "skipped, not failed"
+    // que hace el bloque opt-in de Supabase.
+    expect(around).not.toMatch(/skipped, not failed/i);
+  });
+
+  it('declara que report-migration-drift NO es hermético/sin red y puede tocar una DB remota', () => {
+    const idx = claude.indexOf('report-migration-drift');
+    expect(idx, 'report-migration-drift no aparece en CLAUDE.md').toBeGreaterThan(-1);
+
+    const around = claude.slice(Math.max(0, idx - 400), idx + 400);
+    expect(around).toMatch(/EXTERNAL_BLOCKED|psql|remote|remota/i);
+    // La afirmación errónea que esta guarda bloquea explícitamente: agrupar
+    // este comando bajo la promesa de "hermetic, no network".
+    expect(around).not.toMatch(/hermetic,\s*no network/i);
+  });
+
+  it('exige rama y PR para todo cambio, incluidos docs y archivos de agentes: nunca push directo a main', () => {
+    expect(claude).toMatch(/never push (directly )?to (`?origin\/)?main|nunca (hacer|hagas)? ?push directo a (`?origin\/)?main/i);
+    expect(claude).toMatch(/docs?[^\n]*(CLAUDE\.md|agent)|agent[^\n]*docs?/i);
   });
 });

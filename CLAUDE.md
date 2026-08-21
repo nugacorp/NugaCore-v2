@@ -35,15 +35,18 @@ npm run test:e2e               # tests/e2e via vitest
 npm run test:e2e:browser       # Playwright
 npm run test:watch
 
-# Tests requiring live infra (opt-in; skipped, not failed, when unconfigured)
-npm run test:db                # RUN_DB_TESTS=true, needs real Supabase
-npm run test:db:billing
-npm run test:auth              # RUN_AUTH_TESTS=true, forces NODE_ENV=production (JWT-only)
-npm run test:db:postgres17 -- <case>   # disposable Postgres 17 container fixture
-
-# Release / migration guards (hermetic, no network)
+# Hermetic guards (no network, no external service)
 npm run validate:migration-files
 npm run validate:release-tag -- v2.0.0
+
+# Opt-in suites against REAL infra — fail closed, they do NOT skip quietly
+npm run test:db                # RUN_DB_TESTS=true; needs real Supabase creds or it FAILS with an explicit error
+npm run test:db:billing        # same opt-in, narrower scope (billing + its customers/plans deps)
+npm run test:auth              # RUN_AUTH_TESTS=true, forces NODE_ENV=production (JWT-only); FAILS without creds
+npm run test:db:postgres17 -- <case>   # needs a running Docker daemon; may pull postgres:17; FAILS if Docker is unavailable
+
+# Read-only but network-capable — reads local files always; reads a REMOTE
+# database only if a Postgres URL is configured (never DDL/DML either way)
 npm run report-migration-drift
 ```
 
@@ -56,6 +59,13 @@ npm run report-migration-drift
 - **Vitest runs single-threaded on purpose** (`pool: 'forks'`, `fileParallelism: false`, `maxWorkers: 1` in `vitest.config.ts`): contract tests share an in-memory singleton store, and parallel files would interfere with each other.
 - **Test env layering**: `tests/setup/test-env.ts` runs before any backend module loads. It forces the hermetic in-memory mode by default (all `USE_DB_*=false`) even if a local `.env` points at a real Supabase project; `RUN_DB_TESTS`/`RUN_AUTH_TESTS` opt into the other two modes.
 - Migrations live in `supabase/migrations/` and are applied via `psql` against the pooler — **never `supabase db push`**. Filenames must have a unique `YYYYMMDDHHMMSS` version prefix; two files sharing a prefix leave one silently unapplied forever (this happened once — see `docs/deployment/SUPABASE_MIGRATIONS_SYNC.md`). CI enforces uniqueness via `validate:migration-files`.
+- **`report-migration-drift` is read-only but not hermetic.** It always reads local migration files; it also reads remote migration history via `psql` whenever a Postgres URL is configured (`MIGRATION_DRIFT_DATABASE_URL` / `STAGING_DATABASE_URL` / `DATABASE_URL`). It never runs DDL/DML either way. Without a URL it reports `EXTERNAL_BLOCKED` — that is the expected local result, not an error. Don't point it at staging or production without explicit authorization (see `docs/deployment/MIGRATION_DRIFT_READONLY_REPORT.md`).
+
+## Git workflow
+
+**Never push directly to `origin/main`.** Every change — including docs, `CLAUDE.md`, and agent skill/config files — goes through a branch and a PR, even a one-line fix. "Commit it separately" means a separate branch and PR, not a direct commit on `main`.
+
+If an untracked file shows up in the working tree that you didn't just create for the current task, stop and ask before proceeding — don't assume it's safe to commit, move, or delete, and don't reach for `git stash` to make it disappear unless the user explicitly authorizes it.
 
 ## Architecture
 
