@@ -1,10 +1,25 @@
 import { createClient } from '@supabase/supabase-js';
+import { readRuntimeConfig } from '../config/runtimeConfig';
 
-// Load values from Vite client environment variables
+// ── Configuración pública: runtime primero, build-time como respaldo ──
+//
+// El servidor sirve `/runtime-config.js` antes que el bundle, así que una
+// misma imagen OCI puede promoverse entre ambientes cambiando sólo variables
+// del contenedor. Las `VITE_*` siguen funcionando para desarrollo local y
+// para cualquier build antigua que aún las traiga incrustadas.
+//
+// Si no hay ninguna de las dos, el comportamiento no cambia: cliente nulo y
+// fail-closed, igual que antes.
+const runtimeConfig = readRuntimeConfig();
 const viteEnv = (import.meta as ImportMeta & { env: Record<string, string | undefined> }).env;
-const supabaseUrl = viteEnv.VITE_SUPABASE_URL || '';
+
+const supabaseUrl =
+  runtimeConfig?.SUPABASE_URL
+  || viteEnv.VITE_SUPABASE_URL
+  || '';
 const supabaseAnonKey =
-  viteEnv.VITE_SUPABASE_ANON_KEY
+  runtimeConfig?.SUPABASE_ANON_KEY
+  || viteEnv.VITE_SUPABASE_ANON_KEY
   || viteEnv.VITE_SUPABASE_PUBLISHABLE_KEY
   || '';
 
