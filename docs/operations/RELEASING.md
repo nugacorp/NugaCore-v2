@@ -48,7 +48,7 @@ Reglas:
 - `N` en `rc.N` empieza en **1**. `rc.0` no existe.
 - Sin ceros iniciales (`v02.0.0`, `rc.01` se rechazan).
 - Sin metadatos `+build`, sin espacios, sin `latest`, `beta` ni `alpha`.
-- `package.json` y la versión raíz de `package-lock.json` deben coincidir **exactamente** con el tag sin la `v`.
+- **Tres** campos deben coincidir **exactamente** con el tag sin la `v`: `package.json.version`, `package-lock.json.version` y `package-lock.json.packages[""].version`. El lockfile declara la versión en dos sitios; `npm version` actualiza ambos, pero una edición manual puede dejar uno atrás y entonces el lockfile diría dos cosas distintas sobre la misma release. El informe indica cuál de los tres falló.
 
 Comprobación local antes de etiquetar:
 
@@ -106,8 +106,10 @@ Ejecuta, en este orden y deteniéndose ante el primer fallo:
 4. Rechaza si ya existe un release para el tag.
 5. Construye y publica multi-arquitectura (`linux/amd64,linux/arm64`) con provenance `mode=max` y SBOM.
 6. Adjunta una attestation al nombre completo de la imagen y a su digest.
-7. **Descarga la imagen por digest** y repite el smoke de `/api/health/live` y `/runtime-config.js`.
+7. **Descarga la imagen por digest** y ejecuta `scripts/smoke-container.sh`, el MISMO script que corre el gate del PR. Arranca el contenedor en `NODE_ENV=production` con valores ficticios que satisfacen el fail-fast de producción, y verifica `/api/health/live` y `/runtime-config.js`.
 8. Sólo entonces crea el GitHub Release, con notas generadas y `release-manifest.json`.
+
+El smoke es un único script compartido a propósito. Cuando eran dos bloques de shell duplicados divergieron: el de release omitía `MIKROTIK_CREDENTIALS_KEY`, que `validateEnvironment()` exige porque la imagen fija `NODE_ENV=production`. El primer release habría publicado la imagen y sólo después habría fallado al arrancarla.
 
 El release es el **último** paso a propósito. Si el smoke por digest falla, queda una imagen publicada sin release: ese es el fallo seguro, porque el procedimiento de despliegue parte del release y nadie desplegará una imagen que no aparece en ninguno.
 
@@ -124,7 +126,28 @@ El release es el **último** paso a propósito. Si el smoke por digest falla, qu
 
 Un tag publicado apunta a un release y a una imagen. Moverlo deja artefactos que dicen proceder de un árbol que ya no existe.
 
-**Un RC defectuoso se sustituye con `rc.N+1`**, nunca reescribiendo el anterior. El workflow rechaza un tag cuyo release ya exista.
+**Un RC defectuoso se sustituye con `rc.N+1`**, nunca reescribiendo el anterior.
+
+### Un release parcial NO se reintenta sobre las mismas etiquetas
+
+Una ejecución puede publicar la imagen en GHCR y fallar después —en la attestation, en el smoke por digest o al crear el release—. En ese caso quedan publicadas `<versión>` y `sha-<SHA>` **sin** GitHub Release.
+
+Eso no se arregla borrando el tag Git y volviéndolo a empujar. Reutilizar el tag implicaría sobrescribir etiquetas OCI ya publicadas, y alguien que hubiera anotado ese digest se encontraría con contenido distinto bajo la misma etiqueta.
+
+**El procedimiento correcto es publicar `rc.N+1`.** El pipeline lo hace cumplir con dos comprobaciones independientes, ambas fail-closed:
+
+| Comprobación | Momento | Efecto |
+| --- | --- | --- |
+| ¿Existe ya un GitHub Release para el tag? | Antes de construir | Aborta |
+| ¿Existe ya `<versión>` o `sha-<SHA>` en GHCR? | Tras el login, antes del build/push | Aborta |
+
+La segunda consulta el registro por HTTP y sólo continúa ante un **404 inequívoco**. Un `200` significa que la etiqueta existe y aborta. Un `401`, `403`, rate limit, timeout, `5xx` o cualquier respuesta indeterminada **también aborta**: un error de acceso no prueba que la etiqueta esté libre. Nada se borra ni se sobrescribe, y no hay ningún `|| true` que esconda un fallo.
+
+### Proteger el patrón de tags antes del primer RC
+
+Un administrador debería configurar la protección del patrón de tags Git `v*` para impedir que se borren o se muevan, si las reglas del repositorio lo permiten.
+
+**Esa regla todavía no está configurada.** Esta fase no consulta ni modifica los settings del repositorio. Queda como acción manual pendiente antes del primer release candidate.
 
 ### Desplegar por digest, nunca por etiqueta móvil
 

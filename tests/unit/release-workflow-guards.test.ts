@@ -161,9 +161,26 @@ describe('imagen publicada', () => {
   });
 
   it('adjunta una attestation al nombre completo y al digest', () => {
-    expect(release).toContain('attest-build-provenance');
+    expect(release).toMatch(/uses: actions\/attest@[0-9a-f]{40}/);
     expect(release).toContain('subject-name: ${{ env.IMAGE_NAME }}');
     expect(release).toContain('subject-digest: ${{ steps.build.outputs.digest }}');
+    expect(release).toContain('push-to-registry: true');
+  });
+
+  it('usa la action unificada actual, no la envoltura anterior', () => {
+    expect(releaseCode).not.toContain('actions/attest-build-provenance');
+  });
+
+  it('desactiva el registro en el almacén para no pedir un quinto permiso', () => {
+    // `create-storage-record: true` exigiría `artifact-metadata: write`.
+    expect(release).toContain('create-storage-record: false');
+    expect(releaseCode).not.toContain('artifact-metadata');
+  });
+
+  it('el subject-name se declara sin etiqueta', () => {
+    const line = release.split('\n').find((l) => l.includes('subject-name:'))!;
+    expect(line).toContain('${{ env.IMAGE_NAME }}');
+    expect(line).not.toMatch(/IMAGE_NAME \}\}:/);
   });
 
   it('pasa metadata OCI por build-args, sin secretos', () => {
@@ -180,20 +197,74 @@ describe('imagen publicada', () => {
   });
 });
 
+describe('guarda contra colisión de etiquetas en GHCR', () => {
+  const publish = release.slice(release.indexOf('  publish:'));
+  const guard = publish.slice(
+    publish.indexOf('Rechazar si alguna etiqueta objetivo'),
+    publish.indexOf('docker/build-push-action'),
+  );
+
+  it('comprueba las dos referencias objetivo', () => {
+    expect(release).toContain('check_absent "${VERSION_TAG}"');
+    expect(release).toContain('check_absent "sha-${GITHUB_SHA}"');
+  });
+
+  it('ocurre DESPUÉS del login y ANTES del build/push', () => {
+    const loginAt = publish.indexOf('docker/login-action');
+    const guardAt = publish.indexOf('Rechazar si alguna etiqueta objetivo ya existe en GHCR');
+    const buildAt = publish.indexOf('docker/build-push-action');
+
+    expect(loginAt).toBeGreaterThan(-1);
+    expect(guardAt).toBeGreaterThan(loginAt);
+    expect(buildAt).toBeGreaterThan(guardAt);
+  });
+
+  it('sólo un 404 inequívoco autoriza continuar', () => {
+    expect(guard).toContain('404)');
+    expect(guard).toContain('200)');
+    expect(guard).toContain('401|403)');
+    // Cualquier otra respuesta cae en el caso por defecto y aborta.
+    expect(guard).toContain('*)');
+    expect((guard.match(/exit 1/g) ?? []).length).toBeGreaterThanOrEqual(4);
+  });
+
+  it('un error de acceso o de red nunca se interpreta como ausencia', () => {
+    expect(guard).toContain('no prueba ausencia');
+    expect(guard).toContain('no prueba que la etiqueta esté libre');
+  });
+
+  it('no oculta fallos', () => {
+    expect(guard).not.toContain('|| true');
+    expect(guard).toContain('set -euo pipefail');
+    expect(guard).toContain('--max-time');
+  });
+
+  it('no borra ni sobrescribe ninguna referencia', () => {
+    expect(guard).not.toContain('docker rmi');
+    expect(guard).not.toContain('-X DELETE');
+    expect(guard).toContain('http_code');
+  });
+});
+
 describe('el release se crea DESPUÉS del smoke por digest', () => {
   it('verifica la imagen publicada referenciándola por digest', () => {
     expect(release).toContain('${IMAGE_NAME}@${DIGEST}');
     expect(release).toContain('docker pull "$REF"');
   });
 
-  it('el smoke comprueba health y runtime-config', () => {
-    const smoke = release.slice(release.indexOf('Smoke POR DIGEST'));
-    expect(smoke).toContain('/api/health/live');
-    expect(smoke).toContain('/runtime-config.js');
+  it('el smoke delega en el script compartido, no lo reimplementa', () => {
+    const smoke = release.slice(
+      release.indexOf('Smoke POR DIGEST'),
+      release.indexOf('Manifiesto del release'),
+    );
+    expect(smoke).toContain('bash scripts/smoke-container.sh');
+    // Health y runtime-config los comprueba el script, verificado aparte.
+    expect(smoke).not.toContain('/api/health/live');
   });
 
   it('el smoke falla si un marcador de secreto aparece en la respuesta', () => {
-    expect(release).toContain('FUGA DE SECRETO');
+    // La comprobación vive en el script compartido, que ambos workflows usan.
+    expect(readFileSync('scripts/smoke-container.sh', 'utf8')).toContain('FUGA DE SECRETO');
   });
 
   it('la creación del release aparece después del smoke y del manifiesto', () => {
@@ -244,12 +315,20 @@ describe('el workflow de release no despliega ni toca infraestructura', () => {
     });
   }
 
-  it('sólo referencia Supabase con valores falsos de smoke', () => {
+  it('el workflow no referencia ninguna instancia real de Supabase', () => {
     const supabaseRefs = releaseCode.match(/supabase[\w.-]*/gi) ?? [];
     for (const ref of supabaseRefs) {
-      expect(ref.toLowerCase()).toMatch(/supabase(_url|_anon_key|_service_role_key|_secret_key)?$|supabase\.invalid/i);
+      expect(ref.toLowerCase()).toMatch(/supabase(_url|_anon_key|_service_role_key|_secret_key)?$/i);
     }
-    expect(release).toContain('.supabase.invalid');
+  });
+
+  it('el script de smoke sólo usa dominios .invalid, que nunca resuelven', () => {
+    const smoke = readFileSync('scripts/smoke-container.sh', 'utf8');
+    const hosts = smoke.match(/https?:\/\/[\w.-]+/gi) ?? [];
+    for (const host of hosts) {
+      expect(host, `host no hermético: ${host}`).toMatch(/\.invalid|127\.0\.0\.1/);
+    }
+    expect(smoke).toContain('.supabase.invalid');
   });
 });
 
@@ -284,12 +363,96 @@ describe('los gates existentes siguen intactos', () => {
     expect(smoke).not.toContain('ghcr.io');
   });
 
-  it('el smoke de PR usa un puerto efímero y limpia el contenedor', () => {
-    const smoke = gates.slice(gates.indexOf('container-smoke:'), gates.indexOf('webhook-postgres17:'));
+  it('ambos workflows invocan EXACTAMENTE el mismo script de smoke', () => {
+    // Dos copias divergieron una vez: la de release omitía
+    // MIKROTIK_CREDENTIALS_KEY, que el fail-fast de producción exige, así que
+    // el primer release habría publicado la imagen y fallado al arrancarla.
+    expect(gates).toContain('bash scripts/smoke-container.sh');
+    expect(release).toContain('bash scripts/smoke-container.sh');
+  });
+
+  it('ninguno reimplementa el smoke en shell', () => {
+    for (const [name, wf] of [['production-gates', gates], ['release', release]] as const) {
+      expect(wf, `${name} no debe arrancar el contenedor por su cuenta`).not.toContain('docker run -d -P');
+      expect(wf, `${name} no debe reimplementar la espera de health`).not.toContain('/api/health/live');
+    }
+  });
+
+  it('release pasa la referencia POR DIGEST al script', () => {
+    expect(release).toContain('REF="${IMAGE_NAME}@${DIGEST}"');
+    expect(release).toContain('bash scripts/smoke-container.sh "$REF"');
+  });
+});
+
+describe('el script de smoke compartido', () => {
+  const smoke = readFileSync('scripts/smoke-container.sh', 'utf8');
+
+  it('exige una referencia de imagen', () => {
+    expect(smoke).toContain('IMAGE_REF="${1:-}"');
+    expect(smoke).toContain('exit 2');
+  });
+
+  it('arranca en NODE_ENV=production con AUTH_TRUST_HEADERS=false', () => {
+    expect(smoke).toContain('-e NODE_ENV=production');
+    expect(smoke).toContain('-e AUTH_TRUST_HEADERS=false');
+  });
+
+  it('satisface el fail-fast de producción, incluido MIKROTIK_CREDENTIALS_KEY', () => {
+    // Era exactamente lo que faltaba en la copia de release.
+    for (const required of [
+      '-e MIKROTIK_CREDENTIALS_KEY=',
+      '-e SUPABASE_URL=',
+      '-e SUPABASE_SERVICE_ROLE_KEY=',
+    ]) {
+      expect(smoke, `falta ${required}`).toContain(required);
+    }
+  });
+
+  it('apaga stores DB, pollers y gates live de forma explícita', () => {
+    for (const off of [
+      '-e USE_DB_CUSTOMERS=false',
+      '-e USE_DB_PAYMENTS=false',
+      '-e NOC_POLLER_ENABLED=false',
+      '-e SNMP_POLLER_ENABLED=false',
+      '-e NUGACORE_LIVE_MODE=false',
+      '-e MIKROTIK_WORKER_COMMIT=false',
+      '-e PAYMENTS_ROUTER_LIVE=false',
+    ]) {
+      expect(smoke, `falta ${off}`).toContain(off);
+    }
+  });
+
+  it('usa dominios .invalid', () => {
+    expect(smoke).toContain('.invalid');
+  });
+
+  it('no imprime el marcador de secreto', () => {
+    const echoes = smoke.split('\n').filter((l) => l.trim().startsWith('echo'));
+    for (const line of echoes) {
+      expect(line, `imprime el marcador: ${line}`).not.toContain('SECRET_MARKER');
+    }
+  });
+
+  it('usa puerto efímero, trap de limpieza y espera acotada', () => {
     expect(smoke).toContain('docker run -d -P');
     expect(smoke).toContain('trap cleanup EXIT');
     expect(smoke).toContain('docker rm -f');
-    // Espera acotada, nunca indefinida.
-    expect(smoke).toMatch(/for i in \$\(seq 1 \d+\)/);
+    expect(smoke).toContain('HEALTH_TIMEOUT_SECONDS');
+  });
+
+  it('detecta que el contenedor murió antes de responder health', () => {
+    expect(smoke).toContain('.State.Running');
+    expect(smoke).toContain('terminó antes de responder health');
+  });
+
+  it('verifica cabeceras, config pública y ausencia de secretos', () => {
+    expect(smoke).toContain('cache-control');
+    expect(smoke).toContain('application/javascript');
+    expect(smoke).toContain('FUGA DE SECRETO');
+  });
+
+  it('no hace pull ni push por su cuenta', () => {
+    expect(smoke).not.toContain('docker pull');
+    expect(smoke).not.toContain('docker push');
   });
 });
