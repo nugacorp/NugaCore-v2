@@ -94,6 +94,27 @@ describe('el estado actual no colapsa las brechas en una sola categoría', () =>
   });
 });
 
+describe('T071 no se confunde con despliegue, producción o T072/T073', () => {
+  // La verificación de paridad de migraciones (T071) sólo demuestra que el
+  // ESQUEMA de staging coincide con el repositorio en un momento dado. No
+  // demuestra que la imagen esté desplegada allí, ni que producción esté
+  // lista, ni que las tareas externas independientes (T072 readiness
+  // estricto, T073 restore) estén resueltas. Mezclar esas afirmaciones fue
+  // exactamente el tipo de error que este documento existe para evitar.
+  it('declara T071 cerrada sin afirmar que staging está desplegado', () => {
+    expect(status).toMatch(/T071/);
+    expect(status).not.toMatch(/staging est[aá] desplegad[oa] con v2\.0\.0-rc\.1/i);
+  });
+
+  it('no declara T072 ni T073 cerradas junto con T071', () => {
+    const t071Index = status.indexOf('T071');
+    expect(t071Index).toBeGreaterThan(-1);
+    const nearby = status.slice(t071Index, t071Index + 800);
+    expect(nearby).not.toMatch(/T072[^\n]*cerrad/i);
+    expect(nearby).not.toMatch(/T073[^\n]*cerrad/i);
+  });
+});
+
 describe('el gate de nombres de migración está cableado en CI', () => {
   const GATE_STEP = 'Validate migration filenames and unique versions';
   const GATE_CMD = 'npm run validate:migration-files';

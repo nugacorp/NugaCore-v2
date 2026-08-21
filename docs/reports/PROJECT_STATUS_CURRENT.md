@@ -21,7 +21,7 @@ El flujo núcleo del negocio está implementado y cubierto por pruebas: alta de 
 
 Las brechas restantes son de tres tipos distintos, y conviene no confundirlos:
 
-1. **Validación externa.** Son los blockers inmediatos de Spec 001 y los que más pesan hoy: sandbox de proveedor de pagos, laboratorio CHR para la escritura RouterOS, paridad del esquema en staging, readiness estricto y evidencia de restore. Aquí el código existe; falta ejecutarlo contra el mundo real.
+1. **Validación externa.** Son los blockers inmediatos de Spec 001 y los que más pesan hoy: sandbox de proveedor de pagos, laboratorio CHR para la escritura RouterOS, readiness estricto y evidencia de restore. Aquí el código existe; falta ejecutarlo contra el mundo real. (La paridad del esquema en staging, T071, ya se verificó — ver más abajo.)
 2. **Código y persistencia.** Siete dominios (`automation`, `notifications`, `commercial`, `collections`, `client-360`, `provisioning`, `service-status`) siguen exclusivamente en memoria, varios con tablas ya creadas en migraciones que nadie lee. El job `suspension-cycle` necesita una fuente autoritativa de tenants que todavía no existe. Esto sí es código faltante.
 3. **Alcance de producto.** UISP/Splynx no está iniciado, y hay que decidir qué dominios entran en el alcance de producción y qué tablas huérfanas se retiran.
 
@@ -136,11 +136,11 @@ La lectura RouterOS se validó contra un CHR de laboratorio, pero esa evidencia 
 
 ### 3. Paridad del esquema en staging
 
-`NO CONFIRMADO EN STAGING` · Severidad alta · Spec 001 **T071**
+`VERIFICADO EN CÓDIGO/CI` · Spec 001 **T071** — cerrada
 
-`SUPABASE_MIGRATIONS_SYNC.md` está fechado el 2026-07-30 y refleja 52 archivos; hoy el repositorio tiene 76. **No se ha consultado la base de staging**, así que este documento no afirma que `20260814050000_customer_suspension_blocks` esté aplicada allí, ni que el backfill de `tenant_id` siga completo.
+`npm run report-migration-drift` se ejecutó contra la base de staging real (`nugacore-staging`) usando un rol de Postgres de solo lectura, con `v2.0.0-rc.1` (`802544ca3aae9c3b1e266825cbd4fb1fe2bed663`) como referencia. Resultado: `status: PASS`, 76 migraciones locales y 76 remotas, cero faltantes, cero extras no documentados, cero duplicados, y las 12 verificaciones críticas de columnas por tabla (`tenants`, `clients`, `plans`, `invoices`, `payments`, inventario, MikroTik, etc.) en `PASS` — no sólo `schema_migrations`, que fue precisamente lo que ocultó el drift anterior. Evidencia completa, sanitizada, en `docs/results/STAGING_MIGRATION_PARITY_V2.0.0_RC1_RESULT.md`.
 
-Criterio de cierre: `npm run report-migration-drift` contra staging sin pendientes, más verificación columna por columna (no por `schema_migrations`, que fue precisamente lo que ocultó el drift anterior).
+Esto confirma la paridad del esquema en staging al momento de esta verificación. **No** confirma que staging esté desplegado con `v2.0.0-rc.1`, ni cierra T072 (readiness estricto) o T073 (evidencia de restore), que siguen abiertas y sin relación con este resultado.
 
 ### 4. Dominios críticos en memoria
 
