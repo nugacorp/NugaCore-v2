@@ -1,12 +1,28 @@
 import { createClient } from '@supabase/supabase-js';
+import { readRuntimeConfig, resolveClientSupabaseConfig } from '../config/runtimeConfig';
 
-// Load values from Vite client environment variables
+// ── Configuración pública: la fuente se elige como UNA UNIDAD ─────────
+//
+// El servidor sirve `/runtime-config.js` antes que el bundle, así que una
+// misma imagen OCI puede promoverse entre ambientes cambiando sólo variables
+// del contenedor. Las `VITE_*` siguen funcionando para desarrollo local.
+//
+// Lo que NO se hace es elegir campo por campo. Tomar la URL del runtime y la
+// anon key del bundle mezclaría dos ambientes: el cliente hablaría con un
+// proyecto Supabase usando la credencial de otro. Si el runtime está presente
+// pero incompleto, se falla cerrado en vez de rellenar el hueco con `VITE_*`.
+//
+// Sin ninguna configuración, el comportamiento no cambia: cliente nulo.
 const viteEnv = (import.meta as ImportMeta & { env: Record<string, string | undefined> }).env;
-const supabaseUrl = viteEnv.VITE_SUPABASE_URL || '';
-const supabaseAnonKey =
-  viteEnv.VITE_SUPABASE_ANON_KEY
-  || viteEnv.VITE_SUPABASE_PUBLISHABLE_KEY
-  || '';
+
+const resolvedConfig = resolveClientSupabaseConfig({
+  runtime: readRuntimeConfig(),
+  buildUrl: viteEnv.VITE_SUPABASE_URL,
+  buildAnonKey: viteEnv.VITE_SUPABASE_ANON_KEY || viteEnv.VITE_SUPABASE_PUBLISHABLE_KEY,
+});
+
+const supabaseUrl = resolvedConfig.url;
+const supabaseAnonKey = resolvedConfig.anonKey;
 
 // Lazy initialization check
 export const isSupabaseConfigured = supabaseUrl.trim() !== '' && supabaseAnonKey.trim() !== '';
@@ -20,6 +36,8 @@ export const supabaseConfig = {
   url: supabaseUrl,
   hasAnonKey: supabaseAnonKey.trim() !== '',
   isConfigured: isSupabaseConfigured,
+  /** De dónde salió el par: 'runtime', 'build' o 'none'. Sólo diagnóstico. */
+  source: resolvedConfig.source,
 } as const;
 
 export interface UserSessionProfile {

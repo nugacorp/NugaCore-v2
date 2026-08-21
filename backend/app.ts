@@ -7,6 +7,7 @@ import { redactSensitivePath } from './common/log-redaction';
 import { logger } from './common/logger';
 import { enforceWispOnboarding } from './common/require-onboarding';
 import { attachRequestId } from './common/request-context';
+import { RUNTIME_CONFIG_PATH, runtimeConfigHandler } from './common/runtime-config';
 import { attachSecurityAudit } from './common/security-audit';
 import { registerRoutes } from './register-routes';
 
@@ -31,6 +32,12 @@ export function createApp() {
 
   // Correlation ID por petición (req.requestId / req.log / X-Request-Id).
   app.use(attachRequestId);
+
+  // Configuración PÚBLICA de runtime, antes del middleware estático y del
+  // fallback SPA (que viven en server.ts, montados tras createApp), y antes
+  // de auth/onboarding: el bootstrap del cliente no puede exigir sesión ni
+  // wizard completado. Sólo expone la allowlist de `runtime-config.ts`.
+  app.get(RUNTIME_CONFIG_PATH, runtimeConfigHandler);
 
   // La firma tiene un límite propio antes del parser global: un data URL
   // sobredimensionado nunca llega a PDFKit, Storage ni a la RPC.

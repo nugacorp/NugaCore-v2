@@ -45,6 +45,26 @@ jobs:
       - name: Local readiness (expects failures without prod env)
         run: node scripts/validate-production-readiness.mjs || true
 
+  # `npm test` corre el servidor en proceso: nunca demuestra que la IMAGEN
+  # arranque, que el usuario no-root pueda leer `dist/`, ni que
+  # /runtime-config.js entregue la configuración inyectada al contenedor.
+  #
+  # Este smoke es HERMÉTICO: construye, arranca y consulta la imagen en local
+  # con valores falsos. No publica nada y no contacta Supabase, MikroTik ni
+  # ningún proveedor. NO es una validación de staging ni de producción.
+  container-smoke:
+    name: Imagen y contenedor · smoke hermético
+    runs-on: ubuntu-latest
+    needs: quality
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Build image
+        run: docker build -t nugacore:ci-smoke .
+
+      - name: Smoke hermético del contenedor
+        run: bash scripts/smoke-container.sh nugacore:ci-smoke
+
   # `npm test` es hermético y sobre la migración del webhook sólo puede afirmar
   # presencia de texto. Los invariantes que importan —privilegios mínimos de
   # service_role, el UPDATE que exige `SELECT … FOR UPDATE`, el arbiter del

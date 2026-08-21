@@ -88,6 +88,21 @@ Corregido, y protegido por un gate que rechaza el nombre incorrecto usado como a
 
 La ruta HTTP `/api/payments/webhook/mercadopago` va sin guion bajo y es correcta: es una ruta, no una variable.
 
+### Base de Release Engineering
+
+`VERIFICADO EN CÓDIGO/CI`
+
+Pipeline de publicación inmutable listo, **sin haberlo ejecutado todavía**:
+
+- Contrato tag ↔ versión (`npm run validate:release-tag`): sólo `vX.Y.Z` y `vX.Y.Z-rc.N` con N ≥ 1, y coincidencia exacta con `package.json` y `package-lock.json`.
+- Workflow de release disparado sólo por tags `v*`, con permisos mínimos, actions fijadas a SHA completo y autenticación en GHCR únicamente con `GITHUB_TOKEN`.
+- Publica `ghcr.io/nugacorp/nugacore-v2:<versión>` y `:sha-<SHA>`; **ninguna etiqueta mutable**. Multi-arquitectura, provenance `mode=max`, SBOM y attestation sobre el digest.
+- El GitHub Release se crea **después** del smoke contra la imagen publicada por digest.
+- build-once / deploy-many: la configuración pública de Supabase sale del bundle y se sirve en `/runtime-config.js`, así que un mismo digest se promueve entre ambientes.
+- Smoke hermético de contenedor en CI: construye, arranca, comprueba `/api/health/live` y `/runtime-config.js`, e inyecta un marcador de secreto para demostrar que no se filtra.
+
+`REQUIERE AUTORIZACIÓN`: **no se ha creado ningún tag, ningún GitHub Release ni ninguna imagen en GHCR.** El package de GHCR no existe todavía; se creará en la primera publicación real. `v2.0.0-rc.1` es el primer candidato previsto y `v2.0.0` estable sigue bloqueado por T069–T073 y por las decisiones de alcance. Ver [`../operations/RELEASING.md`](../operations/RELEASING.md).
+
 ## Estado por área
 
 `VERIFICADO EN CÓDIGO/CI` salvo donde se indique.
