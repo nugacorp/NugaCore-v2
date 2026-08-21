@@ -16,8 +16,13 @@ import {
 // Hermético: recibe las versiones como argumento, no lee la red ni el disco.
 // ====================================================================
 
-const check = (tag: string, pkg = '2.0.0', lock = '2.0.0') =>
-  validateReleaseTag({ tag, packageVersion: pkg, lockVersion: lock });
+const check = (tag: string, pkg = '2.0.0', lock = '2.0.0', lockRoot = lock) =>
+  validateReleaseTag({
+    tag,
+    packageVersion: pkg,
+    lockVersion: lock,
+    lockPackagesRootVersion: lockRoot,
+  });
 
 describe('tags aceptados', () => {
   it('acepta un estable vMAJOR.MINOR.PATCH', () => {
@@ -78,10 +83,12 @@ describe('tags rechazados', () => {
 
   for (const [label, tag] of rejected) {
     it(`rechaza ${label}: ${JSON.stringify(tag)}`, () => {
+      const bare = tag.replace(/^v/, '');
       const result = validateReleaseTag({
         tag,
-        packageVersion: tag.replace(/^v/, ''),
-        lockVersion: tag.replace(/^v/, ''),
+        packageVersion: bare,
+        lockVersion: bare,
+        lockPackagesRootVersion: bare,
       });
 
       expect(result.ok).toBe(false);
@@ -90,7 +97,7 @@ describe('tags rechazados', () => {
   }
 
   it('rechaza un tag ausente', () => {
-    expect(validateReleaseTag({ tag: '', packageVersion: '2.0.0', lockVersion: '2.0.0' }).ok).toBe(false);
+    expect(check('', '2.0.0').ok).toBe(false);
     expect(validateReleaseTag({ packageVersion: '2.0.0', lockVersion: '2.0.0' }).ok).toBe(false);
   });
 });
@@ -104,11 +111,47 @@ describe('coherencia con package.json y package-lock.json', () => {
     expect(result.errors.join('\n')).toContain('2.0.0');
   });
 
-  it('rechaza un mismatch con package-lock.json', () => {
-    const result = check('v2.1.0', '2.1.0', '2.0.0');
+  it('rechaza un mismatch con la versión raíz de package-lock.json', () => {
+    const result = check('v2.1.0', '2.1.0', '2.0.0', '2.1.0');
 
     expect(result.ok).toBe(false);
-    expect(result.errors.join('\n')).toMatch(/package-lock\.json/);
+    // El informe debe distinguir CUÁL de los dos campos del lockfile falló.
+    expect(result.errors.join('\n')).toContain('package-lock.json (raíz)');
+  });
+
+  it('rechaza un mismatch con packages[""] de package-lock.json', () => {
+    const result = check('v2.1.0', '2.1.0', '2.1.0', '2.0.0');
+
+    expect(result.ok).toBe(false);
+    expect(result.errors.join('\n')).toContain('packages[""]');
+  });
+
+  it('rechaza un lockfile que se contradice a sí mismo', () => {
+    // Ninguno coincide con el tag, pero además el propio lockfile discrepa.
+    const result = check('v2.1.0', '2.1.0', '2.0.0', '2.0.1');
+
+    expect(result.ok).toBe(false);
+    expect(result.errors.join('\n')).toMatch(/incoherente consigo mismo/i);
+  });
+
+  it('rechaza cuando falta packages[""] en el lockfile', () => {
+    const result = validateReleaseTag({
+      tag: 'v2.0.0',
+      packageVersion: '2.0.0',
+      lockVersion: '2.0.0',
+      lockPackagesRootVersion: undefined,
+    });
+
+    expect(result.ok).toBe(false);
+    expect(result.errors.join('\n')).toContain('Falta la versión de package-lock.json packages[""]');
+  });
+
+  it('expone lo declarado en cada manifiesto para el informe', () => {
+    expect(check('v2.0.0').versions).toEqual({
+      packageVersion: '2.0.0',
+      lockVersion: '2.0.0',
+      lockPackagesRootVersion: '2.0.0',
+    });
   });
 
   it('rechaza cuando ambos difieren y nombra los dos', () => {
@@ -120,7 +163,8 @@ describe('coherencia con package.json y package-lock.json', () => {
 
   it('rechaza versiones ausentes en los manifiestos', () => {
     expect(check('v2.0.0', '', '2.0.0').ok).toBe(false);
-    expect(check('v2.0.0', '2.0.0', '').ok).toBe(false);
+    expect(check('v2.0.0', '2.0.0', '', '2.0.0').ok).toBe(false);
+    expect(check('v2.0.0', '2.0.0', '2.0.0', '').ok).toBe(false);
   });
 
   it('no acepta una coincidencia "casi igual" con whitespace', () => {
@@ -152,12 +196,26 @@ describe('forma del contrato', () => {
 });
 
 describe('el repositorio actual', () => {
-  it('todavía declara 2.0.0 y no prepara un rc en este PR', async () => {
+  it('todavía declara 2.0.0 en los TRES campos y no prepara un rc en este PR', async () => {
     const { readFileSync } = await import('node:fs');
     const pkg = JSON.parse(readFileSync('package.json', 'utf8')) as { version: string };
-    const lock = JSON.parse(readFileSync('package-lock.json', 'utf8')) as { version: string };
+    const lock = JSON.parse(readFileSync('package-lock.json', 'utf8')) as {
+      version: string;
+      packages: Record<string, { version?: string }>;
+    };
 
     expect(pkg.version).toBe('2.0.0');
     expect(lock.version).toBe('2.0.0');
+    expect(lock.packages['']?.version).toBe('2.0.0');
+  });
+
+  it('el lector de manifiestos devuelve los tres campos', async () => {
+    const { readRepositoryVersions } = await import('../../scripts/validate-release-tag.mjs');
+
+    expect(readRepositoryVersions()).toEqual({
+      packageVersion: '2.0.0',
+      lockVersion: '2.0.0',
+      lockPackagesRootVersion: '2.0.0',
+    });
   });
 });

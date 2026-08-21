@@ -50,21 +50,36 @@ export const RELEASE_TAG_PATTERN =
  * @typedef {Object} ReleaseTagResult
  * @property {boolean} ok
  * @property {string[]} errors
- * @property {string|null} version     Versión sin la `v`.
+ * @property {string|null} version       Versión sin la `v`.
  * @property {boolean} prerelease
- * @property {string|null} imageTag    Etiqueta OCI (== versión, nunca con `v`).
+ * @property {string|null} imageTag      Etiqueta OCI (== versión, nunca con `v`).
+ * @property {Object} versions           Lo declarado en cada manifiesto.
+ * @property {string|undefined} versions.packageVersion
+ * @property {string|undefined} versions.lockVersion
+ * @property {string|undefined} versions.lockPackagesRootVersion
  */
 
 /**
  * Valida el contrato. Recibe las versiones como argumentos para poder
  * probarse sin tocar el disco.
  *
- * @param {{tag?: string, packageVersion?: string, lockVersion?: string}} input
+ * `package-lock.json` declara la versión en DOS sitios: la raíz (`version`) y
+ * `packages[""].version`. `npm version` actualiza ambos; una edición manual
+ * puede dejar uno atrás, y entonces el lockfile diría dos cosas distintas
+ * sobre la misma release. Se exigen los tres campos.
+ *
+ * @param {{tag?: string, packageVersion?: string, lockVersion?: string, lockPackagesRootVersion?: string}} input
  * @returns {ReleaseTagResult}
  */
 export function validateReleaseTag(input = {}) {
   const errors = [];
   const rawTag = input.tag;
+
+  const versions = {
+    packageVersion: input.packageVersion,
+    lockVersion: input.lockVersion,
+    lockPackagesRootVersion: input.lockPackagesRootVersion,
+  };
 
   if (typeof rawTag !== 'string' || rawTag.length === 0) {
     return {
@@ -73,6 +88,7 @@ export function validateReleaseTag(input = {}) {
       version: null,
       prerelease: false,
       imageTag: null,
+      versions,
     };
   }
 
@@ -88,6 +104,7 @@ export function validateReleaseTag(input = {}) {
       version: null,
       prerelease: false,
       imageTag: null,
+      versions,
     };
   }
 
@@ -98,7 +115,8 @@ export function validateReleaseTag(input = {}) {
   // aunque lo parezca, y un manifiesto así rompería la trazabilidad.
   for (const [label, value] of [
     ['package.json', input.packageVersion],
-    ['package-lock.json', input.lockVersion],
+    ['package-lock.json (raíz)', input.lockVersion],
+    ['package-lock.json packages[""]', input.lockPackagesRootVersion],
   ]) {
     if (typeof value !== 'string' || value.length === 0) {
       errors.push(`Falta la versión de ${label}.`);
@@ -112,12 +130,27 @@ export function validateReleaseTag(input = {}) {
     }
   }
 
+  // Incoherencia INTERNA del lockfile: aunque ninguno coincida con el tag,
+  // conviene decir explícitamente que el propio lockfile se contradice.
+  if (
+    typeof input.lockVersion === 'string' && input.lockVersion.length > 0
+    && typeof input.lockPackagesRootVersion === 'string' && input.lockPackagesRootVersion.length > 0
+    && input.lockVersion !== input.lockPackagesRootVersion
+  ) {
+    errors.push(
+      `package-lock.json es incoherente consigo mismo: raíz `
+      + `${JSON.stringify(input.lockVersion)} vs packages[""] `
+      + `${JSON.stringify(input.lockPackagesRootVersion)}.`,
+    );
+  }
+
   return {
     ok: errors.length === 0,
     errors: errors.sort(),
     version,
     prerelease,
     imageTag: version,
+    versions,
   };
 }
 
@@ -125,7 +158,16 @@ export function validateReleaseTag(input = {}) {
 export function readRepositoryVersions(root = REPO_ROOT) {
   const pkg = JSON.parse(readFileSync(resolve(root, 'package.json'), 'utf8'));
   const lock = JSON.parse(readFileSync(resolve(root, 'package-lock.json'), 'utf8'));
-  return { packageVersion: pkg.version, lockVersion: lock.version };
+  // `packages[""]` es la entrada del propio paquete raíz. Si no existe, el
+  // lockfile no tiene la forma esperada y se trata como campo ausente.
+  const lockRoot = lock && typeof lock.packages === 'object' && lock.packages !== null
+    ? lock.packages['']
+    : undefined;
+  return {
+    packageVersion: pkg.version,
+    lockVersion: lock.version,
+    lockPackagesRootVersion: lockRoot ? lockRoot.version : undefined,
+  };
 }
 
 /** Ejecución CLI. Devuelve el código de salida (0 = OK). */
@@ -147,8 +189,9 @@ export function runValidateReleaseTagCli({
 
   log.log('=== NugaCore · contrato tag ↔ versión ===');
   log.log(`tag: ${tag ?? '(ausente)'}`);
-  log.log(`package.json: ${versions.packageVersion}`);
-  log.log(`package-lock.json: ${versions.lockVersion}`);
+  log.log(`package.json: ${versions.packageVersion ?? '(ausente)'}`);
+  log.log(`package-lock.json (raíz): ${versions.lockVersion ?? '(ausente)'}`);
+  log.log(`package-lock.json packages[""]: ${versions.lockPackagesRootVersion ?? '(ausente)'}`);
 
   if (!result.ok) {
     log.error(`resultado: FALLO — ${result.errors.length} incumplimiento(s):`);
