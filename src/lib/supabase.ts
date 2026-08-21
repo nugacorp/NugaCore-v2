@@ -1,27 +1,28 @@
 import { createClient } from '@supabase/supabase-js';
-import { readRuntimeConfig } from '../config/runtimeConfig';
+import { readRuntimeConfig, resolveClientSupabaseConfig } from '../config/runtimeConfig';
 
-// ── Configuración pública: runtime primero, build-time como respaldo ──
+// ── Configuración pública: la fuente se elige como UNA UNIDAD ─────────
 //
 // El servidor sirve `/runtime-config.js` antes que el bundle, así que una
 // misma imagen OCI puede promoverse entre ambientes cambiando sólo variables
-// del contenedor. Las `VITE_*` siguen funcionando para desarrollo local y
-// para cualquier build antigua que aún las traiga incrustadas.
+// del contenedor. Las `VITE_*` siguen funcionando para desarrollo local.
 //
-// Si no hay ninguna de las dos, el comportamiento no cambia: cliente nulo y
-// fail-closed, igual que antes.
-const runtimeConfig = readRuntimeConfig();
+// Lo que NO se hace es elegir campo por campo. Tomar la URL del runtime y la
+// anon key del bundle mezclaría dos ambientes: el cliente hablaría con un
+// proyecto Supabase usando la credencial de otro. Si el runtime está presente
+// pero incompleto, se falla cerrado en vez de rellenar el hueco con `VITE_*`.
+//
+// Sin ninguna configuración, el comportamiento no cambia: cliente nulo.
 const viteEnv = (import.meta as ImportMeta & { env: Record<string, string | undefined> }).env;
 
-const supabaseUrl =
-  runtimeConfig?.SUPABASE_URL
-  || viteEnv.VITE_SUPABASE_URL
-  || '';
-const supabaseAnonKey =
-  runtimeConfig?.SUPABASE_ANON_KEY
-  || viteEnv.VITE_SUPABASE_ANON_KEY
-  || viteEnv.VITE_SUPABASE_PUBLISHABLE_KEY
-  || '';
+const resolvedConfig = resolveClientSupabaseConfig({
+  runtime: readRuntimeConfig(),
+  buildUrl: viteEnv.VITE_SUPABASE_URL,
+  buildAnonKey: viteEnv.VITE_SUPABASE_ANON_KEY || viteEnv.VITE_SUPABASE_PUBLISHABLE_KEY,
+});
+
+const supabaseUrl = resolvedConfig.url;
+const supabaseAnonKey = resolvedConfig.anonKey;
 
 // Lazy initialization check
 export const isSupabaseConfigured = supabaseUrl.trim() !== '' && supabaseAnonKey.trim() !== '';
@@ -35,6 +36,8 @@ export const supabaseConfig = {
   url: supabaseUrl,
   hasAnonKey: supabaseAnonKey.trim() !== '',
   isConfigured: isSupabaseConfigured,
+  /** De dónde salió el par: 'runtime', 'build' o 'none'. Sólo diagnóstico. */
+  source: resolvedConfig.source,
 } as const;
 
 export interface UserSessionProfile {

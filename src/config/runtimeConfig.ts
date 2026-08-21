@@ -59,3 +59,68 @@ export function readRuntimeConfig(
   if (!url && !anonKey) return null;
   return { SUPABASE_URL: url, SUPABASE_ANON_KEY: anonKey };
 }
+
+/**
+ * Origen efectivo de la configuración del cliente.
+ *
+ *   'runtime'   el servidor entregó el par completo
+ *   'build'     no hay runtime en absoluto y las VITE_* traen el par completo
+ *   'none'      no hay configuración utilizable
+ */
+export type RuntimeConfigSource = 'runtime' | 'build' | 'none';
+
+export interface ResolvedClientConfig {
+  source: RuntimeConfigSource;
+  url: string;
+  anonKey: string;
+  /** Motivo cuando `source` es 'none'; sirve para diagnóstico, no para UI. */
+  reason?: 'no-config' | 'incomplete-runtime' | 'incomplete-build';
+}
+
+const bothPresent = (url: string, key: string): boolean =>
+  url.trim() !== '' && key.trim() !== '';
+
+/**
+ * Elige la fuente como UNA UNIDAD, nunca campo por campo.
+ *
+ * Seleccionar cada campo por separado permitía mezclar ambientes: una URL de
+ * producción servida en runtime junto a una anon key de staging incrustada en
+ * el bundle. Eso no es sólo incorrecto, es peligroso — el cliente hablaría con
+ * un proyecto usando la credencial de otro.
+ *
+ * Por eso, si el runtime está PRESENTE pero incompleto, no se recurre a las
+ * VITE_*: se falla cerrado. Las VITE_* sólo entran cuando no hay runtime en
+ * absoluto, que es el caso del desarrollo local.
+ */
+export function resolveClientSupabaseConfig(input: {
+  runtime: PublicRuntimeConfig | null;
+  buildUrl?: string;
+  buildAnonKey?: string;
+}): ResolvedClientConfig {
+  const { runtime } = input;
+  const buildUrl = (input.buildUrl || '').trim();
+  const buildAnonKey = (input.buildAnonKey || '').trim();
+
+  if (runtime) {
+    if (bothPresent(runtime.SUPABASE_URL, runtime.SUPABASE_ANON_KEY)) {
+      return {
+        source: 'runtime',
+        url: runtime.SUPABASE_URL.trim(),
+        anonKey: runtime.SUPABASE_ANON_KEY.trim(),
+      };
+    }
+    // Runtime presente pero a medias: fail-closed sin tocar las VITE_*.
+    return { source: 'none', url: '', anonKey: '', reason: 'incomplete-runtime' };
+  }
+
+  if (bothPresent(buildUrl, buildAnonKey)) {
+    return { source: 'build', url: buildUrl, anonKey: buildAnonKey };
+  }
+
+  return {
+    source: 'none',
+    url: '',
+    anonKey: '',
+    reason: buildUrl || buildAnonKey ? 'incomplete-build' : 'no-config',
+  };
+}

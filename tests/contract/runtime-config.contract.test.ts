@@ -11,7 +11,7 @@ import {
   resolvePublicRuntimeConfig,
   serializeForScript,
 } from '../../backend/common/runtime-config';
-import { readRuntimeConfig } from '../../src/config/runtimeConfig';
+import { readRuntimeConfig, resolveClientSupabaseConfig } from '../../src/config/runtimeConfig';
 
 // ====================================================================
 // build-once / deploy-many.
@@ -237,6 +237,119 @@ describe('lector del cliente', () => {
   it('ignora un global con forma inesperada', () => {
     expect(readRuntimeConfig({ [RUNTIME_CONFIG_GLOBAL]: 'no-es-objeto' })).toBeNull();
     expect(readRuntimeConfig({ [RUNTIME_CONFIG_GLOBAL]: { SUPABASE_URL: 42 } })).toBeNull();
+  });
+});
+
+describe('la fuente de configuración se elige como UNA UNIDAD', () => {
+  // Elegir campo por campo permitía mezclar ambientes: URL de producción
+  // servida en runtime + anon key de staging incrustada en el bundle. El
+  // cliente hablaría con un proyecto usando la credencial de otro.
+  const RUNTIME_URL = 'https://runtime.supabase.test';
+  const RUNTIME_KEY = 'anon-runtime';
+  const BUILD_URL = 'https://build.supabase.test';
+  const BUILD_KEY = 'anon-build';
+
+  it('par runtime completo → usa runtime', () => {
+    const result = resolveClientSupabaseConfig({
+      runtime: { SUPABASE_URL: RUNTIME_URL, SUPABASE_ANON_KEY: RUNTIME_KEY },
+      buildUrl: BUILD_URL,
+      buildAnonKey: BUILD_KEY,
+    });
+
+    expect(result.source).toBe('runtime');
+    expect(result.url).toBe(RUNTIME_URL);
+    expect(result.anonKey).toBe(RUNTIME_KEY);
+  });
+
+  it('runtime completamente ausente + par Vite completo → usa build', () => {
+    const result = resolveClientSupabaseConfig({
+      runtime: null,
+      buildUrl: BUILD_URL,
+      buildAnonKey: BUILD_KEY,
+    });
+
+    expect(result.source).toBe('build');
+    expect(result.url).toBe(BUILD_URL);
+    expect(result.anonKey).toBe(BUILD_KEY);
+  });
+
+  it('URL runtime sin key + key Vite → FAIL-CLOSED, no mezcla', () => {
+    const result = resolveClientSupabaseConfig({
+      runtime: { SUPABASE_URL: RUNTIME_URL, SUPABASE_ANON_KEY: '' },
+      buildUrl: BUILD_URL,
+      buildAnonKey: BUILD_KEY,
+    });
+
+    expect(result.source).toBe('none');
+    expect(result.reason).toBe('incomplete-runtime');
+    expect(result.url).toBe('');
+    expect(result.anonKey).toBe('');
+    // Y en particular NO tomó la key del bundle.
+    expect(result.anonKey).not.toBe(BUILD_KEY);
+  });
+
+  it('key runtime sin URL + URL Vite → FAIL-CLOSED, no mezcla', () => {
+    const result = resolveClientSupabaseConfig({
+      runtime: { SUPABASE_URL: '', SUPABASE_ANON_KEY: RUNTIME_KEY },
+      buildUrl: BUILD_URL,
+      buildAnonKey: BUILD_KEY,
+    });
+
+    expect(result.source).toBe('none');
+    expect(result.reason).toBe('incomplete-runtime');
+    expect(result.url).not.toBe(BUILD_URL);
+  });
+
+  it('runtime parcial SIN Vite → fail-closed', () => {
+    const result = resolveClientSupabaseConfig({
+      runtime: { SUPABASE_URL: RUNTIME_URL, SUPABASE_ANON_KEY: '' },
+    });
+
+    expect(result.source).toBe('none');
+    expect(result.reason).toBe('incomplete-runtime');
+  });
+
+  it('ninguna configuración → fail-closed', () => {
+    const result = resolveClientSupabaseConfig({ runtime: null });
+
+    expect(result.source).toBe('none');
+    expect(result.reason).toBe('no-config');
+    expect(result.url).toBe('');
+    expect(result.anonKey).toBe('');
+  });
+
+  it('Vite incompleto sin runtime → fail-closed, tampoco a medias', () => {
+    expect(resolveClientSupabaseConfig({ runtime: null, buildUrl: BUILD_URL }))
+      .toMatchObject({ source: 'none', reason: 'incomplete-build' });
+    expect(resolveClientSupabaseConfig({ runtime: null, buildAnonKey: BUILD_KEY }))
+      .toMatchObject({ source: 'none', reason: 'incomplete-build' });
+  });
+
+  it('trata el whitespace como ausencia', () => {
+    const result = resolveClientSupabaseConfig({
+      runtime: { SUPABASE_URL: RUNTIME_URL, SUPABASE_ANON_KEY: '   ' },
+      buildUrl: BUILD_URL,
+      buildAnonKey: BUILD_KEY,
+    });
+
+    expect(result.source).toBe('none');
+  });
+
+  it('nunca devuelve un par de fuentes distintas', () => {
+    const cases = [
+      { runtime: { SUPABASE_URL: RUNTIME_URL, SUPABASE_ANON_KEY: RUNTIME_KEY }, buildUrl: BUILD_URL, buildAnonKey: BUILD_KEY },
+      { runtime: { SUPABASE_URL: RUNTIME_URL, SUPABASE_ANON_KEY: '' }, buildUrl: BUILD_URL, buildAnonKey: BUILD_KEY },
+      { runtime: { SUPABASE_URL: '', SUPABASE_ANON_KEY: RUNTIME_KEY }, buildUrl: BUILD_URL, buildAnonKey: BUILD_KEY },
+      { runtime: null, buildUrl: BUILD_URL, buildAnonKey: BUILD_KEY },
+    ];
+
+    for (const input of cases) {
+      const { url, anonKey } = resolveClientSupabaseConfig(input);
+      const mixed =
+        (url === RUNTIME_URL && anonKey === BUILD_KEY)
+        || (url === BUILD_URL && anonKey === RUNTIME_KEY);
+      expect(mixed, `mezcló fuentes: url=${url} key=${anonKey}`).toBe(false);
+    }
   });
 });
 
