@@ -62,73 +62,8 @@ jobs:
       - name: Build image
         run: docker build -t nugacore:ci-smoke .
 
-      - name: Run container and verify runtime config
-        env:
-          # Valores PÚBLICOS falsos: deben aparecer en /runtime-config.js.
-          FAKE_SUPABASE_URL: https://smoke.supabase.invalid
-          FAKE_ANON_KEY: anon-smoke-public-value
-          # Marcador de SECRETO: no debe aparecer NUNCA en la respuesta.
-          FAKE_SERVICE_ROLE: SERVICE-ROLE-MARKER-MUST-NOT-LEAK
-        run: |
-          set -euo pipefail
-
-          CID=""
-          cleanup() {
-            if [ -n "$CID" ]; then
-              docker logs "$CID" 2>&1 | tail -40 || true
-              docker rm -f "$CID" >/dev/null 2>&1 || true
-            fi
-          }
-          trap cleanup EXIT
-
-          # Puerto efímero asignado por el kernel: evita colisiones con otros
-          # jobs o servicios del runner.
-          CID=$(docker run -d -P \
-            -e SUPABASE_URL="$FAKE_SUPABASE_URL" \
-            -e SUPABASE_ANON_KEY="$FAKE_ANON_KEY" \
-            -e SUPABASE_SERVICE_ROLE_KEY="$FAKE_SERVICE_ROLE" \
-            -e SUPABASE_SECRET_KEY="$FAKE_SERVICE_ROLE" \
-            -e DATABASE_URL="$FAKE_SERVICE_ROLE" \
-            -e MIKROTIK_CREDENTIALS_KEY="$FAKE_SERVICE_ROLE" \
-            -e WEBHOOK_SECRET_MANUAL="$FAKE_SERVICE_ROLE" \
-            nugacore:ci-smoke)
-
-          PORT=$(docker port "$CID" 3000/tcp | head -1 | sed 's/.*://')
-          echo "container=$CID port=$PORT"
-
-          # Espera acotada: 60 intentos de 1s. Nunca indefinida.
-          ok=0
-          for i in $(seq 1 60); do
-            if curl -fsS "http://127.0.0.1:${PORT}/api/health/live" >/dev/null 2>&1; then
-              ok=1; break
-            fi
-            sleep 1
-          done
-          if [ "$ok" -ne 1 ]; then
-            echo "::error::el contenedor no respondió /api/health/live en 60s"
-            exit 1
-          fi
-          echo "health OK tras ${i}s"
-
-          BODY=$(curl -fsS -D /tmp/rc-headers "http://127.0.0.1:${PORT}/runtime-config.js")
-          echo "--- /runtime-config.js ---"
-          echo "$BODY"
-
-          grep -qi '^cache-control: *no-store' /tmp/rc-headers \
-            || { echo "::error::falta Cache-Control: no-store"; exit 1; }
-          grep -qi '^content-type: *application/javascript' /tmp/rc-headers \
-            || { echo "::error::content-type inesperado"; exit 1; }
-
-          echo "$BODY" | grep -q "$FAKE_SUPABASE_URL" \
-            || { echo "::error::la URL pública inyectada no aparece"; exit 1; }
-          echo "$BODY" | grep -q "$FAKE_ANON_KEY" \
-            || { echo "::error::la anon key pública inyectada no aparece"; exit 1; }
-
-          if echo "$BODY" | grep -q "$FAKE_SERVICE_ROLE"; then
-            echo "::error::FUGA DE SECRETO: el marcador service-role apareció en /runtime-config.js"
-            exit 1
-          fi
-          echo "smoke OK: config pública presente, secretos ausentes"
+      - name: Smoke hermético del contenedor
+        run: bash scripts/smoke-container.sh nugacore:ci-smoke
 
   # `npm test` es hermético y sobre la migración del webhook sólo puede afirmar
   # presencia de texto. Los invariantes que importan —privilegios mínimos de

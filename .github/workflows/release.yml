@@ -159,6 +159,55 @@ jobs:
           # y sobrevive al job.
           password: ${{ github.token }}
 
+      - name: Rechazar si alguna etiqueta objetivo ya existe en GHCR
+        env:
+          GH_TOKEN_FOR_REGISTRY: ${{ github.token }}
+          VERSION_TAG: ${{ needs.verify.outputs.image_tag }}
+        run: |
+          set -euo pipefail
+          # El chequeo de "release ya existe" no basta: una ejecución anterior
+          # pudo alcanzar el push de GHCR y fallar después, dejando etiquetas
+          # publicadas. Sobrescribirlas rompería el contrato de inmutabilidad,
+          # así que se comprueban ANTES de construir nada.
+          #
+          # Fail-closed estricto: sólo un 404 inequívoco autoriza continuar.
+          # Un 401, 403, rate limit, timeout, 5xx o cualquier respuesta
+          # indeterminada aborta. Un error de acceso NUNCA se interpreta como
+          # "la etiqueta no existe". Nada se borra ni se sobrescribe.
+          BEARER=$(printf '%s' "$GH_TOKEN_FOR_REGISTRY" | base64 -w0)
+          ACCEPT='application/vnd.oci.image.index.v1+json,application/vnd.docker.distribution.manifest.list.v2+json,application/vnd.oci.image.manifest.v1+json,application/vnd.docker.distribution.manifest.v2+json'
+
+          check_absent() {
+            tag="$1"
+            url="https://ghcr.io/v2/nugacorp/nugacore-v2/manifests/${tag}"
+            if ! status=$(curl -sS -o /dev/null -w '%{http_code}'                   --max-time 30 --retry 2 --retry-connrefused                   -H "Authorization: Bearer ${BEARER}"                   -H "Accept: ${ACCEPT}"                   "$url"); then
+              echo "::error::no se pudo consultar GHCR para '${tag}'. Un fallo de consulta no prueba que la etiqueta esté libre; se aborta."
+              exit 1
+            fi
+            case "$status" in
+              404)
+                echo "OK: '${tag}' no existe en GHCR."
+                ;;
+              200)
+                echo "::error::la etiqueta '${tag}' YA EXISTE en GHCR. No se sobrescribe."
+                echo "Si una ejecución anterior publicó parcialmente, el procedimiento seguro es publicar rc.N+1, nunca reutilizar este tag."
+                exit 1
+                ;;
+              401|403)
+                echo "::error::GHCR respondió ${status} para '${tag}'. Un error de acceso no prueba ausencia; se aborta."
+                exit 1
+                ;;
+              *)
+                echo "::error::GHCR respondió ${status} (indeterminado) para '${tag}'. Se aborta."
+                exit 1
+                ;;
+            esac
+          }
+
+          check_absent "${VERSION_TAG}"
+          check_absent "sha-${GITHUB_SHA}"
+          echo "ambas etiquetas objetivo están libres"
+
       - name: Build y push (multi-arquitectura, con provenance y SBOM)
         id: build
         uses: docker/build-push-action@10e90e3645eae34f1e60eeb005ba3a3d33f178e8 # v6.19.2
@@ -181,63 +230,28 @@ jobs:
             IMAGE_CREATED=${{ needs.verify.outputs.created }}
 
       - name: Attestation de procedencia sobre el digest
-        uses: actions/attest-build-provenance@e8998f949152b193b063cb0ec769d69d929409be # v2.4.0
+        uses: actions/attest@1e69f48acb82d1966a394da916b4c1698aa569d6 # v4.2.2
         with:
           subject-name: ${{ env.IMAGE_NAME }}
           subject-digest: ${{ steps.build.outputs.digest }}
           push-to-registry: true
+          # Sin registro en el almacén de artefactos: exigiría
+          # `artifact-metadata: write`, un quinto permiso que este workflow no
+          # necesita. La attestation viaja adjunta al digest en el registro.
+          create-storage-record: false
 
       - name: Smoke POR DIGEST de la imagen publicada
         env:
           DIGEST: ${{ steps.build.outputs.digest }}
-          FAKE_SUPABASE_URL: https://release-smoke.supabase.invalid
-          FAKE_ANON_KEY: anon-release-smoke-public
-          FAKE_SERVICE_ROLE: SERVICE-ROLE-MARKER-MUST-NOT-LEAK
         run: |
           set -euo pipefail
-          # Se verifica EXACTAMENTE lo publicado, referenciado por digest, no
-          # por etiqueta. Si esto falla no se crea el release: queda una imagen
-          # publicada sin release, que es el fallo seguro (nadie la despliega
-          # porque el procedimiento parte del release).
+          # Se verifica EXACTAMENTE lo publicado, referenciado por DIGEST, no
+          # por etiqueta. Usa el MISMO script que el gate del PR: dos copias
+          # divergieron una vez y la de release omitía MIKROTIK_CREDENTIALS_KEY,
+          # que el fail-fast de producción exige.
           REF="${IMAGE_NAME}@${DIGEST}"
-          echo "verificando ${REF}"
           docker pull "$REF"
-
-          CID=""
-          cleanup() {
-            if [ -n "$CID" ]; then
-              docker logs "$CID" 2>&1 | tail -40 || true
-              docker rm -f "$CID" >/dev/null 2>&1 || true
-            fi
-          }
-          trap cleanup EXIT
-
-          CID=$(docker run -d -P \
-            -e SUPABASE_URL="$FAKE_SUPABASE_URL" \
-            -e SUPABASE_ANON_KEY="$FAKE_ANON_KEY" \
-            -e SUPABASE_SERVICE_ROLE_KEY="$FAKE_SERVICE_ROLE" \
-            -e SUPABASE_SECRET_KEY="$FAKE_SERVICE_ROLE" \
-            -e DATABASE_URL="$FAKE_SERVICE_ROLE" \
-            "$REF")
-
-          PORT=$(docker port "$CID" 3000/tcp | head -1 | sed 's/.*://')
-          ok=0
-          for i in $(seq 1 60); do
-            if curl -fsS "http://127.0.0.1:${PORT}/api/health/live" >/dev/null 2>&1; then
-              ok=1; break
-            fi
-            sleep 1
-          done
-          [ "$ok" -eq 1 ] || { echo "::error::la imagen publicada no respondió /api/health/live"; exit 1; }
-
-          BODY=$(curl -fsS "http://127.0.0.1:${PORT}/runtime-config.js")
-          echo "$BODY" | grep -q "$FAKE_SUPABASE_URL" \
-            || { echo "::error::/runtime-config.js no refleja la configuración inyectada"; exit 1; }
-          if echo "$BODY" | grep -q "$FAKE_SERVICE_ROLE"; then
-            echo "::error::FUGA DE SECRETO en la imagen publicada"
-            exit 1
-          fi
-          echo "smoke por digest OK"
+          bash scripts/smoke-container.sh "$REF"
 
       - name: Manifiesto del release
         env:
