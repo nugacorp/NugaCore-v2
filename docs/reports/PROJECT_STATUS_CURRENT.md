@@ -9,6 +9,7 @@ Este documento es la fuente de verdad del estado del proyecto. Todo lo que afirm
 | Etiqueta | Significado |
 | --- | --- |
 | `VERIFICADO EN CÓDIGO/CI` | Comprobado en este repositorio por lectura de código y por pruebas que pasan en CI. |
+| `VERIFICADO EN STAGING` | Comprobado directamente contra la base de datos real de staging, no sólo contra código o CI. |
 | `NO CONFIRMADO EN STAGING` | El código existe, pero nadie ha comprobado el estado real de la base de datos de staging. |
 | `REQUIERE AMBIENTE EXTERNO` | Depende de infraestructura que no está en el repositorio (proveedor de pagos, CHR, backups). |
 | `REQUIERE AUTORIZACIÓN` | Es una decisión operativa humana, no una tarea de desarrollo. |
@@ -136,9 +137,13 @@ La lectura RouterOS se validó contra un CHR de laboratorio, pero esa evidencia 
 
 ### 3. Paridad del esquema en staging
 
-`VERIFICADO EN CÓDIGO/CI` · Spec 001 **T071** — cerrada
+`VERIFICADO EN STAGING` · Spec 001 **T071** — cerrada
 
-`npm run report-migration-drift` se ejecutó contra la base de staging real (`nugacore-staging`) usando un rol de Postgres de solo lectura, con `v2.0.0-rc.1` (`802544ca3aae9c3b1e266825cbd4fb1fe2bed663`) como referencia. Resultado: `status: PASS`, 76 migraciones locales y 76 remotas, cero faltantes, cero extras no documentados, cero duplicados, y las 12 verificaciones críticas de columnas por tabla (`tenants`, `clients`, `plans`, `invoices`, `payments`, inventario, MikroTik, etc.) en `PASS` — no sólo `schema_migrations`, que fue precisamente lo que ocultó el drift anterior. Evidencia completa, sanitizada, en `docs/results/STAGING_MIGRATION_PARITY_V2.0.0_RC1_RESULT.md`.
+`npm run report-migration-drift` se ejecutó contra la base de staging real (`nugacore-staging`), con `v2.0.0-rc.1` (`802544ca3aae9c3b1e266825cbd4fb1fe2bed663`) como referencia. Resultado: `status: PASS`, 76 migraciones locales y 76 remotas, cero faltantes, cero extras no documentados, cero duplicados, y las 12 verificaciones críticas de columnas por tabla (`tenants`, `clients`, `plans`, `invoices`, `payments`, inventario, MikroTik, etc.) en `PASS` — no sólo `schema_migrations`, que fue precisamente lo que ocultó el drift anterior. Evidencia completa, sanitizada, en `docs/results/STAGING_MIGRATION_PARITY_V2.0.0_RC1_RESULT.md`.
+
+**Precisión sobre qué fue read-only y qué no.** La *consulta* que midió la paridad (el `SELECT` compuesto por CTEs de `report-migration-drift.mjs`) fue estrictamente de solo lectura. Pero para poder ejecutarla hizo falta, antes, una **mutación administrativa de ACL** en staging: crear un rol de Postgres nuevo (`report_migration_drift_ro`) y concederle `SELECT`. No hubo ningún cambio de esquema ni de datos de aplicación — sólo aprovisionamiento de acceso. Esa distinción importa: la fase completa no fue "toda read-only", sólo la consulta de verificación lo fue.
+
+Después de recopilar la evidencia, ese rol y todos sus privilegios **fueron retirados** de staging (`DROP OWNED BY` + `DROP ROLE`, verificado con una consulta posterior que confirmó cero filas) — staging queda sin ningún rol ni credencial adicional respecto a como estaba antes de T071. El Personal Access Token de Supabase que quedó expuesto durante esta fase fue revocado, únicamente después de recibir confirmación humana explícita.
 
 Esto confirma la paridad del esquema en staging al momento de esta verificación. **No** confirma que staging esté desplegado con `v2.0.0-rc.1`, ni cierra T072 (readiness estricto) o T073 (evidencia de restore), que siguen abiertas y sin relación con este resultado.
 

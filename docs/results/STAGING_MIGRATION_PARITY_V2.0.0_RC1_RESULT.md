@@ -6,7 +6,7 @@ Fecha UTC: 2026-08-21 20:25
 
 ✅ **T071 CERRADA: `STAGING_MIGRATIONS_APPLIED_AND_VALIDATED`.**
 
-Verificación estrictamente de lectura contra la base de staging (`nugacore-staging`, ref `elshnzkceutvjzxvzqad`), usando como referencia el release candidate `v2.0.0-rc.1`. No se aplicó, reparó ni revirtió ninguna migración. No se ejecutó `supabase db push`. No hubo DDL/DML de escritura contra datos de aplicación. No se desplegó nada, no se accedió a producción, no se tocó Coolify, no se conectó MikroTik/CHR, no se llamó a ningún proveedor de pagos.
+La *consulta* que midió la paridad —el `SELECT` compuesto por CTEs de `report-migration-drift.mjs`— fue estrictamente de solo lectura contra la base de staging (`nugacore-staging`, ref `elshnzkceutvjzxvzqad`), usando como referencia el release candidate `v2.0.0-rc.1`. **Esto no es lo mismo que decir que toda la fase fue read-only**: para habilitar esa consulta hizo falta antes una mutación administrativa de ACL en staging (crear un rol y concederle `SELECT`), documentada en detalle en "Credencial utilizada" más abajo. No hubo ningún cambio de esquema ni de datos de aplicación en ningún momento. No se aplicó, reparó ni revirtió ninguna migración. No se ejecutó `supabase db push`. No se desplegó nada, no se accedió a producción, no se tocó Coolify, no se conectó MikroTik/CHR, no se llamó a ningún proveedor de pagos.
 
 ## Referencia de versión
 
@@ -42,6 +42,19 @@ Se verificó explícitamente, conectado como ese rol y no como administrador, qu
 - un intento de escritura (`create table public.__probe_should_fail(...)`) fue **rechazado** con `permission denied`, confirmando que el rol es real y verdaderamente de solo lectura, no sólo nominalmente.
 
 Ninguna URL completa, hostname sensible, usuario, contraseña, token ni variable de entorno completa fue impresa en ningún momento de esta sesión.
+
+## Retirada posterior del rol (remediación)
+
+El alcance del rol (`SELECT` sobre todas las tablas actuales **y futuras** de `public`) era mayor del necesario para dejarlo activo de forma permanente. Con autorización explícita, y usando la credencial administrativa ya configurada localmente (nunca impresa), se retiró de staging:
+
+1. Se confirmó el destino (`nugacore-staging`) antes de ejecutar nada.
+2. Se inspeccionaron de forma sanitizada sus dependencias: **0 objetos propios**, 100 grants de tabla activos, sin entradas de default privileges inesperadas.
+3. `DROP OWNED BY report_migration_drift_ro` (revoca todos sus privilegios, incluidas las entradas de `ALTER DEFAULT PRIVILEGES` que lo mencionan) seguido de `DROP ROLE report_migration_drift_ro`.
+4. Verificado: una consulta posterior a `pg_roles` confirmó **cero filas** — el rol ya no existe.
+
+No se eliminó ninguna tabla, función, esquema ni dato de aplicación. `MIGRATION_DRIFT_DATABASE_URL` nunca se persistió en `.env` (se generó y usó sólo en memoria de shell), así que no hubo nada que retirar de ahí.
+
+Adicionalmente, el Personal Access Token de la cuenta Supabase que quedó expuesto durante la fase de creación del rol fue **revocado**, únicamente después de recibir confirmación humana explícita de que ya se había hecho. No se publica ningún fragmento, prefijo ni fingerprint de ese token en este documento ni en ningún otro.
 
 ## Resultado del reporte
 
@@ -102,4 +115,6 @@ Este resultado **no** afirma ni implica:
 
 ## Confirmación de alcance
 
-Ninguna migración fue aplicada, reparada ni revertida. No se ejecutó `supabase db push`. No hubo DDL/DML de escritura contra datos de aplicación (el único intento de escritura fue una prueba negativa deliberada, que fue rechazada). No hubo despliegue. No hubo acceso a producción. No se crearon, movieron ni eliminaron tags. No se creó ningún Release ni imagen GHCR adicional. No se modificó ningún ruleset. No se activó ningún gate live.
+Ninguna migración fue aplicada, reparada ni revertida. No se ejecutó `supabase db push`. No hubo DDL/DML de escritura contra datos de aplicación (el único intento de escritura fue una prueba negativa deliberada, que fue rechazada). No se eliminó ninguna tabla, función, esquema ni dato. No hubo despliegue. No hubo acceso a producción. No se crearon, movieron ni eliminaron tags. No se creó ningún Release ni imagen GHCR adicional. No se modificó ningún ruleset. No se activó ningún gate live.
+
+El rol temporal y todos sus privilegios fueron retirados de staging tras recopilar la evidencia, confirmado por consulta directa (cero filas). El PAT expuesto fue revocado, confirmado por el humano antes de continuar con esta remediación.
