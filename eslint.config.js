@@ -30,6 +30,9 @@ export default tseslint.config(
         setTimeout: 'readonly',
         clearTimeout: 'readonly',
         Buffer: 'readonly',
+        // Timeouts acotados en las llamadas HTTP de los scripts de release.
+        AbortSignal: 'readonly',
+        globalThis: 'readonly',
       },
     },
   },

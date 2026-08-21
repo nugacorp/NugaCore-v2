@@ -144,6 +144,11 @@ jobs:
         with:
           fetch-depth: 0
 
+      - name: Setup Node
+        uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4.4.0
+        with:
+          node-version: 22
+
       - name: Setup QEMU
         uses: docker/setup-qemu-action@c7c53464625b32c7a7e944ae62b3e17d2b600130 # v3.7.0
 
@@ -161,52 +166,22 @@ jobs:
 
       - name: Rechazar si alguna etiqueta objetivo ya existe en GHCR
         env:
-          GH_TOKEN_FOR_REGISTRY: ${{ github.token }}
-          VERSION_TAG: ${{ needs.verify.outputs.image_tag }}
+          GITHUB_ACTOR: ${{ github.actor }}
+          GITHUB_TOKEN: ${{ github.token }}
         run: |
           set -euo pipefail
-          # El chequeo de "release ya existe" no basta: una ejecución anterior
-          # pudo alcanzar el push de GHCR y fallar después, dejando etiquetas
-          # publicadas. Sobrescribirlas rompería el contrato de inmutabilidad,
-          # así que se comprueban ANTES de construir nada.
+          # Tras el login y ANTES del build/push. Una ejecución anterior pudo
+          # publicar en GHCR y fallar después; sobrescribir esas etiquetas
+          # rompería el contrato de inmutabilidad.
           #
-          # Fail-closed estricto: sólo un 404 inequívoco autoriza continuar.
-          # Un 401, 403, rate limit, timeout, 5xx o cualquier respuesta
-          # indeterminada aborta. Un error de acceso NUNCA se interpreta como
-          # "la etiqueta no existe". Nada se borra ni se sobrescribe.
-          BEARER=$(printf '%s' "$GH_TOKEN_FOR_REGISTRY" | base64 -w0)
-          ACCEPT='application/vnd.oci.image.index.v1+json,application/vnd.docker.distribution.manifest.list.v2+json,application/vnd.oci.image.manifest.v1+json,application/vnd.docker.distribution.manifest.v2+json'
-
-          check_absent() {
-            tag="$1"
-            url="https://ghcr.io/v2/nugacorp/nugacore-v2/manifests/${tag}"
-            if ! status=$(curl -sS -o /dev/null -w '%{http_code}'                   --max-time 30 --retry 2 --retry-connrefused                   -H "Authorization: Bearer ${BEARER}"                   -H "Accept: ${ACCEPT}"                   "$url"); then
-              echo "::error::no se pudo consultar GHCR para '${tag}'. Un fallo de consulta no prueba que la etiqueta esté libre; se aborta."
-              exit 1
-            fi
-            case "$status" in
-              404)
-                echo "OK: '${tag}' no existe en GHCR."
-                ;;
-              200)
-                echo "::error::la etiqueta '${tag}' YA EXISTE en GHCR. No se sobrescribe."
-                echo "Si una ejecución anterior publicó parcialmente, el procedimiento seguro es publicar rc.N+1, nunca reutilizar este tag."
-                exit 1
-                ;;
-              401|403)
-                echo "::error::GHCR respondió ${status} para '${tag}'. Un error de acceso no prueba ausencia; se aborta."
-                exit 1
-                ;;
-              *)
-                echo "::error::GHCR respondió ${status} (indeterminado) para '${tag}'. Se aborta."
-                exit 1
-                ;;
-            esac
-          }
-
-          check_absent "${VERSION_TAG}"
-          check_absent "sha-${GITHUB_SHA}"
-          echo "ambas etiquetas objetivo están libres"
+          # La autenticación va en el script: `docker/login-action` guarda
+          # credenciales para el cliente Docker, no para una petición HTTP
+          # aparte, y el GITHUB_TOKEN NO es un bearer de Registry v2 — hay que
+          # canjearlo por un token opaco en el token service. Ver
+          # scripts/check-ghcr-tags-absent.mjs.
+          node scripts/check-ghcr-tags-absent.mjs \
+            "${{ needs.verify.outputs.image_tag }}" \
+            "sha-${GITHUB_SHA}"
 
       - name: Build y push (multi-arquitectura, con provenance y SBOM)
         id: build

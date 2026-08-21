@@ -204,9 +204,21 @@ describe('guarda contra colisión de etiquetas en GHCR', () => {
     publish.indexOf('docker/build-push-action'),
   );
 
-  it('comprueba las dos referencias objetivo', () => {
-    expect(release).toContain('check_absent "${VERSION_TAG}"');
-    expect(release).toContain('check_absent "sha-${GITHUB_SHA}"');
+  it('delega en el script hermético, con las dos referencias objetivo', () => {
+    expect(guard).toContain('node scripts/check-ghcr-tags-absent.mjs');
+    expect(guard).toContain('${{ needs.verify.outputs.image_tag }}');
+    expect(guard).toContain('"sha-${GITHUB_SHA}"');
+  });
+
+  it('NUNCA usa el GITHUB_TOKEN codificado como bearer del registry', () => {
+    // El error original: `BEARER=$(printf '%s' "$TOKEN" | base64 -w0)`.
+    // El GITHUB_TOKEN sólo vale como Basic ante el token service; el bearer
+    // del Registry v2 es el token OPACO que ese servicio devuelve.
+    expect(release).not.toMatch(/BEARER=/);
+    expect(release).not.toMatch(/base64/);
+    for (const wf of [release, gates]) {
+      expect(wf).not.toMatch(/Authorization: Bearer \$\{?\w*TOKEN/);
+    }
   });
 
   it('ocurre DESPUÉS del login y ANTES del build/push', () => {
@@ -219,30 +231,64 @@ describe('guarda contra colisión de etiquetas en GHCR', () => {
     expect(buildAt).toBeGreaterThan(guardAt);
   });
 
-  it('sólo un 404 inequívoco autoriza continuar', () => {
-    expect(guard).toContain('404)');
-    expect(guard).toContain('200)');
-    expect(guard).toContain('401|403)');
-    // Cualquier otra respuesta cae en el caso por defecto y aborta.
-    expect(guard).toContain('*)');
-    expect((guard.match(/exit 1/g) ?? []).length).toBeGreaterThanOrEqual(4);
-  });
-
-  it('un error de acceso o de red nunca se interpreta como ausencia', () => {
-    expect(guard).toContain('no prueba ausencia');
-    expect(guard).toContain('no prueba que la etiqueta esté libre');
-  });
-
   it('no oculta fallos', () => {
     expect(guard).not.toContain('|| true');
     expect(guard).toContain('set -euo pipefail');
-    expect(guard).toContain('--max-time');
   });
 
   it('no borra ni sobrescribe ninguna referencia', () => {
     expect(guard).not.toContain('docker rmi');
     expect(guard).not.toContain('-X DELETE');
-    expect(guard).toContain('http_code');
+  });
+});
+
+describe('el script de la guarda GHCR implementa Registry v2', () => {
+  const script = readFileSync('scripts/check-ghcr-tags-absent.mjs', 'utf8');
+
+  it('canjea Basic por un bearer en el token service', () => {
+    expect(script).toContain('https://ghcr.io/token');
+    expect(script).toContain('Basic ${basic}');
+    expect(script).toContain('Bearer ${bearer}');
+  });
+
+  it('pide el scope de pull sobre el repositorio fijado', () => {
+    expect(script).toContain('repository:${repository}:pull');
+    expect(script).toContain("OCI_REPOSITORY = 'nugacorp/nugacore-v2'");
+  });
+
+  it('acepta token y access_token', () => {
+    expect(script).toContain('payload.token');
+    expect(script).toContain('payload.access_token');
+  });
+
+  it('clasifica todos los códigos de manifest de forma fail-closed', () => {
+    for (const code of ['404', '200', '401', '403', '429']) {
+      expect(script, `falta el caso ${code}`).toContain(`case ${code}:`);
+    }
+    expect(script).toContain('response.status >= 500');
+    expect(script).toContain('indeterminado');
+  });
+
+  it('nunca usa el GITHUB_TOKEN como bearer del registry', () => {
+    expect(script).not.toMatch(/Bearer \$\{(password|token)\}/);
+    // El único base64 del script es el de la credencial Basic.
+    const base64Lines = script.split('\n').filter((l) => l.includes("toString('base64')"));
+    expect(base64Lines).toHaveLength(1);
+    expect(base64Lines[0]).toContain('${actor}:${password}');
+  });
+
+  it('acota el tiempo de espera', () => {
+    expect(script).toContain('AbortSignal.timeout');
+    expect(script).toContain('DEFAULT_TIMEOUT_MS');
+  });
+
+  it('no imprime credenciales, bearer ni la respuesta del token service', () => {
+    const logs = script.split('\n').filter((l) => /log\.(log|error)\(/.test(l));
+    for (const line of logs) {
+      for (const forbidden of ['password', 'basic', 'bearer', 'GITHUB_TOKEN', 'payload', 'raw']) {
+        expect(line, `posible fuga: ${line}`).not.toContain(forbidden);
+      }
+    }
   });
 });
 

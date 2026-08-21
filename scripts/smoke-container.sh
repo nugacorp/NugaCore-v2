@@ -49,12 +49,15 @@ readonly SECRET_MARKER="SERVICE-ROLE-MARKER-MUST-NOT-LEAK"
 readonly HEALTH_TIMEOUT_SECONDS=60
 
 CID=""
+HEADERS_FILE=""
 cleanup() {
   if [ -n "$CID" ]; then
     echo "--- últimas líneas del log del contenedor ---"
     docker logs "$CID" 2>&1 | tail -40 || true
     docker rm -f "$CID" >/dev/null 2>&1 || true
   fi
+  [ -n "$HEADERS_FILE" ] && rm -f "$HEADERS_FILE"
+  return 0
 }
 trap cleanup EXIT
 
