@@ -15,6 +15,31 @@ import { processPendingOrders, reconcileConfirmedOrder } from '../../backend/dom
 import { dispatchNetworkOrder } from '../../backend/bridges/network-order-dispatch';
 import { engineStore } from '../../backend/domains/suspension/engine-store';
 import { store } from '../../backend/state/store';
+import type { Invoice } from '../../src/types';
+
+const isoDate = (daysFromNow: number): string =>
+  new Date(Date.now() + daysFromNow * 24 * 60 * 60 * 1000).toISOString().substring(0, 10);
+
+/**
+ * Una orden de corte del motor sólo puede cruzar RouterOS si la deuda que la
+ * originó sigue siendo bloqueante. Estas pruebas verifican claim/concurrencia,
+ * así que necesitan la deuda real que el invariante exige.
+ */
+const delinquentInvoice = (clientId: string, tenantId: string): Invoice => ({
+  id: `inv-${clientId}`,
+  tenantId,
+  clientId,
+  clientName: clientId,
+  amount: 500,
+  dateStr: isoDate(-40),
+  dueDateStr: isoDate(-20),
+  status: 'overdue',
+  cfdiStatus: 'generated',
+  items: [{ description: 'Internet', price: 500, qty: 1 }],
+  payments: [],
+  paidAmount: 0,
+  pendingAmount: 500,
+});
 
 const router = (id: string, tenantId: string): MikrotikRouterRegistryItem => ({
   id,
@@ -40,6 +65,7 @@ describe('Worker MikroTik tenant-scoped en commit mode', () => {
     engineStore.createBlock({ tenantId: 'tenant-a', customerId: 'customer-a', category: 'financial', source: 'billing' });
     engineStore.createBlock({ tenantId: 'tenant-b', customerId: 'customer-b', category: 'financial', source: 'billing' });
     store.CLIENTS = [];
+    store.INVOICES = [];
     store.MIKROTIK_ROUTERS = [router('router-a', 'tenant-a'), router('router-b', 'tenant-b')];
     executeMock.mockClear();
   });
@@ -48,6 +74,7 @@ describe('Worker MikroTik tenant-scoped en commit mode', () => {
     engineStore.ORDERS = [];
     engineStore.BLOCKS = [];
     store.CLIENTS = [];
+    store.INVOICES = [];
     store.MIKROTIK_ROUTERS = [];
     vi.unstubAllEnvs();
   });
@@ -112,6 +139,7 @@ describe('Worker MikroTik tenant-scoped en commit mode', () => {
       id: 'customer-a', tenantId: 'tenant-a', name: 'A', type: 'residential', status: 'active',
       email: '', phone: '', address: '', city: '', lat: 0, lng: 0, planId: 'p', ip: '192.0.2.10', routerId: 'router-a',
     });
+    store.INVOICES = [delinquentInvoice('customer-a', 'tenant-a')];
     const order = engineStore.createOrder({
       customerId: 'customer-a', orderType: 'suspension', source: 'engine', tenantId: 'tenant-a', routerId: 'router-a',
     });
@@ -128,6 +156,7 @@ describe('Worker MikroTik tenant-scoped en commit mode', () => {
 
   it('el sweep recupera un QUEUED abandonado sin efecto iniciado', async () => {
     store.CLIENTS.push({ id: 'customer-a', tenantId: 'tenant-a', name: 'A', type: 'residential', status: 'active', email: '', phone: '', address: '', city: '', lat: 0, lng: 0, planId: 'p', ip: '192.0.2.10', routerId: 'router-a' });
+    store.INVOICES = [delinquentInvoice('customer-a', 'tenant-a')];
     const order = engineStore.createOrder({ customerId: 'customer-a', orderType: 'suspension', source: 'engine', tenantId: 'tenant-a', routerId: 'router-a' });
     engineStore.updateOrder(order.id, { status: 'QUEUED', workerRunId: 'dead', claimedAt: '2026-01-01T00:00:00.000Z' });
 

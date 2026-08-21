@@ -59,6 +59,34 @@ export const findEngineFinancialOrder = (
       && resolveTenant(order.tenantId) === tenantId,
   );
 
+/**
+ * Reconciliación de una orden que YA NO está abierta (el worker la ejecutó
+ * antes de que su bloqueo llegara a persistir).
+ *
+ * Sólo devuelve una orden cuando la asociación es INEQUÍVOCA: exactamente una
+ * orden de suspensión del motor, en este tenant, para este cliente y ligada a
+ * la MISMA factura que hoy sigue impagada. Si hay cero o varias candidatas
+ * devuelve `undefined` en vez de adivinar.
+ *
+ * No es un backfill de clientes legacy: un suspendido sin orden del motor no
+ * produce evidencia por este camino y sigue siendo `unknown`/fail-closed.
+ */
+export const findDeterministicEngineFinancialOrder = (
+  orders: SuspensionOrder[],
+  tenantId: string,
+  customerId: string,
+  invoiceId: string | undefined,
+): SuspensionOrder | undefined => {
+  if (!invoiceId) return undefined;
+  const candidates = orders.filter(
+    (order) => isEngineFinancialSuspensionOrder(order)
+      && order.customerId === customerId
+      && resolveTenant(order.tenantId) === tenantId
+      && order.invoiceId === invoiceId,
+  );
+  return candidates.length === 1 ? candidates[0] : undefined;
+};
+
 export const engineFinancialBlockReason = (
   billingStatus: BillingStatus,
   graceDays: number,

@@ -16,6 +16,7 @@ import { getSuspensionService } from './service';
 import { CustomerLite } from './data-provider';
 import {
   ensureEngineFinancialBlock,
+  findDeterministicEngineFinancialOrder,
   findEngineFinancialOrder,
 } from './financial-blocks';
 import { SuspensionRepository } from './repository';
@@ -171,7 +172,7 @@ const SERVICEABLE = new Set(['active', 'suspended']);
 // El fallback histórico sobrevive SOLO en el modo hermético single-WISP
 // (todo en memoria, sin multi-tenant y sin runtime endurecido), que es donde
 // nació. En cuanto hay aislamiento real que respetar, falla cerrado.
-const requiresExplicitTenant = (): boolean =>
+export const requiresExplicitTenantScope = (): boolean =>
   isHardenedRuntimeNow()
   || isMultiTenantEnabled()
   || isDomainOnDb('suspension')
@@ -184,7 +185,7 @@ export function resolveEvaluationTenantId(
 ): string {
   const scoped = (tenantId || '').trim();
   if (scoped) return scoped;
-  if (requiresExplicitTenant()) {
+  if (requiresExplicitTenantScope()) {
     throw new Error(
       `${caller}: tenantId es obligatorio cuando hay aislamiento por tenant activo `
       + '(multi-tenant, runtime endurecido o dominios en DB). Una evaluación con efectos '
@@ -261,18 +262,32 @@ async function applyEvaluation(
     const order = await repo.createOrder({ customerId: customer.id, tenantId, invoiceId: worstInvoiceId, orderType: 'suspension', source: 'engine', reason: decision.reason });
     orderId = order.id;
     financialEvidenceOrder = order;
-    await repo.recordEvent({ customerId: customer.id, invoiceId: worstInvoiceId, eventType: 'suspension_order_created', reason: decision.reason, automatic: true, actorId, metadata: { orderId: order.id, billingStatus } });
+    await repo.recordEvent({ customerId: customer.id, tenantId, invoiceId: worstInvoiceId, eventType: 'suspension_order_created', reason: decision.reason, automatic: true, actorId, metadata: { orderId: order.id, billingStatus } });
   } else if (decision.action === 'create_reactivation') {
     await repo.cancelOpenOrders(customer.id, 'suspension', 'Reemplazada por nueva orden de reactivación.', actorId, tenantId);
     const order = await repo.createOrder({ customerId: customer.id, tenantId, invoiceId: worstInvoiceId, orderType: 'reactivation', source: 'engine', reason: decision.reason });
     orderId = order.id;
-    await repo.recordEvent({ customerId: customer.id, invoiceId: worstInvoiceId, eventType: 'reactivation_order_created', reason: decision.reason, automatic: true, actorId, metadata: { orderId: order.id, billingStatus } });
+    await repo.recordEvent({ customerId: customer.id, tenantId, invoiceId: worstInvoiceId, eventType: 'reactivation_order_created', reason: decision.reason, automatic: true, actorId, metadata: { orderId: order.id, billingStatus } });
   } else if (billingStatus === 'DELINQUENT') {
     // Reconciliación (B1): la orden de corte ya existe pero su bloqueo pudo no
-    // haberse persistido (fallo parcial en una evaluación anterior). La orden
-    // abierta hace que `decideServiceStatus` devuelva 'none', así que sin esta
-    // rama el reintento nunca podría reparar el bloqueo.
+    // haberse persistido (fallo parcial en una evaluación anterior).
+    //
+    //   1. Orden aún abierta: `decideServiceStatus` devuelve 'none', así que
+    //      sin esta rama el reintento nunca podría reparar el bloqueo.
+    //   2. Orden ya cerrada por el worker: se reconcilia SÓLO cuando la
+    //      asociación es inequívoca — una única orden del motor ligada a la
+    //      misma factura que hoy sigue impagada. No es un backfill: un
+    //      suspendido sin orden del motor no obtiene evidencia por aquí.
     financialEvidenceOrder = findEngineFinancialOrder(open, tenantId, customer.id);
+    if (!financialEvidenceOrder) {
+      const history = await repo.listOrders({ customerId: customer.id, tenantId });
+      financialEvidenceOrder = findDeterministicEngineFinancialOrder(
+        history,
+        tenantId,
+        customer.id,
+        worstInvoiceId,
+      );
+    }
   }
 
   // Convergencia idempotente: create-or-return por (tenant, evidencia). Se
@@ -292,7 +307,7 @@ async function applyEvaluation(
   const changed = previousServiceStatus !== decision.serviceStatus;
   if (changed) {
     await repo.recordEvent({
-      customerId: customer.id, invoiceId: worstInvoiceId, eventType: 'state_changed',
+      customerId: customer.id, tenantId, invoiceId: worstInvoiceId, eventType: 'state_changed',
       reason: `${previousServiceStatus ?? 'NUEVO'} -> ${decision.serviceStatus}: ${decision.reason}`,
       automatic: true, actorId, metadata: { from: previousServiceStatus, to: decision.serviceStatus, billingStatus },
     });
