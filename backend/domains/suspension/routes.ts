@@ -5,7 +5,7 @@ import { getSuspensionService } from './service';
 import { asyncHandler } from '../../common/errors';
 import { legacySuspensionDisabled, rejectLegacySuspension } from './legacy-guard';
 import { productionGates } from '../../config/production-gates';
-import { processPendingOrders } from '../mikrotik/worker/worker';
+import { processPendingOrdersForTenant } from '../mikrotik/worker/worker';
 import {
   customerServiceView,
   evaluateAllCustomers,
@@ -311,9 +311,11 @@ router.get('/api/suspension/customers', requireRoles([...SUSP_VIEW_ROLES]), asyn
 router.get('/api/suspension/orders', requireRoles([...SUSP_VIEW_ROLES]), asyncHandler(async (req, res) => {
   const status = String(req.query.status || '').trim().toUpperCase();
   const customerId = String(req.query.customerId || '').trim();
+  // Lectura tenant-scoped: /api/suspension/orders nunca expone filas de otro WISP.
   const rows = await getSuspensionService().repo.listOrders({
     customerId: customerId || undefined,
     status: status || undefined,
+    tenantId: tenantIdFromRequest(req),
   });
   res.json(rows);
 }));
@@ -321,7 +323,11 @@ router.get('/api/suspension/orders', requireRoles([...SUSP_VIEW_ROLES]), asyncHa
 // ── Eventos / auditoría ───────────────────────────────────────────────
 router.get('/api/suspension/events', requireRoles([...SUSP_VIEW_ROLES]), asyncHandler(async (req, res) => {
   const customerId = String(req.query.customerId || '').trim();
-  res.json(await getSuspensionService().repo.listEvents(customerId || undefined));
+  // Igual que las órdenes: la auditoría se lee dentro del tenant de la petición.
+  res.json(await getSuspensionService().repo.listEvents(
+    customerId || undefined,
+    tenantIdFromRequest(req),
+  ));
 }));
 
 // ── Evaluación (genera órdenes; NO ejecuta) ───────────────────────────
@@ -344,12 +350,14 @@ router.post('/api/suspension/evaluate-all', requireRoles([...SUSP_EVALUATE_ROLES
     reactivationOrders: results.filter((r) => r.action === 'create_reactivation').length,
     changed: results.filter((r) => r.changed).length,
   };
-  let worker: Awaited<ReturnType<typeof processPendingOrders>> | null = null;
+  let worker: Awaited<ReturnType<typeof processPendingOrdersForTenant>> | null = null;
   if (
     summary.changed > 0
     && (productionGates.serviceStatusLive() || productionGates.mikrotikWorkerCommit())
   ) {
-    worker = await processPendingOrders(req.authContext?.userId);
+    // Bulk SIEMPRE acotado al tenant de la petición: una corrida del WISP A
+    // no puede reclamar, cancelar ni ejecutar órdenes del WISP B.
+    worker = await processPendingOrdersForTenant(req.authContext?.userId, tenantId);
   }
   res.json({ summary, results, worker });
 }));

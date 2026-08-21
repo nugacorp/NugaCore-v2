@@ -14,7 +14,7 @@ import {
 } from './provisioning/types';
 import { asyncHandler } from '../../common/errors';
 import { logger } from '../../common/logger';
-import { processPendingOrders, readRouterSnapshot, listWorkerRuns, reconcileConfirmedOrder } from './worker/worker';
+import { processPendingOrdersForTenant, readRouterSnapshot, listWorkerRuns, reconcileConfirmedOrder } from './worker/worker';
 import { getWireguardService } from '../wireguard/service';
 import type { PeerCreatedOnce } from '../wireguard/types';
 import { persistMikrotikRouter } from './repository';
@@ -858,7 +858,8 @@ router.post('/api/mikrotik/routers/:id/test-connection', requireRoles([...PROV_S
 
 // Procesa las órdenes PENDING en dry-run.
 router.post('/api/mikrotik/worker/run', requireRoles([...PROV_SCRIPT_ROLES]), asyncHandler(async (req, res) => {
-  const run = await processPendingOrders(req.authContext?.userId);
+  // Barrido acotado al WISP autenticado: nunca reclama órdenes de otro tenant.
+  const run = await processPendingOrdersForTenant(req.authContext?.userId, tenantIdFromRequest(req));
   res.status(201).json(run);
 }));
 

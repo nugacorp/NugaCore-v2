@@ -95,11 +95,13 @@ registerJob('suspension-cycle', async () => {
     );
   }
   const { evaluateAllCustomers } = await import('../domains/suspension/engine');
-  const { processPendingOrders } = await import('../domains/mikrotik/worker/worker');
+  const { processPendingOrdersForTenant } = await import('../domains/mikrotik/worker/worker');
   const results = await evaluateAllCustomers('job:suspension-cycle', tenantId);
   const changed = results.filter((r) => r.changed).length;
   if (changed > 0) {
-    await processPendingOrders('job:suspension-cycle');
+    // El barrido del worker usa el MISMO tenant que la evaluación: evaluar un
+    // WISP y luego ejecutar las órdenes de todos sería peor que no correr.
+    await processPendingOrdersForTenant('job:suspension-cycle', tenantId);
   }
   logger.info('suspension_cycle_complete', { tenantId, evaluated: results.length, changed });
 });
