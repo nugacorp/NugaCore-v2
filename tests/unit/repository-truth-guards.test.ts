@@ -17,6 +17,7 @@ const status = readFileSync('docs/reports/PROJECT_STATUS_CURRENT.md', 'utf8');
 const ciWorkflow = readFileSync('.github/workflows/ci.yml', 'utf8');
 const gatesWorkflow = readFileSync('.github/workflows/production-gates.yml', 'utf8');
 const claude = readFileSync('CLAUDE.md', 'utf8');
+const t071Result = readFileSync('docs/results/STAGING_MIGRATION_PARITY_V2.0.0_RC1_RESULT.md', 'utf8');
 
 describe('el README no reincide en las afirmaciones de Fase 0', () => {
   const retired = [
@@ -91,6 +92,59 @@ describe('el estado actual no colapsa las brechas en una sola categoría', () =>
 
   it('mantiene que no está aprobado para producción', () => {
     expect(status).toMatch(/No está aprobada para producción/i);
+  });
+});
+
+describe('T071 no se confunde con despliegue, producción o T072/T073', () => {
+  // La verificación de paridad de migraciones (T071) sólo demuestra que el
+  // ESQUEMA de staging coincide con el repositorio en un momento dado. No
+  // demuestra que la imagen esté desplegada allí, ni que producción esté
+  // lista, ni que las tareas externas independientes (T072 readiness
+  // estricto, T073 restore) estén resueltas. Mezclar esas afirmaciones fue
+  // exactamente el tipo de error que este documento existe para evitar.
+  it('declara T071 cerrada sin afirmar que staging está desplegado', () => {
+    expect(status).toMatch(/T071/);
+    expect(status).not.toMatch(/staging est[aá] desplegad[oa] con v2\.0\.0-rc\.1/i);
+  });
+
+  it('no declara T072 ni T073 cerradas junto con T071', () => {
+    const t071Index = status.indexOf('T071');
+    expect(t071Index).toBeGreaterThan(-1);
+    const nearby = status.slice(t071Index, t071Index + 800);
+    expect(nearby).not.toMatch(/T072[^\n]*cerrad/i);
+    expect(nearby).not.toMatch(/T073[^\n]*cerrad/i);
+  });
+
+  it('clasifica T071 como VERIFICADO EN STAGING, no como VERIFICADO EN CÓDIGO/CI', () => {
+    const t071SectionIndex = status.indexOf('Spec 001 **T071**');
+    expect(t071SectionIndex, 'no se encontró la sección de T071').toBeGreaterThan(-1);
+    const nearby = status.slice(Math.max(0, t071SectionIndex - 200), t071SectionIndex);
+    expect(nearby).toMatch(/VERIFICADO EN STAGING/);
+    expect(nearby).not.toMatch(/VERIFICADO EN CÓDIGO\/CI/);
+  });
+
+  it('distingue, para T071, la consulta read-only del aprovisionamiento de ACL', () => {
+    // La fase completa no fue "toda read-only": hizo falta una mutación
+    // administrativa (crear un rol, otorgarle SELECT) para poder correr la
+    // consulta de verificación, que sí lo fue. Confundir ambas cosas es
+    // exactamente la sobreafirmación que esta guarda bloquea. La prueba exige
+    // que ambos elementos estén presentes, en vez de prohibir una frase
+    // exacta (que atraparía también la negación explícita y correcta).
+    expect(t071Result).toMatch(/mutaci[oó]n administrativa/i);
+    expect(t071Result).toMatch(/consulta[^\n]*de solo lectura|de solo lectura[^\n]*consulta/i);
+    expect(t071Result).toMatch(/no es lo mismo|no significa|distinta? de/i);
+  });
+
+  it('confirma que el rol temporal y sus privilegios fueron retirados de staging', () => {
+    expect(t071Result).toMatch(/DROP OWNED BY/);
+    expect(t071Result).toMatch(/DROP ROLE/);
+    expect(t071Result).toMatch(/cero filas|0 filas|ya no existe/i);
+  });
+
+  it('confirma la revocación del PAT sin publicar fragmentos ni fingerprints', () => {
+    expect(t071Result).toMatch(/PAT[^\n]*revocad[oa]|revocad[oa][^\n]*PAT|token[^\n]*revocad[oa]/i);
+    // Nunca un prefijo reconocible de token de Supabase, ni siquiera parcial.
+    expect(t071Result).not.toMatch(/sbp_/i);
   });
 });
 
