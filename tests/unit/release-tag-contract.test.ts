@@ -195,27 +195,72 @@ describe('forma del contrato', () => {
   });
 });
 
-describe('el repositorio actual', () => {
-  it('todavía declara 2.0.0 en los TRES campos y no prepara un rc en este PR', async () => {
-    const { readFileSync } = await import('node:fs');
-    const pkg = JSON.parse(readFileSync('package.json', 'utf8')) as { version: string };
-    const lock = JSON.parse(readFileSync('package-lock.json', 'utf8')) as {
-      version: string;
-      packages: Record<string, { version?: string }>;
-    };
+// ====================================================================
+// Estas dos pruebas leen los manifiestos REALES del repositorio, así que su
+// redacción importa: la versión anterior fijaba el literal `2.0.0` y por eso
+// fallaba ante cualquier bump legítimo — incluido el primer release candidate
+// que la propia guarda existe para proteger.
+//
+// Un test que hay que editar cada vez que sube la versión no está
+// comprobando el contrato: está comprobando el día en que se escribió. Lo que
+// de verdad debe sostenerse es que los tres campos existan, coincidan entre
+// sí y formen un tag aceptable. Eso vale para 2.0.0, para 2.0.0-rc.1 y para
+// cualquier versión futura.
+// ====================================================================
 
-    expect(pkg.version).toBe('2.0.0');
-    expect(lock.version).toBe('2.0.0');
-    expect(lock.packages['']?.version).toBe('2.0.0');
+const readManifests = async () => {
+  const { readFileSync } = await import('node:fs');
+  const pkg = JSON.parse(readFileSync('package.json', 'utf8')) as { version: string };
+  const lock = JSON.parse(readFileSync('package-lock.json', 'utf8')) as {
+    version: string;
+    packages: Record<string, { version?: string }>;
+  };
+  return { pkg, lock };
+};
+
+describe('el repositorio actual', () => {
+  it('declara una versión válida y coherente en los tres campos', async () => {
+    const { pkg, lock } = await readManifests();
+    const declared = [pkg.version, lock.version, lock.packages['']?.version];
+
+    for (const value of declared) {
+      expect(typeof value).toBe('string');
+      expect(value).not.toBe('');
+    }
+
+    // Los tres campos describen la MISMA release. Si divergen, el lockfile
+    // dice dos cosas distintas sobre el artefacto que se va a publicar.
+    expect(lock.version).toBe(pkg.version);
+    expect(lock.packages['']?.version).toBe(pkg.version);
+
+    const tag = `v${pkg.version}`;
+    expect(tag).toMatch(RELEASE_TAG_PATTERN);
+
+    const result = validateReleaseTag({
+      tag,
+      packageVersion: pkg.version,
+      lockVersion: lock.version,
+      lockPackagesRootVersion: lock.packages['']?.version,
+    });
+
+    expect(result.errors).toEqual([]);
+    expect(result.ok).toBe(true);
+    expect(result.version).toBe(pkg.version);
+    // La etiqueta OCI es la versión sin la `v`, nunca el tag Git.
+    expect(result.imageTag).toBe(pkg.version);
+    // Derivado de la versión declarada, no de un valor esperado a mano: así
+    // la prueba sigue siendo correcta tanto en una estable como en un rc.
+    expect(result.prerelease).toBe(pkg.version.includes('-rc.'));
   });
 
-  it('el lector de manifiestos devuelve los tres campos', async () => {
+  it('el lector de manifiestos devuelve lo que declaran los dos ficheros', async () => {
     const { readRepositoryVersions } = await import('../../scripts/validate-release-tag.mjs');
+    const { pkg, lock } = await readManifests();
 
     expect(readRepositoryVersions()).toEqual({
-      packageVersion: '2.0.0',
-      lockVersion: '2.0.0',
-      lockPackagesRootVersion: '2.0.0',
+      packageVersion: pkg.version,
+      lockVersion: lock.version,
+      lockPackagesRootVersion: lock.packages['']?.version,
     });
   });
 });
