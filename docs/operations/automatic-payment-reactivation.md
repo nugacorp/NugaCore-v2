@@ -87,7 +87,19 @@ existing open suspension order + missing financial block
   -> no second order
 ```
 
-This is convergence, not atomicity. Order and block are two writes and there is no transaction spanning them. The residual window is narrow but real: if the block write fails **and** the worker executes the suspension order before the next evaluation, the order leaves the open set and that customer keeps no structured evidence. Such a customer stays `unknown` and fail-closed, exactly like any other legacy case, and needs the manual path below.
+This is convergence, not atomicity: order and block are two writes with no transaction spanning them. Two further mechanisms close the window that convergence alone left open.
+
+**Deterministic reconciliation of a closed order.** If the worker already executed the order, it is no longer in the open set. The engine then looks for a single unambiguous candidate: exactly one engine suspension order, in this tenant, for this customer, tied to the same invoice that is still unpaid. Zero or several candidates produce no block — the engine does not guess. This is not a legacy backfill: a suspended customer with no engine order gets no evidence from this path.
+
+**Pre-RouterOS invariant.** An engine suspension order cannot send commands, set `effectStartedAt`, or reach `EXECUTED` until its active financial block exists. Before planning any command — and before the dry-run shortcut, since `EXECUTED` would close the order and remove it from the reconcilable set — the worker verifies tenant, customer, order type and source, re-checks that the debt is still `DELINQUENT`, and ensures the block through the same `ensureEngineFinancialBlock` contract.
+
+The consequences are deliberate:
+
+- If the debt is no longer blocking (the customer paid between the order and the worker), the order is cancelled as a safe no-op and no cut happens.
+- If the block cannot be persisted, the error propagates. Nothing is caught or hidden, no command is sent, and the order keeps its claim with `effectStartedAt` unset, so the standard expired-lease recovery retries it safely.
+- If the evidence exists but was already cleared, the order is cancelled rather than crossing RouterOS with inactive evidence.
+
+Together these mean new code no longer produces legacy customers: a customer cut by the engine always has structured evidence by the time the cut reaches the router.
 
 ### Legacy Suspended Customers
 
@@ -95,13 +107,18 @@ Customers suspended before this behavior existed — or suspended outside the en
 
 - No backfill is executed. The engine never infers a financial cause from `status = 'suspended'` alone.
 - The recovery path is manual review followed by authorized manual reactivation.
-- A future repair could deterministically derive `financial` evidence from historical `source='engine'` suspension orders tied to delinquency. That is a **proposal only**; it requires separate authorization, a migration plan, preflight, and evidence, and it is not part of this change.
+- Reconciliation from a closed engine order is limited to the unambiguous, tenant-scoped, same-invoice case described above. It repairs the engine's own partial failures; it does not sweep historical data.
+- A broader repair over historical suspensions remains a **proposal only**. It requires separate authorization, a migration plan, preflight, and evidence, and it is not part of this change.
 
 ### Tenant Scope
 
 Block, order, customer, and invoices all belong to the same tenant. Engine evaluations that produce effects resolve their tenant before doing anything else and fail closed when tenant isolation is active (multi-tenant enabled, hardened runtime, or suspension/customers/billing on the database). The historical single-WISP `tenant-default` fallback survives only in the fully hermetic local mode.
 
 The `suspension-cycle` job has no HTTP request to inherit a tenant from. It requires an explicit `SUSPENSION_CYCLE_TENANT_ID` and fails closed otherwise; it must never evaluate every tenant as if they were one. A per-tenant authoritative enumeration for that job does not exist yet and remains open work.
+
+The worker is scoped the same way. `processPendingOrdersForTenant(actor, tenantId)` is the correct way to sweep from a job or a request, because a bare `processPendingOrders()` loads every tenant's `PENDING` and `QUEUED` orders. `POST /api/suspension/evaluate-all`, `POST /api/mikrotik/worker/run`, and `suspension-cycle` all pass an explicit tenant, and a bulk sweep without one fails closed whenever tenant isolation is active. Single-order dispatch keeps its full `{ tenantId, orderId, routerId }` scope. An order belonging to tenant A can never be claimed, cancelled, updated, or executed by a run for tenant B.
+
+Engine events (`suspension_order_created`, `reactivation_order_created`, `state_changed`, `order_cancelled`) are stamped with the evaluation's tenant, and `GET /api/suspension/orders` and `GET /api/suspension/events` filter by the requesting tenant in both persistence modes — in Supabase the filter travels to the `SELECT` and to the cancellation `UPDATE`.
 
 ### Clearing
 

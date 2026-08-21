@@ -122,6 +122,25 @@ jobs:
           node-version: 22
       - run: npm run test:db:postgres17 -- contract-sign
 
+  # La reactivación automática por pago sólo puede declarar `eligible` si el
+  # bloqueo financiero del motor existe, y su idempotencia descansa por
+  # completo en el índice único parcial (tenant_id, evidence_type, evidence_id).
+  # `npm test` corre en modo mock: ahí el respaldo en memoria no puede
+  # demostrar la RLS, la ACL mínima (service_role SIN DELETE) ni esa unicidad,
+  # así que retirar un GRANT o el índice pasaría CI en verde y sólo se notaría
+  # con clientes reales duplicando o filtrando bloqueos entre WISPs.
+  # `schema-replay` aplica las migraciones, pero NO ejecuta estos asserts.
+  customer-suspension-blocks-postgres17:
+    name: Customer suspension blocks · PostgreSQL 17 real
+    runs-on: ubuntu-latest
+    needs: quality
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+      - run: npm run test:db:postgres17 -- customer-suspension-blocks
+
   security-smoke:
     name: Security contract tests
     runs-on: ubuntu-latest
