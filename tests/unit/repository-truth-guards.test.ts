@@ -169,7 +169,7 @@ describe('package.json expone el validador con un nombre inequívoco', () => {
 
 describe('CLAUDE.md clasifica correctamente las suites de prueba', () => {
   it('distingue `npm test` hermético de los comandos opt-in', () => {
-    expect(claude).toMatch(/npm test\b[^\n]*heretic|npm test\b[^\n]*hermetic/i);
+    expect(claude).toMatch(/npm test\b[^\n]*(?:hermetic|herm[eé]tico)/i);
     expect(claude).toMatch(/opt-in/i);
   });
 
@@ -207,6 +207,27 @@ describe('CLAUDE.md clasifica correctamente las suites de prueba', () => {
     // La afirmación errónea que esta guarda bloquea explícitamente: agrupar
     // este comando bajo la promesa de "hermetic, no network".
     expect(around).not.toMatch(/hermetic,\s*no network/i);
+  });
+
+  it('documenta las CUATRO variables de entorno que activan la lectura remota', () => {
+    // Las mismas cuatro que scripts/report-migration-drift.mjs reconoce en
+    // DB_URL_ENV_KEYS. Omitir una deja una fuente de URL indocumentada: quien
+    // lea CLAUDE.md creería que sin las otras tres el comando es inofensivo,
+    // aunque SUPABASE_DB_URL (u otra) esté poblada en el entorno.
+    //
+    // El comando aparece dos veces (el bloque de comandos y el gotcha
+    // detallado); las cuatro variables viven junto a la SEGUNDA mención.
+    const idx = claude.lastIndexOf('report-migration-drift');
+    const around = claude.slice(Math.max(0, idx - 100), idx + 500);
+
+    for (const envVar of [
+      'MIGRATION_DRIFT_DATABASE_URL',
+      'STAGING_DATABASE_URL',
+      'SUPABASE_DB_URL',
+      'DATABASE_URL',
+    ]) {
+      expect(around, `falta ${envVar} junto a report-migration-drift`).toContain(envVar);
+    }
   });
 
   it('exige rama y PR para todo cambio, incluidos docs y archivos de agentes: nunca push directo a main', () => {
