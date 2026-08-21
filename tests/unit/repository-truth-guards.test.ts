@@ -13,6 +13,7 @@ import { describe, expect, it } from 'vitest';
 // ====================================================================
 
 const readme = readFileSync('README.md', 'utf8');
+const status = readFileSync('docs/reports/PROJECT_STATUS_CURRENT.md', 'utf8');
 const ciWorkflow = readFileSync('.github/workflows/ci.yml', 'utf8');
 const gatesWorkflow = readFileSync('.github/workflows/production-gates.yml', 'utf8');
 
@@ -46,6 +47,49 @@ describe('el README no reincide en las afirmaciones de Fase 0', () => {
 
   it('no hardcodea un porcentaje de avance', () => {
     expect(readme).not.toMatch(/\b\d{1,3}\s?% (completado|de avance|avanzado)/i);
+  });
+});
+
+describe('el README no afirma hechos que el repositorio no puede comprobar', () => {
+  it('no presenta PostgreSQL 17 como la versión del servicio remoto', () => {
+    // El repo sólo puede afirmar la versión de los fixtures de CI. La versión
+    // real de la instancia de Supabase requiere consultarla.
+    expect(readme).not.toContain('PostgreSQL 17 vía Supabase');
+    expect(readme).not.toMatch(/Supabase\s*\/\s*PostgreSQL 17/);
+  });
+
+  it('sigue pudiendo hablar de PostgreSQL 17 para los fixtures de CI', () => {
+    expect(readme).toMatch(/fixtures[^.]*PostgreSQL 17|PostgreSQL 17[^.]*fixtures/i);
+  });
+
+  it('no afirma que TODOS los dominios tengan persistencia dual', () => {
+    expect(readme).not.toContain('Cada dominio puede correr contra el store en memoria o contra Supabase');
+    // Debe declarar explícitamente que el patrón no es universal.
+    expect(readme).toMatch(/no es universal/i);
+  });
+
+  it('declara que la escritura RouterOS no está validada', () => {
+    expect(readme).toMatch(/escritura RouterOS no ha sido validada/i);
+    // Y no debe presentar el CHR emulado como validación de escritura.
+    expect(readme).not.toContain('Escritura RouterOS: validada sólo en dry-run');
+  });
+});
+
+describe('el estado actual no colapsa las brechas en una sola categoría', () => {
+  it('no afirma que las brechas restantes sean sólo de validación externa', () => {
+    expect(status).not.toContain('las brechas que quedan son de *validación externa*, no de código faltante');
+    expect(status).not.toMatch(/casi todo está implementado/i);
+    expect(status).not.toMatch(/casi nada está probado/i);
+  });
+
+  it('reconoce brechas de código y de alcance de producto', () => {
+    expect(status).toMatch(/Código y persistencia/i);
+    expect(status).toMatch(/Alcance de producto/i);
+    expect(status).toMatch(/Esto sí es código faltante/i);
+  });
+
+  it('mantiene que no está aprobado para producción', () => {
+    expect(status).toMatch(/No está aprobada para producción/i);
   });
 });
 

@@ -2,7 +2,7 @@
 
 Plataforma **SaaS multi-tenant de operación para WISP/ISP** (inalámbrico y FTTH): un WISP por tenant, con CRM, planes, facturación, cobranza, pagos, suspensión/reactivación, soporte, inventario, red (MikroTik/RouterOS, WireGuard, OLT/FTTH, GIS, NOC/SNMP), portal de clientes, PWA de técnicos y reportes.
 
-React + Vite + TypeScript en el frontend, Express + TypeScript en el backend, PostgreSQL 17 vía Supabase.
+React + Vite + TypeScript en el frontend, Express + TypeScript en el backend, PostgreSQL vía Supabase. Los fixtures de base de datos real en CI se ejecutan sobre PostgreSQL 17; la versión del servicio remoto de Supabase no se afirma aquí porque este repositorio no la consulta.
 
 ## Cómo leer el estado del proyecto
 
@@ -34,12 +34,16 @@ Express — helmet · CORS · rate-limit · auth/RBAC · tenant fail-closed
    ├─ backend/bridges/network-order-dispatch.ts   (única frontera hacia la red)
    └─ backend/domains/mikrotik/worker/            (lectura allowlisted / escritura gated)
    ▼
-Supabase / PostgreSQL 17
+Supabase / PostgreSQL
 ```
 
 ### Persistencia dual
 
-Cada dominio puede correr contra el store en memoria o contra Supabase, según su flag `USE_DB_*` ([backend/config/feature-flags.ts](./backend/config/feature-flags.ts)). El modo de desarrollo por defecto es **hermético**: todos los flags en `false`, sin red ni secretos. La misma API y las mismas pruebas de contrato deben pasar en ambos modos.
+Los dominios núcleo soportados —clientes, planes, facturación, pagos, suspensión, inventario, soporte, tenancy, contratos, portal, OLT, WireGuard, router-enrollment— usan el patrón dual: store en memoria o Supabase, según su flag `USE_DB_*` ([backend/config/feature-flags.ts](./backend/config/feature-flags.ts)). En ellos, la misma API y las mismas pruebas de contrato deben pasar en ambos modos.
+
+El patrón **no es universal**. Varios dominios siguen exclusivamente en memoria y no tienen repositorio Supabase, en algunos casos pese a que sus tablas ya existen en migraciones. La lista vigente está en [docs/reports/PROJECT_STATUS_CURRENT.md](./docs/reports/PROJECT_STATUS_CURRENT.md).
+
+El modo de desarrollo por defecto es **hermético**: todos los flags en `false`, sin red ni secretos.
 
 ### Gates de ejecución real
 
@@ -60,7 +64,7 @@ Todo subsistema con efecto externo está **apagado por defecto** ([backend/confi
 ### Implementado pero NO validado contra infraestructura externa
 
 - Proveedores de pago (Mercado Pago, OpenPay, SPEI, CoDi): sin evidencia de sandbox real.
-- Escritura RouterOS: validada sólo en dry-run y contra un CHR emulado; nunca contra hardware.
+- RouterOS: la lectura/read-only y el dry-run tienen evidencia histórica en un CHR de laboratorio (`docs/results/MIKROTIK_WORKER_LIVE_CHR_STAGING_RESULT.md`, 2026-06-05, sobre un commit anterior; no es una validación del HEAD actual). **La escritura RouterOS no ha sido validada en CHR ni contra hardware.**
 - Paridad del esquema en staging para las migraciones más recientes.
 - Readiness estricto de producción y evidencia de restore.
 

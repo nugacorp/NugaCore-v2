@@ -15,9 +15,15 @@ Este documento es la fuente de verdad del estado del proyecto. Todo lo que afirm
 
 ## Veredicto
 
-NugaCore es una plataforma SaaS multi-tenant de operación para WISP/ISP, funcionalmente amplia y con una disciplina de pruebas alta. **No está aprobada para producción**, y el motivo ya no es el que decía este documento en julio: las brechas que quedan son de *validación externa*, no de código faltante.
+NugaCore es una plataforma SaaS multi-tenant de operación para WISP/ISP con una disciplina de pruebas alta. **No está aprobada para producción.**
 
-Dicho de otro modo: casi todo está implementado; casi nada está probado contra el mundo real.
+El flujo núcleo del negocio está implementado y cubierto por pruebas: alta de cliente, planes, facturación, cobranza, pagos con idempotencia durable, suspensión por morosidad, reactivación automática tras pago confirmado, inventario, soporte, contratos, y la integración MikroTik en modo lectura y dry-run.
+
+Las brechas restantes son de tres tipos distintos, y conviene no confundirlos:
+
+1. **Validación externa.** Son los blockers inmediatos de Spec 001 y los que más pesan hoy: sandbox de proveedor de pagos, laboratorio CHR para la escritura RouterOS, paridad del esquema en staging, readiness estricto y evidencia de restore. Aquí el código existe; falta ejecutarlo contra el mundo real.
+2. **Código y persistencia.** Siete dominios (`automation`, `notifications`, `commercial`, `collections`, `client-360`, `provisioning`, `service-status`) siguen exclusivamente en memoria, varios con tablas ya creadas en migraciones que nadie lee. El job `suspension-cycle` necesita una fuente autoritativa de tenants que todavía no existe. Esto sí es código faltante.
+3. **Alcance de producto.** UISP/Splynx no está iniciado, y hay que decidir qué dominios entran en el alcance de producción y qué tablas huérfanas se retiran.
 
 ## Cerrado recientemente
 
@@ -179,7 +185,7 @@ Ejecutados localmente sobre la rama de esta fase, en modo hermético. No son res
 | --- | --- | --- |
 | `npm run validate:migration-files` | 0 | 76 archivos, 76 versiones únicas, sin duplicados |
 | `npm run lint` | 0 | 0 errores, 119 warnings (`no-explicit-any` en pruebas) + typecheck limpio |
-| `npm test` | 0 | 312 archivos pasados / 11 omitidos (323) · 3266 pruebas / 97 omitidas (3363) · ~147 s |
+| `npm test` | 0 | 312 archivos pasados / 11 omitidos (323) · 3273 pruebas / 97 omitidas (3370) · ~149 s |
 | `npm run build` | 0 | vite + esbuild OK |
 | `npm audit --omit=dev` | 0 | 0 vulnerabilidades |
 
