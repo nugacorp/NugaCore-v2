@@ -27,8 +27,13 @@ import {
 // ====================================================================
 
 const ACTOR = 'nugacorp';
-const PASSWORD = 'ghs_TOKEN_QUE_NUNCA_DEBE_APARECER';
-const OPAQUE = 'OPAQUE_REGISTRY_BEARER_abc123';
+// Valor ficticio DELIBERADAMENTE sin el prefijo con el que GitHub marca sus
+// tokens: un literal que imita el formato real de una credencial dispara a los
+// escáneres de secretos, y un escáner que cría falsos positivos acaba
+// ignorándose. Lo único que este valor necesita es ser distintivo para poder
+// buscarlo en la salida capturada.
+const PASSWORD = 'CREDENCIAL-FICTICIA-QUE-NUNCA-DEBE-APARECER';
+const OPAQUE = 'BEARER-OPACO-FICTICIO-DEL-REGISTRY';
 
 const jsonResponse = (status: number, body: unknown, ok = status >= 200 && status < 300) => ({
   ok,
