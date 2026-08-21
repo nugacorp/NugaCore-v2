@@ -1,0 +1,279 @@
+# ====================================================================
+# NugaCore — publicación de release (workflow PRIVILEGIADO).
+#
+# Es el único workflow que escribe fuera del repositorio: publica una imagen
+# OCI en GHCR y crea un GitHub Release. Por eso su superficie está cerrada al
+# máximo:
+#
+#   - Se dispara SÓLO al empujar un tag `v*`. Nunca por rama, nunca por pull
+#     request, y nunca con `pull_request_target` (que ejecutaría con permisos
+#     del repositorio base código venido de un fork).
+#   - Todas las actions van fijadas a SHA completo. Una etiqueta móvil como
+#     `@v4` la puede reescribir el autor de la action en cualquier momento, y
+#     este workflow tiene `packages: write` e `id-token: write`.
+#   - Autenticación en GHCR sólo con `GITHUB_TOKEN`. Ningún PAT.
+#   - Permisos mínimos, declarados de forma explícita.
+#
+# LO QUE ESTE WORKFLOW NO HACE
+#
+# No despliega, no ejecuta migraciones, no habla con staging ni producción, no
+# toca Coolify y no activa ningún gate live. Publicar un release NO es
+# desplegarlo. Ver docs/operations/RELEASING.md.
+# ====================================================================
+
+name: Release
+
+on:
+  push:
+    tags:
+      - 'v*'
+
+# Sin permisos por defecto: cada job declara sólo lo que necesita.
+permissions: {}
+
+concurrency:
+  # Por tag, y NUNCA cancelando: interrumpir a mitad podría dejar la imagen
+  # publicada sin su release, o el release sin attestation.
+  group: release-${{ github.ref }}
+  cancel-in-progress: false
+
+env:
+  IMAGE_NAME: ghcr.io/nugacorp/nugacore-v2
+  PLATFORMS: linux/amd64,linux/arm64
+
+jobs:
+  # ── 1. Puertas previas ────────────────────────────────────────────
+  # Todo lo que puede rechazar el release ocurre ANTES de construir o
+  # publicar nada. Un fallo aquí no deja artefactos a medias.
+  verify:
+    name: Verificar contrato del tag
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      actions: read
+      checks: read
+    outputs:
+      version: ${{ steps.contract.outputs.version }}
+      prerelease: ${{ steps.contract.outputs.prerelease }}
+      image_tag: ${{ steps.contract.outputs.image_tag }}
+      created: ${{ steps.commit_date.outputs.created }}
+    steps:
+      - name: Checkout
+        uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4.4.0
+        with:
+          # Historial completo: hace falta para demostrar que el commit
+          # etiquetado pertenece de verdad a `main`.
+          fetch-depth: 0
+
+      - name: Confirmar que el commit etiquetado está en main
+        run: |
+          set -euo pipefail
+          git fetch --no-tags origin main
+          if ! git merge-base --is-ancestor "$GITHUB_SHA" origin/main; then
+            echo "::error::el commit ${GITHUB_SHA} no es ancestro de origin/main."
+            echo "Sólo se publican releases desde commits fusionados en main."
+            exit 1
+          fi
+          echo "OK: ${GITHUB_SHA} pertenece a main."
+
+      - name: Setup Node
+        uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4.4.0
+        with:
+          node-version: 22
+
+      - name: Validar contrato tag ↔ versión
+        id: contract
+        run: node scripts/validate-release-tag.mjs "${GITHUB_REF_NAME}"
+
+      - name: Exigir CI y Production Gates verdes sobre ESTE SHA
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          set -euo pipefail
+          # El tag puede empujarse en cualquier momento, incluso años después.
+          # Se exige que los workflows de calidad hayan corrido en evento
+          # `push` sobre EXACTAMENTE este SHA y hayan terminado en success.
+          # Falta, pendiente, otro SHA o fallo => se rechaza.
+          for wf in "CI" "Production Gates"; do
+            conclusion=$(gh api \
+              "repos/${GITHUB_REPOSITORY}/actions/runs?head_sha=${GITHUB_SHA}&event=push&per_page=100" \
+              --jq "[.workflow_runs[] | select(.name==\"${wf}\")] | sort_by(.run_number) | last | .conclusion // \"missing\"")
+            echo "${wf}: ${conclusion}"
+            if [ "$conclusion" != "success" ]; then
+              echo "::error::el workflow '${wf}' no está en success para ${GITHUB_SHA} (estado: ${conclusion})."
+              exit 1
+            fi
+          done
+
+      - name: Rechazar si el release ya existe
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          set -euo pipefail
+          # Un release existente NUNCA se sustituye. Un RC defectuoso se
+          # reemplaza publicando rc.N+1, no reescribiendo el anterior.
+          if gh release view "${GITHUB_REF_NAME}" --repo "${GITHUB_REPOSITORY}" >/dev/null 2>&1; then
+            echo "::error::ya existe un GitHub Release para ${GITHUB_REF_NAME}. No se sustituye."
+            exit 1
+          fi
+          echo "OK: no hay release previo para ${GITHUB_REF_NAME}."
+
+      - name: Fecha reproducible del commit
+        id: commit_date
+        run: |
+          set -euo pipefail
+          # Deriva de la fecha del COMMIT, no de `date`: un rerun del mismo tag
+          # produce exactamente la misma metadata OCI.
+          created=$(git show -s --format=%cI "$GITHUB_SHA")
+          echo "created=${created}" >> "$GITHUB_OUTPUT"
+          echo "created=${created}"
+
+  # ── 2. Construir, publicar y verificar por digest ─────────────────
+  publish:
+    name: Publicar imagen y crear release
+    runs-on: ubuntu-latest
+    needs: verify
+    permissions:
+      contents: write      # crear el GitHub Release
+      packages: write      # publicar en GHCR
+      id-token: write      # OIDC para la attestation
+      attestations: write  # adjuntar la attestation al digest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4.4.0
+        with:
+          fetch-depth: 0
+
+      - name: Setup QEMU
+        uses: docker/setup-qemu-action@c7c53464625b32c7a7e944ae62b3e17d2b600130 # v3.7.0
+
+      - name: Setup Buildx
+        uses: docker/setup-buildx-action@8d2750c68a42422c14e847fe6c8ac0403b4cbd6f # v3.12.0
+
+      - name: Login en GHCR
+        uses: docker/login-action@c94ce9fb468520275223c153574b00df6fe4bcc9 # v3.7.0
+        with:
+          registry: ghcr.io
+          username: ${{ github.actor }}
+          # Sólo GITHUB_TOKEN. Ningún PAT: su alcance excede este repositorio
+          # y sobrevive al job.
+          password: ${{ github.token }}
+
+      - name: Build y push (multi-arquitectura, con provenance y SBOM)
+        id: build
+        uses: docker/build-push-action@10e90e3645eae34f1e60eeb005ba3a3d33f178e8 # v6.19.2
+        with:
+          context: .
+          platforms: ${{ env.PLATFORMS }}
+          push: true
+          # SÓLO etiquetas inmutables. Nada de `latest`, `edge` ni `main`:
+          # desplegar contra una etiqueta móvil hace irreproducible saber qué
+          # está corriendo.
+          tags: |
+            ${{ env.IMAGE_NAME }}:${{ needs.verify.outputs.image_tag }}
+            ${{ env.IMAGE_NAME }}:sha-${{ github.sha }}
+          provenance: mode=max
+          sbom: true
+          build-args: |
+            IMAGE_SOURCE=${{ github.server_url }}/${{ github.repository }}
+            IMAGE_REVISION=${{ github.sha }}
+            IMAGE_VERSION=${{ needs.verify.outputs.version }}
+            IMAGE_CREATED=${{ needs.verify.outputs.created }}
+
+      - name: Attestation de procedencia sobre el digest
+        uses: actions/attest-build-provenance@e8998f949152b193b063cb0ec769d69d929409be # v2.4.0
+        with:
+          subject-name: ${{ env.IMAGE_NAME }}
+          subject-digest: ${{ steps.build.outputs.digest }}
+          push-to-registry: true
+
+      - name: Smoke POR DIGEST de la imagen publicada
+        env:
+          DIGEST: ${{ steps.build.outputs.digest }}
+          FAKE_SUPABASE_URL: https://release-smoke.supabase.invalid
+          FAKE_ANON_KEY: anon-release-smoke-public
+          FAKE_SERVICE_ROLE: SERVICE-ROLE-MARKER-MUST-NOT-LEAK
+        run: |
+          set -euo pipefail
+          # Se verifica EXACTAMENTE lo publicado, referenciado por digest, no
+          # por etiqueta. Si esto falla no se crea el release: queda una imagen
+          # publicada sin release, que es el fallo seguro (nadie la despliega
+          # porque el procedimiento parte del release).
+          REF="${IMAGE_NAME}@${DIGEST}"
+          echo "verificando ${REF}"
+          docker pull "$REF"
+
+          CID=""
+          cleanup() {
+            if [ -n "$CID" ]; then
+              docker logs "$CID" 2>&1 | tail -40 || true
+              docker rm -f "$CID" >/dev/null 2>&1 || true
+            fi
+          }
+          trap cleanup EXIT
+
+          CID=$(docker run -d -P \
+            -e SUPABASE_URL="$FAKE_SUPABASE_URL" \
+            -e SUPABASE_ANON_KEY="$FAKE_ANON_KEY" \
+            -e SUPABASE_SERVICE_ROLE_KEY="$FAKE_SERVICE_ROLE" \
+            -e SUPABASE_SECRET_KEY="$FAKE_SERVICE_ROLE" \
+            -e DATABASE_URL="$FAKE_SERVICE_ROLE" \
+            "$REF")
+
+          PORT=$(docker port "$CID" 3000/tcp | head -1 | sed 's/.*://')
+          ok=0
+          for i in $(seq 1 60); do
+            if curl -fsS "http://127.0.0.1:${PORT}/api/health/live" >/dev/null 2>&1; then
+              ok=1; break
+            fi
+            sleep 1
+          done
+          [ "$ok" -eq 1 ] || { echo "::error::la imagen publicada no respondió /api/health/live"; exit 1; }
+
+          BODY=$(curl -fsS "http://127.0.0.1:${PORT}/runtime-config.js")
+          echo "$BODY" | grep -q "$FAKE_SUPABASE_URL" \
+            || { echo "::error::/runtime-config.js no refleja la configuración inyectada"; exit 1; }
+          if echo "$BODY" | grep -q "$FAKE_SERVICE_ROLE"; then
+            echo "::error::FUGA DE SECRETO en la imagen publicada"
+            exit 1
+          fi
+          echo "smoke por digest OK"
+
+      - name: Manifiesto del release
+        env:
+          DIGEST: ${{ steps.build.outputs.digest }}
+        run: |
+          set -euo pipefail
+          cat > release-manifest.json <<JSON
+          {
+            "tag": "${GITHUB_REF_NAME}",
+            "version": "${{ needs.verify.outputs.version }}",
+            "prerelease": ${{ needs.verify.outputs.prerelease }},
+            "sourceSha": "${GITHUB_SHA}",
+            "image": "${IMAGE_NAME}",
+            "imageTag": "${{ needs.verify.outputs.image_tag }}",
+            "imageRef": "${IMAGE_NAME}@${DIGEST}",
+            "digest": "${DIGEST}",
+            "platforms": "${PLATFORMS}",
+            "created": "${{ needs.verify.outputs.created }}",
+            "workflowRun": "${GITHUB_SERVER_URL}/${GITHUB_REPOSITORY}/actions/runs/${GITHUB_RUN_ID}"
+          }
+          JSON
+          cat release-manifest.json
+
+      - name: Crear el GitHub Release
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          set -euo pipefail
+          # ÚLTIMO paso a propósito: sólo después de que el push, la
+          # attestation y el smoke por digest hayan pasado. El release es la
+          # señal de "esto es desplegable"; no debe existir antes de estarlo.
+          FLAGS=(--repo "${GITHUB_REPOSITORY}" --title "${GITHUB_REF_NAME}" --generate-notes)
+          if [ "${{ needs.verify.outputs.prerelease }}" = "true" ]; then
+            FLAGS+=(--prerelease)
+          else
+            FLAGS+=(--latest)
+          fi
+          gh release create "${GITHUB_REF_NAME}" "${FLAGS[@]}" release-manifest.json
+          echo "release creado para ${GITHUB_REF_NAME}"
